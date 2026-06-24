@@ -76,17 +76,24 @@ class ChatRepository {
 
   static SupabaseClient get _c => SupabaseService.client;
 
-  /// Most recent messages, oldest first.
+  /// Messages newest-first (descending by server `created_at`). Pairs with a
+  /// `reverse: true` ListView so the newest message sits at the bottom.
   static Future<List<Message>> fetch(String coupleId) async {
     final res = await _c
         .from('messages')
         .select()
         .eq('couple_id', coupleId)
-        .order('created_at')
+        .order('created_at', ascending: false)
         .limit(300);
-    return (res as List)
-        .map((e) => Message.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final out = <Message>[];
+    for (final row in (res as List)) {
+      try {
+        out.add(Message.fromJson(JsonUtils.asMap(row)));
+      } catch (_) {
+        // Skip a malformed row rather than blanking the whole conversation.
+      }
+    }
+    return out;
   }
 
   static Future<void> sendText(String coupleId, String body) async {

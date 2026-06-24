@@ -34,6 +34,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   String? _coupleId;
   Timer? _typingTimer;
   bool _typingActive = false;
+  bool _hasNewMessage = false;
 
   // Voice recorder
   final _audioRecorder = AudioRecorder();
@@ -42,7 +43,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
     _init();
+  }
+
+  void _onScroll() {
+    if (_hasNewMessage && _isAtBottom()) {
+      setState(() => _hasNewMessage = false);
+    }
   }
 
   Future<void> _init() async {
@@ -55,6 +63,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     try {
       final msgs = await ChatRepository.fetch(couple.id);
       _messages.addAll(msgs);
+      _sortMessages();
       _ids.addAll(msgs.map((m) => m.id));
     } catch (_) {
       // first-run is fine
@@ -63,15 +72,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
     if (mounted) setState(() => _loading = false);
-    _scrollToBottom(animate: false);
+    // reverse:true already pins the view to the newest message — no scroll needed.
   }
 
   void _onIncoming(Message m) {
     if (_ids.contains(m.id)) return;
     _ids.add(m.id);
     if (!mounted) return;
-    setState(() => _messages.add(m));
-    _scrollToBottom();
+    final mine = m.isMine(SupabaseService.currentUserId);
+    final atBottom = _isAtBottom();
+    setState(() {
+      _messages.insert(0, m); // newest-first ordering
+      _sortMessages();
+    });
+    // Don't yank a user who's reading history; show a chip instead.
+    if (mine || atBottom) {
+      _scrollToNewest();
+    } else {
+      setState(() => _hasNewMessage = true);
+    }
   }
 
   Future<void> _videoCall() async {
@@ -92,10 +111,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  void _scrollToBottom({bool animate = true}) {
+  void _sortMessages() {
+    // Newest first; id as a stable tiebreaker for same-second messages.
+    _messages.sort((a, b) {
+      final c = b.createdAt.compareTo(a.createdAt);
+      return c != 0 ? c : b.id.compareTo(a.id);
+    });
+  }
+
+  /// With reverse:true the newest message sits at offset 0 (the visual bottom).
+  bool _isAtBottom() {
+    if (!_scroll.hasClients) return true;
+    return _scroll.offset <= _scroll.position.minScrollExtent + 120;
+  }
+
+  void _scrollToNewest({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      final target = _scroll.position.maxScrollExtent;
+      final target = _scroll.position.minScrollExtent; // 0 = newest (reverse:true)
       if (animate) {
         _scroll.animateTo(target,
             duration: const Duration(milliseconds: 240),
@@ -138,6 +171,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _messages
           ..clear()
           ..addAll(msgs);
+        _sortMessages();
         _ids
           ..clear()
           ..addAll(msgs.map((m) => m.id));
@@ -324,27 +358,51 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   .where((m) => !m.isHiddenFor(uid))
                                   .toList();
                               if (visible.isEmpty) return const _EmptyChat();
-                              return ListView.builder(
-                                controller: _scroll,
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                                itemCount: visible.length,
-                                itemBuilder: (_, i) {
-                                  final m = visible[i];
-                                  final showTime = i == 0 ||
-                                      visible[i - 1].createdAt.day !=
-                                          m.createdAt.day;
-                                  return GestureDetector(
-                                    onLongPress: () =>
-                                        _showMessageActions(m, m.isMine(uid)),
-                                    child: _Bubble(
-                                      message: m,
-                                      mine: m.isMine(uid),
-                                      showDateHeader: showTime,
-                                      player: _player,
+                              return Stack(
+                                children: [
+                                  ListView.builder(
+                                    controller: _scroll,
+                                    reverse: true,
+                                    padding: const EdgeInsets.fromLTRB(
+                                        16, 12, 16, 12),
+                                    itemCount: visible.length,
+                                    itemBuilder: (_, i) {
+                                      final m = visible[i];
+                                      // Descending list: the older neighbour is
+                                      // i+1, so a date header marks the oldest
+                                      // message of each day (top of the group).
+                                      final showTime = i == visible.length - 1 ||
+                                          !DateUtils.isSameDay(
+                                              visible[i + 1].createdAt,
+                                              m.createdAt);
+                                      return GestureDetector(
+                                        onLongPress: () => _showMessageActions(
+                                            m, m.isMine(uid)),
+                                        child: _Bubble(
+                                          message: m,
+                                          mine: m.isMine(uid),
+                                          showDateHeader: showTime,
+                                          player: _player,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  if (_hasNewMessage)
+                                    Positioned(
+                                      bottom: 12,
+                                      left: 0,
+                                      right: 0,
+                                      child: Center(
+                                        child: _NewMessageChip(
+                                          onTap: () {
+                                            setState(
+                                                () => _hasNewMessage = false);
+                                            _scrollToNewest();
+                                          },
+                                        ),
+                                      ),
                                     ),
-                                  );
-                                },
+                                ],
                               );
                             }),
                 ),
@@ -648,6 +706,46 @@ class _VoicePlayerState extends State<_VoicePlayer> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// "↓ New message" pill shown when a message arrives while the user is scrolled
+/// up reading history — taps to jump to the newest.
+class _NewMessageChip extends StatelessWidget {
+  const _NewMessageChip({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: MilesColors.ember,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: MilesColors.ember.withValues(alpha: 0.4),
+                blurRadius: 12,
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.arrow_downward, size: 16, color: MilesColors.cream50),
+              SizedBox(width: 6),
+              Text('New message',
+                  style: TextStyle(color: MilesColors.cream50, fontSize: 12)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
