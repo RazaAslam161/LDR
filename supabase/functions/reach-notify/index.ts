@@ -102,6 +102,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "bad payload" }), { status: 400 });
     }
 
+    // Fail clearly if the service-account secret isn't configured (otherwise the
+    // JWT signing throws a cryptic "undefined.replace" later).
+    if (!SERVICE_ACCOUNT.private_key || !SERVICE_ACCOUNT.client_email) {
+      console.error(
+        "FCM_SERVICE_ACCOUNT secret missing/invalid — set it via `supabase secrets set`",
+      );
+      return new Response(
+        JSON.stringify({ error: "FCM_SERVICE_ACCOUNT not configured" }),
+        { status: 200 },
+      );
+    }
+    if (!FCM_PROJECT_ID) {
+      return new Response(
+        JSON.stringify({ error: "FCM_PROJECT_ID not configured" }),
+        { status: 200 },
+      );
+    }
+
     // Recipient = the OTHER member of this couple.
     const { data: recipients } = await admin
       .from("profiles")

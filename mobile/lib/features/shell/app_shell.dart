@@ -28,7 +28,8 @@ class AppShell extends ConsumerStatefulWidget {
   ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends ConsumerState<AppShell> {
+class _AppShellState extends ConsumerState<AppShell>
+    with WidgetsBindingObserver {
   RealtimeChannel? _reachChannel;
   final Set<String> _shownReach = {};
 
@@ -44,8 +45,28 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     pendingReach.addListener(_onPendingReach);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _reconnectRealtime();
+  }
+
+  /// Realtime sockets die silently during Android doze (no close event), so the
+  /// client keeps "connected" and stops delivering reaches/presence until a full
+  /// restart. On resume we force a fresh socket + re-subscribe the reach channel
+  /// so Reach (and presence/map, which rejoin on the new socket) recover.
+  void _reconnectRealtime() {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    try {
+      SupabaseService.client.realtime.disconnect();
+    } catch (_) {}
+    _reachChannel?.unsubscribe();
+    _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
   }
 
   void _onReady() {
@@ -97,6 +118,7 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     pendingReach.removeListener(_onPendingReach);
     _reachChannel?.unsubscribe();
     super.dispose();
