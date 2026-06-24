@@ -12,16 +12,21 @@ class RitualRepository {
 
   static final _c = SupabaseService.client;
 
-  /// All rituals for this couple, newest first.
+  /// All rituals for this couple, soonest delivery first. (The table has no
+  /// created_at column — ordering by it was the cause of the Rituals error.)
   static Future<List<Ritual>> list(String coupleId) async {
     final res = await _c
         .from('rituals')
         .select()
         .eq('couple_id', coupleId)
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => Ritual.fromJson(e as Map<String, dynamic>))
-        .toList(growable: false);
+        .order('deliver_at', ascending: true);
+    final out = <Ritual>[];
+    for (final row in (res as List)) {
+      try {
+        out.add(Ritual.fromJson(row as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    return out;
   }
 
   static Future<Ritual> create({
