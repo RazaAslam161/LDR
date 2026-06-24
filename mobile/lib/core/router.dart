@@ -6,6 +6,7 @@ import 'package:miles/features/auth/couple_page.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
 import 'package:miles/features/auth/sign_up_page.dart';
 import 'package:miles/features/auth/welcome_page.dart';
+import 'package:miles/features/call/call_screen.dart';
 import 'package:miles/features/capsule/capsule_create_screen.dart';
 import 'package:miles/features/capsule/capsule_detail_screen.dart';
 import 'package:miles/features/capsule/capsule_fill_screen.dart';
@@ -141,6 +142,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/together',
         builder: (context, state) => const TogetherScreen(),
+      ),
+      GoRoute(
+        path: '/call',
+        builder: (context, state) => const CallScreen(),
       ),
       GoRoute(
         path: '/app/rituals',

@@ -11,6 +11,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/mood_selector.dart';
@@ -18,7 +19,6 @@ import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -45,8 +45,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   int _burstId = 0;
 
   void _sendMoodBurst(MoodData m) {
-    _moodChannel?.sendBroadcastMessage(
-        event: 'mood', payload: {'mood': m.key});
+    _moodChannel?.sendBroadcastMessage(event: 'mood', payload: {'mood': m.key});
     _showMoodBurst(m); // also show it on my own screen
   }
 
@@ -154,21 +153,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _videoCall() async {
-    final uri = Uri.parse('https://meet.google.com/new');
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No video app found to open.')),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start a video call.')),
-        );
-      }
-    }
+    // In-app WebRTC call. The shell listens for the state change and pushes the
+    // call screen; the partner's app rings if it's open.
+    await ref.read(callControllerProvider).startCall();
   }
 
   void _sortMessages() {
@@ -188,11 +175,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _scrollToNewest({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      final target = _scroll.position.minScrollExtent; // 0 = newest (reverse:true)
+      final target =
+          _scroll.position.minScrollExtent; // 0 = newest (reverse:true)
       if (animate) {
         _scroll.animateTo(target,
-            duration: const Duration(milliseconds: 240),
-            curve: Curves.easeOut);
+            duration: const Duration(milliseconds: 240), curve: Curves.easeOut);
       } else {
         _scroll.jumpTo(target);
       }
@@ -378,8 +365,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
                 if (partnerMood != null) ...[
                   const SizedBox(width: 8),
-                  Text(partnerMood.emoji,
-                      style: const TextStyle(fontSize: 16)),
+                  Text(partnerMood.emoji, style: const TextStyle(fontSize: 16)),
                 ],
               ],
             ),
@@ -390,8 +376,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           if (couple != null)
             IconButton(
               tooltip: 'Set your mood',
-              icon:
-                  const Icon(Icons.palette_outlined, color: MilesColors.gilt),
+              icon: const Icon(Icons.palette_outlined, color: MilesColors.gilt),
               onPressed: _setMyMood,
             ),
           if (couple != null)
@@ -404,8 +389,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           if (couple != null)
             IconButton(
               tooltip: 'Video call',
-              icon: const Icon(Icons.videocam_outlined,
-                  color: MilesColors.ember),
+              icon:
+                  const Icon(Icons.videocam_outlined, color: MilesColors.ember),
               onPressed: _videoCall,
             ),
           if (couple != null)
@@ -449,10 +434,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                       // Descending list: the older neighbour is
                                       // i+1, so a date header marks the oldest
                                       // message of each day (top of the group).
-                                      final showTime = i == visible.length - 1 ||
-                                          !DateUtils.isSameDay(
-                                              visible[i + 1].createdAt,
-                                              m.createdAt);
+                                      final showTime =
+                                          i == visible.length - 1 ||
+                                              !DateUtils.isSameDay(
+                                                  visible[i + 1].createdAt,
+                                                  m.createdAt);
                                       return GestureDetector(
                                         onLongPress: () => _showMessageActions(
                                             m, m.isMine(uid)),
@@ -496,14 +482,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   onChanged: _onTyping,
                   replyingTo: _replyingTo,
                   onCancelReply: _cancelReply,
-                  onSendText: (t) =>
-                      ChatRepository.sendText(couple.id, t, replyToId: _takeReplyId()),
-                  onSendImage: (f) =>
-                      ChatRepository.sendImage(couple.id, f, replyToId: _takeReplyId()),
-                  onSendVoice: (f) =>
-                      ChatRepository.sendVoice(couple.id, f, replyToId: _takeReplyId()),
-                  onSendVideo: (f) =>
-                      ChatRepository.sendVideo(couple.id, f, replyToId: _takeReplyId()),
+                  onSendText: (t) => ChatRepository.sendText(couple.id, t,
+                      replyToId: _takeReplyId()),
+                  onSendImage: (f) => ChatRepository.sendImage(couple.id, f,
+                      replyToId: _takeReplyId()),
+                  onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
+                      replyToId: _takeReplyId()),
+                  onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
+                      replyToId: _takeReplyId()),
                 ),
               ],
             ),
@@ -598,8 +584,7 @@ class _Bubble extends StatelessWidget {
             child: Center(
               child: Text(
                 DateFormat('EEEE, MMM d').format(message.createdAt),
-                style:
-                    const TextStyle(fontSize: 11, color: MilesColors.faint),
+                style: const TextStyle(fontSize: 11, color: MilesColors.faint),
               ),
             ),
           ),
@@ -851,8 +836,8 @@ class _VoicePlayerState extends State<_VoicePlayer> {
   void initState() {
     super.initState();
     widget.player.playerStateStream.listen((state) {
-      final playing = state.processingState != ProcessingState.completed &&
-          state.playing;
+      final playing =
+          state.processingState != ProcessingState.completed && state.playing;
       if (playing != _playing) {
         if (mounted) setState(() => _playing = playing);
       }
@@ -978,8 +963,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
     if (!mounted) return;
     setState(() => _loading = false);
     if (url == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Video unavailable')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Video unavailable')));
       return;
     }
     await Navigator.of(context).push(
@@ -1056,8 +1041,7 @@ class _FullScreenVideoState extends State<_FullScreenVideo> {
         videoPlayerController: vp,
         autoPlay: true,
         looping: false,
-        aspectRatio:
-            vp.value.aspectRatio == 0 ? 16 / 9 : vp.value.aspectRatio,
+        aspectRatio: vp.value.aspectRatio == 0 ? 16 / 9 : vp.value.aspectRatio,
       );
     });
   }

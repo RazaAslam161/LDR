@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
@@ -9,6 +10,7 @@ import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/features/breath/breath_sync_screen.dart';
+import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
 import 'package:miles/features/countdown/countdown_screen.dart';
@@ -33,6 +35,7 @@ class _AppShellState extends ConsumerState<AppShell>
     with WidgetsBindingObserver {
   RealtimeChannel? _reachChannel;
   final Set<String> _shownReach = {};
+  CallState _lastCallState = CallState.idle;
 
   static const List<Widget> _screens = <Widget>[
     HomeScreen(),
@@ -129,6 +132,20 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   Widget build(BuildContext context) {
+    // Pop the call screen up on an incoming ring or an outgoing call. (For a
+    // ChangeNotifierProvider, prev==next is the same instance, so we track the
+    // last state ourselves to detect the inactive -> active transition.)
+    ref.listen(callControllerProvider, (_, c) {
+      final now = c.state;
+      bool active(CallState s) =>
+          s == CallState.ringing ||
+          s == CallState.calling ||
+          s == CallState.connected;
+      final fire = active(now) && !active(_lastCallState);
+      _lastCallState = now;
+      if (fire && context.mounted) GoRouter.of(context).push('/call');
+    });
+
     final session = ref.watch(sessionProvider);
     final isAdult = session.profile?.isAdult ?? false;
     final isModest = session.couple?.modestMode ?? true;

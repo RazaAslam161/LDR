@@ -14,8 +14,13 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <!-- Microphone for Time Capsule voice memos + chat voice notes -->
+    <!-- Microphone for Time Capsule voice memos + chat voice notes + video calls -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- WebRTC video calling: audio routing + network state -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
     <!-- Camera for photo + video capture -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Gallery access for sharing photos + videos (private app, not Play-bound) -->
