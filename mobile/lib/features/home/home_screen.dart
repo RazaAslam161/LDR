@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -16,6 +17,7 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/features/home/partner_location_card.dart';
 import 'package:miles/features/reach/reach_button.dart';
 
 /// The landing screen: how your partner is, right now — plus the Reach button
@@ -27,15 +29,39 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
   final _picker = ImagePicker();
   bool _uploading = false;
   bool _promptedLocation = false;
+  String _myMode = 'off';
+  double? _myLat;
+  double? _myLon;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _initLocation());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Pause the stream when leaving Home (mode persists; resumes on return).
+    LocationService.pauseStream();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final couple = ref.read(currentCoupleProvider);
+    if (couple == null || _myMode != 'precise') return;
+    if (state == AppLifecycleState.resumed) {
+      LocationService.startLiveSharing(couple.id);
+    } else {
+      LocationService.pauseStream();
+    }
   }
 
   Future<void> _initLocation() async {
@@ -43,15 +69,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (couple == null) return;
     final mine = await PresenceService.fetchMine(couple.id);
     final mode = mine?.locationSharingMode ?? 'off';
+    if (mounted) setState(() => _myMode = mode);
+    await _refreshMyCoords();
     if (mode == 'off') {
       if (!_promptedLocation && mounted) {
         _promptedLocation = true;
         await _locationOnboarding();
       }
+    } else if (mode == 'precise') {
+      await LocationService.startLiveSharing(couple.id);
+      await _refreshMyCoords();
     } else {
-      // Refresh our shared location on open (foreground only).
       await LocationService.shareOnce(couple.id, mode);
     }
+  }
+
+  /// My own coords (for the distance readout) — last-known is instant + prompt-free.
+  Future<void> _refreshMyCoords() async {
+    try {
+      final pos = await Geolocator.getLastKnownPosition();
+      if (pos != null && mounted) {
+        setState(() {
+          _myLat = pos.latitude;
+          _myLon = pos.longitude;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _startLive() async {
+    final couple = ref.read(currentCoupleProvider);
+    if (couple == null) return;
+    final ok = await LocationService.startLiveSharing(couple.id);
+    if (mounted) setState(() => _myMode = ok ? 'precise' : 'off');
+    await _refreshMyCoords();
+  }
+
+  Future<void> _stopLive() async {
+    final couple = ref.read(currentCoupleProvider);
+    if (couple == null) return;
+    await LocationService.stopLiveSharing(couple.id);
+    if (mounted) setState(() => _myMode = 'off');
   }
 
   Future<void> _locationOnboarding() async {
@@ -65,9 +123,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         backgroundColor: MilesColors.surface1,
         title: const Text('See where each other is 💕'),
         content: Text(
-          'Share your location with $partnerName so you always feel close — '
-          "they'll share theirs with you too. You can change or turn this off "
-          'any time in Settings.',
+          'Share your live location with $partnerName? You\'ll both see each '
+          'other on the map and always know you\'re close. You can turn this '
+          'off anytime.',
           style: const TextStyle(color: MilesColors.taupe, height: 1.5),
         ),
         actions: [
@@ -81,13 +139,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               style:
                   FilledButton.styleFrom(backgroundColor: MilesColors.blush),
               onPressed: () => Navigator.pop(ctx, 'precise'),
-              child: const Text('Precise')),
+              child: const Text('Share live')),
         ],
       ),
     );
     if (mode == null) return;
     if (mode == 'off') {
       await PresenceService.setSharingMode(couple.id, 'off');
+    } else if (mode == 'precise') {
+      await _startLive();
     } else {
       await LocationService.shareOnce(couple.id, mode);
     }
@@ -162,6 +222,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   uploading: _uploading,
                   onShareSnap: _shareSnap,
                 ),
+                const SizedBox(height: 16),
+                PartnerLocationCard(
+                  partner: presence,
+                  partnerName: partner.displayName,
+                  myLat: _myLat,
+                  myLon: _myLon,
+                ),
+                if (_myMode == 'precise') ...[
+                  const SizedBox(height: 8),
+                  _LiveSharingBanner(
+                    partnerName: partner.displayName,
+                    onStop: _stopLive,
+                  ),
+                ],
                 const SizedBox(height: 36),
                 Center(
                   child: ReachButton(
@@ -381,6 +455,48 @@ class _QuickActions extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// "📍 Sharing live location with X" indicator + one-tap off switch (privacy:
+/// the sharer always sees they're sharing, and can stop instantly).
+class _LiveSharingBanner extends StatelessWidget {
+  const _LiveSharingBanner({required this.partnerName, required this.onStop});
+  final String partnerName;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: MilesColors.blush.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MilesColors.blush.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.my_location, color: MilesColors.blush, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Sharing live location with $partnerName',
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
+            ),
+          ),
+          GestureDetector(
+            onTap: onStop,
+            child: const Text(
+              'Turn off',
+              style: TextStyle(
+                  color: MilesColors.blush,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -17,6 +17,8 @@ create table if not exists public.presence (
   longitude      double precision,
   location_label text,
   location_sharing_mode text not null default 'off',   -- 'off'|'city'|'precise'
+  location_accuracy double precision,                  -- Issue 2B: live map
+  location_updated_at timestamptz,                     -- "updated Xs ago"
   current_activity text,
   checkin_photo_url text,
   checkin_photo_at  timestamptz,

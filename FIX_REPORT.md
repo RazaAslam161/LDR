@@ -103,6 +103,30 @@ full-height drawer on the shell and open it from anywhere via a global
 `rootScaffoldKey.currentState?.openDrawer()` (home, chat, countdown, sky, breath,
 closer, touch). Drawer now opens from every main screen, full-height over the nav.
 
+## Issue 2B — exact live location + live map on the dashboard
+
+**Built** (precise, opt-in, symmetric, revocable — Play-safe by design):
+- Migration `presence_live_location_meta`: `location_accuracy` + `location_updated_at`
+  on `presence` (coords/mode already existed). Repo `supabase/presence_and_mood.sql` updated.
+- Packages: `flutter_map ^8.3` (OpenStreetMap tiles — **no API key**) + `latlong2`.
+- `LocationService.startLiveSharing/stopLiveSharing/pauseStream`: streams
+  `getPositionStream(high, distanceFilter:10m)` → `PresenceService.setLiveLocation`
+  (coords + accuracy + `location_updated_at`). **Foreground only**; stopping clears the
+  coords so the partner sees "paused", never a stale pin presented as live.
+- `PartnerLocationCard`: live OSM map, partner avatar marker that animates to each
+  new fix (`MapController.move` on coord change), "updated Xs ago", **distance apart**
+  (latlong2 Haversine, "4,182 km apart"), recenter button; "isn't sharing" state when off.
+- HomeScreen: lifecycle-managed stream (pauses on background / leaving Home, resumes
+  on return — battery + privacy; no covert background tracking), the warm consent
+  dialog ("Share your live location with X?"), and a **"Sharing live location with X"
+  banner with a one-tap Turn off**.
+
+## Issue 5 — labels (partial)
+Shortened the main-app nav/drawer labels: Countdown→**Reunion**, Time Capsule→**Capsule**,
+Private Vault→**Vault**, drawer title Miles→**Tethered**. The full 360px / 1.3×-font
+alignment audit + the 22px `RenderFlex` overflow are **pending a stable device** (the
+OnePlus USB kept dropping all session, blocking reliable screenshots).
+
 
 > Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
 > One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed

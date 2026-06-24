@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -72,5 +74,58 @@ class LocationService {
     } catch (_) {
       return null;
     }
+  }
+
+  // ── Live (precise) streaming ───────────────────────────────────────────────
+  static StreamSubscription<Position>? _liveSub;
+
+  static bool get isLiveSharing => _liveSub != null;
+
+  /// Streams the device position (foreground) and upserts each fix to presence.
+  /// Returns false if location is off / permission denied. Symmetric + opt-in:
+  /// the caller turns this on; either partner can stop it any time.
+  static Future<bool> startLiveSharing(String coupleId) async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return false;
+      final perm = await ensurePermission();
+      if (blocked(perm)) return false;
+
+      // Push one fix immediately so the partner sees us right away.
+      final first = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      await PresenceService.setLiveLocation(coupleId,
+          lat: first.latitude, lon: first.longitude, accuracy: first.accuracy);
+
+      await _liveSub?.cancel();
+      _liveSub = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 10, // metres — battery + privacy friendly
+        ),
+      ).listen(
+        (pos) => PresenceService.setLiveLocation(coupleId,
+            lat: pos.latitude, lon: pos.longitude, accuracy: pos.accuracy),
+        onError: (_) {},
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Stops streaming and clears the shared coords (no covert/stale tracking).
+  static Future<void> stopLiveSharing(String coupleId) async {
+    await _liveSub?.cancel();
+    _liveSub = null;
+    await PresenceService.clearLiveLocation(coupleId);
+  }
+
+  /// Stop the stream WITHOUT changing the sharing mode — used when the app
+  /// backgrounds (we resume on foreground). Battery + privacy.
+  static Future<void> pauseStream() async {
+    await _liveSub?.cancel();
+    _liveSub = null;
   }
 }

@@ -17,6 +17,10 @@ class Presence {
     this.moodColor,
     this.locationLabel,
     this.locationSharingMode = 'off',
+    this.latitude,
+    this.longitude,
+    this.locationAccuracy,
+    this.locationUpdatedAt,
     this.currentActivity,
     this.checkinPhotoUrl,
     this.checkinPhotoAt,
@@ -33,6 +37,13 @@ class Presence {
         locationLabel: JsonUtils.parseStringOrNull(j['location_label']),
         locationSharingMode:
             JsonUtils.parseString(j['location_sharing_mode'], fallback: 'off'),
+        latitude: j['latitude'] == null ? null : JsonUtils.parseDouble(j['latitude']),
+        longitude: j['longitude'] == null ? null : JsonUtils.parseDouble(j['longitude']),
+        locationAccuracy: j['location_accuracy'] == null
+            ? null
+            : JsonUtils.parseDouble(j['location_accuracy']),
+        locationUpdatedAt:
+            JsonUtils.parseDateOrNull(j['location_updated_at'])?.toLocal(),
         currentActivity: JsonUtils.parseStringOrNull(j['current_activity']),
         checkinPhotoUrl: JsonUtils.parseStringOrNull(j['checkin_photo_url']),
         checkinPhotoAt: JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
@@ -47,9 +58,16 @@ class Presence {
   final String? moodColor;
   final String? locationLabel;
   final String locationSharingMode; // 'off' | 'city' | 'precise'
+  final double? latitude;
+  final double? longitude;
+  final double? locationAccuracy;
+  final DateTime? locationUpdatedAt;
   final String? currentActivity;
   final String? checkinPhotoUrl;
   final DateTime? checkinPhotoAt;
+
+  bool get isSharingLive =>
+      locationSharingMode == 'precise' && latitude != null && longitude != null;
 }
 
 /// Couple-scoped presence read/write. RLS lets you update only your own row and
@@ -109,6 +127,30 @@ class PresenceService {
         'latitude': lat,
         'longitude': lon,
         'location_label': label,
+      });
+
+  /// A single live-location tick (precise mode): coords + accuracy + freshness.
+  static Future<void> setLiveLocation(
+    String coupleId, {
+    required double lat,
+    required double lon,
+    double? accuracy,
+  }) =>
+      _upsert(coupleId, {
+        'location_sharing_mode': 'precise',
+        'latitude': lat,
+        'longitude': lon,
+        'location_accuracy': accuracy,
+        'location_updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+  /// Clears coords when live sharing stops (so the partner sees "paused", not a
+  /// stale pin presented as live).
+  static Future<void> clearLiveLocation(String coupleId) => _upsert(coupleId, {
+        'location_sharing_mode': 'off',
+        'latitude': null,
+        'longitude': null,
+        'location_accuracy': null,
       });
 
   static Future<void> setCheckinPhoto(String coupleId, String url) =>
