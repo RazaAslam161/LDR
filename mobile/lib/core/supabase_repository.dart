@@ -1,6 +1,7 @@
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// All Supabase queries go through here so the screens stay thin.
@@ -122,7 +123,7 @@ class SupabaseRepository {
         .select('public_key')
         .eq('user_id', partnerId)
         .maybeSingle();
-    return res?['public_key'] as String?;
+    return JsonUtils.parseStringOrNull(res?['public_key']);
   }
 
   // ─── Couple ──────────────────────────────────────────────────
@@ -172,8 +173,8 @@ class SupabaseRepository {
     );
     final m = _singleRow(res);
     return (
-      code: m['code'] as String,
-      expiresAt: DateTime.parse(m['expires_at'] as String).toLocal(),
+      code: JsonUtils.parseString(m['code']),
+      expiresAt: JsonUtils.parseDate(m['expires_at']).toLocal(),
     );
   }
 

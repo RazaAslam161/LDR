@@ -5,6 +5,7 @@ import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 
 /// One pin on the body map, with decrypted note.
 class BodyMapPin {
@@ -103,21 +104,25 @@ class BodyMapRepository {
 
     final out = <BodyMapPin>[];
     for (final row in rows as List) {
-      final cipherB64 = row['note_cipher'] as String;
-      final nonceB64 = row['note_nonce'] as String;
-      final authorId = row['author'] as String;
-      final note = await CryptoCore.decryptString(
-        _unpack(cipherB64, nonceB64),
-        associatedData: authorId,
-      );
-      out.add(BodyMapPin(
-        id: row['id'] as String,
-        authorId: authorId,
-        x: (row['x'] as num).toDouble(),
-        y: (row['y'] as num).toDouble(),
-        note: note,
-        createdAt: DateTime.parse(row['created_at'] as String).toLocal(),
-      ),);
+      try {
+        final cipherB64 = row['note_cipher'] as String;
+        final nonceB64 = row['note_nonce'] as String;
+        final authorId = JsonUtils.parseString(row['author']);
+        final note = await CryptoCore.decryptString(
+          _unpack(cipherB64, nonceB64),
+          associatedData: authorId,
+        );
+        out.add(BodyMapPin(
+          id: JsonUtils.parseString(row['id']),
+          authorId: authorId,
+          x: JsonUtils.parseDouble(row['x']),
+          y: JsonUtils.parseDouble(row['y']),
+          note: note,
+          createdAt: JsonUtils.parseDate(row['created_at']).toLocal(),
+        ),);
+      } catch (_) {
+        continue;
+      }
     }
     return out;
   }

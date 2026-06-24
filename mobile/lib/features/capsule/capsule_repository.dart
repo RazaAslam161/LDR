@@ -143,8 +143,13 @@ class CapsuleRepository {
     );
     final out = <CapsuleItemType, int>{};
     for (final row in (res as List? ?? const [])) {
-      final m = row as Map<String, dynamic>;
-      out[_typeFrom(m['item_type'] as String)] = (m['n'] as num).toInt();
+      try {
+        final m = JsonUtils.asMap(row);
+        out[_typeFrom(JsonUtils.parseString(m['item_type']))] =
+            JsonUtils.parseInt(m['n']);
+      } catch (_) {
+        // Skip a malformed summary row rather than blanking the whole capsule.
+      }
     }
     return out;
   }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
 /// What kind of thing a vault row holds. Maps to the `kind` text column.
@@ -104,9 +105,8 @@ class VaultItem {
     final cipherBytes = blob.sublist(16);
 
     final requested = (json['delete_requested'] as bool?) ?? false;
-    final requestedAt = json['delete_requested_at'] != null
-        ? DateTime.parse(json['delete_requested_at'] as String).toUtc()
-        : null;
+    final requestedAt =
+        JsonUtils.parseDateOrNull(json['delete_requested_at'])?.toUtc();
     var deleteState = VaultDeleteState.none;
     if (requested && requestedAt != null) {
       final age = DateTime.now().toUtc().difference(requestedAt);
@@ -116,21 +116,19 @@ class VaultItem {
     }
 
     return VaultItem(
-      id: json['id'] as String,
-      kind: _parseKind(json['kind'] as String),
+      id: JsonUtils.parseString(json['id']),
+      kind: _parseKind(JsonUtils.parseString(json['kind'])),
       ciphertext: cipherBytes,
       nonce: nonce,
       mac: macBytes,
-      createdBy: json['created_by'] as String,
-      createdAt: DateTime.parse(json['created_at'] as String).toUtc(),
+      createdBy: JsonUtils.parseString(json['created_by']),
+      createdAt: JsonUtils.parseDate(json['created_at']).toUtc(),
       retention: (json['retention'] as String?) == 'ephemeral'
           ? VaultRetention.ephemeral
           : VaultRetention.keep,
-      reconfirmDue: json['reconfirm_due'] != null
-          ? DateTime.parse(json['reconfirm_due'] as String).toUtc()
-          : null,
+      reconfirmDue: JsonUtils.parseDateOrNull(json['reconfirm_due'])?.toUtc(),
       deleteState: deleteState,
-      deleteRequestedBy: json['delete_requested_by'] as String?,
+      deleteRequestedBy: JsonUtils.parseStringOrNull(json['delete_requested_by']),
       deleteRequestedAt: requestedAt,
     );
   }
@@ -155,9 +153,15 @@ class PrivateVaultRepository {
         .order('created_at', ascending: false);
 
     final uid = SupabaseService.currentUserId!;
-    return (res as List)
-        .map((row) => VaultItem.fromJson(row as Map<String, dynamic>, uid))
-        .toList(growable: false);
+    final items = <VaultItem>[];
+    for (final row in (res as List)) {
+      try {
+        items.add(VaultItem.fromJson(row as Map<String, dynamic>, uid));
+      } catch (_) {
+        // Skip a single malformed row rather than blanking the whole vault.
+      }
+    }
+    return List<VaultItem>.unmodifiable(items);
   }
 
   /// Inserts a new encrypted item. The bytes passed in are encrypted

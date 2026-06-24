@@ -1,5 +1,45 @@
 # Tethered — Bug-Fix & Feature Sprint: FIX_REPORT
 
+---
+
+# ⟶ Precision bug-fix pass (2026-06-24)
+
+## Issue 3 — "FormatException on every feature" → **NOT REPRODUCIBLE** (root cause: there isn't one)
+
+**Diagnostic, not assumption.** Added the requested global error nets to `main.dart`
+(`FlutterError.onError` + `PlatformDispatcher.onError`) plus a masked env check,
+then ran on IN2015 and exercised Home + every bottom-nav tab. Captured via
+`adb logcat` (the flaky OnePlus USB kept dropping `flutter run`'s debug socket):
+
+```
+I/flutter: ENV CHECK → url len: 40, key len: 208      ← env valid (not empty)
+I/flutter: STARTUP OK → booting app                    ← all init succeeded
+FormatException lines:  NONE                            ← zero, across all features
+Only error caught:  "FLUTTER ERROR: A RenderFlex overflowed by 22 pixels"  ← Issue 5, cosmetic
+```
+
+**Root cause of the original reports:** the pre-JsonUtils core-model casts —
+already fixed in the earlier sprint. Static analysis ruled out every single-point
+cause the brief listed: `grep json.decode|jsonDecode` → 0 matches (no double-decode);
+`JsonUtils` uses only `tryParse`+fallback (never throws); `dotenv.get()` would crash
+at startup if env were empty, yet the app boots and talks to Supabase; the two
+user-facing raw `DateTime.parse` sites (`countdown_screen`, `models.isAdult`) are
+already inside `try/catch`.
+
+**What changed (the permanent safety net, so it can never regress):**
+- `main.dart`: global `FlutterError.onError` + `PlatformDispatcher.onError` (log full
+  exception + stack); masked `ENV CHECK`; **fail-fast** with a clear message if the
+  Supabase url/key is empty.
+- `capsule_repository.sealSummary`: per-row `try/catch` skip + `JsonUtils`.
+- **Hardened 7 previously-unguarded repos** (raw `DateTime.parse`/`as String` →
+  `JsonUtils`, and list builds now skip a bad row instead of aborting): the Closer
+  repos `body_map`, `fantasy_jar`, `afterglow`, `memory_threads`, `private_vault`,
+  `pick_for_us`, plus the pairing-invite parse in `supabase_repository`. Encryption
+  /bytes paths left byte-for-byte untouched.
+
+**Carried to Issue 5:** the live 22px `RenderFlex` overflow (a layout/alignment bug).
+
+
 > Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
 > One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed
 > (foreground works). Repo SQL files for every migration are now in `supabase/`.

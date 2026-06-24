@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
 /// Afterglow — the soft wind-down after intimacy. Both partners enter one
@@ -451,16 +452,22 @@ class AfterglowRepository {
         .not('sealed_at', 'is', null)
         .order('happened_at', ascending: false);
 
-    return (res as List)
-        .map((row) => _entryFromJson(row as Map<String, dynamic>))
-        .toList(growable: false);
+    final entries = <AfterglowEntry>[];
+    for (final row in res as List) {
+      try {
+        entries.add(_entryFromJson(row as Map<String, dynamic>));
+      } catch (_) {
+        // Skip a malformed row so one bad entry can't blank the whole list.
+      }
+    }
+    return List<AfterglowEntry>.unmodifiable(entries);
   }
 
   static AfterglowEntry _entryFromJson(Map<String, dynamic> json) {
     return AfterglowEntry(
-      id: json['id'] as String,
-      happenedAt: DateTime.parse(json['happened_at'] as String).toUtc(),
-      retention: (json['retention'] as String?) ?? 'ephemeral',
+      id: JsonUtils.parseString(json['id']),
+      happenedAt: JsonUtils.parseDate(json['happened_at']).toUtc(),
+      retention: JsonUtils.parseStringOrNull(json['retention']) ?? 'ephemeral',
       gratitudeABytes: _maybeBytes(json['gratitude_a']),
       nonceABytes: _maybeBytes(json['nonce_a']),
       photoABytes: _maybeBytes(json['photo_a']),

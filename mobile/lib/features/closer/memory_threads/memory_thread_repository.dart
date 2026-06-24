@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
 /// Lifecycle of a memory thread row. Matches the `state` text column.
@@ -87,24 +88,20 @@ class MemoryThread {
 
   static MemoryThread fromJson(Map<String, dynamic> json) {
     return MemoryThread(
-      id: json['id'] as String,
-      proposer: json['proposer'] as String,
+      id: JsonUtils.parseString(json['id']),
+      proposer: JsonUtils.parseString(json['proposer']),
       titleCipher: byteaToBytes(json['title_cipher']),
       titleNonce: byteaToBytes(json['title_nonce']),
       photoCipher: _maybeBytes(json['photo_cipher']),
       photoNonce: _maybeBytes(json['photo_nonce']),
       noteCipher: _maybeBytes(json['note_cipher']),
       noteNonce: _maybeBytes(json['note_nonce']),
-      happenedOn: DateTime.parse(json['happened_on'] as String).toUtc(),
-      state: _parseState(json['state'] as String),
-      acceptedBy: json['accepted_by'] as String?,
-      acceptedAt: json['accepted_at'] != null
-          ? DateTime.parse(json['accepted_at'] as String).toUtc()
-          : null,
-      archivedAt: json['archived_at'] != null
-          ? DateTime.parse(json['archived_at'] as String).toUtc()
-          : null,
-      createdAt: DateTime.parse(json['created_at'] as String).toUtc(),
+      happenedOn: JsonUtils.parseDate(json['happened_on']).toUtc(),
+      state: _parseState(JsonUtils.parseString(json['state'])),
+      acceptedBy: JsonUtils.parseStringOrNull(json['accepted_by']),
+      acceptedAt: JsonUtils.parseDateOrNull(json['accepted_at'])?.toUtc(),
+      archivedAt: JsonUtils.parseDateOrNull(json['archived_at'])?.toUtc(),
+      createdAt: JsonUtils.parseDate(json['created_at']).toUtc(),
     );
   }
 
@@ -142,9 +139,15 @@ class MemoryThreadRepository {
         .neq('state', _stringifyState(MemoryState.deleted))
         .order('happened_on', ascending: false);
 
-    return (res as List)
-        .map((row) => MemoryThread.fromJson(row as Map<String, dynamic>))
-        .toList(growable: false);
+    final threads = <MemoryThread>[];
+    for (final row in res as List) {
+      try {
+        threads.add(MemoryThread.fromJson(JsonUtils.asMap(row)));
+      } catch (_) {
+        // Skip a single malformed row so it can't blank the whole timeline.
+      }
+    }
+    return List<MemoryThread>.unmodifiable(threads);
   }
 
   /// Propose a new memory (state = `proposed`). Awaits partner's accept.
@@ -287,12 +290,11 @@ class MemoryThreadRepository {
     if (res == null) return null;
     final json = res;
     return MemoryRevisit(
-      memoryId: json['memory_id'] as String,
-      initiatedBy: json['initiated_by'] as String,
-      initiatedAt: DateTime.parse(json['initiated_at'] as String).toUtc(),
-      partnerAcknowledgedAt: json['partner_acknowledged_at'] != null
-          ? DateTime.parse(json['partner_acknowledged_at'] as String).toUtc()
-          : null,
+      memoryId: JsonUtils.parseString(json['memory_id']),
+      initiatedBy: JsonUtils.parseString(json['initiated_by']),
+      initiatedAt: JsonUtils.parseDate(json['initiated_at']).toUtc(),
+      partnerAcknowledgedAt:
+          JsonUtils.parseDateOrNull(json['partner_acknowledged_at'])?.toUtc(),
     );
   }
 

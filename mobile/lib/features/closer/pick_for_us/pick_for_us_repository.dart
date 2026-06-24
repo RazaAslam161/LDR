@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 
 /// Pre-approved category tiers for "Pick for us". Each tier carries a fixed
 /// pool of result tags. The dice picks one tag from each enabled tier.
@@ -98,17 +99,22 @@ class PickForUsRepository {
         .order('rolled_at', ascending: false)
         .limit(limit);
 
-    return (rows as List)
-        .map((r) => DiceRoll(
-              id: r['id'] as String,
-              tier: r['tier'] as String,
-              tags: (r['result_tags'] as List)
-                  .map((e) => e.toString())
-                  .toList(growable: false),
-              rolledAt:
-                  DateTime.parse(r['rolled_at'] as String).toLocal(),
-            ),)
-        .toList(growable: false);
+    final out = <DiceRoll>[];
+    for (final r in rows as List) {
+      try {
+        out.add(DiceRoll(
+          id: JsonUtils.parseString(r['id']),
+          tier: JsonUtils.parseString(r['tier']),
+          tags: (r['result_tags'] as List)
+              .map((e) => e.toString())
+              .toList(growable: false),
+          rolledAt: JsonUtils.parseDate(r['rolled_at']).toLocal(),
+        ),);
+      } catch (_) {
+        // Skip a malformed row rather than blanking the whole list.
+      }
+    }
+    return out;
   }
 
   /// Loads the consent rows for the couple. Returns a map
@@ -123,10 +129,14 @@ class PickForUsRepository {
 
     final out = <String, Map<String, bool>>{};
     for (final row in rows as List) {
-      final tier = row['tier'] as String;
-      final uid = row['user_id'] as String;
-      final granted = row['granted'] as bool;
-      (out[tier] ??= {})[uid] = granted;
+      try {
+        final tier = JsonUtils.parseString(row['tier']);
+        final uid = JsonUtils.parseString(row['user_id']);
+        final granted = JsonUtils.parseBool(row['granted']);
+        (out[tier] ??= {})[uid] = granted;
+      } catch (_) {
+        // Skip a malformed row rather than blanking the whole map.
+      }
     }
     return out;
   }

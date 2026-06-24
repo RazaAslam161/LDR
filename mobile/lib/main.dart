@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
+import 'package:miles/core/config.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/router.dart';
 import 'package:miles/core/services/fcm_service.dart';
@@ -19,7 +20,29 @@ import 'package:miles/firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Global error nets: surface the FULL exception + stack (Issue 3) and keep
+  //    one bad async error from blanking a whole feature. Permanent safety net.
+  FlutterError.onError = (details) {
+    debugPrint('FLUTTER ERROR: ${details.exception}\n${details.stack}');
+    FlutterError.presentError(details);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    debugPrint('PLATFORM ERROR: $error\n$stack');
+    return true;
+  };
+
   await dotenv.load();
+  // An empty url/key would FormatException on every Supabase request — log
+  // (masked) and fail fast with a clear message rather than a cryptic crash.
+  final envUrl = dotenv.maybeGet(MilesConfig.supabaseUrlKey) ?? '';
+  final envKey = dotenv.maybeGet(MilesConfig.supabaseAnonKeyKey) ?? '';
+  debugPrint('ENV CHECK → url len: ${envUrl.length}, key len: ${envKey.length}');
+  if (envUrl.isEmpty || envKey.isEmpty) {
+    throw StateError('Supabase env missing: ensure mobile/.env has '
+        '${MilesConfig.supabaseUrlKey} and ${MilesConfig.supabaseAnonKeyKey}.');
+  }
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   // Must be registered before runApp; runs in its own isolate when a push
   // arrives while the app is backgrounded or terminated.
@@ -28,6 +51,7 @@ Future<void> main() async {
   await SupabaseService.init();
   await AdService.init();
   await FcmService.init();
+  debugPrint('STARTUP OK → booting app');
 
   runApp(const ProviderScope(child: MilesApp()));
 }

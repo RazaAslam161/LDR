@@ -5,6 +5,7 @@ import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
 
 /// Fixed tag taxonomy for Fantasy Jar entries. Tags are hashed before storage
 /// (see §F2 of INTIMACY_LAYER.md) so the server never sees plaintext tags.
@@ -128,7 +129,7 @@ class FantasyJarRepository {
       'tag_hashes': tagHashes,
     }).select('id').single();
 
-    return row['id'] as String;
+    return JsonUtils.parseString(row['id']);
   }
 
   /// Deletes one of my own entries.
@@ -153,23 +154,27 @@ class FantasyJarRepository {
 
     final out = <FantasyEntry>[];
     for (final row in rows as List) {
-      final cipherB64 = row['ciphertext'] as String;
-      final nonceB64 = row['nonce'] as String;
-      final plain = await CryptoCore.decryptString(
-        _unpack(cipherB64, nonceB64),
-        associatedData: myId,
-      );
-      final hashes = (row['tag_hashes'] as List? ?? [])
-          .map((e) => e.toString())
-          .toList();
-      final tags = hashes.map((h) => hashToTag[h]).whereType<String>().toList();
-      out.add(FantasyEntry(
-        id: row['id'] as String,
-        authorId: row['author'] as String,
-        text: plain,
-        tags: tags,
-        createdAt: DateTime.parse(row['created_at'] as String).toLocal(),
-      ),);
+      try {
+        final cipherB64 = row['ciphertext'] as String;
+        final nonceB64 = row['nonce'] as String;
+        final plain = await CryptoCore.decryptString(
+          _unpack(cipherB64, nonceB64),
+          associatedData: myId,
+        );
+        final hashes = (row['tag_hashes'] as List? ?? [])
+            .map((e) => e.toString())
+            .toList();
+        final tags = hashes.map((h) => hashToTag[h]).whereType<String>().toList();
+        out.add(FantasyEntry(
+          id: JsonUtils.parseString(row['id']),
+          authorId: JsonUtils.parseString(row['author']),
+          text: plain,
+          tags: tags,
+          createdAt: JsonUtils.parseDate(row['created_at']).toLocal(),
+        ),);
+      } catch (_) {
+        continue;
+      }
     }
     return out;
   }
