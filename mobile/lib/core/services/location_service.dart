@@ -78,8 +78,42 @@ class LocationService {
 
   // ── Live (precise) streaming ───────────────────────────────────────────────
   static StreamSubscription<Position>? _liveSub;
+  static double? _lastLabelLat;
+  static double? _lastLabelLon;
 
   static bool get isLiveSharing => _liveSub != null;
+
+  /// Reverse-geocode a coarse "Area, Region, Country" label (best-effort).
+  static Future<String?> _label(double lat, double lon) async {
+    try {
+      final marks = await placemarkFromCoordinates(lat, lon);
+      if (marks.isNotEmpty) {
+        final m = marks.first;
+        final label = [m.subLocality ?? m.locality, m.administrativeArea, m.country]
+            .where((e) => e != null && e.isNotEmpty)
+            .join(', ');
+        if (label.isNotEmpty) return label;
+      }
+    } catch (_) {
+      // geocoding can fail offline / rate-limit — keep the previous label
+    }
+    return null;
+  }
+
+  /// Re-geocode the label only on the first fix or after a meaningful move
+  /// (~700 m), so the dashboard text follows the live map without geocoding
+  /// every 10 m tick.
+  static Future<String?> _labelIfMoved(double lat, double lon) async {
+    final moved = _lastLabelLat == null ||
+        Geolocator.distanceBetween(_lastLabelLat!, _lastLabelLon!, lat, lon) > 700;
+    if (!moved) return null;
+    final label = await _label(lat, lon);
+    if (label != null) {
+      _lastLabelLat = lat;
+      _lastLabelLon = lon;
+    }
+    return label;
+  }
 
   /// Streams the device position (foreground) and upserts each fix to presence.
   /// Returns false if location is off / permission denied. Symmetric + opt-in:
@@ -90,13 +124,19 @@ class LocationService {
       final perm = await ensurePermission();
       if (blocked(perm)) return false;
 
-      // Push one fix immediately so the partner sees us right away.
+      _lastLabelLat = null;
+      _lastLabelLon = null;
+
+      // Push one fix immediately (with a fresh label) so the partner sees us.
       final first = await Geolocator.getCurrentPosition(
         locationSettings:
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
       await PresenceService.setLiveLocation(coupleId,
-          lat: first.latitude, lon: first.longitude, accuracy: first.accuracy);
+          lat: first.latitude,
+          lon: first.longitude,
+          accuracy: first.accuracy,
+          label: await _labelIfMoved(first.latitude, first.longitude));
 
       await _liveSub?.cancel();
       _liveSub = Geolocator.getPositionStream(
@@ -105,8 +145,11 @@ class LocationService {
           distanceFilter: 10, // metres — battery + privacy friendly
         ),
       ).listen(
-        (pos) => PresenceService.setLiveLocation(coupleId,
-            lat: pos.latitude, lon: pos.longitude, accuracy: pos.accuracy),
+        (pos) async => PresenceService.setLiveLocation(coupleId,
+            lat: pos.latitude,
+            lon: pos.longitude,
+            accuracy: pos.accuracy,
+            label: await _labelIfMoved(pos.latitude, pos.longitude)),
         onError: (_) {},
       );
       return true;
@@ -119,6 +162,8 @@ class LocationService {
   static Future<void> stopLiveSharing(String coupleId) async {
     await _liveSub?.cancel();
     _liveSub = null;
+    _lastLabelLat = null;
+    _lastLabelLon = null;
     await PresenceService.clearLiveLocation(coupleId);
   }
 

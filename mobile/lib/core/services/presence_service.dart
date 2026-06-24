@@ -135,6 +135,7 @@ class PresenceService {
     required double lat,
     required double lon,
     double? accuracy,
+    String? label,
   }) =>
       _upsert(coupleId, {
         'location_sharing_mode': 'precise',
@@ -142,6 +143,9 @@ class PresenceService {
         'longitude': lon,
         'location_accuracy': accuracy,
         'location_updated_at': DateTime.now().toUtc().toIso8601String(),
+        // Only overwrite the label when we re-geocoded (keeps the dashboard
+        // text in sync with the live map without geocoding every tick).
+        if (label != null) 'location_label': label,
       });
 
   /// Clears coords when live sharing stops (so the partner sees "paused", not a
