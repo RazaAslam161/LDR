@@ -3,7 +3,12 @@
 -- Personal (owner-only) vault + a 4-digit PIN hashed server-side (bcrypt),
 -- with a 5-try / 15-minute lockout. (Named `personal_vault_items` because the
 -- couple-scoped `vault_items` already exists in the Closer module.)
+-- NOTE: crypt()/gen_salt() live in the `extensions` schema on Supabase, so the
+-- PIN functions MUST include `extensions` in search_path (or qualify the calls)
+-- — otherwise every set_vault_pin throws "function gen_salt does not exist".
 -- ───────────────────────────────────────────────────────────────────────────
+create extension if not exists pgcrypto with schema extensions;
+
 create table if not exists public.vault_pin (
   user_id           uuid primary key references public.profiles(id) on delete cascade,
   pin_hash          text not null,
@@ -30,13 +35,14 @@ create policy "pvi_owner_only" on public.personal_vault_items
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 create or replace function public.set_vault_pin(p_pin text)
-returns void language plpgsql security definer set search_path = public as $$
+returns void language plpgsql security definer
+set search_path = public, extensions as $$
 declare v_uid uuid := auth.uid();
 begin
   if v_uid is null then raise exception 'not_authenticated'; end if;
   if p_pin !~ '^[0-9]{4}$' then raise exception 'invalid_pin'; end if;
   insert into public.vault_pin (user_id, pin_hash)
-    values (v_uid, crypt(p_pin, gen_salt('bf')))
+    values (v_uid, extensions.crypt(p_pin, extensions.gen_salt('bf')))
   on conflict (user_id) do update
     set pin_hash = excluded.pin_hash, failed_attempts = 0, locked_until = null;
 end; $$;
@@ -44,14 +50,15 @@ revoke execute on function public.set_vault_pin(text) from public, anon;
 grant  execute on function public.set_vault_pin(text) to authenticated;
 
 create or replace function public.verify_vault_pin(p_pin text)
-returns text language plpgsql security definer set search_path = public as $$
+returns text language plpgsql security definer
+set search_path = public, extensions as $$
 declare v_uid uuid := auth.uid(); r public.vault_pin;
 begin
   if v_uid is null then raise exception 'not_authenticated'; end if;
   select * into r from public.vault_pin where user_id = v_uid;
   if not found then return 'no_pin'; end if;
   if r.locked_until is not null and r.locked_until > now() then return 'locked'; end if;
-  if r.pin_hash = crypt(p_pin, r.pin_hash) then
+  if r.pin_hash = extensions.crypt(p_pin, r.pin_hash) then
     update public.vault_pin set failed_attempts = 0, locked_until = null where user_id = v_uid;
     return 'ok';
   end if;

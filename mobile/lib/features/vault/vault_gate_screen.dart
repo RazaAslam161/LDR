@@ -80,15 +80,27 @@ class _VaultGateScreenState extends State<VaultGateScreen>
     try {
       await VaultRepository.setPin(pin);
       if (mounted) setState(() => _unlocked = true);
-    } catch (_) {
+    } catch (e, st) {
+      // Surface the real error (logged) instead of a blanket generic message.
+      debugPrint('Vault setPin failed: $e\n$st');
       setState(() {
-        _message = 'Could not set the PIN. Try again.';
+        _message = _pinErrorText(e);
         _firstPin = null;
         _errorSignal++;
       });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  String _pinErrorText(Object e) {
+    final s = e.toString();
+    if (s.contains('invalid_pin')) return 'PIN must be exactly 4 digits.';
+    if (s.contains('not_authenticated')) return 'Please sign in again.';
+    if (s.contains('gen_salt') || s.contains('does not exist')) {
+      return 'Server PIN setup error — please update the app.';
+    }
+    return 'Could not set the PIN. Please try again.';
   }
 
   Future<void> _onEnterPin(String pin) async {
@@ -112,7 +124,8 @@ class _VaultGateScreenState extends State<VaultGateScreen>
             _errorSignal++;
           });
       }
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('Vault verifyPin failed: $e\n$st');
       setState(() {
         _message = "Couldn't check the PIN";
         _errorSignal++;

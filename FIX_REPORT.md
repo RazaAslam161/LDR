@@ -39,6 +39,37 @@ already inside `try/catch`.
 
 **Carried to Issue 5:** the live 22px `RenderFlex` overflow (a layout/alignment bug).
 
+## Issue 1 — chat message order reversed
+
+**Root cause:** postgrest `.order('created_at')` defaults to `ascending:false`
+(descending/newest-first), but the `ListView` had no `reverse:` → newest rendered
+at the **top**. (The repo comment even wrongly said "oldest first".)
+
+**Fix (canonical chat pattern):** explicit `.order(..., ascending:false)`; `ListView.builder`
+`reverse:true` (newest at index 0 → bottom); realtime/new messages `insert(0, …)`
++ `_sortMessages()` (created_at desc, id desc tiebreaker); scroll helpers retargeted
+to `minScrollExtent` (offset 0 = newest under reverse); day dividers use the `i+1`
+older neighbour + `DateUtils.isSameDay`; **"↓ New message" chip** when a message
+arrives while scrolled up (no yank), auto-clearing at the bottom.
+
+## Issue 6 — Vault PIN won't set → **root cause captured + fixed + proven**
+
+**Real error (evidence):** `set_vault_pin`/`verify_vault_pin` had
+`proconfig = ["search_path=public"]`, but `crypt()`/`gen_salt()` live in the
+`extensions` schema → Postgres `function gen_salt(unknown) does not exist` on every
+save (surfaced as a PostgrestException = "error on save"). **Not** a missing table
+(exists), **not** RLS (correct), **not** a missing package.
+
+**Fix:** recreated both functions with `set search_path = public, extensions` and
+schema-qualified `extensions.crypt` / `extensions.gen_salt` (migration
+`fix_vault_pin_pgcrypto_search_path`; repo `supabase/private_vault.sql` updated +
+`create extension … with schema extensions`). Also: gate screen now logs the real
+exception + maps known cases instead of a blanket "could not set" message.
+
+**Proven server-side** (simulated auth via `request.jwt.claims.sub`):
+`set_vault_pin('1234')` → ok; `verify_vault_pin('1234')` → `ok`;
+`verify_vault_pin('0000')` → `wrong`. (Test PIN deleted afterward.)
+
 
 > Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
 > One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed
