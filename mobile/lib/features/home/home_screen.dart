@@ -34,8 +34,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _uploading = false;
   bool _promptedLocation = false;
   String _myMode = 'off';
+  bool _alwaysOn = false;
   double? _myLat;
   double? _myLon;
+
+  void _snack(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  /// Opt in/out of always-on (background) sharing. Enabling needs "Allow all the
+  /// time" — if it isn't granted we open app settings and ask them to return.
+  Future<void> _setAlwaysOn(bool value) async {
+    final couple = ref.read(currentCoupleProvider);
+    if (couple == null) return;
+    if (!value) {
+      await LocationService.setAlwaysOnPref(value: false);
+      await LocationService.startLiveSharing(couple.id); // back to foreground-only
+      if (mounted) setState(() => _alwaysOn = false);
+      return;
+    }
+    final perm = await LocationService.ensurePermission();
+    if (LocationService.blocked(perm)) return;
+    if (!await LocationService.hasBackgroundPermission()) {
+      _snack("Set Location to 'Allow all the time', then turn this on again.");
+      await Geolocator.openAppSettings();
+      return;
+    }
+    await LocationService.setAlwaysOnPref(value: true);
+    await LocationService.startLiveSharing(couple.id); // restart with bg service
+    if (mounted) setState(() => _alwaysOn = true);
+  }
 
   @override
   void initState() {
@@ -68,7 +99,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (couple == null) return;
     final mine = await PresenceService.fetchMine(couple.id);
     final mode = mine?.locationSharingMode ?? 'off';
-    if (mounted) setState(() => _myMode = mode);
+    final always = await LocationService.isAlwaysOn();
+    if (mounted) {
+      setState(() {
+        _myMode = mode;
+        _alwaysOn = always;
+      });
+    }
     await _refreshMyCoords();
     if (mode == 'off') {
       if (!_promptedLocation && mounted) {
@@ -231,6 +268,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const SizedBox(height: 8),
                   _LiveSharingBanner(
                     partnerName: partner.displayName,
+                    alwaysOn: _alwaysOn,
+                    onAlwaysOnChanged: _setAlwaysOn,
                     onStop: _stopLive,
                   ),
                 ],
@@ -460,38 +499,65 @@ class _QuickActions extends StatelessWidget {
 /// "📍 Sharing live location with X" indicator + one-tap off switch (privacy:
 /// the sharer always sees they're sharing, and can stop instantly).
 class _LiveSharingBanner extends StatelessWidget {
-  const _LiveSharingBanner({required this.partnerName, required this.onStop});
+  const _LiveSharingBanner({
+    required this.partnerName,
+    required this.alwaysOn,
+    required this.onAlwaysOnChanged,
+    required this.onStop,
+  });
   final String partnerName;
+  final bool alwaysOn;
+  final ValueChanged<bool> onAlwaysOnChanged;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
         color: MilesColors.blush.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: MilesColors.blush.withValues(alpha: 0.3)),
       ),
-      child: Row(
+      child: Column(
         children: [
-          const Icon(Icons.my_location, color: MilesColors.blush, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Sharing live location with $partnerName',
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
-            ),
+          Row(
+            children: [
+              const Icon(Icons.my_location, color: MilesColors.blush, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Sharing live location with $partnerName',
+                  style:
+                      const TextStyle(color: MilesColors.cream50, fontSize: 12),
+                ),
+              ),
+              GestureDetector(
+                onTap: onStop,
+                child: const Text(
+                  'Turn off',
+                  style: TextStyle(
+                      color: MilesColors.blush,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
           ),
-          GestureDetector(
-            onTap: onStop,
-            child: const Text(
-              'Turn off',
-              style: TextStyle(
-                  color: MilesColors.blush,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600),
-            ),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Keep sharing when the app is closed',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 11),
+                ),
+              ),
+              Switch(
+                value: alwaysOn,
+                onChanged: onAlwaysOnChanged,
+                activeThumbColor: MilesColors.blush,
+              ),
+            ],
           ),
         ],
       ),

@@ -9,6 +9,11 @@
     <!-- Coarse location for the Time Capsule "when you're together" proximity unlock -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Opt-in always-on (background) location sharing — foreground-service backed,
+         mutual + consensual, with a persistent notification (anti-stalkerware). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Microphone for Time Capsule voice memos + chat voice notes -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Camera for chat photo capture -->

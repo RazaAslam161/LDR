@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Symmetric, opt-in, revocable location sharing.
 ///
@@ -22,6 +23,22 @@ class LocationService {
 
   static bool blocked(LocationPermission p) =>
       p == LocationPermission.denied || p == LocationPermission.deniedForever;
+
+  // ── Always-on (background) opt-in ──────────────────────────────────────────
+  static const _alwaysKey = 'location_always_on';
+
+  /// Whether this user opted into sharing with the app closed.
+  static Future<bool> isAlwaysOn() async =>
+      (await SharedPreferences.getInstance()).getBool(_alwaysKey) ?? false;
+
+  static Future<void> setAlwaysOnPref({required bool value}) async =>
+      (await SharedPreferences.getInstance()).setBool(_alwaysKey, value);
+
+  /// "Allow all the time" — required to keep updating when the app is closed.
+  /// Android 11+ won't grant it in the normal request flow; the caller sends the
+  /// user to app settings (openAppSettings) to pick it, then we re-check here.
+  static Future<bool> hasBackgroundPermission() async =>
+      await Geolocator.checkPermission() == LocationPermission.always;
 
   /// Reads the device location (per [mode]) and pushes it to the presence row.
   /// Returns the human label, or null if it couldn't (off / denied / error).
@@ -138,13 +155,28 @@ class LocationService {
           accuracy: first.accuracy,
           label: await _labelIfMoved(first.latitude, first.longitude));
 
+      // Always-on (opt-in + "allow all the time") keeps streaming with the app
+      // closed via a foreground service + persistent notification. Otherwise a
+      // lighter foreground-only stream. Background throttled to save battery.
+      final background = await isAlwaysOn() && await hasBackgroundPermission();
+      final LocationSettings settings = background
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 50,
+              intervalDuration: const Duration(minutes: 1),
+              foregroundNotificationConfig: const ForegroundNotificationConfig(
+                notificationTitle: 'Tethered',
+                notificationText: 'Sharing your live location',
+                enableWakeLock: true,
+              ),
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 10,
+            );
+
       await _liveSub?.cancel();
-      _liveSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 10, // metres — battery + privacy friendly
-        ),
-      ).listen(
+      _liveSub = Geolocator.getPositionStream(locationSettings: settings).listen(
         (pos) async => PresenceService.setLiveLocation(coupleId,
             lat: pos.latitude,
             lon: pos.longitude,
@@ -168,8 +200,10 @@ class LocationService {
   }
 
   /// Stop the stream WITHOUT changing the sharing mode — used when the app
-  /// backgrounds (we resume on foreground). Battery + privacy.
+  /// backgrounds / leaves Home. NO-OP when always-on is enabled, so opted-in
+  /// users keep streaming (via the foreground service) with the app closed.
   static Future<void> pauseStream() async {
+    if (await isAlwaysOn() && await hasBackgroundPermission()) return;
     await _liveSub?.cancel();
     _liveSub = null;
   }
