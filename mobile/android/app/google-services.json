@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "188998306037",
+    "project_id": "ldrc-120a2",
+    "storage_bucket": "ldrc-120a2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:188998306037:android:32baecc398a397210dddbc",
+        "android_client_info": {
+          "package_name": "com.miles.miles"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBHUOM-Hz1midmM-uAqfQrJw97i_8xHdPw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

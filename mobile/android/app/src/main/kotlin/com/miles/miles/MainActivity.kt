@@ -1,7 +1,12 @@
 package com.miles.miles
 
 import android.app.Activity
+import android.app.NotificationManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -33,6 +38,33 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "isSecure" -> result.success(secureFlagSet)
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Full-screen-intent permission (Android 14 / API 34+). Below 34 it's
+        // implicitly granted; from 34 the user must allow it in system settings.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/fsi")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "canUseFullScreenIntent" -> {
+                        if (Build.VERSION.SDK_INT >= 34) {
+                            val nm = getSystemService(NotificationManager::class.java)
+                            result.success(nm.canUseFullScreenIntent())
+                        } else {
+                            result.success(true)
+                        }
+                    }
+                    "openSettings" -> {
+                        if (Build.VERSION.SDK_INT >= 34) {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                                Uri.parse("package:$packageName")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                        }
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }

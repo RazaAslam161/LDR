@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/features/breath/breath_sync_screen.dart';
@@ -41,33 +43,60 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _subscribeReach());
+    pendingReach.addListener(_onPendingReach);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
 
-  void _subscribeReach() {
+  void _onReady() {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
+    // Foreground realtime path — works whether or not push is configured.
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
+    // Register this device for push now that we're past login + pairing.
+    FcmService.registerToken();
+    // One-time, dismissible full-screen-alert prompt (Android 14+).
+    final partnerName =
+        ref.read(sessionProvider).partner?.displayName ?? 'your partner';
+    FsiPermission.promptIfNeeded(context, partnerName);
+    // A push may have been tapped before the listener attached.
+    _onPendingReach();
   }
 
   void _onReach(ReachEvent e) {
     final uid = SupabaseService.currentUserId;
-    if (e.isMine(uid) || !e.isActive || _shownReach.contains(e.id)) return;
-    _shownReach.add(e.id);
-    if (!mounted) return;
+    if (e.isMine(uid) || !e.isActive) return;
     final partnerName =
         ref.read(sessionProvider).partner?.displayName ?? 'Your partner';
+    _showReach(e.id, partnerName);
+  }
+
+  /// From a foreground push or a tapped notification (FcmService.pendingReach).
+  void _onPendingReach() {
+    final tap = pendingReach.value;
+    if (tap == null) return;
+    pendingReach.value = null;
+    final name = tap.fromName.isNotEmpty ? tap.fromName : 'Your partner';
+    _showReach(tap.reachId, name);
+  }
+
+  /// Single entry point for the overlay — de-duped by reach id so the realtime
+  /// and push paths never double-show the same Reach.
+  void _showReach(String reachId, String partnerName) {
+    if (reachId.isNotEmpty && _shownReach.contains(reachId)) return;
+    if (reachId.isNotEmpty) _shownReach.add(reachId);
+    if (!mounted) return;
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
         builder: (_) =>
-            ReachOverlayScreen(partnerName: partnerName, eventId: e.id),
+            ReachOverlayScreen(partnerName: partnerName, eventId: reachId),
       ),
     );
   }
 
   @override
   void dispose() {
+    pendingReach.removeListener(_onPendingReach);
     _reachChannel?.unsubscribe();
     super.dispose();
   }

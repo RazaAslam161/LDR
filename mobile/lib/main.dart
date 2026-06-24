@@ -1,23 +1,33 @@
 import 'dart:async';
 
 import 'package:app_links/app_links.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/router.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Must be registered before runApp; runs in its own isolate when a push
+  // arrives while the app is backgrounded or terminated.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   TzHelper.ensureInit();
   await SupabaseService.init();
   await AdService.init();
+  await FcmService.init();
 
   runApp(const ProviderScope(child: MilesApp()));
 }
@@ -45,8 +55,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    PresenceService.setOnline(couple.id,
-        online: state == AppLifecycleState.resumed);
+    PresenceService.setOnline(
+      couple.id,
+      online: state == AppLifecycleState.resumed,
+    );
   }
 
   Future<void> _initDeepLinks() async {

@@ -1,5 +1,8 @@
 plugins {
     id("com.android.application")
+    // START: FlutterFire Configuration
+    id("com.google.gms.google-services")
+    // END: FlutterFire Configuration
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -20,7 +23,7 @@ android {
         applicationId = "com.miles.miles"
         // minSdk 23 (Android 6.0) — required by Supabase Realtime, firebase_messaging
         // 16.x, and most plugins. Pinned explicitly (FCM needs >= 21; Firebase >= 23).
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

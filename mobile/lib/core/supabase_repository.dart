@@ -229,6 +229,18 @@ class SupabaseRepository {
     await _c.rpc<dynamic>('leave_couple');
   }
 
+  /// Persists (or clears) this device's FCM push token on the user's profile.
+  /// Pass null on sign-out so stale devices stop receiving Reach pushes.
+  static Future<void> setFcmToken(String? token) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    await _c.from('profiles').update({
+      'fcm_token': token,
+      'fcm_token_updated_at':
+          token == null ? null : DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', uid);
+  }
+
   /// A Postgres function returning a single composite row comes back as either
   /// a JSON object or a one-element list depending on the PostgREST version.
   /// Normalise both into a plain map.

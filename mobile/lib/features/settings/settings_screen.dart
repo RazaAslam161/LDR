@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/models.dart';
+import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
@@ -231,6 +233,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _signOut() async {
+    // Drop this device's push token while still authenticated.
+    await FcmService.clearToken();
     await ref.read(sessionProvider.notifier).signOut();
     if (mounted) context.go('/signin');
   }
@@ -308,6 +312,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
               trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeLocationSharing,
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Reach alerts ─────────────────────────────────────
+            const _SectionHeader(label: 'Reach alerts'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Full-screen alerts',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: const Text(
+                  'Let your partner wake your screen when they reach for you',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: FsiPermission.openSettings,
             ),
 
             const SizedBox(height: 28),
