@@ -24,6 +24,7 @@ class Presence {
     this.currentActivity,
     this.currentScreen,
     this.bodyPhotoPath,
+    this.avatarEmoji,
     this.checkinPhotoUrl,
     this.checkinPhotoAt,
   });
@@ -49,6 +50,7 @@ class Presence {
         currentActivity: JsonUtils.parseStringOrNull(j['current_activity']),
         currentScreen: JsonUtils.parseStringOrNull(j['current_screen']),
         bodyPhotoPath: JsonUtils.parseStringOrNull(j['body_photo_path']),
+        avatarEmoji: JsonUtils.parseStringOrNull(j['avatar_emoji']),
         checkinPhotoUrl: JsonUtils.parseStringOrNull(j['checkin_photo_url']),
         checkinPhotoAt: JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
       );
@@ -69,6 +71,7 @@ class Presence {
   final String? currentActivity;
   final String? currentScreen;
   final String? bodyPhotoPath;
+  final String? avatarEmoji;
   final String? checkinPhotoUrl;
   final DateTime? checkinPhotoAt;
 
@@ -125,6 +128,10 @@ class PresenceService {
   /// The user's full-body photo for the Touch feature (private bucket path).
   static Future<void> setBodyPhoto(String coupleId, String path) =>
       _upsert(coupleId, {'body_photo_path': path});
+
+  /// The user's chosen avatar (emoji) for the "Together" space.
+  static Future<void> setAvatarEmoji(String coupleId, String emoji) =>
+      _upsert(coupleId, {'avatar_emoji': emoji});
 
   static Future<void> setSharingMode(String coupleId, String mode) =>
       _upsert(coupleId, {'location_sharing_mode': mode});

@@ -22,6 +22,7 @@ create table if not exists public.presence (
   current_activity text,
   current_screen text,                                 -- #3: which feature partner is in
   body_photo_path text,                                -- #1: Touch body photo (private bucket)
+  avatar_emoji text,                                   -- Option B: "Together" avatar
   checkin_photo_url text,
   checkin_photo_at  timestamptz,
   updated_at     timestamptz not null default now()
