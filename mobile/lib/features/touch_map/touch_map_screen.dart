@@ -89,11 +89,16 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   bool _hasMyPhoto = false;
   bool _uploadingPhoto = false;
   Offset? _lastPan; // throttle caress sends
+  double _heat = 0; // shared warmth 0..1 — rises with touches, decays
+  Timer? _heatTimer;
 
   @override
   void initState() {
     super.initState();
     SecureScreen.setSecure(); // intimate photos — block screenshots
+    _heatTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _heat > 0) setState(() => _heat = (_heat - 0.03).clamp(0.0, 1.0));
+    });
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     _coupleId = couple.id;
@@ -105,9 +110,28 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   @override
   void dispose() {
     SecureScreen.clearSecure();
+    _heatTimer?.cancel();
     reportActiveTab(ref);
     _channel?.unsubscribe();
     super.dispose();
+  }
+
+  /// Richer haptics by touch type.
+  void _haptic(String type) {
+    switch (type) {
+      case 'kiss':
+        HapticFeedback.mediumImpact();
+      case 'hug':
+        HapticFeedback.heavyImpact();
+        Future.delayed(
+            const Duration(milliseconds: 140), HapticFeedback.heavyImpact);
+      default:
+        HapticFeedback.lightImpact();
+    }
+  }
+
+  void _bumpHeat() {
+    if (mounted) setState(() => _heat = (_heat + 0.07).clamp(0.0, 1.0));
   }
 
   Future<void> _loadPhotos() async {
@@ -157,12 +181,13 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       if (z == null) return;
       _spawnAt(z.x, z.y, t.type);
     }
-    HapticFeedback.mediumImpact();
-    Future.delayed(const Duration(milliseconds: 200), HapticFeedback.lightImpact);
+    _haptic(t.type);
+    _bumpHeat();
   }
 
   void _tap(_Zone z) {
-    HapticFeedback.lightImpact();
+    _haptic(_type);
+    _bumpHeat();
     _spawnAt(z.x, z.y, _type);
     final id = _coupleId;
     if (id != null) {
@@ -172,7 +197,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   /// Photo-mode touch at a normalized (x,y) anywhere on the partner's photo.
   void _touchAt(double x, double y) {
-    HapticFeedback.lightImpact();
+    _haptic(_type);
+    _bumpHeat();
     _spawnAt(x, y, _type);
     final id = _coupleId;
     if (id != null) {
@@ -271,6 +297,44 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
+                // Shared warmth — rises as you both touch, cools over time.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    children: [
+                      Icon(Icons.local_fire_department,
+                          color: MilesColors.blush.withValues(
+                              alpha: 0.4 + _heat * 0.6),
+                          size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Stack(
+                            children: [
+                              Container(height: 8, color: MilesColors.surface1),
+                              AnimatedFractionallySizedBox(
+                                duration: const Duration(milliseconds: 400),
+                                widthFactor: _heat.clamp(0.0, 1.0),
+                                child: Container(
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(colors: [
+                                      MilesColors.gilt,
+                                      MilesColors.blush,
+                                      MilesColors.ember,
+                                    ]),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, c) {
