@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/features/photo/filter_editor_screen.dart';
 
 /// Crop shape for [PhotoPickerService.pick].
 enum PhotoShape { square, free }
@@ -16,12 +17,14 @@ class PhotoPickerService {
   static final ImagePicker _picker = ImagePicker();
 
   /// Returns a cropped + compressed file, or null if the user cancels.
+  /// Pass [enhanceContext] to offer the beauty-filter step after cropping.
   static Future<File?> pick({
     required ImageSource source,
     PhotoShape shape = PhotoShape.free,
+    BuildContext? enhanceContext,
   }) async {
-    final picked =
-        await _picker.pickImage(source: source, maxWidth: 2400, imageQuality: 92);
+    final picked = await _picker.pickImage(
+        source: source, maxWidth: 2400, imageQuality: 92);
     if (picked == null) return null;
 
     final cropped = await ImageCropper().cropImage(
@@ -55,7 +58,13 @@ class PhotoPickerService {
       ],
     );
     if (cropped == null) return null;
-    return File(cropped.path);
+    final file = File(cropped.path);
+    // Optional beauty/enhance pass.
+    if (enhanceContext != null && enhanceContext.mounted) {
+      final edited = await FilterEditorScreen.edit(enhanceContext, file);
+      return edited ?? file;
+    }
+    return file;
   }
 
   /// Pick (or record) a video — no crop. Capped at 5 minutes to bound size.
@@ -67,10 +76,12 @@ class PhotoPickerService {
     return x == null ? null : File(x.path);
   }
 
-  /// Shows a camera/gallery sheet, then pick + crop. Returns null on cancel.
+  /// Shows a camera/gallery sheet, then pick + crop (+ optional enhance).
+  /// Returns null on cancel.
   static Future<File?> pickFromSheet(
     BuildContext context, {
     PhotoShape shape = PhotoShape.free,
+    bool enhance = true,
   }) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -97,7 +108,11 @@ class PhotoPickerService {
         ),
       ),
     );
-    if (source == null) return null;
-    return pick(source: source, shape: shape);
+    if (source == null || !context.mounted) return null;
+    return pick(
+      source: source,
+      shape: shape,
+      enhanceContext: enhance ? context : null,
+    );
   }
 }

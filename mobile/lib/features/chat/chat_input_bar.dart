@@ -73,8 +73,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Future<void> _pickAndSend(ImageSource source) async {
     try {
-      // Crop / adjust / compress before sending.
-      final file = await PhotoPickerService.pick(source: source);
+      // Crop / adjust / enhance / compress before sending.
+      final file = await PhotoPickerService.pick(
+          source: source, enhanceContext: context);
       if (file == null) return;
       setState(() => _sending = true);
       await widget.onSendImage(file);
@@ -128,8 +129,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_outlined,
-                  color: MilesColors.cream50),
+              leading:
+                  const Icon(Icons.photo_outlined, color: MilesColors.cream50),
               title: const Text('Gallery',
                   style: TextStyle(color: MilesColors.cream50)),
               onTap: () {
@@ -236,98 +237,96 @@ class _ChatInputBarState extends State<ChatInputBar> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-            // Attach button
-            CircleIconButton(
-              icon: Icons.add,
-              onTap: _sending ? null : _showAttachSheet,
-            ),
-            const SizedBox(width: 6),
+                // Attach button
+                CircleIconButton(
+                  icon: Icons.add,
+                  onTap: _sending ? null : _showAttachSheet,
+                ),
+                const SizedBox(width: 6),
 
-            // Text field or recording indicator
-            Expanded(
-              child: _recording
-                  ? Container(
-                      height: 48,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: MilesColors.surface1,
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      alignment: Alignment.centerLeft,
-                      child: Row(
-                        children: [
-                          const Icon(Icons.fiber_manual_record,
-                              color: MilesColors.ember, size: 16),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Slide up to cancel · release to send',
-                            style: TextStyle(
-                                color: MilesColors.cream50, fontSize: 13),
+                // Text field or recording indicator
+                Expanded(
+                  child: _recording
+                      ? Container(
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: MilesColors.surface1,
+                            borderRadius: BorderRadius.circular(24),
                           ),
-                        ],
-                      ),
-                    )
-                  : TextField(
-                      controller: _text,
-                      minLines: 1,
-                      maxLines: 5,
-                      onChanged: widget.onChanged,
-                      style: const TextStyle(color: MilesColors.cream50),
-                      decoration: InputDecoration(
-                        hintText: 'Message…',
-                        hintStyle: TextStyle(
-                            color: MilesColors.cream50.withValues(alpha: 0.4)),
-                        filled: true,
-                        fillColor: MilesColors.surface1,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
+                          alignment: Alignment.centerLeft,
+                          child: Row(
+                            children: [
+                              const Icon(Icons.fiber_manual_record,
+                                  color: MilesColors.ember, size: 16),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Slide up to cancel · release to send',
+                                style: TextStyle(
+                                    color: MilesColors.cream50, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        )
+                      : TextField(
+                          controller: _text,
+                          minLines: 1,
+                          maxLines: 5,
+                          onChanged: widget.onChanged,
+                          style: const TextStyle(color: MilesColors.cream50),
+                          decoration: InputDecoration(
+                            hintText: 'Message…',
+                            hintStyle: TextStyle(
+                                color:
+                                    MilesColors.cream50.withValues(alpha: 0.4)),
+                            filled: true,
+                            fillColor: MilesColors.surface1,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 6),
+
+                // Mic button (when no text) OR Send button (when text)
+                _sending
+                    ? const SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: Padding(
+                          padding: EdgeInsets.all(12),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: MilesColors.cream50),
+                        ),
+                      )
+                    : GestureDetector(
+                        onLongPressStart: (_) => _startRecording(),
+                        onLongPressEnd: (_) => _stopRecording(),
+                        onTap: _hasText ? _sendText : null,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: _recording ? MilesColors.ember : null,
+                            gradient: _recording ? null : MilesGradients.cta,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            _recording
+                                ? Icons.stop_rounded
+                                : (_hasText
+                                    ? Icons.send_rounded
+                                    : Icons.mic_rounded),
+                            color: MilesColors.cream50,
+                            size: 22,
+                          ),
                         ),
                       ),
-                    ),
-            ),
-            const SizedBox(width: 6),
-
-            // Mic button (when no text) OR Send button (when text)
-            _sending
-                ? const SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Padding(
-                      padding: EdgeInsets.all(12),
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: MilesColors.cream50),
-                    ),
-                  )
-                : GestureDetector(
-                    onLongPressStart: (_) => _startRecording(),
-                    onLongPressEnd: (_) => _stopRecording(),
-                    onTap: _hasText ? _sendText : null,
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: _recording
-                            ? MilesColors.ember
-                            : null,
-                        gradient:
-                            _recording ? null : MilesGradients.cta,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _recording
-                            ? Icons.stop_rounded
-                            : (_hasText
-                                ? Icons.send_rounded
-                                : Icons.mic_rounded),
-                        color: MilesColors.cream50,
-                        size: 22,
-                      ),
-                    ),
-                  ),
-          ],
+              ],
             ),
           ],
         ),
@@ -368,8 +367,8 @@ class _ReplyBar extends StatelessWidget {
                   message.previewText(),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: MilesColors.cream50, fontSize: 13),
+                  style:
+                      const TextStyle(color: MilesColors.cream50, fontSize: 13),
                 ),
               ],
             ),
