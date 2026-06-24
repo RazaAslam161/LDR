@@ -70,6 +70,12 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="reach_channel" />
+
+        <!-- image_cropper (uCrop) photo crop/adjust activity -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
     </application>
 
     <!-- Supabase Auth deep-link for email confirmation + OAuth redirects -->

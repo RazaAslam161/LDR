@@ -127,6 +127,31 @@ Private Vault→**Vault**, drawer title Miles→**Tethered**. The full 360px / 1
 alignment audit + the 22px `RenderFlex` overflow are **pending a stable device** (the
 OnePlus USB kept dropping all session, blocking reliable screenshots).
 
+## Issue 7 — photo tooling (compliant scope)
+
+**Touch stays on illustrated silhouettes** — no photo upload added there (Play
+sexual-content policy + ad eligibility). Built proper photo tooling on the
+surfaces where photos belong:
+- Package `image_cropper ^12.2` (+ uCrop activity in the manifest); `image_picker`
+  already present.
+- **`PhotoPickerService`** (`lib/core/services/photo_picker_service.dart`): one
+  reusable camera/gallery sheet → crop/adjust (aspect presets: original / square /
+  4:3 / 16:9, or locked 1:1) → compress (≤1200px, JPEG q80).
+- Applied to the **three** surfaces:
+  1. **Profile avatar** (Settings) — tappable avatar, **1:1 locked** crop → upload →
+     `profiles.avatar_url` (new `SupabaseRepository.setAvatarUrl`).
+  2. **Check-in snap** (Home) — replaces the raw camera grab with crop+compress.
+  3. **Chat photo** (ChatInputBar) — crop/adjust before send.
+
+**Deferred (documented, not silently skipped):**
+- **Private bucket + signed URLs:** photos currently use the existing public
+  `couple_media` bucket (obscure paths). Migrating to a private bucket with
+  couple-scoped RLS + signed URLs touches every existing image read (chat, snaps)
+  and is a follow-up.
+- **FLAG_SECURE** on photo-viewing screens: the native `miles/secure_screen`
+  channel already exists (Vault); wiring it to chat/photo viewers is a follow-up.
+- Silhouette skin-tone / front-back toggle: optional enhancement, not built.
+
 
 > Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
 > One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed

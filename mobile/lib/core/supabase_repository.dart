@@ -230,6 +230,13 @@ class SupabaseRepository {
     await _c.rpc<dynamic>('leave_couple');
   }
 
+  /// Sets the user's avatar URL (Issue 7 — profile photo).
+  static Future<void> setAvatarUrl(String url) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    await _c.from('profiles').update({'avatar_url': url}).eq('id', uid);
+  }
+
   /// Persists (or clears) this device's FCM push token on the user's profile.
   /// Pass null on sign-out so stale devices stop receiving Reach pushes.
   static Future<void> setFcmToken(String? token) async {

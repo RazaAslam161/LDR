@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -31,7 +31,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
-  final _picker = ImagePicker();
   bool _uploading = false;
   bool _promptedLocation = false;
   String _myMode = 'off';
@@ -156,9 +155,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _shareSnap() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    final x = await _picker.pickImage(
-        source: ImageSource.camera, imageQuality: 70, maxWidth: 1000);
-    if (x == null) return;
+    final file = await PhotoPickerService.pickFromSheet(context);
+    if (file == null) return;
     setState(() => _uploading = true);
     try {
       final uid = SupabaseService.currentUserId!;
@@ -166,7 +164,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           '${couple.id}/checkins/${uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await SupabaseService.client.storage
           .from('couple_media')
-          .upload(path, File(x.path));
+          .upload(path, file);
       final url = SupabaseService.client.storage
           .from('couple_media')
           .getPublicUrl(path);

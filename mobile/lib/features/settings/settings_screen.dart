@@ -6,9 +6,11 @@ import 'package:miles/core/models.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -29,6 +31,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _error;
   bool _seeded = false;
   String _locationMode = 'off';
+  bool _changingAvatar = false;
+  String? _localAvatarUrl;
+
+  Future<void> _changeAvatar() async {
+    final file =
+        await PhotoPickerService.pickFromSheet(context, shape: PhotoShape.square);
+    if (file == null) return;
+    final couple = ref.read(sessionProvider).couple;
+    setState(() => _changingAvatar = true);
+    try {
+      final uid = SupabaseService.currentUserId!;
+      final cid = couple?.id ?? uid;
+      final path =
+          '$cid/avatars/${uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await SupabaseService.client.storage
+          .from('couple_media')
+          .upload(path, file);
+      final url = SupabaseService.client.storage
+          .from('couple_media')
+          .getPublicUrl(path);
+      await SupabaseRepository.setAvatarUrl(url);
+      if (mounted) {
+        setState(() => _localAvatarUrl = url);
+        _toast('Photo updated');
+      }
+    } catch (_) {
+      if (mounted) _toast('Could not update photo');
+    }
+    if (mounted) setState(() => _changingAvatar = false);
+  }
 
   @override
   void initState() {
@@ -263,6 +295,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           children: [
             // ── Profile ──────────────────────────────────────────
             const _SectionHeader(label: 'Profile'),
+            Center(
+              child: GestureDetector(
+                onTap: _changingAvatar ? null : _changeAvatar,
+                child: _AvatarEditor(
+                  url: _localAvatarUrl ?? profile?.avatarUrl,
+                  name: profile?.displayName ?? '',
+                  busy: _changingAvatar,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
             LoveTextField(
               label: 'Display name',
               controller: _name,
@@ -416,6 +459,56 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Tappable round avatar with a camera badge (Issue 7 — profile photo, 1:1).
+class _AvatarEditor extends StatelessWidget {
+  const _AvatarEditor({required this.url, required this.name, required this.busy});
+  final String? url;
+  final String name;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
+    return Stack(
+      alignment: Alignment.bottomRight,
+      children: [
+        Container(
+          width: 92,
+          height: 92,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: MilesColors.surface2,
+            border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.3)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: busy
+              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+              : url == null
+                  ? Center(
+                      child: Text(initial,
+                          style: const TextStyle(
+                              color: MilesColors.cream50, fontSize: 34)))
+                  : Image.network(url!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Center(
+                          child: Text(initial,
+                              style: const TextStyle(
+                                  color: MilesColors.cream50, fontSize: 34)))),
+        ),
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: MilesColors.blush,
+          ),
+          child: const Icon(Icons.camera_alt,
+              size: 15, color: MilesColors.cream50),
+        ),
+      ],
     );
   }
 }

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -31,7 +32,6 @@ class ChatInputBar extends StatefulWidget {
 
 class _ChatInputBarState extends State<ChatInputBar> {
   final _text = TextEditingController();
-  final _picker = ImagePicker();
   final _recorder = AudioRecorder();
   bool _sending = false;
   bool _recording = false;
@@ -58,33 +58,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  Future<void> _pickFromCamera() async {
-    try {
-      final x = await _picker.pickImage(source: ImageSource.camera);
-      if (x == null) return;
-      setState(() => _sending = true);
-      await widget.onSendImage(File(x.path));
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open camera.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
-  }
+  Future<void> _pickFromCamera() => _pickAndSend(ImageSource.camera);
 
-  Future<void> _pickFromGallery() async {
+  Future<void> _pickFromGallery() => _pickAndSend(ImageSource.gallery);
+
+  Future<void> _pickAndSend(ImageSource source) async {
     try {
-      final x = await _picker.pickImage(source: ImageSource.gallery);
-      if (x == null) return;
+      // Crop / adjust / compress before sending.
+      final file = await PhotoPickerService.pick(source: source);
+      if (file == null) return;
       setState(() => _sending = true);
-      await widget.onSendImage(File(x.path));
+      await widget.onSendImage(file);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open gallery.')),
+          const SnackBar(content: Text('Could not attach that photo.')),
         );
       }
     } finally {
