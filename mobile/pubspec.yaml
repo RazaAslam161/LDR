@@ -1,0 +1,75 @@
+name: miles
+description: Feel close, even from here. A quiet app for couples apart.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ─── Supabase ────────────────────────────────────────────────
+  supabase_flutter: ^2.6.0
+
+  # ─── State management ────────────────────────────────────────
+  flutter_riverpod: ^2.5.1
+
+  # ─── Routing ─────────────────────────────────────────────────
+  go_router: ^14.2.7
+
+  # ─── Time / timezones ────────────────────────────────────────
+  intl: ^0.19.0
+  timezone: ^0.11.0
+
+  # ─── Fonts ───────────────────────────────────────────────────
+  google_fonts: ^6.2.1
+
+  # ─── Icons ───────────────────────────────────────────────────
+  cupertino_icons: ^1.0.8
+
+  # ─── Haptics + sensors (for Breath Sync + Reach) ─────────────
+  vibration: ^2.0.0
+  sensors_plus: ^6.0.1
+
+  # ─── Secure env ──────────────────────────────────────────────
+  flutter_dotenv: ^5.1.0
+
+  # ─── Storage ─────────────────────────────────────────────────
+  shared_preferences: ^2.3.2
+
+  # ─── Crypto (E2EE for the Closer intimacy module) ────────────
+  cryptography: ^2.7.0
+  flutter_secure_storage: ^9.2.2
+
+  # ─── Local auth (PIN / biometric gate for Closer) ────────────
+  local_auth: ^2.3.0
+
+  # ─── File picking (chat photos + Vault) ──────────────────────
+  image_picker: ^1.1.2
+
+  # ─── Voice notes (record + playback in chat) ─────────────────
+  record: ^7.1.0
+  just_audio: ^0.10.5
+
+  # ─── Misc utilities ──────────────────────────────────────────
+  collection: ^1.18.0
+  path_provider: ^2.1.6
+  url_launcher: ^6.3.2
+  geolocator: ^14.0.2
+  flutter_animate: ^4.5.2
+  google_mobile_ads: ^9.0.0
+  app_links: ^7.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  very_good_analysis: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env

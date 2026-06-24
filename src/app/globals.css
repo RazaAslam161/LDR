@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-navy-950 text-cream-100 font-sans;
+    background-image:
+      radial-gradient(at 0% 0%, rgba(239, 111, 88, 0.06) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(244, 147, 126, 0.04) 0px, transparent 50%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-coral-500/30 text-cream-50;
+  }
+}
+
+@layer components {
+  .font-display {
+    @apply font-serif;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-br from-cream-50 via-cream-100 to-coral-400 bg-clip-text text-transparent;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-coral-500 px-6 py-3
+           text-sm font-medium text-navy-950 transition
+           hover:bg-coral-400 hover:shadow-lg hover:shadow-coral-500/20
+           active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-full border border-cream-100/15
+           bg-cream-50/5 px-6 py-3 text-sm font-medium text-cream-100 backdrop-blur transition
+           hover:bg-cream-50/10 active:scale-[0.98];
+  }
+
+  .card {
+    @apply rounded-3xl border border-cream-100/10 bg-navy-900/60 backdrop-blur-xl;
+  }
+
+  .input {
+    @apply w-full rounded-2xl border border-cream-100/10 bg-navy-950/50 px-4 py-3
+           text-cream-50 placeholder:text-cream-100/30
+           focus:border-coral-400/50 focus:outline-none focus:ring-2 focus:ring-coral-500/20;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}

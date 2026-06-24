@@ -1,0 +1,109 @@
+import 'package:miles/core/models.dart';
+import 'package:miles/core/supabase_service.dart';
+
+/// Curated pool of LDR-flavoured daily questions.
+///
+/// Selection is deterministic: `promptPool[dayOfYear % promptPool.length]`
+/// so both partners see the same question on the same day without having
+/// to coordinate.
+const List<String> promptPool = <String>[
+  "What's one small thing you wished you could share with me today?",
+  'What does the version of us in the same city look like?',
+  'What song did you play on repeat today, and why?',
+  'When did you feel closest to me this week?',
+  "What is something you are proud of that you haven't told me yet?",
+  'What part of your day do you wish I had been there for?',
+  "What's something tiny I do that you never want me to stop doing?",
+  'If we could teleport for ten minutes right now, what would we do?',
+  'What are you looking forward to most in our next visit?',
+  "What's something difficult about the distance that you haven't said out loud?",
+  "What's one thing you'd like us to start doing together while apart?",
+  'What memory of us do you replay when you miss me most?',
+  'What does your morning look like right now? Walk me through it.',
+  "What is one thing you'd like to be braver about with me?",
+  "What's a small way I can love you better this week?",
+  'What part of yourself are you growing into lately?',
+  "What's something you want to remember about this season of us?",
+  'When distance ends, what is the first ordinary day you want to have together?',
+  "What's a tiny dream you've had that you haven't told me about?",
+  'What does "home" mean to you right now?',
+];
+
+/// Returns today's prompt string deterministically.
+String promptForDay(DateTime date) {
+  final dayOfYear = _dayOfYear(date);
+  return promptPool[dayOfYear % promptPool.length];
+}
+
+int _dayOfYear(DateTime d) {
+  final start = DateTime(d.year);
+  return d.difference(start).inDays;
+}
+
+/// Wrapper around `daily_prompts` + `prompt_responses`.
+///
+/// One prompt per couple per day. The first partner to open the screen
+/// creates the row; both partners' answers are revealed only once both
+/// have responded.
+class DailyPromptRepository {
+  DailyPromptRepository._();
+
+  static final _c = SupabaseService.client;
+
+  /// Returns today's [DailyPrompt], creating it idempotently if needed.
+  static Future<DailyPrompt> ensureToday({
+    required String coupleId,
+    required DateTime localToday,
+  }) async {
+    final today = DateTime(
+      localToday.year,
+      localToday.month,
+      localToday.day,
+    );
+
+    // Look for an existing row first.
+    final existing = await _c
+        .from('daily_prompts')
+        .select()
+        .eq('couple_id', coupleId)
+        .eq('scheduled_date', today.toIso8601String().substring(0, 10))
+        .maybeSingle();
+    if (existing != null) {
+      return DailyPrompt.fromJson(existing);
+    }
+
+    final text = promptForDay(today);
+    final inserted = await _c.from('daily_prompts').insert({
+      'couple_id': coupleId,
+      'prompt_text': text,
+      'scheduled_date': today.toIso8601String().substring(0, 10),
+    }).select().single();
+    return DailyPrompt.fromJson(inserted);
+  }
+
+  /// All responses for [promptId].
+  static Future<List<PromptResponse>> responsesFor(String promptId) async {
+    final res = await _c
+        .from('prompt_responses')
+        .select()
+        .eq('prompt_id', promptId);
+    return (res as List)
+        .map((e) => PromptResponse.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  /// Upsert the current user's response for [promptId].
+  static Future<void> upsertMyResponse({
+    required String promptId,
+    required String responseText,
+  }) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) throw StateError('Not signed in');
+    await _c.from('prompt_responses').upsert({
+      'prompt_id': promptId,
+      'user_id': uid,
+      'response_text': responseText,
+      'responded_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+}
