@@ -14,12 +14,16 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendText,
     required this.onSendImage,
     required this.onSendVoice,
+    this.onChanged,
   });
 
   final String coupleId;
   final Future<void> Function(String text) onSendText;
   final Future<void> Function(File image) onSendImage;
   final Future<void> Function(File voice) onSendVoice;
+
+  /// Called as the user types (used to broadcast the typing indicator).
+  final ValueChanged<String>? onChanged;
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -227,6 +231,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       controller: _text,
                       minLines: 1,
                       maxLines: 5,
+                      onChanged: widget.onChanged,
                       style: const TextStyle(color: MilesColors.cream50),
                       decoration: InputDecoration(
                         hintText: 'Message…',

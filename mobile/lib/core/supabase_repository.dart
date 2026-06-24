@@ -206,6 +206,29 @@ class SupabaseRepository {
     }
   }
 
+  // ─── Profile + couple management ─────────────────────────────────
+
+  /// Update editable profile fields (only non-null ones are written).
+  static Future<void> updateMyProfile({
+    String? displayName,
+    String? timezone,
+    String? statusMessage,
+  }) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    final patch = <String, dynamic>{};
+    if (displayName != null) patch['display_name'] = displayName;
+    if (timezone != null) patch['timezone'] = timezone;
+    if (statusMessage != null) patch['status_message'] = statusMessage;
+    if (patch.isEmpty) return;
+    await _c.from('profiles').update(patch).eq('id', uid);
+  }
+
+  /// Unlink from the partner (dissolves the couple; data preserved server-side).
+  static Future<void> leaveCouple() async {
+    await _c.rpc<dynamic>('leave_couple');
+  }
+
   /// A Postgres function returning a single composite row comes back as either
   /// a JSON object or a one-element list depending on the PostgREST version.
   /// Normalise both into a plain map.

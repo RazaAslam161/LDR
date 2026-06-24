@@ -32,14 +32,22 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
-    final picked = await showDatePicker(
+    final date = await showDatePicker(
       context: context,
       initialDate: now.add(const Duration(days: 30)),
       firstDate: now,
       lastDate: DateTime(now.year + 10),
       helpText: 'When should it open?',
     );
-    if (picked != null) setState(() => _date = picked);
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 20, minute: 0),
+      helpText: 'At what time?',
+    );
+    final t = time ?? const TimeOfDay(hour: 20, minute: 0);
+    setState(() =>
+        _date = DateTime(date.year, date.month, date.day, t.hour, t.minute));
   }
 
   Future<void> _save() async {
@@ -146,8 +154,8 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
                       const SizedBox(width: 12),
                       Text(
                         _date == null
-                            ? 'Pick a date'
-                            : DateFormat('EEEE, MMMM d, y').format(_date!),
+                            ? 'Pick a date & time'
+                            : DateFormat('EEE, MMM d, y · h:mm a').format(_date!),
                         style: TextStyle(
                           color: _date == null
                               ? MilesColors.faint

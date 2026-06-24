@@ -1,0 +1,130 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/providers.dart';
+import 'package:miles/core/realtime_service.dart';
+import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/utils/json_utils.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// A partner's live presence row (online / typing / mood).
+class Presence {
+  Presence({
+    required this.userId,
+    this.isOnline = false,
+    this.lastSeen,
+    this.isTyping = false,
+    this.typingInChat = false,
+    this.currentMood,
+    this.moodColor,
+  });
+
+  factory Presence.fromJson(Map<String, dynamic> j) => Presence(
+        userId: JsonUtils.parseString(j['user_id']),
+        isOnline: JsonUtils.parseBool(j['is_online']),
+        lastSeen: JsonUtils.parseDateOrNull(j['last_seen'])?.toLocal(),
+        isTyping: JsonUtils.parseBool(j['is_typing']),
+        typingInChat: JsonUtils.parseBool(j['typing_in_chat']),
+        currentMood: JsonUtils.parseStringOrNull(j['current_mood']),
+        moodColor: JsonUtils.parseStringOrNull(j['mood_color']),
+      );
+
+  final String userId;
+  final bool isOnline;
+  final DateTime? lastSeen;
+  final bool isTyping;
+  final bool typingInChat;
+  final String? currentMood;
+  final String? moodColor;
+}
+
+/// Couple-scoped presence read/write. RLS lets you update only your own row and
+/// read your partner's.
+class PresenceService {
+  PresenceService._();
+
+  static SupabaseClient get _c => SupabaseService.client;
+
+  static Future<void> _upsert(String coupleId, Map<String, dynamic> patch) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    try {
+      await _c.from('presence').upsert({
+        'user_id': uid,
+        'couple_id': coupleId,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        ...patch,
+      });
+    } catch (_) {
+      // presence is best-effort; never surface an error to the user
+    }
+  }
+
+  static Future<void> setOnline(String coupleId, {required bool online}) =>
+      _upsert(coupleId, {
+        'is_online': online,
+        'last_seen': DateTime.now().toUtc().toIso8601String(),
+      });
+
+  static Future<void> setTyping(String coupleId, {required bool typing}) =>
+      _upsert(coupleId, {'is_typing': typing});
+
+  static Future<void> setTypingInChat(String coupleId, {required bool inChat}) =>
+      _upsert(coupleId, {'typing_in_chat': inChat});
+
+  static Future<void> setMood(
+          String coupleId, String mood, String color) =>
+      _upsert(coupleId, {
+        'current_mood': mood,
+        'mood_color': color,
+        'mood_updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+  static Future<Presence?> fetchPartner(String coupleId) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return null;
+    final res = await _c
+        .from('presence')
+        .select()
+        .eq('couple_id', coupleId)
+        .neq('user_id', uid)
+        .maybeSingle();
+    return res == null ? null : Presence.fromJson(res);
+  }
+}
+
+/// Live partner presence — refetches on any presence change for the couple.
+class PartnerPresenceNotifier extends StateNotifier<Presence?> {
+  PartnerPresenceNotifier(this.ref) : super(null) {
+    _init();
+  }
+
+  final Ref ref;
+  RealtimeChannel? _channel;
+  String? _coupleId;
+
+  Future<void> _init() async {
+    final couple = ref.read(currentCoupleProvider);
+    if (couple == null) return;
+    _coupleId = couple.id;
+    state = await PresenceService.fetchPartner(couple.id);
+    _channel = RealtimeService.coupleTable(
+      channelName: 'presence:${couple.id}',
+      table: 'presence',
+      coupleId: couple.id,
+      onChange: (_) async {
+        final p = await PresenceService.fetchPartner(_coupleId!);
+        if (mounted) state = p;
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _channel?.unsubscribe();
+    super.dispose();
+  }
+}
+
+final partnerPresenceProvider =
+    StateNotifierProvider.autoDispose<PartnerPresenceNotifier, Presence?>(
+  (ref) => PartnerPresenceNotifier(ref),
+);

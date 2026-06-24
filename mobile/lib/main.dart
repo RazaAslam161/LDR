@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/router.dart';
+import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
@@ -28,14 +29,24 @@ class MilesApp extends ConsumerStatefulWidget {
   ConsumerState<MilesApp> createState() => _MilesAppState();
 }
 
-class _MilesAppState extends ConsumerState<MilesApp> {
+class _MilesAppState extends ConsumerState<MilesApp>
+    with WidgetsBindingObserver {
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _sub;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initDeepLinks();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final couple = ref.read(currentCoupleProvider);
+    if (couple == null) return;
+    PresenceService.setOnline(couple.id,
+        online: state == AppLifecycleState.resumed);
   }
 
   Future<void> _initDeepLinks() async {
@@ -58,6 +69,7 @@ class _MilesAppState extends ConsumerState<MilesApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     super.dispose();
   }

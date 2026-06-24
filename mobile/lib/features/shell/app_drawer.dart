@@ -94,6 +94,14 @@ class AppDrawer extends ConsumerWidget {
                 },
               ),
               _DrawerTile(
+                icon: Icons.lock_outline,
+                label: 'Private Vault',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/app/vault');
+                },
+              ),
+              _DrawerTile(
                 icon: Icons.schedule,
                 label: 'Rituals',
                 onTap: () {

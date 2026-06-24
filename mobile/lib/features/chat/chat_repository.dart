@@ -20,6 +20,8 @@ class Message {
     this.imagePath,
     this.voicePath,
     this.kind = 'text',
+    this.deletedForEveryone = false,
+    this.deletedBy = const [],
   });
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -30,6 +32,10 @@ class Message {
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
         kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
+        deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
+        deletedBy: j['deleted_by'] is List
+            ? (j['deleted_by'] as List).map((e) => e.toString()).toList()
+            : const [],
       );
 
   final String id;
@@ -39,8 +45,13 @@ class Message {
   final String? voicePath;
   final String kind;
   final DateTime createdAt;
+  final bool deletedForEveryone;
+  final List<String> deletedBy;
 
   bool isMine(String? uid) => senderId == uid;
+
+  /// Hidden from this user (they chose "delete for me").
+  bool isHiddenFor(String? uid) => uid != null && deletedBy.contains(uid);
 
   /// Public URL for the image (Supabase Storage serves couple_media publicly).
   String? get imageUrl {
@@ -144,6 +155,21 @@ class ChatRepository {
         )
         .subscribe();
   }
+
+  // ─── deletion ─────────────────────────────────────────────────
+
+  /// "Delete for me" — hides the message for the current user only.
+  static Future<void> deleteForMe(String messageId) =>
+      _c.rpc<dynamic>('hide_message', params: {'p_message_id': messageId});
+
+  /// "Delete for everyone" — sender-only; both see a "deleted" placeholder.
+  static Future<void> deleteForEveryone(String messageId) => _c.rpc<dynamic>(
+        'delete_message_for_everyone',
+        params: {'p_message_id': messageId},
+      );
+
+  /// Clears the whole conversation for the current user only.
+  static Future<void> clearConversation() => _c.rpc<dynamic>('clear_conversation');
 
   // ─── helpers ──────────────────────────────────────────────────
 

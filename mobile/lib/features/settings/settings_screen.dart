@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/config.dart';
+import 'package:miles/core/models.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/widgets/love_text_field.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -12,66 +19,150 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  final _name = TextEditingController();
+  final _status = TextEditingController();
   bool _busy = false;
+  bool _savingProfile = false;
   String? _error;
+  bool _seeded = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _status.dispose();
+    super.dispose();
+  }
+
+  void _seed(Profile? profile) {
+    if (_seeded || profile == null) return;
+    _seeded = true;
+    _name.text = profile.displayName;
+    _status.text = profile.statusMessage ?? '';
+  }
+
+  void _toast(String m) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(m)));
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (_name.text.trim().isEmpty) {
+      _toast('Your name can\'t be empty.');
+      return;
+    }
+    setState(() => _savingProfile = true);
+    try {
+      await SupabaseRepository.updateMyProfile(
+        displayName: _name.text.trim(),
+        statusMessage: _status.text.trim(),
+      );
+      await ref.read(sessionProvider.notifier).loadProfile();
+      _toast('Profile updated 💕');
+    } catch (e) {
+      _toast('Could not save profile.');
+    }
+    if (mounted) setState(() => _savingProfile = false);
+  }
+
+  Future<void> _changeTimezone() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: MilesColors.surface1,
+      builder: (_) => const _TimezonePicker(),
+    );
+    if (picked == null) return;
+    try {
+      await SupabaseRepository.updateMyProfile(timezone: picked);
+      await ref.read(sessionProvider.notifier).loadProfile();
+      _toast('Timezone updated');
+    } catch (_) {
+      _toast('Could not update timezone.');
+    }
+  }
+
+  Future<void> _removePartner(String partnerName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: Text('Disconnect from $partnerName?'),
+        content: const Text(
+          'This will unlink your accounts. Your private data and time capsules '
+          'are preserved, but you\'ll both need to re-pair to reconnect. '
+          'This cannot be undone.',
+          style: TextStyle(color: MilesColors.taupe, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB83A57)), // passionCrimson
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, disconnect'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _busy = true);
+    try {
+      await SupabaseRepository.leaveCouple();
+      await ref.read(sessionProvider.notifier).loadProfile();
+      if (mounted) context.go('/couple');
+    } catch (_) {
+      _toast('Could not disconnect. Try again.');
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   Future<void> _toggleModestMode(bool newValue) async {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
-
-    // The switch is "Closer visible": ON (newValue == true) reveals the module,
-    // which means modest_mode must become FALSE. Confirm before revealing —
-    // it's a significant change that affects both partners.
     if (newValue == true) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF141B26),
+          backgroundColor: MilesColors.surface1,
           title: const Text('Enable Closer?'),
           content: const Text(
-            'This reveals the intimacy module for both of you. Your partner '
-            'will see it the next time they open the app.\n\n'
-            'Everything in Closer is end-to-end encrypted and stays on your '
-            'phones. You can re-enable Modest Mode any time.',
+            'This reveals the intimacy module for both of you. Everything in '
+            'Closer is end-to-end encrypted. You can re-enable Modest Mode any '
+            'time.',
+            style: TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Enable'),
-            ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Enable')),
           ],
         ),
       );
       if (confirmed != true) return;
     }
-
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await SupabaseRepository.setModestMode(
-        coupleId: couple.id,
-        // switch ON (reveal Closer) → modest_mode OFF, and vice-versa.
-        enabled: !newValue,
-      );
-      // When enabling Closer, also publish our E2EE public key so the partner
-      // can derive the shared key when they next open any Closer feature.
-      // (Idempotent — publishMyPublicKey upserts.)
+          coupleId: couple.id, enabled: !newValue);
       if (newValue == true) {
         try {
           await SupabaseRepository.publishMyPublicKey();
-        } catch (_) {
-          // Non-fatal: ensureSharedKey will retry on first Closer feature open.
-        }
+        } catch (_) {}
       }
       await ref.read(sessionProvider.notifier).loadProfile();
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = 'Could not update.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -87,9 +178,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final session = ref.watch(sessionProvider);
     final couple = session.couple;
     final profile = session.profile;
+    final partner = session.partner;
     final isModest = couple?.modestMode ?? true;
+    _seed(profile);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('Settings'),
         leading: IconButton(
@@ -101,75 +195,128 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            // ─── Account ────────────────────────────────────────
-            const _SectionHeader(label: 'Account'),
-            _ListTile(
-              label: 'Name',
-              value: profile?.displayName ?? '—',
+            // ── Profile ──────────────────────────────────────────
+            const _SectionHeader(label: 'Profile'),
+            LoveTextField(
+              label: 'Display name',
+              controller: _name,
+              hint: 'What should we call you?',
+              maxLength: 30,
             ),
-            _ListTile(
-              label: 'Timezone',
-              value: profile?.timezone.replaceAll('_', ' ') ?? '—',
+            const SizedBox(height: 16),
+            LoveTextField(
+              label: 'Status',
+              controller: _status,
+              hint: 'A little note your partner sees',
+              maxLength: 60,
             ),
-            _ListTile(
-              label: 'Date of birth',
-              value: profile?.birthDate ?? '—',
-            ),
-            _ListTile(
-              label: 'Partner',
-              value: session.partner?.displayName ?? 'Not linked yet',
+            const SizedBox(height: 16),
+            GlowButton(
+              label: 'Save profile',
+              color: MilesColors.blush,
+              loading: _savingProfile,
+              onPressed: _savingProfile ? null : _saveProfile,
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
 
-            // ─── Privacy ────────────────────────────────────────
+            // ── Timezone ─────────────────────────────────────────
+            const _SectionHeader(label: 'Timezone'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                profile?.timezone.replaceAll('_', ' ') ?? '—',
+                style: const TextStyle(color: MilesColors.cream50),
+              ),
+              subtitle: const Text('Used for the countdown & sky',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: _changeTimezone,
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Privacy ──────────────────────────────────────────
             const _SectionHeader(label: 'Privacy'),
             SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               value: !isModest,
               onChanged: _busy ? null : _toggleModestMode,
-              title: const Text(
-                'Closer (intimacy module)',
-                style: TextStyle(color: Color(0xFFFBF8F4)),
-              ),
+              activeThumbColor: MilesColors.ember,
+              title: const Text('Closer (intimacy module)',
+                  style: TextStyle(color: MilesColors.cream50)),
               subtitle: Text(
                 isModest
                     ? 'Hidden. Reveal for both partners.'
-                    : 'Visible. Content is end-to-end encrypted.',
-                style: const TextStyle(fontSize: 12, color: Color(0x80F5EFE6)),
+                    : 'Visible. End-to-end encrypted.',
+                style: const TextStyle(fontSize: 12, color: MilesColors.taupe),
               ),
-              activeThumbColor: const Color(0xFFEF6F58),
             ),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(color: Color(0xFFEF6F58)),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child:
+                    Text(_error!, style: const TextStyle(color: MilesColors.blush)),
+              ),
+
+            const SizedBox(height: 28),
+
+            // ── Partner ──────────────────────────────────────────
+            const _SectionHeader(label: 'Partner'),
+            if (partner != null) ...[
+              GlassPanel(
+                child: Row(
+                  children: [
+                    const Text('💞', style: TextStyle(fontSize: 24)),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(partner.displayName,
+                              style: const TextStyle(
+                                  color: MilesColors.cream50,
+                                  fontWeight: FontWeight.w600)),
+                          Text(partner.timezone.replaceAll('_', ' '),
+                              style: const TextStyle(
+                                  color: MilesColors.taupe, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-
-            const SizedBox(height: 32),
-
-            // ─── Session ────────────────────────────────────────
-            const _SectionHeader(label: 'Session'),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Color(0xFFEF6F58)),
-              title: const Text(
-                'Sign out',
-                style: TextStyle(color: Color(0xFFEF6F58)),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFB83A57),
+                  side: const BorderSide(color: Color(0x55B83A57)),
+                ),
+                onPressed:
+                    _busy ? null : () => _removePartner(partner.displayName),
+                icon: const Icon(Icons.link_off, size: 18),
+                label: const Text('Remove partner'),
               ),
+            ] else
+              const Text('Not linked yet.',
+                  style: TextStyle(color: MilesColors.taupe)),
+
+            const SizedBox(height: 28),
+
+            // ── Account ──────────────────────────────────────────
+            const _SectionHeader(label: 'Account'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.logout, color: MilesColors.ember),
+              title: const Text('Sign out',
+                  style: TextStyle(color: MilesColors.ember)),
               onTap: _signOut,
             ),
 
-            const SizedBox(height: 48),
-            Center(
-              child: Text(
-                'Miles · v0.1.0',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: const Color(0xFFF5EFE6).withValues(alpha: 0.3),
-                ),
-              ),
+            const SizedBox(height: 40),
+            const Center(
+              child: Text('Tethered · v0.1.0',
+                  style: TextStyle(fontSize: 11, color: MilesColors.faint)),
             ),
           ],
         ),
@@ -185,41 +332,68 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8, top: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Text(
         label.toUpperCase(),
         style: const TextStyle(
           fontSize: 11,
           letterSpacing: 2,
           fontWeight: FontWeight.w600,
-          color: Color(0xFFF4937E),
+          color: MilesColors.gilt,
         ),
       ),
     );
   }
 }
 
-class _ListTile extends StatelessWidget {
-  const _ListTile({required this.label, required this.value});
-  final String label;
-  final String value;
+/// Searchable timezone picker over the curated city list.
+class _TimezonePicker extends StatefulWidget {
+  const _TimezonePicker();
+
+  @override
+  State<_TimezonePicker> createState() => _TimezonePickerState();
+}
+
+class _TimezonePickerState extends State<_TimezonePicker> {
+  String _query = '';
 
   @override
   Widget build(BuildContext context) {
+    final filtered = commonTimezones
+        .where((tz) =>
+            tz.toLowerCase().contains(_query.toLowerCase().replaceAll(' ', '_')))
+        .toList();
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Color(0x99F5EFE6)),
+          Text('Choose your timezone',
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          TextField(
+            autofocus: true,
+            onChanged: (v) => setState(() => _query = v),
+            style: const TextStyle(color: MilesColors.cream50),
+            decoration: const InputDecoration(
+                hintText: 'Search a city…', prefixIcon: Icon(Icons.search)),
           ),
+          const SizedBox(height: 8),
           Flexible(
-            child: Text(
-              value,
-              style: const TextStyle(color: Color(0xFFFBF8F4)),
-              textAlign: TextAlign.right,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: filtered.length,
+              itemBuilder: (_, i) => ListTile(
+                title: Text(filtered[i].replaceAll('_', ' '),
+                    style: const TextStyle(color: MilesColors.cream50)),
+                onTap: () => Navigator.pop(context, filtered[i]),
+              ),
             ),
           ),
         ],

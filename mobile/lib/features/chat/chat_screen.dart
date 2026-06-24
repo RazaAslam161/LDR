@@ -1,14 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:miles/core/mood.dart';
+import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/mood_selector.dart';
+import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:record/record.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 import 'package:url_launcher/url_launcher.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -25,6 +31,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   RealtimeChannel? _channel;
   bool _loading = true;
+  String? _coupleId;
+  Timer? _typingTimer;
+  bool _typingActive = false;
 
   // Voice recorder
   final _audioRecorder = AudioRecorder();
@@ -42,6 +51,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (mounted) setState(() => _loading = false);
       return;
     }
+    _coupleId = couple.id;
     try {
       final msgs = await ChatRepository.fetch(couple.id);
       _messages.addAll(msgs);
@@ -50,6 +60,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // first-run is fine
     }
     _channel = ChatRepository.subscribe(couple.id, _onIncoming);
+    PresenceService.setOnline(couple.id, online: true);
+    PresenceService.setTypingInChat(couple.id, inChat: true);
     if (mounted) setState(() => _loading = false);
     _scrollToBottom(animate: false);
   }
@@ -94,8 +106,136 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
+  void _onTyping(String _) {
+    final id = _coupleId;
+    if (id == null) return;
+    if (!_typingActive) {
+      _typingActive = true;
+      PresenceService.setTyping(id, typing: true);
+    }
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(milliseconds: 1500), () {
+      _typingActive = false;
+      PresenceService.setTyping(id, typing: false);
+    });
+  }
+
+  Future<void> _setMyMood() async {
+    final id = _coupleId;
+    if (id == null) return;
+    final m = await showMoodSelector(context);
+    if (m == null) return;
+    await PresenceService.setMood(id, m.key, m.hex);
+  }
+
+  Future<void> _reload() async {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    try {
+      final msgs = await ChatRepository.fetch(couple.id);
+      if (!mounted) return;
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(msgs);
+        _ids
+          ..clear()
+          ..addAll(msgs.map((m) => m.id));
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _showMessageActions(Message m, bool mine) async {
+    if (m.deletedForEveryone) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MilesColors.surface1,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading:
+                  const Icon(Icons.visibility_off, color: MilesColors.taupe),
+              title: const Text('Delete for me',
+                  style: TextStyle(color: MilesColors.cream50)),
+              onTap: () => Navigator.pop(ctx, 'me'),
+            ),
+            if (mine)
+              ListTile(
+                leading:
+                    const Icon(Icons.delete_outline, color: Color(0xFFB83A57)),
+                title: const Text('Delete for everyone',
+                    style: TextStyle(color: Color(0xFFB83A57))),
+                onTap: () => Navigator.pop(ctx, 'everyone'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.close, color: MilesColors.faint),
+              title: const Text('Cancel',
+                  style: TextStyle(color: MilesColors.taupe)),
+              onTap: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null) return;
+    try {
+      if (action == 'me') {
+        await ChatRepository.deleteForMe(m.id);
+      } else {
+        await ChatRepository.deleteForEveryone(m.id);
+      }
+      await _reload();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not delete that message.')));
+      }
+    }
+  }
+
+  Future<void> _clearConversation() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: const Text('Clear conversation?'),
+        content: const Text(
+          "This deletes all messages for you only. Your partner's chat history "
+          "won't be affected.",
+          style: TextStyle(color: MilesColors.taupe, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Clear')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ChatRepository.clearConversation();
+      await _reload();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not clear the conversation.')));
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _typingTimer?.cancel();
+    final id = _coupleId;
+    if (id != null) {
+      PresenceService.setTyping(id, typing: false);
+      PresenceService.setTypingInChat(id, inChat: false);
+    }
     _channel?.unsubscribe();
     _scroll.dispose();
     _audioRecorder.dispose();
@@ -109,6 +249,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final couple = session.couple;
     final partnerName = session.partner?.displayName;
     final uid = SupabaseService.currentUserId;
+    final presence = ref.watch(partnerPresenceProvider);
+    final partnerMood = moodByKey(presence?.currentMood);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -122,20 +264,49 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(partnerName ?? 'Chat',
-                style: Theme.of(context).textTheme.headlineMedium),
-            if (partnerName != null)
-              const Text('together, even from here',
-                  style: TextStyle(fontSize: 11, color: MilesColors.taupe)),
+            Row(
+              children: [
+                Flexible(
+                  child: Text(partnerName ?? 'Chat',
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineMedium),
+                ),
+                if (partnerMood != null) ...[
+                  const SizedBox(width: 8),
+                  Text(partnerMood.emoji,
+                      style: const TextStyle(fontSize: 16)),
+                ],
+              ],
+            ),
+            if (partnerName != null) _ChatSubtitle(presence: presence),
           ],
         ),
         actions: [
+          if (couple != null)
+            IconButton(
+              tooltip: 'Set your mood',
+              icon:
+                  const Icon(Icons.palette_outlined, color: MilesColors.gilt),
+              onPressed: _setMyMood,
+            ),
           if (couple != null)
             IconButton(
               tooltip: 'Video call',
               icon: const Icon(Icons.videocam_outlined,
                   color: MilesColors.ember),
               onPressed: _videoCall,
+            ),
+          if (couple != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: MilesColors.gilt),
+              color: MilesColors.surface1,
+              onSelected: (v) {
+                if (v == 'clear') _clearConversation();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                    value: 'clear', child: Text('Clear conversation')),
+              ],
             ),
         ],
       ),
@@ -148,27 +319,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       ? const Center(child: CircularProgressIndicator())
                       : _messages.isEmpty
                           ? const _EmptyChat()
-                          : ListView.builder(
-                              controller: _scroll,
-                              padding:
-                                  const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                              itemCount: _messages.length,
-                              itemBuilder: (_, i) {
-                                final m = _messages[i];
-                                final showTime = i == 0 ||
-                                    _messages[i - 1].createdAt.day !=
-                                        m.createdAt.day;
-                                return _Bubble(
-                                  message: m,
-                                  mine: m.isMine(uid),
-                                  showDateHeader: showTime,
-                                  player: _player,
-                                );
-                              },
-                            ),
+                          : Builder(builder: (_) {
+                              final visible = _messages
+                                  .where((m) => !m.isHiddenFor(uid))
+                                  .toList();
+                              if (visible.isEmpty) return const _EmptyChat();
+                              return ListView.builder(
+                                controller: _scroll,
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                                itemCount: visible.length,
+                                itemBuilder: (_, i) {
+                                  final m = visible[i];
+                                  final showTime = i == 0 ||
+                                      visible[i - 1].createdAt.day !=
+                                          m.createdAt.day;
+                                  return GestureDetector(
+                                    onLongPress: () =>
+                                        _showMessageActions(m, m.isMine(uid)),
+                                    child: _Bubble(
+                                      message: m,
+                                      mine: m.isMine(uid),
+                                      showDateHeader: showTime,
+                                      player: _player,
+                                    ),
+                                  );
+                                },
+                              );
+                            }),
                 ),
                 ChatInputBar(
                   coupleId: couple.id,
+                  onChanged: _onTyping,
                   onSendText: (t) => ChatRepository.sendText(couple.id, t),
                   onSendImage: (f) => ChatRepository.sendImage(couple.id, f),
                   onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f),
@@ -177,6 +359,66 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
     );
   }
+}
+
+/// Presence-aware AppBar subtitle: typing… / Online / Last seen.
+class _ChatSubtitle extends StatelessWidget {
+  const _ChatSubtitle({required this.presence});
+  final Presence? presence;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = presence;
+    if (p == null) {
+      return const Text('together, even from here',
+          style: TextStyle(fontSize: 11, color: MilesColors.taupe));
+    }
+    if (p.isTyping && p.typingInChat) {
+      return const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('typing',
+              style: TextStyle(fontSize: 11, color: MilesColors.sage)),
+          SizedBox(width: 6),
+          TypingIndicator(),
+        ],
+      );
+    }
+    if (p.isOnline) {
+      return const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _Dot(color: MilesColors.sage),
+          SizedBox(width: 6),
+          Text('Online',
+              style: TextStyle(fontSize: 11, color: MilesColors.sage)),
+        ],
+      );
+    }
+    final seen = p.lastSeen;
+    return Text(
+      seen == null ? 'Offline' : 'Last seen ${_ago(seen)}',
+      style: const TextStyle(fontSize: 11, color: MilesColors.taupe),
+    );
+  }
+
+  static String _ago(DateTime d) {
+    final diff = DateTime.now().difference(d);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return DateFormat('MMM d').format(d);
+  }
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot({required this.color});
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle));
 }
 
 class _Bubble extends StatelessWidget {
@@ -231,7 +473,15 @@ class _Bubble extends StatelessWidget {
                   ? null
                   : Border.all(color: MilesColors.gilt.withValues(alpha: 0.12)),
             ),
-            child: _Content(message: message, player: player),
+            child: message.deletedForEveryone
+                ? const Text(
+                    'This message was deleted',
+                    style: TextStyle(
+                        color: MilesColors.cream50,
+                        fontStyle: FontStyle.italic,
+                        fontSize: 14),
+                  )
+                : _Content(message: message, player: player),
           ),
         ),
         Padding(

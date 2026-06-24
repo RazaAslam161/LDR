@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -158,14 +160,18 @@ class _CapsuleCard extends StatelessWidget {
                   Text(capsule.title,
                       style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 4),
-                  Text(
-                    opened
-                        ? 'Opened — relive it 💫'
-                        : ready
-                            ? 'Ready to open ✨'
-                            : unlockModeLabel(capsule),
-                    style: TextStyle(color: accent, fontSize: 12.5),
-                  ),
+                  if (opened)
+                    Text('Opened — relive it 💫',
+                        style: TextStyle(color: accent, fontSize: 12.5))
+                  else if (ready)
+                    Text('Ready to open ✨',
+                        style: TextStyle(color: accent, fontSize: 12.5))
+                  else if (capsule.unlockDate != null &&
+                      capsule.unlockDate!.isAfter(DateTime.now()))
+                    _CountdownText(target: capsule.unlockDate!, color: accent)
+                  else
+                    Text(unlockModeLabel(capsule),
+                        style: TextStyle(color: accent, fontSize: 12.5)),
                 ],
               ),
             ),
@@ -203,6 +209,51 @@ class _EmptyState extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Live "Opens in 3 days, 4 h" countdown for future date-mode capsules.
+class _CountdownText extends StatefulWidget {
+  const _CountdownText({required this.target, required this.color});
+  final DateTime target;
+  final Color color;
+
+  @override
+  State<_CountdownText> createState() => _CountdownTextState();
+}
+
+class _CountdownTextState extends State<_CountdownText> {
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  String _fmt() {
+    final d = widget.target.difference(DateTime.now());
+    if (d.isNegative) return 'Ready to open ✨';
+    final days = d.inDays;
+    final hours = d.inHours % 24;
+    final mins = d.inMinutes % 60;
+    if (days > 0) return 'Opens in $days ${days == 1 ? 'day' : 'days'}, $hours h';
+    if (hours > 0) return 'Opens in $hours h $mins m';
+    return 'Opens in $mins min';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(_fmt(),
+        style: TextStyle(color: widget.color, fontSize: 12.5));
   }
 }
 

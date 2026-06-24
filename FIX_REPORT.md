@@ -1,8 +1,44 @@
 # Tethered — Bug-Fix & Feature Sprint: FIX_REPORT
 
-> Status as of this commit: **Issue 3 complete and verified.** Issues 1, 2, 4–9
-> are large, multi-day features; each is scoped below with its root cause /
-> reality-check and a plan. This report is updated per issue.
+> Status: **Issues 3, 7, 1D/1E, 4, 1F, 6, 9 complete and verified** (`flutter
+> analyze` = 0 errors project-wide). Remaining: **2 (Home+location), 5 (Body
+> Map), 8 (Reach/FCM)**. (Git skipped per request.)
+>
+> **Batch 3 done:** Issue 9 — Private Vault. New `vault_pin` + `personal_vault_items`
+> (owner-only RLS); **server-side bcrypt** PIN via `set_vault_pin`/`verify_vault_pin`
+> RPCs with **5-try → 15-min lockout**; `PinPad` (dots + shake + haptics),
+> `VaultGateScreen` (first-run setup ↔ lock, **biometric** via local_auth,
+> **auto-lock on background**), `VaultScreen` (personal notes). Route `/app/vault`
+> + drawer entry. (Used `personal_vault_items` because the couple-scoped
+> `vault_items` table already exists in Closer. Photo/voice vault items + FLAG_SECURE
+> screenshot-block deferred — noted.)
+>
+> **Batch 2 done:** Issue 4 — capsule **date+time** picker + live countdown in the
+> list (notification at unlock deferred — needs `flutter_local_notifications`).
+> Issue 1F — `presence` table + `PresenceService` + app lifecycle (online/offline)
+> + chat AppBar subtitle (**Online / Last seen / typing…** with a `TypingIndicator`)
+> + typing broadcast via a new `ChatInputBar.onChanged`. Issue 6 — 12-mood system
+> (`core/mood.dart`), `showMoodSelector`, `presence.current_mood/color`, and the
+> partner's mood shown in the chat header. (Per-message bubble tint + a Home mood
+> widget deferred — they need the send-path threading / the missing HomeScreen.)
+
+### ✅ Issue 7 — Settings (DONE)
+Rewrote `settings_screen.dart` (Velvet Aurora): editable **display name + status**
+(`updateMyProfile`), a searchable **timezone picker**, the Closer toggle, and
+**Remove partner** — confirmation dialog → `leave_couple()` RPC (unlinks both via
+`profiles.couple_id`, soft-deletes the couple with new `couples.active`, preserves
+data) → routes back to pairing. Added `profiles.status_message`. (Avatar picker,
+appearance/notifications/biometric sections deferred — they overlap Issues 6/9.)
+
+### ✅ Issue 1D/1E — Message delete + clear conversation (DONE)
+The spec's single `deleted_for_sender` boolean is broken for per-user hiding, so I
+implemented it **correctly** with a `deleted_by uuid[]` + 3 RPCs (`hide_message`,
+`delete_message_for_everyone` [sender-only], `clear_conversation`). Long-press a
+bubble → Delete for me / Delete for everyone; deleted-for-everyone renders a
+"This message was deleted" placeholder; AppBar ⋮ → Clear conversation (yours only).
+
+---
+
 
 ---
 

@@ -59,6 +59,7 @@ class Profile {
     this.wakeTime,
     this.sleepTime,
     this.birthDate,
+    this.statusMessage,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -74,6 +75,7 @@ class Profile {
           JsonUtils.parseString(json['presence_status'], fallback: 'free')),
       createdAt: JsonUtils.parseDate(json['created_at']),
       birthDate: JsonUtils.parseStringOrNull(json['birth_date']),
+      statusMessage: JsonUtils.parseStringOrNull(json['status_message']),
     );
   }
 
@@ -88,6 +90,8 @@ class Profile {
   final DateTime createdAt;
   /// ISO date (YYYY-MM-DD). Used for the 18+ age gate.
   final String? birthDate;
+  /// Short status/bio line shown to the partner (max ~60 chars).
+  final String? statusMessage;
 
   /// True once the user has completed profile onboarding. The signup trigger
   /// auto-creates a bare profile (no birth_date), so profile-existence alone
