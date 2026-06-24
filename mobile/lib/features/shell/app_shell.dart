@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/banner_ad_slot.dart';
+import 'package:miles/core/providers.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/supabase_service.dart';
 import 'package:miles/features/breath/breath_sync_screen.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
 import 'package:miles/features/countdown/countdown_screen.dart';
-import 'package:miles/features/reach/reach_screen.dart';
+import 'package:miles/features/home/home_screen.dart';
+import 'package:miles/features/reach/reach_overlay_screen.dart';
+import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/skybridge/sky_bridge_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Bottom-nav shell that hosts the feature tabs.
-/// The 5th tab (Closer / intimacy module) is always present — the screen
-/// itself handles the modest-mode state and shows the appropriate gate.
+/// Bottom-nav shell. Tab 0 is Home (the landing screen). The Closer tab is only
+/// shown to verified adults. An app-wide listener pops the full-screen Reach
+/// overlay whenever the partner reaches.
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
@@ -21,50 +26,85 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
-  int _index = 0;
+  RealtimeChannel? _reachChannel;
+  final Set<String> _shownReach = {};
 
-  List<Widget> get _screens => const <Widget>[
-        ChatScreen(),
-        CountdownScreen(),
-        SkyBridgeScreen(),
-        BreathSyncScreen(),
-        ReachScreen(),
-        CloserScreen(),
-      ];
+  static const List<Widget> _screens = <Widget>[
+    HomeScreen(),
+    ChatScreen(),
+    CountdownScreen(),
+    SkyBridgeScreen(),
+    BreathSyncScreen(),
+    CloserScreen(),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _subscribeReach());
+  }
+
+  void _subscribeReach() {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
+  }
+
+  void _onReach(ReachEvent e) {
+    final uid = SupabaseService.currentUserId;
+    if (e.isMine(uid) || !e.isActive || _shownReach.contains(e.id)) return;
+    _shownReach.add(e.id);
+    if (!mounted) return;
+    final partnerName =
+        ref.read(sessionProvider).partner?.displayName ?? 'Your partner';
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) =>
+            ReachOverlayScreen(partnerName: partnerName, eventId: e.id),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _reachChannel?.unsubscribe();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
     final isAdult = session.profile?.isAdult ?? false;
     final isModest = session.couple?.modestMode ?? true;
+    final index = ref.watch(shellTabProvider);
 
-    // The Closer tab is only visible to verified adults who have opted in.
-    // We don't hide it from minors (they're blocked from signing up), but we
-    // DO respect modest-mode: the tab is always present, the screen shows the
-    // gate when modest mode is on. This keeps the nav count stable.
     final showCloser = isAdult;
-    final screens = showCloser
-        ? _screens
-        : _screens.sublist(0, _screens.length - 1);
-
-    final selected = _index.clamp(0, screens.length - 1);
-    // The Closer (intimacy) tab is the last one when present. Ads must never
-    // appear there — AdMob forbids ads next to mature content.
+    final screens =
+        showCloser ? _screens : _screens.sublist(0, _screens.length - 1);
+    final selected = index.clamp(0, screens.length - 1);
     final isCloserTab = showCloser && selected == screens.length - 1;
+    // Ads only on the secondary feature tabs (Countdown / Sky / Breath).
+    final showAd = selected >= 2 && !isCloserTab;
 
     return Scaffold(
       drawer: const AppDrawer(),
       body: Column(
         children: [
           Expanded(child: screens[selected]),
-          // No ad on the Closer (mature) tab, nor on the Chat home screen.
-          if (!isCloserTab && selected != 0) const BannerAdSlot(),
+          if (showAd) const BannerAdSlot(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selected,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) =>
+            ref.read(shellTabProvider.notifier).state = i,
         destinations: [
+          const NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
           const NavigationDestination(
             icon: Icon(Icons.chat_bubble_outline),
             selectedIcon: Icon(Icons.chat_bubble),
@@ -84,11 +124,6 @@ class _AppShellState extends ConsumerState<AppShell> {
             icon: Icon(Icons.air_outlined),
             selectedIcon: Icon(Icons.air),
             label: 'Breath',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.favorite_outline),
-            selectedIcon: Icon(Icons.favorite),
-            label: 'Reach',
           ),
           if (showCloser)
             NavigationDestination(

@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Camera for chat photo capture -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Reach: full-screen wake alert (foreground now; FCM background later) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:label="Miles"

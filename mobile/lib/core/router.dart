@@ -29,6 +29,7 @@ import 'package:miles/features/rituals/rituals_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
+import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
 
 /// Routes the user based on auth + onboarding state.
@@ -131,6 +132,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/vault',
         builder: (context, state) => const VaultGateScreen(),
+      ),
+      GoRoute(
+        path: '/app/touch',
+        builder: (context, state) => const TouchMapScreen(),
       ),
       GoRoute(
         path: '/app/rituals',

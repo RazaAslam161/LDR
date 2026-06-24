@@ -15,6 +15,11 @@ class Presence {
     this.typingInChat = false,
     this.currentMood,
     this.moodColor,
+    this.locationLabel,
+    this.locationSharingMode = 'off',
+    this.currentActivity,
+    this.checkinPhotoUrl,
+    this.checkinPhotoAt,
   });
 
   factory Presence.fromJson(Map<String, dynamic> j) => Presence(
@@ -25,6 +30,12 @@ class Presence {
         typingInChat: JsonUtils.parseBool(j['typing_in_chat']),
         currentMood: JsonUtils.parseStringOrNull(j['current_mood']),
         moodColor: JsonUtils.parseStringOrNull(j['mood_color']),
+        locationLabel: JsonUtils.parseStringOrNull(j['location_label']),
+        locationSharingMode:
+            JsonUtils.parseString(j['location_sharing_mode'], fallback: 'off'),
+        currentActivity: JsonUtils.parseStringOrNull(j['current_activity']),
+        checkinPhotoUrl: JsonUtils.parseStringOrNull(j['checkin_photo_url']),
+        checkinPhotoAt: JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
       );
 
   final String userId;
@@ -34,6 +45,11 @@ class Presence {
   final bool typingInChat;
   final String? currentMood;
   final String? moodColor;
+  final String? locationLabel;
+  final String locationSharingMode; // 'off' | 'city' | 'precise'
+  final String? currentActivity;
+  final String? checkinPhotoUrl;
+  final DateTime? checkinPhotoAt;
 }
 
 /// Couple-scoped presence read/write. RLS lets you update only your own row and
@@ -78,6 +94,29 @@ class PresenceService {
         'mood_updated_at': DateTime.now().toUtc().toIso8601String(),
       });
 
+  static Future<void> setSharingMode(String coupleId, String mode) =>
+      _upsert(coupleId, {'location_sharing_mode': mode});
+
+  static Future<void> setLocation(
+    String coupleId, {
+    required String mode,
+    double? lat,
+    double? lon,
+    String? label,
+  }) =>
+      _upsert(coupleId, {
+        'location_sharing_mode': mode,
+        'latitude': lat,
+        'longitude': lon,
+        'location_label': label,
+      });
+
+  static Future<void> setCheckinPhoto(String coupleId, String url) =>
+      _upsert(coupleId, {
+        'checkin_photo_url': url,
+        'checkin_photo_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
   static Future<Presence?> fetchPartner(String coupleId) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
@@ -86,6 +125,17 @@ class PresenceService {
         .select()
         .eq('couple_id', coupleId)
         .neq('user_id', uid)
+        .maybeSingle();
+    return res == null ? null : Presence.fromJson(res);
+  }
+
+  static Future<Presence?> fetchMine(String coupleId) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return null;
+    final res = await _c
+        .from('presence')
+        .select()
+        .eq('user_id', uid)
         .maybeSingle();
     return res == null ? null : Presence.fromJson(res);
   }

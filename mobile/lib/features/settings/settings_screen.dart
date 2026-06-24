@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/models.dart';
+import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
@@ -25,6 +26,67 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _savingProfile = false;
   String? _error;
   bool _seeded = false;
+  String _locationMode = 'off';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLocationMode());
+  }
+
+  Future<void> _loadLocationMode() async {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    final mine = await PresenceService.fetchMine(couple.id);
+    if (mounted) {
+      setState(() => _locationMode = mine?.locationSharingMode ?? 'off');
+    }
+  }
+
+  Future<void> _changeLocationSharing() async {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    final mode = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MilesColors.surface1,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final opt in const [
+              ['off', 'Off'],
+              ['city', 'City only'],
+              ['precise', 'Precise location'],
+            ])
+              ListTile(
+                title: Text(opt[1],
+                    style: const TextStyle(color: MilesColors.cream50)),
+                trailing: _locationMode == opt[0]
+                    ? const Icon(Icons.check, color: MilesColors.blush)
+                    : null,
+                onTap: () => Navigator.pop(ctx, opt[0]),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (mode == null) return;
+    if (mode == 'off') {
+      await PresenceService.setSharingMode(couple.id, 'off');
+    } else {
+      await LocationService.shareOnce(couple.id, mode);
+    }
+    if (mounted) {
+      setState(() => _locationMode = mode);
+      _toast('Location sharing updated');
+    }
+  }
+
+  String get _locationLabel => _locationMode == 'off'
+      ? 'Off'
+      : _locationMode == 'city'
+          ? 'City only'
+          : 'Precise location';
 
   @override
   void dispose() {
@@ -232,6 +294,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
               trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeTimezone,
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Location ─────────────────────────────────────────
+            const _SectionHeader(label: 'Location sharing'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(_locationLabel,
+                  style: const TextStyle(color: MilesColors.cream50)),
+              subtitle: const Text('Only your partner can ever see this',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: _changeLocationSharing,
             ),
 
             const SizedBox(height: 28),

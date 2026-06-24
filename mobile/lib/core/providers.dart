@@ -35,3 +35,7 @@ final isPairedProvider = Provider<bool>(
 /// A short-lived invite code captured from a deep link (tethered://join?code=…),
 /// consumed by the pairing screen to pre-fill the join field.
 final pendingInviteCodeProvider = StateProvider<String?>((ref) => null);
+
+/// The selected bottom-nav tab index in the AppShell (0 = Home). A provider so
+/// the Home screen's quick actions can switch tabs (e.g. open Chat).
+final shellTabProvider = StateProvider<int>((ref) => 0);

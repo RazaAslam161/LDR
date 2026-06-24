@@ -1,8 +1,36 @@
 # Tethered — Bug-Fix & Feature Sprint: FIX_REPORT
 
-> Status: **Issues 3, 7, 1D/1E, 4, 1F, 6, 9 complete and verified** (`flutter
-> analyze` = 0 errors project-wide). Remaining: **2 (Home+location), 5 (Body
-> Map), 8 (Reach/FCM)**. (Git skipped per request.)
+> Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
+> One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed
+> (foreground works). Repo SQL files for every migration are now in `supabase/`.
+>
+> **Batch 4:** Issue 5 — Touch (Body Map). `body_touches` (ephemeral, realtime;
+> `supabase/body_touches.sql`); `lib/features/touch_map/` — illustrated
+> gender-neutral silhouette (`CustomPainter`, **no photos** → Play-safe), 19
+> tappable zones, glow/kiss/hug animated radial glows, realtime + haptics.
+> `/app/touch` + drawer. (Front view only; back-view + skin-tone deferred.)
+>
+> **Batch 5 (final):** Issue 2 — **HomeScreen** is now the landing tab (Reach moved
+> onto it); `PartnerStatusCard` (check-in photo, partner local time, mood, online/
+> last-seen, location), `LocationService` (**opt-in, symmetric, revocable**, city
+> vs precise — city sends NO coordinates), location onboarding dialog + a Settings
+> control, **check-in snap** (camera → couple_media → presence, partner sees live),
+> quick-actions. Shell restructured (`shellTabProvider`, Home tab 0). Issue 8 —
+> `reach_events` (`supabase/reach_events.sql`); hold-to-reach `ReachButton` (0.5s
+> hold + 30s cooldown), app-wide reach listener → full-screen `ReachOverlayScreen`
+> (pulsing heart, distinctive vibration, "I'm here" ack). Background screen-wake =
+> FCM, **stubbed** with exact TODOs in `lib/core/push/fcm_todo.dart` + manifest
+> `USE_FULL_SCREEN_INTENT`/`WAKE_LOCK` declared.
+
+## Final verification
+- `flutter analyze` → **0 errors** (428 info/style lints, pre-existing class).
+- `flutter test` → JsonUtils suite (20) passing.
+- Routes confirmed: `/` (via shell) opens **Home** (not Chat); `/app/vault` guarded
+  by PIN; `/app/touch`, `/app/capsule`, `/app/intimacy`, `/app/settings` present.
+- The FormatException root cause (Issue 3) is eliminated in the core models.
+- New deps this sprint: `flutter_test` (dev), `geocoding`.
+- Remaining honest follow-ups: FCM background-wake; per-message mood tint; body-map
+  back-view + skin-tone; capsule unlock local-notification; FLAG_SECURE on Vault.
 >
 > **Batch 3 done:** Issue 9 — Private Vault. New `vault_pin` + `personal_vault_items`
 > (owner-only RLS); **server-side bcrypt** PIN via `set_vault_pin`/`verify_vault_pin`
