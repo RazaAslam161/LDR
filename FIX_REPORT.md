@@ -70,6 +70,22 @@ exception + maps known cases instead of a blanket "could not set" message.
 `set_vault_pin('1234')` → ok; `verify_vault_pin('1234')` → `ok`;
 `verify_vault_pin('0000')` → `wrong`. (Test PIN deleted afterward.)
 
+## Issue 2A — Reach does nothing on partner's screen → **foreground VERIFIED working**
+
+**Diagnosis:** the spec's "most likely bug" (listener lives on one screen, disposed
+when you leave it) **does not apply** — the reach listener was already moved
+app-wide into `AppShell` during the FCM work (subscribes after pairing, ignores
+your own inserts, shows the overlay via the root navigator). Backend verified:
+`reach_events` is in the realtime publication, `replica identity full`, and the
+`reach_select` RLS lets the partner receive the row.
+
+**On-device proof:** injected a reach from Zuu → Raza's foregrounded app popped the
+full-screen overlay ("Zuu is reaching for you 💕" + pulsing heart + vibration +
+"I'm here"). No code change needed.
+
+**Screen-off / app-killed path:** that genuinely needs FCM (built + deployed in the
+earlier pass) — only the two Supabase secrets remain (see `FCM_SETUP_REPORT.md`).
+
 
 > Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
 > One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed
