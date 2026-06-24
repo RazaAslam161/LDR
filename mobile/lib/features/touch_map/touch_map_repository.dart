@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,6 +11,8 @@ class BodyTouch {
     required this.zone,
     required this.type,
     required this.createdAt,
+    this.posX,
+    this.posY,
   });
 
   factory BodyTouch.fromJson(Map<String, dynamic> j) => BodyTouch(
@@ -17,6 +21,8 @@ class BodyTouch {
         zone: JsonUtils.parseString(j['body_zone']),
         type: JsonUtils.parseString(j['touch_type'], fallback: 'glow'),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
+        posX: j['pos_x'] == null ? null : JsonUtils.parseDouble(j['pos_x']),
+        posY: j['pos_y'] == null ? null : JsonUtils.parseDouble(j['pos_y']),
       );
 
   final String id;
@@ -24,6 +30,8 @@ class BodyTouch {
   final String zone;
   final String type;
   final DateTime createdAt;
+  final double? posX; // normalized 0..1 (photo mode)
+  final double? posY;
 
   bool isMine(String? uid) => fromUser == uid;
 }
@@ -39,6 +47,8 @@ class TouchMapRepository {
     required String coupleId,
     required String zone,
     required String type,
+    double? posX,
+    double? posY,
   }) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
@@ -47,7 +57,40 @@ class TouchMapRepository {
       'from_user': uid,
       'body_zone': zone,
       'touch_type': type,
+      if (posX != null) 'pos_x': posX,
+      if (posY != null) 'pos_y': posY,
     });
+  }
+
+  /// Sets/refreshes the user's body photo (private bucket) and returns a signed
+  /// URL to view a body photo at [path] (couple_intimate bucket, 1h).
+  static Future<String?> signedBodyUrl(String? path) async {
+    if (path == null) return null;
+    try {
+      return await _c.storage
+          .from('couple_intimate')
+          .createSignedUrl(path, 60 * 60);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Uploads the user's body photo to the private couple_intimate bucket and
+  /// stores its path on presence. Returns the storage path.
+  static Future<String?> uploadBodyPhoto(String coupleId, File file) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return null;
+    final path = '$coupleId/body/${uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    try {
+      await _c.storage.from('couple_intimate').upload(
+            path,
+            file,
+            fileOptions: const FileOptions(upsert: true),
+          );
+      return path;
+    } catch (_) {
+      return null;
+    }
   }
 
   static RealtimeChannel subscribe(

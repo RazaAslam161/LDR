@@ -5,9 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
+import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/touch_map/touch_map_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -82,21 +85,59 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   final List<_ActiveTouch> _active = [];
   int _nextId = 0;
 
+  String? _partnerPhotoUrl;
+  bool _hasMyPhoto = false;
+  bool _uploadingPhoto = false;
+  Offset? _lastPan; // throttle caress sends
+
   @override
   void initState() {
     super.initState();
+    SecureScreen.setSecure(); // intimate photos — block screenshots
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     _coupleId = couple.id;
     _channel = TouchMapRepository.subscribe(couple.id, _onIncoming);
     reportScreen(ref, 'Touch'); // partner sees we're in Touch
+    _loadPhotos();
   }
 
   @override
   void dispose() {
+    SecureScreen.clearSecure();
     reportActiveTab(ref);
     _channel?.unsubscribe();
     super.dispose();
+  }
+
+  Future<void> _loadPhotos() async {
+    final id = _coupleId;
+    if (id == null) return;
+    final partner = await PresenceService.fetchPartner(id);
+    final mine = await PresenceService.fetchMine(id);
+    final url = await TouchMapRepository.signedBodyUrl(partner?.bodyPhotoPath);
+    if (mounted) {
+      setState(() {
+        _partnerPhotoUrl = url;
+        _hasMyPhoto = mine?.bodyPhotoPath != null;
+      });
+    }
+  }
+
+  Future<void> _setMyPhoto() async {
+    final id = _coupleId;
+    if (id == null) return;
+    final file = await PhotoPickerService.pickFromSheet(context);
+    if (file == null) return;
+    setState(() => _uploadingPhoto = true);
+    final path = await TouchMapRepository.uploadBodyPhoto(id, file);
+    if (path != null) await PresenceService.setBodyPhoto(id, path);
+    if (mounted) {
+      setState(() {
+        _uploadingPhoto = false;
+        _hasMyPhoto = path != null;
+      });
+    }
   }
 
   _Zone? _zoneByKey(String key) {
@@ -108,26 +149,40 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   void _onIncoming(BodyTouch t) {
     final uid = SupabaseService.currentUserId;
-    if (t.isMine(uid)) return; // mine already shown optimistically
-    final z = _zoneByKey(t.zone);
-    if (z == null || !mounted) return;
-    _spawn(z, t.type);
+    if (t.isMine(uid) || !mounted) return; // mine already shown optimistically
+    if (t.posX != null && t.posY != null) {
+      _spawnAt(t.posX!, t.posY!, t.type);
+    } else {
+      final z = _zoneByKey(t.zone);
+      if (z == null) return;
+      _spawnAt(z.x, z.y, t.type);
+    }
     HapticFeedback.mediumImpact();
     Future.delayed(const Duration(milliseconds: 200), HapticFeedback.lightImpact);
   }
 
   void _tap(_Zone z) {
     HapticFeedback.lightImpact();
-    _spawn(z, _type);
+    _spawnAt(z.x, z.y, _type);
     final id = _coupleId;
     if (id != null) {
       TouchMapRepository.sendTouch(coupleId: id, zone: z.key, type: _type);
     }
   }
 
-  void _spawn(_Zone z, String type) {
-    final id = _nextId++;
-    setState(() => _active.add(_ActiveTouch(id, z.x, z.y, type)));
+  /// Photo-mode touch at a normalized (x,y) anywhere on the partner's photo.
+  void _touchAt(double x, double y) {
+    HapticFeedback.lightImpact();
+    _spawnAt(x, y, _type);
+    final id = _coupleId;
+    if (id != null) {
+      TouchMapRepository.sendTouch(
+          coupleId: id, zone: 'free', type: _type, posX: x, posY: y);
+    }
+  }
+
+  void _spawnAt(double x, double y, String type) {
+    setState(() => _active.add(_ActiveTouch(_nextId++, x, y, type)));
   }
 
   void _remove(int id) {
@@ -148,6 +203,19 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
             onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
           ),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Set my photo',
+            icon: _uploadingPhoto
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.add_a_photo_outlined,
+                    color: MilesColors.emberSoft),
+            onPressed: _uploadingPhoto ? null : _setMyPhoto,
+          ),
+        ],
       ),
       body: !linked
           ? const Center(
@@ -156,8 +224,23 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           : Column(
               children: [
                 const SizedBox(height: 8),
-                const Text('Tap a spot to send it. Feel theirs land on you.',
-                    style: TextStyle(color: MilesColors.taupe, fontSize: 12.5)),
+                Text(
+                  _partnerPhotoUrl != null
+                      ? 'Touch anywhere on them — they feel it in real time.'
+                      : 'Tap a spot to send it. Feel theirs land on you.',
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(color: MilesColors.taupe, fontSize: 12.5),
+                ),
+                if (!_hasMyPhoto)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Tap 📷 to add your photo so they can touch you too.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: MilesColors.gilt, fontSize: 11),
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 // Touch type selector
                 Row(
@@ -192,6 +275,48 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   child: LayoutBuilder(
                     builder: (context, c) {
                       final w = c.maxWidth, h = c.maxHeight;
+                      // Photo mode — caress anywhere on the partner's photo.
+                      if (_partnerPhotoUrl != null) {
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapDown: (d) => _touchAt(
+                              (d.localPosition.dx / w).clamp(0.0, 1.0),
+                              (d.localPosition.dy / h).clamp(0.0, 1.0)),
+                          onPanUpdate: (d) {
+                            final x = (d.localPosition.dx / w).clamp(0.0, 1.0);
+                            final y = (d.localPosition.dy / h).clamp(0.0, 1.0);
+                            if (_lastPan == null ||
+                                (Offset(x, y) - _lastPan!).distance > 0.05) {
+                              _lastPan = Offset(x, y);
+                              _touchAt(x, y);
+                            }
+                          },
+                          onPanEnd: (_) => _lastPan = null,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.network(
+                                _partnerPhotoUrl!,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) => const Center(
+                                  child: Text('Could not load their photo',
+                                      style: TextStyle(color: MilesColors.taupe)),
+                                ),
+                              ),
+                              for (final t in _active)
+                                Positioned(
+                                  key: ValueKey(t.id),
+                                  left: t.x * w - 45,
+                                  top: t.y * h - 45,
+                                  child: _Glow(
+                                      type: t.type,
+                                      onDone: () => _remove(t.id)),
+                                ),
+                            ],
+                          ),
+                        );
+                      }
+                      // Silhouette fallback (no photos yet).
                       return Stack(
                         children: [
                           CustomPaint(

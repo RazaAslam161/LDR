@@ -7,9 +7,11 @@ create table if not exists public.body_touches (
   id         uuid primary key default gen_random_uuid(),
   couple_id  uuid not null references public.couples(id) on delete cascade,
   from_user  uuid not null references public.profiles(id) on delete cascade,
-  body_zone  text not null,
+  body_zone  text not null,                  -- silhouette zone, or 'free' (photo)
   touch_type text not null default 'glow',   -- 'glow' | 'kiss' | 'hug'
   intensity  real not null default 1.0,
+  pos_x      real,                            -- #1: normalized 0..1 (photo mode)
+  pos_y      real,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default (now() + interval '10 seconds')
 );
