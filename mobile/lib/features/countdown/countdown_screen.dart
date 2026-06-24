@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/time/tz_helper.dart';
@@ -100,7 +101,7 @@ class _CountdownScreenState extends ConsumerState<CountdownScreen> {
         leading: Builder(
           builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
           ),
         ),
       ),

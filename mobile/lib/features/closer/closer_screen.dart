@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
@@ -84,7 +85,7 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
         leading: Builder(
           builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
+            onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
           ),
         ),
       ),

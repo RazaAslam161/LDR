@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
@@ -117,6 +118,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     final showAd = selected >= 2 && !isCloserTab;
 
     return Scaffold(
+      key: rootScaffoldKey,
       drawer: const AppDrawer(),
       body: Column(
         children: [

@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -144,7 +145,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   Builder(
                     builder: (ctx) => IconButton(
                       icon: const Icon(Icons.menu, color: MilesColors.gilt),
-                      onPressed: () => Scaffold.of(ctx).openDrawer(),
+                      onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
                     ),
                   ),
                 ],

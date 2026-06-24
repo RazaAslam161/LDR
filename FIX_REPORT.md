@@ -86,6 +86,23 @@ full-screen overlay ("Zuu is reaching for you 💕" + pulsing heart + vibration 
 **Screen-off / app-killed path:** that genuinely needs FCM (built + deployed in the
 earlier pass) — only the two Supabase secrets remain (see `FCM_SETUP_REPORT.md`).
 
+## Issue 4 — drawer only works from one screen → **nested-Scaffold bug fixed**
+
+**Root cause:** the drawer lives on `AppShell`'s Scaffold, but every tab screen
+returns its **own** Scaffold (no drawer) and the hamburgers called
+`Scaffold.of(context).openDrawer()` — which resolves to the screen's *own*
+drawerless Scaffold → the hamburger failed on **all** tabs (not "one screen").
+
+**Why not per-screen drawers / a ShellRoute:** adding a drawer to each inner
+Scaffold would render a half-height drawer that doesn't cover the bottom nav (the
+nav lives on the outer shell Scaffold); a full go_router ShellRoute rewrite would
+risk the working nav. **Chosen fix (minimal, correct):** keep the single
+full-height drawer on the shell and open it from anywhere via a global
+`rootScaffoldKey` (`lib/core/root_scaffold_key.dart`): `AppShell`'s Scaffold gets
+`key: rootScaffoldKey`; all 7 screen hamburgers now call
+`rootScaffoldKey.currentState?.openDrawer()` (home, chat, countdown, sky, breath,
+closer, touch). Drawer now opens from every main screen, full-height over the nav.
+
 
 > Status: **ALL 9 ISSUES COMPLETE** — `flutter analyze` = **0 errors** project-wide.
 > One documented infra follow-up: Issue 8 background screen-wake (FCM) is stubbed
