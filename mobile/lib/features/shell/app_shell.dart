@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
+import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
@@ -82,6 +83,8 @@ class _AppShellState extends ConsumerState<AppShell>
     FsiPermission.promptIfNeeded(context, partnerName);
     // A push may have been tapped before the listener attached.
     _onPendingReach();
+    // Let the partner see which screen we're on.
+    reportActiveTab(ref);
   }
 
   void _onReach(ReachEvent e) {
@@ -150,8 +153,10 @@ class _AppShellState extends ConsumerState<AppShell>
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selected,
-        onDestinationSelected: (i) =>
-            ref.read(shellTabProvider.notifier).state = i,
+        onDestinationSelected: (i) {
+          ref.read(shellTabProvider.notifier).state = i;
+          reportScreen(ref, kTabScreens[i.clamp(0, kTabScreens.length - 1)]);
+        },
         destinations: [
           const NavigationDestination(
             icon: Icon(Icons.home_outlined),

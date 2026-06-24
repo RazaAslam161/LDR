@@ -22,6 +22,7 @@ class Presence {
     this.locationAccuracy,
     this.locationUpdatedAt,
     this.currentActivity,
+    this.currentScreen,
     this.checkinPhotoUrl,
     this.checkinPhotoAt,
   });
@@ -45,6 +46,7 @@ class Presence {
         locationUpdatedAt:
             JsonUtils.parseDateOrNull(j['location_updated_at'])?.toLocal(),
         currentActivity: JsonUtils.parseStringOrNull(j['current_activity']),
+        currentScreen: JsonUtils.parseStringOrNull(j['current_screen']),
         checkinPhotoUrl: JsonUtils.parseStringOrNull(j['checkin_photo_url']),
         checkinPhotoAt: JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
       );
@@ -63,6 +65,7 @@ class Presence {
   final double? locationAccuracy;
   final DateTime? locationUpdatedAt;
   final String? currentActivity;
+  final String? currentScreen;
   final String? checkinPhotoUrl;
   final DateTime? checkinPhotoAt;
 
@@ -111,6 +114,10 @@ class PresenceService {
         'mood_color': color,
         'mood_updated_at': DateTime.now().toUtc().toIso8601String(),
       });
+
+  /// Which feature/section the user is currently in (so the partner can see).
+  static Future<void> setScreen(String coupleId, String? screen) =>
+      _upsert(coupleId, {'current_screen': screen});
 
   static Future<void> setSharingMode(String coupleId, String mode) =>
       _upsert(coupleId, {'location_sharing_mode': mode});

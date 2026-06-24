@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/root_scaffold_key.dart';
+import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -88,10 +89,12 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (couple == null) return;
     _coupleId = couple.id;
     _channel = TouchMapRepository.subscribe(couple.id, _onIncoming);
+    reportScreen(ref, 'Touch'); // partner sees we're in Touch
   }
 
   @override
   void dispose() {
+    reportActiveTab(ref);
     _channel?.unsubscribe();
     super.dispose();
   }

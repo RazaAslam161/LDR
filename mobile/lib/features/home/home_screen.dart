@@ -388,6 +388,12 @@ class _PartnerStatusCard extends StatelessWidget {
             const SizedBox(height: 8),
             _InfoRow(icon: Icons.favorite_outline, text: 'Feeling ${mood.label}'),
           ],
+          if (online && presence?.currentScreen != null) ...[
+            const SizedBox(height: 8),
+            _InfoRow(
+                icon: Icons.smartphone_outlined,
+                text: 'In ${presence!.currentScreen}'),
+          ],
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: uploading ? null : onShareSnap,
