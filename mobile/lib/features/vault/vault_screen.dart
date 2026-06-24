@@ -106,7 +106,7 @@ class _VaultScreenState extends State<VaultScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Private Vault'),
+        title: const Text('Vault'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).maybePop(),

@@ -144,7 +144,7 @@ class _AppShellState extends ConsumerState<AppShell> {
           const NavigationDestination(
             icon: Icon(Icons.hourglass_top_outlined),
             selectedIcon: Icon(Icons.hourglass_top),
-            label: 'Countdown',
+            label: 'Reunion',
           ),
           const NavigationDestination(
             icon: Icon(Icons.dark_mode_outlined),

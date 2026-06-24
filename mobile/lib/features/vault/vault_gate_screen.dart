@@ -207,7 +207,7 @@ class _GateBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = setup
         ? (confirming ? 'Confirm your PIN' : 'Create a vault PIN')
-        : 'Private Vault';
+        : 'Vault';
     final subtitle = setup
         ? 'A 4-digit PIN protects what only you can see.'
         : 'Your partner can never open this.';

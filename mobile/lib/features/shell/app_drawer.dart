@@ -34,7 +34,7 @@ class AppDrawer extends ConsumerWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Miles',
+                    'Tethered',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ],
@@ -87,7 +87,7 @@ class AppDrawer extends ConsumerWidget {
               ],
               _DrawerTile(
                 icon: Icons.lock_clock,
-                label: 'Time Capsule',
+                label: 'Capsule',
                 onTap: () {
                   Navigator.of(context).pop();
                   context.push('/app/capsule');
@@ -95,7 +95,7 @@ class AppDrawer extends ConsumerWidget {
               ),
               _DrawerTile(
                 icon: Icons.lock_outline,
-                label: 'Private Vault',
+                label: 'Vault',
                 onTap: () {
                   Navigator.of(context).pop();
                   context.push('/app/vault');
