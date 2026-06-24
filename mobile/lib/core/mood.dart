@@ -26,6 +26,9 @@ const List<MoodData> kMoods = [
   MoodData('anxious', '🌀', 'Anxious', '#9FD8A0', 'Restless'),
   MoodData('grateful', '🙏', 'Grateful', '#F2A9BC', 'Thankful'),
   MoodData('sad', '💧', 'Blue', '#378ADD', 'Reflective'),
+  MoodData('angry', '😠', 'Angry', '#E0564B', 'Fuming'),
+  MoodData('annoyed', '😤', 'Annoyed', '#C9824A', 'Irritated'),
+  MoodData('horny', '🔥', 'Turned on', '#E84A6F', 'Aching for you'),
 ];
 
 MoodData? moodByKey(String? key) {

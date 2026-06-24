@@ -40,6 +40,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _typingActive = false;
   bool _hasNewMessage = false;
   Message? _replyingTo;
+  RealtimeChannel? _moodChannel;
+  final List<_ActiveBurst> _bursts = [];
+  int _burstId = 0;
+
+  void _sendMoodBurst(MoodData m) {
+    _moodChannel?.sendBroadcastMessage(
+        event: 'mood', payload: {'mood': m.key});
+    _showMoodBurst(m); // also show it on my own screen
+  }
+
+  void _onMoodBurst(Map<String, dynamic> payload) {
+    final m = moodByKey(payload['mood']?.toString());
+    if (m != null) _showMoodBurst(m);
+  }
+
+  void _showMoodBurst(MoodData m) {
+    if (!mounted) return;
+    setState(() => _bursts.add(_ActiveBurst(_burstId++, m)));
+  }
+
+  void _removeBurst(int id) {
+    if (mounted) setState(() => _bursts.removeWhere((b) => b.id == id));
+  }
+
+  Future<void> _pickMoodBurst() async {
+    final m = await showMoodSelector(context);
+    if (m != null) _sendMoodBurst(m);
+  }
 
   void _startReply(Message m) {
     if (m.deletedForEveryone) return;
@@ -97,6 +125,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // first-run is fine
     }
     _channel = ChatRepository.subscribe(couple.id, _onIncoming);
+    _moodChannel = SupabaseService.client
+        .channel('mood_burst:${couple.id}')
+        .onBroadcast(event: 'mood', callback: _onMoodBurst)
+        .subscribe();
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
     if (mounted) setState(() => _loading = false);
@@ -309,6 +341,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       PresenceService.setTypingInChat(id, inChat: false);
     }
     _channel?.unsubscribe();
+    _moodChannel?.unsubscribe();
     _scroll.dispose();
     _audioRecorder.dispose();
     _player.dispose();
@@ -360,6 +393,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               icon:
                   const Icon(Icons.palette_outlined, color: MilesColors.gilt),
               onPressed: _setMyMood,
+            ),
+          if (couple != null)
+            IconButton(
+              tooltip: 'Fling a mood',
+              icon: const Icon(Icons.emoji_emotions_outlined,
+                  color: MilesColors.blush),
+              onPressed: _pickMoodBurst,
             ),
           if (couple != null)
             IconButton(
@@ -440,6 +480,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           },
                                         ),
                                       ),
+                                    ),
+                                  for (final b in _bursts)
+                                    _BurstAnimation(
+                                      key: ValueKey(b.id),
+                                      mood: b.mood,
+                                      onDone: () => _removeBurst(b.id),
                                     ),
                                 ],
                               );
@@ -609,6 +655,84 @@ class _Bubble extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ActiveBurst {
+  _ActiveBurst(this.id, this.mood);
+  final int id;
+  final MoodData mood;
+}
+
+/// A mood "fling" — a big emoji that rises up the chat and fades, on both
+/// phones in real time (sent over an ephemeral broadcast channel).
+class _BurstAnimation extends StatefulWidget {
+  const _BurstAnimation({super.key, required this.mood, required this.onDone});
+  final MoodData mood;
+  final VoidCallback onDone;
+
+  @override
+  State<_BurstAnimation> createState() => _BurstAnimationState();
+}
+
+class _BurstAnimationState extends State<_BurstAnimation>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1900),
+  )..forward();
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addStatusListener((s) {
+      if (s == AnimationStatus.completed) widget.onDone();
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) {
+            final v = _c.value;
+            final opacity =
+                v < 0.15 ? v / 0.15 : (1 - (v - 0.15) / 0.85).clamp(0.0, 1.0);
+            return Align(
+              alignment: Alignment(0, 0.4 - v * 1.1),
+              child: Opacity(
+                opacity: opacity.clamp(0.0, 1.0),
+                child: Transform.scale(
+                  scale: 0.6 + v * 0.9,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.mood.color.withValues(alpha: 0.5),
+                          blurRadius: 30,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Text(widget.mood.emoji,
+                        style: const TextStyle(fontSize: 84)),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
