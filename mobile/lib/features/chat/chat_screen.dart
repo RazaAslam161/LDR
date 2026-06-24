@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -14,9 +15,11 @@ import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/mood_selector.dart';
 import 'package:miles/features/chat/typing_indicator.dart';
+import 'package:miles/features/closer/secure_screen.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -413,6 +416,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   onSendText: (t) => ChatRepository.sendText(couple.id, t),
                   onSendImage: (f) => ChatRepository.sendImage(couple.id, f),
                   onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f),
+                  onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f),
                 ),
               ],
             ),
@@ -614,6 +618,8 @@ class _Content extends StatelessWidget {
           );
         }
         return _VoicePlayer(url: url, player: player);
+      case 'video':
+        return _VideoBubble(path: m.videoPath);
       default:
         return Text(
           m.body ?? '',
@@ -746,6 +752,134 @@ class _NewMessageChip extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Tap-to-play thumbnail for a private video message → full-screen player.
+class _VideoBubble extends StatefulWidget {
+  const _VideoBubble({required this.path});
+  final String? path;
+
+  @override
+  State<_VideoBubble> createState() => _VideoBubbleState();
+}
+
+class _VideoBubbleState extends State<_VideoBubble> {
+  bool _loading = false;
+
+  Future<void> _open() async {
+    if (widget.path == null) return;
+    setState(() => _loading = true);
+    final url = await ChatRepository.signedVideoUrl(widget.path);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (url == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video unavailable')));
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => _FullScreenVideo(url: url)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _loading ? null : _open,
+      child: Container(
+        width: 220,
+        height: 140,
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Center(
+          child: _loading
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: const BoxDecoration(
+                      shape: BoxShape.circle, color: MilesColors.blush),
+                  child: const Icon(Icons.play_arrow,
+                      color: MilesColors.cream50, size: 30),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen player with FLAG_SECURE so intimate video can't be
+/// screenshotted / screen-recorded / shown in the recents preview.
+class _FullScreenVideo extends StatefulWidget {
+  const _FullScreenVideo({required this.url});
+  final String url;
+
+  @override
+  State<_FullScreenVideo> createState() => _FullScreenVideoState();
+}
+
+class _FullScreenVideoState extends State<_FullScreenVideo> {
+  VideoPlayerController? _vp;
+  ChewieController? _chewie;
+
+  @override
+  void initState() {
+    super.initState();
+    SecureScreen.setSecure();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final vp = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    try {
+      await vp.initialize();
+    } catch (_) {
+      await vp.dispose();
+      return;
+    }
+    if (!mounted) {
+      await vp.dispose();
+      return;
+    }
+    setState(() {
+      _vp = vp;
+      _chewie = ChewieController(
+        videoPlayerController: vp,
+        autoPlay: true,
+        looping: false,
+        aspectRatio:
+            vp.value.aspectRatio == 0 ? 16 / 9 : vp.value.aspectRatio,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    SecureScreen.clearSecure();
+    _chewie?.dispose();
+    _vp?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        leading: const BackButton(color: Colors.white),
+      ),
+      body: Center(
+        child: _chewie == null
+            ? const CircularProgressIndicator()
+            : Chewie(controller: _chewie!),
       ),
     );
   }

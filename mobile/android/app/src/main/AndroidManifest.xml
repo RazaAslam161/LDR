@@ -16,8 +16,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Microphone for Time Capsule voice memos + chat voice notes -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Camera for chat photo capture -->
+    <!-- Camera for photo + video capture -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Gallery access for sharing photos + videos (private app, not Play-bound) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <!-- Reach: full-screen wake alert (foreground now; FCM background later) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />

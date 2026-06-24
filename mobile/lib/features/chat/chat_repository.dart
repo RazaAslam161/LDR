@@ -7,10 +7,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A single chat message between the two partners.
 ///
-/// [kind] is one of: 'text', 'image', 'voice'.
+/// [kind] is one of: 'text', 'image', 'voice', 'video'.
 /// - text: [body] holds the message
 /// - image: [imagePath] is the storage path; the public URL is derived
 /// - voice: [voicePath] is the storage path; client plays it back
+/// - video: [videoPath] is in the PRIVATE couple_intimate bucket (signed URL)
 class Message {
   Message({
     required this.id,
@@ -19,6 +20,7 @@ class Message {
     this.body,
     this.imagePath,
     this.voicePath,
+    this.videoPath,
     this.kind = 'text',
     this.deletedForEveryone = false,
     this.deletedBy = const [],
@@ -30,6 +32,7 @@ class Message {
         body: JsonUtils.parseStringOrNull(j['body']),
         imagePath: JsonUtils.parseStringOrNull(j['image_path']),
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
+        videoPath: JsonUtils.parseStringOrNull(j['video_path']),
         kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
         deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
@@ -43,6 +46,7 @@ class Message {
   final String? body;
   final String? imagePath;
   final String? voicePath;
+  final String? videoPath;
   final String kind;
   final DateTime createdAt;
   final bool deletedForEveryone;
@@ -124,6 +128,35 @@ class ChatRepository {
       'image_path': path,
       'kind': 'image',
     });
+  }
+
+  /// Uploads a video to the PRIVATE couple_intimate bucket and inserts a
+  /// message of kind='video'. Served via short-lived signed URLs (couple-only).
+  static Future<void> sendVideo(String coupleId, File file) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+
+    final ext = _ext(file.path) ?? 'mp4';
+    final path = '$coupleId/${_randomName('vid', ext)}';
+    await _c.storage.from('couple_intimate').upload(path, file);
+    await _c.from('messages').insert({
+      'couple_id': coupleId,
+      'sender_id': uid,
+      'video_path': path,
+      'kind': 'video',
+    });
+  }
+
+  /// A short-lived signed URL for a private video (couple_intimate bucket).
+  static Future<String?> signedVideoUrl(String? path) async {
+    if (path == null) return null;
+    try {
+      return await _c.storage
+          .from('couple_intimate')
+          .createSignedUrl(path, 60 * 60);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Uploads a voice note and inserts a message row of kind='voice'.

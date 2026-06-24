@@ -15,6 +15,7 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendText,
     required this.onSendImage,
     required this.onSendVoice,
+    required this.onSendVideo,
     this.onChanged,
   });
 
@@ -22,6 +23,7 @@ class ChatInputBar extends StatefulWidget {
   final Future<void> Function(String text) onSendText;
   final Future<void> Function(File image) onSendImage;
   final Future<void> Function(File voice) onSendVoice;
+  final Future<void> Function(File video) onSendVideo;
 
   /// Called as the user types (used to broadcast the typing indicator).
   final ValueChanged<String>? onChanged;
@@ -80,6 +82,23 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  Future<void> _pickAndSendVideo(ImageSource source) async {
+    try {
+      final file = await PhotoPickerService.pickVideo(source: source);
+      if (file == null) return;
+      setState(() => _sending = true);
+      await widget.onSendVideo(file);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not attach that video.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   void _showAttachSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -109,6 +128,26 @@ class _ChatInputBarState extends State<ChatInputBar> {
               onTap: () {
                 Navigator.pop(context);
                 _pickFromGallery();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined,
+                  color: MilesColors.emberSoft),
+              title: const Text('Record video',
+                  style: TextStyle(color: MilesColors.cream50)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndSendVideo(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined,
+                  color: MilesColors.emberSoft),
+              title: const Text('Video from gallery',
+                  style: TextStyle(color: MilesColors.cream50)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndSendVideo(ImageSource.gallery);
               },
             ),
             const SizedBox(height: 8),

@@ -17,19 +17,19 @@ class SecureScreen {
 
   static const _channel = MethodChannel('miles/secure_screen');
 
-  /// Applies FLAG_SECURE. Idempotent.
+  /// Applies FLAG_SECURE. Idempotent. (Native `setSecure` reads `enable`.)
   static Future<void> setSecure() async {
-    await _invoke('setSecure');
+    await _invoke('setSecure', {'enable': true});
   }
 
   /// Clears FLAG_SECURE. Idempotent.
   static Future<void> clearSecure() async {
-    await _invoke('clearSecure');
+    await _invoke('setSecure', {'enable': false});
   }
 
-  static Future<void> _invoke(String method) async {
+  static Future<void> _invoke(String method, [Map<String, dynamic>? args]) async {
     try {
-      await _channel.invokeMethod<void>(method);
+      await _channel.invokeMethod<void>(method, args);
     } on MissingPluginException {
       // Native side not wired up yet (e.g. iOS, or pre-integration Android) —
       // not fatal. The feature still works; it just won't block screenshots.

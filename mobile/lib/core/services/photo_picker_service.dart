@@ -58,6 +58,15 @@ class PhotoPickerService {
     return File(cropped.path);
   }
 
+  /// Pick (or record) a video — no crop. Capped at 5 minutes to bound size.
+  static Future<File?> pickVideo({required ImageSource source}) async {
+    final x = await _picker.pickVideo(
+      source: source,
+      maxDuration: const Duration(minutes: 5),
+    );
+    return x == null ? null : File(x.path);
+  }
+
   /// Shows a camera/gallery sheet, then pick + crop. Returns null on cancel.
   static Future<File?> pickFromSheet(
     BuildContext context, {
