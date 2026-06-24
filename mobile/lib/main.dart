@@ -11,6 +11,7 @@ import 'package:miles/core/config.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/router.dart';
 import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -72,6 +73,9 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // First launch (any device): ask for all permissions at once.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => PermissionsBootstrap.requestAllOnce());
     _initDeepLinks();
   }
 
