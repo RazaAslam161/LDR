@@ -21,6 +21,7 @@ class Message {
     this.imagePath,
     this.voicePath,
     this.videoPath,
+    this.replyToId,
     this.kind = 'text',
     this.deletedForEveryone = false,
     this.deletedBy = const [],
@@ -33,6 +34,7 @@ class Message {
         imagePath: JsonUtils.parseStringOrNull(j['image_path']),
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
         videoPath: JsonUtils.parseStringOrNull(j['video_path']),
+        replyToId: JsonUtils.parseStringOrNull(j['reply_to_id']),
         kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
         deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
@@ -47,7 +49,24 @@ class Message {
   final String? imagePath;
   final String? voicePath;
   final String? videoPath;
+  final String? replyToId;
   final String kind;
+
+  /// A short preview of a message for quote-replies.
+  String previewText() {
+    if (deletedForEveryone) return 'deleted message';
+    switch (kind) {
+      case 'image':
+        return '📷 Photo';
+      case 'voice':
+        return '🎙️ Voice note';
+      case 'video':
+        return '🎬 Video';
+      default:
+        final b = (body ?? '').trim();
+        return b.isEmpty ? 'Message' : (b.length > 60 ? '${b.substring(0, 60)}…' : b);
+    }
+  }
   final DateTime createdAt;
   final bool deletedForEveryone;
   final List<String> deletedBy;
@@ -100,7 +119,8 @@ class ChatRepository {
     return out;
   }
 
-  static Future<void> sendText(String coupleId, String body) async {
+  static Future<void> sendText(String coupleId, String body,
+      {String? replyToId}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     final trimmed = body.trim();
@@ -110,12 +130,14 @@ class ChatRepository {
       'sender_id': uid,
       'body': trimmed,
       'kind': 'text',
+      if (replyToId != null) 'reply_to_id': replyToId,
     });
   }
 
   /// Uploads an image to couple_media/<coupleId>/<rand>.<ext> and inserts a
   /// message row of kind='image'.
-  static Future<void> sendImage(String coupleId, File file) async {
+  static Future<void> sendImage(String coupleId, File file,
+      {String? replyToId}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -127,12 +149,14 @@ class ChatRepository {
       'sender_id': uid,
       'image_path': path,
       'kind': 'image',
+      if (replyToId != null) 'reply_to_id': replyToId,
     });
   }
 
   /// Uploads a video to the PRIVATE couple_intimate bucket and inserts a
   /// message of kind='video'. Served via short-lived signed URLs (couple-only).
-  static Future<void> sendVideo(String coupleId, File file) async {
+  static Future<void> sendVideo(String coupleId, File file,
+      {String? replyToId}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -144,6 +168,7 @@ class ChatRepository {
       'sender_id': uid,
       'video_path': path,
       'kind': 'video',
+      if (replyToId != null) 'reply_to_id': replyToId,
     });
   }
 
@@ -160,7 +185,8 @@ class ChatRepository {
   }
 
   /// Uploads a voice note and inserts a message row of kind='voice'.
-  static Future<void> sendVoice(String coupleId, File file) async {
+  static Future<void> sendVoice(String coupleId, File file,
+      {String? replyToId}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -172,6 +198,7 @@ class ChatRepository {
       'sender_id': uid,
       'voice_path': path,
       'kind': 'voice',
+      if (replyToId != null) 'reply_to_id': replyToId,
     });
   }
 

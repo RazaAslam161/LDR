@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -17,6 +18,8 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendVoice,
     required this.onSendVideo,
     this.onChanged,
+    this.replyingTo,
+    this.onCancelReply,
   });
 
   final String coupleId;
@@ -27,6 +30,10 @@ class ChatInputBar extends StatefulWidget {
 
   /// Called as the user types (used to broadcast the typing indicator).
   final ValueChanged<String>? onChanged;
+
+  /// The message being replied to (shows a quoted bar above the input).
+  final Message? replyingTo;
+  final VoidCallback? onCancelReply;
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -220,9 +227,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
+            if (widget.replyingTo != null)
+              _ReplyBar(
+                  message: widget.replyingTo!, onCancel: widget.onCancelReply),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
             // Attach button
             CircleIconButton(
               icon: Icons.add,
@@ -315,7 +328,57 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     ),
                   ),
           ],
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _ReplyBar extends StatelessWidget {
+  const _ReplyBar({required this.message, this.onCancel});
+  final Message message;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+      decoration: BoxDecoration(
+        color: MilesColors.surface1,
+        borderRadius: BorderRadius.circular(12),
+        border: const Border(
+          left: BorderSide(color: MilesColors.blush, width: 3),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.reply, size: 16, color: MilesColors.blush),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Replying to',
+                    style: TextStyle(color: MilesColors.blush, fontSize: 11)),
+                Text(
+                  message.previewText(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: MilesColors.cream50, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18, color: MilesColors.taupe),
+            onPressed: onCancel,
+          ),
+        ],
       ),
     );
   }

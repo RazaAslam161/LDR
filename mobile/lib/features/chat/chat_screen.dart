@@ -39,6 +39,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Timer? _typingTimer;
   bool _typingActive = false;
   bool _hasNewMessage = false;
+  Message? _replyingTo;
+
+  void _startReply(Message m) {
+    if (m.deletedForEveryone) return;
+    setState(() => _replyingTo = m);
+  }
+
+  void _cancelReply() => setState(() => _replyingTo = null);
+
+  /// The id to attach to the next send (and clears the reply state).
+  String? _takeReplyId() {
+    final id = _replyingTo?.id;
+    if (_replyingTo != null) setState(() => _replyingTo = null);
+    return id;
+  }
+
+  /// Find a loaded message by id (for rendering a quoted reply preview).
+  Message? _byId(String? id) {
+    if (id == null) return null;
+    for (final m in _messages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
 
   // Voice recorder
   final _audioRecorder = AudioRecorder();
@@ -193,6 +217,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(Icons.reply, color: MilesColors.emberSoft),
+              title: const Text('Reply',
+                  style: TextStyle(color: MilesColors.cream50)),
+              onTap: () => Navigator.pop(ctx, 'reply'),
+            ),
+            ListTile(
               leading:
                   const Icon(Icons.visibility_off, color: MilesColors.taupe),
               title: const Text('Delete for me',
@@ -218,6 +248,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
     if (action == null) return;
+    if (action == 'reply') {
+      _startReply(m);
+      return;
+    }
     try {
       if (action == 'me') {
         await ChatRepository.deleteForMe(m.id);
@@ -386,6 +420,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           message: m,
                                           mine: m.isMine(uid),
                                           showDateHeader: showTime,
+                                          repliedTo: _byId(m.replyToId),
                                           player: _player,
                                         ),
                                       );
@@ -413,10 +448,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ChatInputBar(
                   coupleId: couple.id,
                   onChanged: _onTyping,
-                  onSendText: (t) => ChatRepository.sendText(couple.id, t),
-                  onSendImage: (f) => ChatRepository.sendImage(couple.id, f),
-                  onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f),
-                  onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f),
+                  replyingTo: _replyingTo,
+                  onCancelReply: _cancelReply,
+                  onSendText: (t) =>
+                      ChatRepository.sendText(couple.id, t, replyToId: _takeReplyId()),
+                  onSendImage: (f) =>
+                      ChatRepository.sendImage(couple.id, f, replyToId: _takeReplyId()),
+                  onSendVoice: (f) =>
+                      ChatRepository.sendVoice(couple.id, f, replyToId: _takeReplyId()),
+                  onSendVideo: (f) =>
+                      ChatRepository.sendVideo(couple.id, f, replyToId: _takeReplyId()),
                 ),
               ],
             ),
@@ -490,12 +531,14 @@ class _Bubble extends StatelessWidget {
     required this.mine,
     required this.showDateHeader,
     required this.player,
+    this.repliedTo,
   });
 
   final Message message;
   final bool mine;
   final bool showDateHeader;
   final AudioPlayer player;
+  final Message? repliedTo;
 
   @override
   Widget build(BuildContext context) {
@@ -536,15 +579,22 @@ class _Bubble extends StatelessWidget {
                   ? null
                   : Border.all(color: MilesColors.gilt.withValues(alpha: 0.12)),
             ),
-            child: message.deletedForEveryone
-                ? const Text(
-                    'This message was deleted',
-                    style: TextStyle(
-                        color: MilesColors.cream50,
-                        fontStyle: FontStyle.italic,
-                        fontSize: 14),
-                  )
-                : _Content(message: message, player: player),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (repliedTo != null) _ReplyPreview(message: repliedTo!),
+                message.deletedForEveryone
+                    ? const Text(
+                        'This message was deleted',
+                        style: TextStyle(
+                            color: MilesColors.cream50,
+                            fontStyle: FontStyle.italic,
+                            fontSize: 14),
+                      )
+                    : _Content(message: message, player: player),
+              ],
+            ),
           ),
         ),
         Padding(
@@ -559,6 +609,34 @@ class _Bubble extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Small quoted preview shown at the top of a bubble that's replying.
+class _ReplyPreview extends StatelessWidget {
+  const _ReplyPreview({required this.message});
+  final Message message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: const Border(
+          left: BorderSide(color: MilesColors.gilt, width: 3),
+        ),
+      ),
+      child: Text(
+        message.previewText(),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+            color: MilesColors.cream50, fontSize: 12, height: 1.2),
+      ),
     );
   }
 }
