@@ -114,7 +114,8 @@ class _AppShellState extends ConsumerState<AppShell>
     _showReach(tap.reachId, name);
   }
 
-  /// An incoming call delivered by FCM (app was backgrounded / closed). Ring it.
+  /// An incoming call delivered by FCM (full-screen ring / tapped notification /
+  /// cold start). Hand it to the CallController to fetch the offer + ring.
   void _onPendingCall() {
     final tap = pendingCall.value;
     if (tap == null) return;
