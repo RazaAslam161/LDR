@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
@@ -29,16 +31,49 @@ class PartnerLocationCard extends StatefulWidget {
 }
 
 class _PartnerLocationCardState extends State<PartnerLocationCard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _map = MapController();
   late final AnimationController _pulse = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1600),
   )..repeat();
+  // Glides the camera smoothly between live fixes so movement is visible.
+  late final AnimationController _move = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..addListener(_onMoveTick);
+  LatLng? _animFrom;
+  LatLng? _animTo;
+
+  void _onMoveTick() {
+    final from = _animFrom, to = _animTo;
+    if (from == null || to == null) return;
+    final t = Curves.easeInOut.transform(_move.value);
+    try {
+      _map.move(
+        LatLng(
+          from.latitude + (to.latitude - from.latitude) * t,
+          from.longitude + (to.longitude - from.longitude) * t,
+        ),
+        _map.camera.zoom,
+      );
+    } catch (_) {}
+  }
+
+  void _glideTo(LatLng target) {
+    try {
+      _animFrom = _map.camera.center;
+    } catch (_) {
+      _animFrom = target;
+    }
+    _animTo = target;
+    _move.forward(from: 0);
+  }
 
   @override
   void dispose() {
     _pulse.dispose();
+    _move.dispose();
     super.dispose();
   }
 
@@ -46,14 +81,15 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   void didUpdateWidget(PartnerLocationCard old) {
     super.didUpdateWidget(old);
     final p = widget.partner;
-    if (p != null && p.isSharingLive) {
+    if (p != null &&
+        p.isSharingLive &&
+        p.latitude != null &&
+        p.longitude != null) {
       final moved = old.partner?.latitude != p.latitude ||
           old.partner?.longitude != p.longitude;
       if (moved) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          try {
-            _map.move(LatLng(p.latitude!, p.longitude!), _map.camera.zoom);
-          } catch (_) {}
+          _glideTo(LatLng(p.latitude!, p.longitude!));
         });
       }
     }
@@ -161,9 +197,17 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                   ),
                 ),
                 children: [
+                  // Ultra-realistic satellite imagery (ESRI World Imagery,
+                  // no API key).
                   TileLayer(
                     urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    userAgentPackageName: 'com.miles.miles',
+                  ),
+                  // Street + place labels on top (hybrid detail).
+                  TileLayer(
+                    urlTemplate:
+                        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
                     userAgentPackageName: 'com.miles.miles',
                   ),
                   if (myPoint != null)
@@ -180,9 +224,10 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                     markers: [
                       Marker(
                         point: point,
-                        width: 70,
-                        height: 70,
-                        child: _PulsingPin(
+                        width: 48,
+                        height: 54,
+                        alignment: Alignment.bottomCenter,
+                        child: _CuteMarker(
                             pulse: _pulse, name: widget.partnerName),
                       ),
                       if (myPoint != null)
@@ -218,30 +263,77 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   }
 }
 
-/// Partner marker with an expanding "live" pulse ring.
-class _PulsingPin extends StatelessWidget {
-  const _PulsingPin({required this.pulse, required this.name});
+/// A small, cute partner marker: a gently-bobbing avatar with a soft "live"
+/// halo and a little ground shadow, anchored at the location point.
+class _CuteMarker extends StatelessWidget {
+  const _CuteMarker({required this.pulse, required this.name});
   final Animation<double> pulse;
   final String name;
 
   @override
   Widget build(BuildContext context) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
     return AnimatedBuilder(
       animation: pulse,
       builder: (context, _) {
-        final v = pulse.value;
+        final v = pulse.value; // 0..1 looping
+        final bob = math.sin(v * 2 * math.pi) * 2.5; // gentle up/down
+        final halo = 1 - (v - 0.5).abs() * 2; // 0 → 1 → 0
         return Stack(
-          alignment: Alignment.center,
+          alignment: Alignment.bottomCenter,
+          clipBehavior: Clip.none,
           children: [
+            // ground shadow
             Container(
-              width: 30 + v * 38,
-              height: 30 + v * 38,
+              width: 12,
+              height: 4,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: MilesColors.blush.withValues(alpha: (1 - v) * 0.35),
+                color: Colors.black.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(4),
               ),
             ),
-            _AvatarPin(name: name),
+            // avatar + halo, lifted off the ground and gently bobbing
+            Positioned(
+              bottom: 6,
+              child: Transform.translate(
+                offset: Offset(0, bob),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: 24 + halo * 12,
+                      height: 24 + halo * 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: MilesColors.blush.withValues(alpha: halo * 0.3),
+                      ),
+                    ),
+                    Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: MilesColors.blush,
+                        border:
+                            Border.all(color: MilesColors.cream50, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                              color: MilesColors.blush.withValues(alpha: 0.6),
+                              blurRadius: 8),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(initial,
+                            style: const TextStyle(
+                                color: MilesColors.cream50,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         );
       },
@@ -264,34 +356,6 @@ class _MyDot extends StatelessWidget {
           BoxShadow(
               color: MilesColors.sage.withValues(alpha: 0.5), blurRadius: 8),
         ],
-      ),
-    );
-  }
-}
-
-class _AvatarPin extends StatelessWidget {
-  const _AvatarPin({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: MilesColors.blush,
-        border: Border.all(color: MilesColors.cream50, width: 2),
-        boxShadow: [
-          BoxShadow(
-              color: MilesColors.blush.withValues(alpha: 0.6), blurRadius: 12),
-        ],
-      ),
-      child: Center(
-        child: Text(initial,
-            style: const TextStyle(
-                color: MilesColors.cream50,
-                fontWeight: FontWeight.bold,
-                fontSize: 16)),
       ),
     );
   }
