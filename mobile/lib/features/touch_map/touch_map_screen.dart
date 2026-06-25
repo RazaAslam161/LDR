@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/touch_haptics.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -23,6 +23,7 @@ class _TouchType {
 }
 
 const List<_TouchType> _types = [
+  _TouchType('caress', '🫳', 'Caress', MilesColors.gilt),
   _TouchType('glow', '💫', 'Glow', MilesColors.blush),
   _TouchType('kiss', '💋', 'Kiss', Color(0xFFD45A77)),
   _TouchType('hug', '🤗', 'Hug', MilesColors.emberSoft),
@@ -107,18 +108,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     super.dispose();
   }
 
-  void _haptic(String type) {
-    switch (type) {
-      case 'kiss':
-        HapticFeedback.mediumImpact();
-      case 'hug':
-        HapticFeedback.heavyImpact();
-        Future.delayed(
-            const Duration(milliseconds: 140), HapticFeedback.heavyImpact);
-      default:
-        HapticFeedback.lightImpact();
-    }
-  }
+  void _haptic(String type) => TouchHaptics.feel(type, _heat);
 
   void _bumpHeat() {
     if (mounted) setState(() => _heat = (_heat + 0.07).clamp(0.0, 1.0));
@@ -158,7 +148,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   /// Local touch on [owner]'s body at normalized (x,y): show it here, buzz a
   /// light feedback, and broadcast so it lands on their phone too.
   void _touch(String owner, double x, double y) {
-    HapticFeedback.selectionClick(); // light feedback for the toucher
+    TouchHaptics.touchTick(); // light feedback for the toucher
     _bumpHeat();
     _spawn(owner, x, y, _type);
     _channel?.sendBroadcastMessage(event: 'touch', payload: {
@@ -540,10 +530,14 @@ class _SilhouettePainter extends CustomPainter {
       Rect.fromLTWH(w * 0.37, h * 0.18, w * 0.26, h * 0.34),
       Radius.circular(w * 0.11),
     );
-    c..drawRRect(torso, fill)..drawRRect(torso, stroke);
+    c
+      ..drawRRect(torso, fill)
+      ..drawRRect(torso, stroke);
 
     final head = Offset(w * 0.5, h * 0.09);
-    c..drawCircle(head, w * 0.07, fill)..drawCircle(head, w * 0.07, stroke);
+    c
+      ..drawCircle(head, w * 0.07, fill)
+      ..drawCircle(head, w * 0.07, stroke);
   }
 
   @override

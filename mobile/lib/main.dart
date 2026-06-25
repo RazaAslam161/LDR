@@ -21,6 +21,7 @@ import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/features/call/call_pill.dart';
+import 'package:miles/features/intro/intro_splash.dart';
 import 'package:miles/firebase_options.dart';
 
 Future<void> main() async {
@@ -154,6 +155,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
             builder: (context, locked, _) =>
                 locked ? const LockScreen() : const SizedBox.shrink(),
           ),
+          // Romantic intro — on top of everything, fades away after a moment.
+          const IntroSplash(),
         ],
       ),
     );

@@ -123,12 +123,13 @@ class ChatRepository {
   }
 
   static Future<void> sendText(String coupleId, String body,
-      {String? replyToId}) async {
+      {String? replyToId, String? id}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     final trimmed = body.trim();
     if (trimmed.isEmpty) return;
     await _c.from('messages').insert({
+      if (id != null) 'id': id,
       'couple_id': coupleId,
       'sender_id': uid,
       'body': trimmed,

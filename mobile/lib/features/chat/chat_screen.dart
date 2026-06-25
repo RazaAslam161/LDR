@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/root_scaffold_key.dart';
@@ -28,6 +28,7 @@ import 'package:miles/features/closer/secure_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
+import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -53,6 +54,60 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   RealtimeChannel? _moodChannel;
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
+  static const _uuid = Uuid();
+
+  /// Send text with INSTANT feedback: show it locally now (optimistic), push it
+  /// to the partner over realtime broadcast (fast), and persist to the DB. All
+  /// three carry the same id, so the postgres echo + broadcast dedupe cleanly.
+  Future<void> _sendTextFast(String coupleId, String t) async {
+    final body = t.trim();
+    if (body.isEmpty) return;
+    final replyId = _takeReplyId();
+    final id = _uuid.v4();
+    final myUid = SupabaseService.currentUserId;
+    final now = DateTime.now();
+    if (myUid != null) {
+      _onIncoming(Message(
+        id: id,
+        senderId: myUid,
+        createdAt: now,
+        body: body,
+        kind: 'text',
+        replyToId: replyId,
+      ));
+    }
+    _moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
+      'id': id,
+      'sender': myUid,
+      'body': body,
+      'createdAt': now.toUtc().toIso8601String(),
+      'replyToId': replyId,
+    });
+    try {
+      await ChatRepository.sendText(coupleId, body, id: id, replyToId: replyId);
+    } catch (_) {
+      /* it's already on screen; the DB retry isn't worth blocking */
+    }
+  }
+
+  /// A text message pushed by the partner over broadcast — shown immediately,
+  /// then deduped when the slower postgres echo arrives (same id).
+  void _onMsgBroadcast(Map<String, dynamic> payload) {
+    final id = payload['id']?.toString();
+    final sender = payload['sender']?.toString();
+    if (id == null || sender == null) return;
+    final created =
+        DateTime.tryParse(payload['createdAt']?.toString() ?? '')?.toLocal() ??
+            DateTime.now();
+    _onIncoming(Message(
+      id: id,
+      senderId: sender,
+      createdAt: created,
+      body: payload['body']?.toString(),
+      kind: 'text',
+      replyToId: payload['replyToId']?.toString(),
+    ));
+  }
 
   void _sendGifBurst(String url) {
     _moodChannel?.sendBroadcastMessage(event: 'mood', payload: {'gif': url});
@@ -183,6 +238,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _moodChannel = SupabaseService.client
         .channel('mood_burst:${couple.id}')
         .onBroadcast(event: 'mood', callback: _onMoodBurst)
+        .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
         .subscribe();
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
@@ -604,8 +660,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       onChanged: _onTyping,
                       replyingTo: _replyingTo,
                       onCancelReply: _cancelReply,
-                      onSendText: (t) => ChatRepository.sendText(couple.id, t,
-                          replyToId: _takeReplyId()),
+                      onSendText: (t) => _sendTextFast(couple.id, t),
                       onSendImage: (f) => ChatRepository.sendImage(couple.id, f,
                           replyToId: _takeReplyId()),
                       onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
