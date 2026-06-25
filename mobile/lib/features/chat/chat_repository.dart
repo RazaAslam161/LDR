@@ -64,9 +64,12 @@ class Message {
         return '🎬 Video';
       default:
         final b = (body ?? '').trim();
-        return b.isEmpty ? 'Message' : (b.length > 60 ? '${b.substring(0, 60)}…' : b);
+        return b.isEmpty
+            ? 'Message'
+            : (b.length > 60 ? '${b.substring(0, 60)}…' : b);
     }
   }
+
   final DateTime createdAt;
   final bool deletedForEveryone;
   final List<String> deletedBy;
@@ -236,7 +239,8 @@ class ChatRepository {
       );
 
   /// Clears the whole conversation for the current user only.
-  static Future<void> clearConversation() => _c.rpc<dynamic>('clear_conversation');
+  static Future<void> clearConversation() =>
+      _c.rpc<dynamic>('clear_conversation');
 
   // ─── helpers ──────────────────────────────────────────────────
 
@@ -248,8 +252,8 @@ class ChatRepository {
 
   static String _randomName(String prefix, String ext) {
     final rng = Random();
-    final hex = List.generate(12, (_) => rng.nextInt(16).toRadixString(16))
-        .join();
+    final hex =
+        List.generate(12, (_) => rng.nextInt(16).toRadixString(16)).join();
     final ms = DateTime.now().millisecondsSinceEpoch;
     return '${prefix}_$ms$hex.$ext';
   }

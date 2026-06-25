@@ -14,9 +14,7 @@ class TypingIndicator extends StatelessWidget {
           height: 5,
           margin: const EdgeInsets.symmetric(horizontal: 1.5),
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        )
-            .animate(onPlay: (c) => c.repeat(reverse: true))
-            .moveY(
+        ).animate(onPlay: (c) => c.repeat(reverse: true)).moveY(
               begin: 0,
               end: -3,
               duration: 400.ms,

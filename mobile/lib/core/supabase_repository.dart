@@ -240,6 +240,29 @@ class SupabaseRepository {
         .update({'gender': gender, 'gender_set': true}).eq('id', uid);
   }
 
+  /// Per-user chat theme (Issue 5). Each partner has their own.
+  static Future<void> setChatTheme(String themeId, {String? bgUrl}) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    final patch = <String, dynamic>{'chat_theme_id': themeId};
+    if (themeId == 'custom') patch['chat_bg_image_url'] = bgUrl;
+    await _c.from('profiles').update(patch).eq('id', uid);
+  }
+
+  static Future<({String themeId, String? bgUrl})> getChatTheme() async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return (themeId: 'velvet', bgUrl: null);
+    final res = await _c
+        .from('profiles')
+        .select('chat_theme_id, chat_bg_image_url')
+        .eq('id', uid)
+        .maybeSingle();
+    return (
+      themeId: JsonUtils.parseString(res?['chat_theme_id'], fallback: 'velvet'),
+      bgUrl: JsonUtils.parseStringOrNull(res?['chat_bg_image_url']),
+    );
+  }
+
   /// Persists (or clears) this device's FCM push token on the user's profile.
   /// Pass null on sign-out so stale devices stop receiving Reach pushes.
   static Future<void> setFcmToken(String? token) async {

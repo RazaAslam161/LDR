@@ -389,3 +389,29 @@ drawer is full-height. Dead `rootScaffoldKey` imports removed. The 6 shell tabs
 are unchanged (they already work). Drawer now opens from every screen.
 
 **flutter analyze:** 0 errors.
+
+## Issue 5 — Chat themes (built-in + custom from gallery)
+
+- Migration `chat_theme_prefs`: `profiles.chat_theme_id` (default 'velvet') +
+  `chat_bg_image_url`; `chat-bg` storage bucket with owner-only write RLS
+  (path `chat-bg/{uid}/`).
+- `chat_theme.dart`: 6 on-brand built-ins (Midnight Boudoir/velvet, Candlelit,
+  Aurora, Blush, Starlit, Dawn) + a 'custom' theme. Each = bg gradient/solid +
+  my/partner bubble colours + text + subtext (Dawn is light → dark text for
+  contrast).
+- `ChatThemeController` (Riverpod): loads instantly from a local cache, then
+  reconciles from the profile (cross-device); `setTheme` / `setCustomBackground`
+  persist to cache + profile. Each partner has their OWN theme.
+- `chat_theme_picker.dart` (Chat ⋮ → "Chat theme"): a 6-swatch grid with mini
+  bubble previews, "Choose from gallery" (PhotoPickerService → crop/compress →
+  upload to chat-bg → custom theme), and "Reset to default". Applies live.
+- ChatScreen: themed background (`_ChatBg` — gradient/solid, or the custom photo
+  with a **dark top→bottom scrim** so text stays readable over any image), themed
+  bubble colours + message text colour. Mood-burst tints still layer on top.
+
+**Note:** `cached_network_image` isn't in the project; the custom background uses
+`Image.network` (Flutter's in-memory image cache). Adding disk caching is a small
+follow-up. Bucket is public-but-obscure-path (matches existing `couple_media`) —
+a deliberate simplification over signed URLs for a wallpaper.
+
+**flutter analyze:** 0 errors.

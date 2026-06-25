@@ -14,6 +14,9 @@ import 'package:miles/core/theme.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_theme.dart';
+import 'package:miles/features/chat/chat_theme_controller.dart';
+import 'package:miles/features/chat/chat_theme_picker.dart';
 import 'package:miles/features/chat/mood_selector.dart';
 import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -347,6 +350,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final uid = SupabaseService.currentUserId;
     final presence = ref.watch(partnerPresenceProvider);
     final partnerMood = moodByKey(presence?.currentMood);
+    final themeCtrl = ref.watch(chatThemeProvider);
+    final chatTheme = themeCtrl.theme;
+    final chatBgUrl = themeCtrl.bgUrl;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -409,8 +415,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               color: MilesColors.surface1,
               onSelected: (v) {
                 if (v == 'clear') _clearConversation();
+                if (v == 'theme') showChatThemePicker(context);
               },
               itemBuilder: (_) => const [
+                PopupMenuItem(value: 'theme', child: Text('Chat theme')),
                 PopupMenuItem(
                     value: 'clear', child: Text('Clear conversation')),
               ],
@@ -419,87 +427,96 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: couple == null
           ? const _NotLinked()
-          : Column(
+          : Stack(
               children: [
-                Expanded(
-                  child: _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _messages.isEmpty
-                          ? const _EmptyChat()
-                          : Builder(builder: (_) {
-                              final visible = _messages
-                                  .where((m) => !m.isHiddenFor(uid))
-                                  .toList();
-                              if (visible.isEmpty) return const _EmptyChat();
-                              return Stack(
-                                children: [
-                                  ListView.builder(
-                                    controller: _scroll,
-                                    reverse: true,
-                                    padding: const EdgeInsets.fromLTRB(
-                                        16, 12, 16, 12),
-                                    itemCount: visible.length,
-                                    itemBuilder: (_, i) {
-                                      final m = visible[i];
-                                      // Descending list: the older neighbour is
-                                      // i+1, so a date header marks the oldest
-                                      // message of each day (top of the group).
-                                      final showTime =
-                                          i == visible.length - 1 ||
-                                              !DateUtils.isSameDay(
-                                                  visible[i + 1].createdAt,
-                                                  m.createdAt);
-                                      return GestureDetector(
-                                        onLongPress: () => _showMessageActions(
-                                            m, m.isMine(uid)),
-                                        child: _Bubble(
-                                          message: m,
-                                          mine: m.isMine(uid),
-                                          showDateHeader: showTime,
-                                          repliedTo: _byId(m.replyToId),
-                                          player: _player,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  if (_hasNewMessage)
-                                    Positioned(
-                                      bottom: 12,
-                                      left: 0,
-                                      right: 0,
-                                      child: Center(
-                                        child: _NewMessageChip(
-                                          onTap: () {
-                                            setState(
-                                                () => _hasNewMessage = false);
-                                            _scrollToNewest();
-                                          },
-                                        ),
+                Positioned.fill(
+                    child: _ChatBg(theme: chatTheme, bgUrl: chatBgUrl)),
+                Column(
+                  children: [
+                    Expanded(
+                      child: _loading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _messages.isEmpty
+                              ? const _EmptyChat()
+                              : Builder(builder: (_) {
+                                  final visible = _messages
+                                      .where((m) => !m.isHiddenFor(uid))
+                                      .toList();
+                                  if (visible.isEmpty)
+                                    return const _EmptyChat();
+                                  return Stack(
+                                    children: [
+                                      ListView.builder(
+                                        controller: _scroll,
+                                        reverse: true,
+                                        padding: const EdgeInsets.fromLTRB(
+                                            16, 12, 16, 12),
+                                        itemCount: visible.length,
+                                        itemBuilder: (_, i) {
+                                          final m = visible[i];
+                                          // Descending list: the older neighbour is
+                                          // i+1, so a date header marks the oldest
+                                          // message of each day (top of the group).
+                                          final showTime =
+                                              i == visible.length - 1 ||
+                                                  !DateUtils.isSameDay(
+                                                      visible[i + 1].createdAt,
+                                                      m.createdAt);
+                                          return GestureDetector(
+                                            onLongPress: () =>
+                                                _showMessageActions(
+                                                    m, m.isMine(uid)),
+                                            child: _Bubble(
+                                              message: m,
+                                              mine: m.isMine(uid),
+                                              showDateHeader: showTime,
+                                              repliedTo: _byId(m.replyToId),
+                                              player: _player,
+                                              theme: chatTheme,
+                                            ),
+                                          );
+                                        },
                                       ),
-                                    ),
-                                  for (final b in _bursts)
-                                    _BurstAnimation(
-                                      key: ValueKey(b.id),
-                                      mood: b.mood,
-                                      onDone: () => _removeBurst(b.id),
-                                    ),
-                                ],
-                              );
-                            }),
-                ),
-                ChatInputBar(
-                  coupleId: couple.id,
-                  onChanged: _onTyping,
-                  replyingTo: _replyingTo,
-                  onCancelReply: _cancelReply,
-                  onSendText: (t) => ChatRepository.sendText(couple.id, t,
-                      replyToId: _takeReplyId()),
-                  onSendImage: (f) => ChatRepository.sendImage(couple.id, f,
-                      replyToId: _takeReplyId()),
-                  onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
-                      replyToId: _takeReplyId()),
-                  onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
-                      replyToId: _takeReplyId()),
+                                      if (_hasNewMessage)
+                                        Positioned(
+                                          bottom: 12,
+                                          left: 0,
+                                          right: 0,
+                                          child: Center(
+                                            child: _NewMessageChip(
+                                              onTap: () {
+                                                setState(() =>
+                                                    _hasNewMessage = false);
+                                                _scrollToNewest();
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      for (final b in _bursts)
+                                        _BurstAnimation(
+                                          key: ValueKey(b.id),
+                                          mood: b.mood,
+                                          onDone: () => _removeBurst(b.id),
+                                        ),
+                                    ],
+                                  );
+                                }),
+                    ),
+                    ChatInputBar(
+                      coupleId: couple.id,
+                      onChanged: _onTyping,
+                      replyingTo: _replyingTo,
+                      onCancelReply: _cancelReply,
+                      onSendText: (t) => ChatRepository.sendText(couple.id, t,
+                          replyToId: _takeReplyId()),
+                      onSendImage: (f) => ChatRepository.sendImage(couple.id, f,
+                          replyToId: _takeReplyId()),
+                      onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
+                          replyToId: _takeReplyId()),
+                      onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
+                          replyToId: _takeReplyId()),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -573,6 +590,7 @@ class _Bubble extends StatelessWidget {
     required this.mine,
     required this.showDateHeader,
     required this.player,
+    required this.theme,
     this.repliedTo,
   });
 
@@ -580,6 +598,7 @@ class _Bubble extends StatelessWidget {
   final bool mine;
   final bool showDateHeader;
   final AudioPlayer player;
+  final ChatTheme theme;
   final Message? repliedTo;
 
   @override
@@ -609,7 +628,7 @@ class _Bubble extends StatelessWidget {
               maxWidth: MediaQuery.of(context).size.width * 0.74,
             ),
             decoration: BoxDecoration(
-              color: mine ? MilesColors.ember : MilesColors.surface1,
+              color: mine ? theme.myBubble : theme.partnerBubble,
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(18),
                 topRight: const Radius.circular(18),
@@ -626,14 +645,17 @@ class _Bubble extends StatelessWidget {
               children: [
                 if (repliedTo != null) _ReplyPreview(message: repliedTo!),
                 message.deletedForEveryone
-                    ? const Text(
+                    ? Text(
                         'This message was deleted',
                         style: TextStyle(
-                            color: MilesColors.cream50,
+                            color: theme.text,
                             fontStyle: FontStyle.italic,
                             fontSize: 14),
                       )
-                    : _Content(message: message, player: player),
+                    : _Content(
+                        message: message,
+                        player: player,
+                        textColor: theme.text),
               ],
             ),
           ),
@@ -762,9 +784,14 @@ class _ReplyPreview extends StatelessWidget {
 
 /// Renders the inside of a bubble based on message kind.
 class _Content extends StatelessWidget {
-  const _Content({required this.message, required this.player});
+  const _Content({
+    required this.message,
+    required this.player,
+    this.textColor = MilesColors.cream50,
+  });
   final Message message;
   final AudioPlayer player;
+  final Color textColor;
 
   @override
   Widget build(BuildContext context) {
@@ -820,13 +847,58 @@ class _Content extends StatelessWidget {
       default:
         return Text(
           m.body ?? '',
-          style: const TextStyle(
-            color: MilesColors.cream50,
+          style: TextStyle(
+            color: textColor,
             fontSize: 15,
             height: 1.35,
           ),
         );
     }
+  }
+}
+
+/// The themed chat background: a gradient/solid colour, or — for the 'custom'
+/// theme — the user's photo with a dark scrim so message text stays readable.
+class _ChatBg extends StatelessWidget {
+  const _ChatBg({required this.theme, required this.bgUrl});
+  final ChatTheme theme;
+  final String? bgUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    if (theme.isCustom && bgUrl != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            bgUrl!,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+                const ColoredBox(color: MilesColors.night),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x59000000), Color(0xA6000000)],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: theme.bg.length == 1
+              ? [theme.bg.first, theme.bg.first]
+              : theme.bg,
+        ),
+      ),
+    );
   }
 }
 
@@ -1134,4 +1206,3 @@ class _NotLinked extends StatelessWidget {
     );
   }
 }
-
