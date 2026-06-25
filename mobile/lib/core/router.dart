@@ -26,6 +26,7 @@ import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
 import 'package:miles/features/intimacy/intimacy_screen.dart';
+import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
@@ -142,6 +143,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/together',
         builder: (context, state) => const TogetherScreen(),
+      ),
+      GoRoute(
+        path: '/app/reasons',
+        builder: (context, state) => const ReasonsScreen(),
       ),
       GoRoute(
         path: '/call',

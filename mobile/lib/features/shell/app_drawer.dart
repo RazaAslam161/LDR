@@ -118,6 +118,14 @@ class AppDrawer extends ConsumerWidget {
                 },
               ),
               _DrawerTile(
+                icon: Icons.auto_awesome,
+                label: 'Reasons I Love You',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/app/reasons');
+                },
+              ),
+              _DrawerTile(
                 icon: Icons.schedule,
                 label: 'Rituals',
                 onTap: () {
