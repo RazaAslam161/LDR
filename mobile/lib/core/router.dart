@@ -27,9 +27,9 @@ import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
+import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/games_screen.dart';
-import 'package:miles/features/games/party_decks.dart';
-import 'package:miles/features/games/simple_card_game_screen.dart';
+import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
@@ -183,21 +183,23 @@ GoRouter buildRouter(Ref ref) {
       ),
       GoRoute(
         path: '/app/games/would-you-rather',
-        builder: (context, state) => const SimpleCardGameScreen(
+        builder: (context, state) => SyncedCardGameScreen(
           title: 'Would You Rather',
-          subtitle: 'Yeh ya woh? Tap karke agla sawaal — saath socho.',
+          subtitle: 'Yeh ya woh? Dono ke phone par ek hi sawaal — jawab neeche do.',
           emoji: '🤔',
-          cards: wouldYouRatherDeck,
+          cards: wyrPool,
+          gameKey: 'wyr',
           accent: MilesColors.sage,
         ),
       ),
       GoRoute(
         path: '/app/games/never-have-i-ever',
-        builder: (context, state) => const SimpleCardGameScreen(
+        builder: (context, state) => SyncedCardGameScreen(
           title: 'Never Have I Ever',
-          subtitle: 'Maine kabhi nahi… sach bolo, hans-hans ke.',
+          subtitle: 'Maine kabhi nahi… sach bolo, jawab neeche likho.',
           emoji: '🙊',
-          cards: neverHaveIEverDeck,
+          cards: nhiePool,
+          gameKey: 'nhie',
           accent: MilesColors.blush,
         ),
       ),

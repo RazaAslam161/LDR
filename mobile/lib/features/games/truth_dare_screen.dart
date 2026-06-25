@@ -8,6 +8,8 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/features/games/game_chat_panel.dart';
+import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -77,17 +79,21 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
   }
 
   void _onState(Map<String, dynamic> payload) {
-    if (payload['from'] == _myUid) return;
-    if (!mounted) return;
+    if (payload['from'] == _myUid || !mounted) return;
+    final cardJson = payload['card'];
+    final card = cardJson is Map
+        ? TDCard.fromJson(cardJson.cast<String, dynamic>())
+        : null;
+    if (card != null) {
+      markTDSeen(card); // keep the no-repeat shared across phones
+    }
     setState(() {
       _started = true;
       _turn = payload['turn'] as String?;
       _round = (payload['round'] as int?) ?? _round;
       _tier = TDTier.values
           .firstWhere((t) => t.name == payload['tier'], orElse: () => _tier);
-      final card = payload['card'];
-      _card =
-          card is Map ? TDCard.fromJson(card.cast<String, dynamic>()) : null;
+      _card = card;
     });
   }
 
@@ -116,16 +122,20 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     if (_started) _broadcast();
   }
 
-  void _pick(TDType type) {
+  Future<void> _pick(TDType type) async {
     if (!_myTurn || _card != null) return;
-    setState(() => _card = drawCard(type, _tier));
+    final card = await drawTD(type, _tier);
+    if (!mounted) return;
+    setState(() => _card = card);
     _broadcast();
   }
 
-  void _redraw() {
+  Future<void> _redraw() async {
     final c = _card;
     if (!_myTurn || c == null) return;
-    setState(() => _card = drawCard(c.type, _tier));
+    final card = await drawTD(c.type, _tier);
+    if (!mounted) return;
+    setState(() => _card = card);
     _broadcast();
   }
 
@@ -168,6 +178,10 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                         style: const TextStyle(
                             color: MilesColors.taupe, fontSize: 12)),
                   ),
+                if (_coupleId != null) ...[
+                  const SizedBox(height: 10),
+                  GameChatPanel(coupleId: _coupleId!, gameKey: 'td'),
+                ],
               ],
             ),
           ),
