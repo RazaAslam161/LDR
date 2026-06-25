@@ -14,6 +14,7 @@ import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
+import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/features/chat/media_viewer.dart';
@@ -270,8 +271,7 @@ class _PartnerStatusCard extends StatelessWidget {
                         ),
                         if (mood != null) ...[
                           const SizedBox(width: 6),
-                          Text(mood.emoji,
-                              style: const TextStyle(fontSize: 15)),
+                          AnimatedMood(mood: mood, size: 20),
                         ],
                       ],
                     ),

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/theme.dart';
@@ -71,6 +72,33 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _text.dispose();
     _recorder.dispose();
     super.dispose();
+  }
+
+  /// A GIF/sticker/image inserted from the phone's keyboard (Gboard GIF panel).
+  /// Saved as-is and sent as an image message — GIFs stay animated (sendImage
+  /// uploads the raw file without recompressing).
+  Future<void> _onKeyboardContent(KeyboardInsertedContent content) async {
+    final data = content.data;
+    if (data == null) return;
+    try {
+      final mime = content.mimeType.toLowerCase();
+      final ext = mime.contains('gif')
+          ? 'gif'
+          : mime.contains('png')
+              ? 'png'
+              : mime.contains('webp')
+                  ? 'webp'
+                  : 'jpg';
+      final dir = await getTemporaryDirectory();
+      final f =
+          File('${dir.path}/kbd_${DateTime.now().millisecondsSinceEpoch}.$ext');
+      await f.writeAsBytes(data);
+      setState(() => _sending = true);
+      await widget.onSendImage(f);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   Future<void> _sendText() async {
@@ -291,6 +319,19 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           minLines: 1,
                           maxLines: 5,
                           onChanged: widget.onChanged,
+                          // Phone's built-in emoji work automatically; this lets
+                          // the keyboard's GIF/sticker picker (Gboard) insert
+                          // straight into chat.
+                          contentInsertionConfiguration:
+                              ContentInsertionConfiguration(
+                            allowedMimeTypes: const [
+                              'image/gif',
+                              'image/webp',
+                              'image/png',
+                              'image/jpeg',
+                            ],
+                            onContentInserted: _onKeyboardContent,
+                          ),
                           style: const TextStyle(color: MilesColors.cream50),
                           decoration: InputDecoration(
                             hintText: 'Message…',

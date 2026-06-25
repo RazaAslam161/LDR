@@ -11,6 +11,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_repository.dart';
@@ -393,7 +394,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
                 if (partnerMood != null) ...[
                   const SizedBox(width: 8),
-                  Text(partnerMood.emoji, style: const TextStyle(fontSize: 16)),
+                  AnimatedMood(mood: partnerMood, size: 20),
                 ],
               ],
             ),
@@ -897,8 +898,7 @@ class _BurstAnimationState extends State<_BurstAnimation>
                         ),
                       ],
                     ),
-                    child: Text(widget.mood.emoji,
-                        style: const TextStyle(fontSize: 84)),
+                    child: AnimatedMood(mood: widget.mood, size: 92),
                   ),
                 ),
               ),

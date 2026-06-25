@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/animated_mood.dart';
 
 /// A bottom sheet of mood chips. Returns the chosen [MoodData] (or null).
 Future<MoodData?> showMoodSelector(BuildContext context, {String? currentKey}) {
@@ -42,7 +43,7 @@ Future<MoodData?> showMoodSelector(BuildContext context, {String? currentKey}) {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(m.emoji),
+                          AnimatedMood(mood: m, size: 26),
                           const SizedBox(width: 6),
                           Text(m.label,
                               style: const TextStyle(
