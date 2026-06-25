@@ -54,6 +54,7 @@ class VaultItem {
   VaultItem({
     required this.id,
     required this.kind,
+    required this.ad,
     required this.ciphertext,
     required this.nonce,
     required this.mac,
@@ -68,6 +69,9 @@ class VaultItem {
 
   final String id;
   final VaultKind kind;
+
+  /// The per-item associated-data bound at encrypt time — required to decrypt.
+  final String ad;
 
   /// Raw ciphertext + nonce + MAC — see [packMacAndCiphertext] / [unpackMacAndCiphertext].
   final Uint8List ciphertext;
@@ -118,6 +122,7 @@ class VaultItem {
     return VaultItem(
       id: JsonUtils.parseString(json['id']),
       kind: _parseKind(JsonUtils.parseString(json['kind'])),
+      ad: JsonUtils.parseString(json['ad']),
       ciphertext: cipherBytes,
       nonce: nonce,
       mac: macBytes,
@@ -272,9 +277,9 @@ class PrivateVaultRepository {
 /// Decrypts the note/photo bytes of [item] back to its original form.
 /// Throws if the MAC check fails (tampering) or the shared key is missing.
 Future<String> decryptVaultNote(VaultItem item) {
-  return CryptoCore.decryptString(item.payload);
+  return CryptoCore.decryptString(item.payload, associatedData: item.ad);
 }
 
 Future<Uint8List> decryptVaultBytes(VaultItem item) {
-  return CryptoCore.decryptBytes(item.payload);
+  return CryptoCore.decryptBytes(item.payload, associatedData: item.ad);
 }

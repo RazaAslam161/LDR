@@ -315,21 +315,27 @@ class MemoryThreadRepository {
   }
 }
 
+// NOTE: these MUST pass the same associated-data the propose() step used
+// (the item id), or the Poly1305 MAC check fails with "could not decrypt".
+
 /// Decrypts the title of [thread] for display.
 Future<String> decryptTitle(MemoryThread thread) async {
-  return CryptoCore.decryptString(thread.titlePayload());
+  return CryptoCore.decryptString(thread.titlePayload(),
+      associatedData: thread.id);
 }
 
 /// Decrypts the optional note. Returns null if there isn't one.
 Future<String?> decryptNote(MemoryThread thread) async {
   final payload = thread.notePayload();
   if (payload == null) return null;
-  return CryptoCore.decryptString(payload);
+  return CryptoCore.decryptString(payload,
+      associatedData: '${thread.id}_note');
 }
 
 /// Decrypts the optional photo. Returns null if there isn't one.
 Future<Uint8List?> decryptPhoto(MemoryThread thread) async {
   final payload = thread.photoPayload();
   if (payload == null) return null;
-  return CryptoCore.decryptBytes(payload);
+  return CryptoCore.decryptBytes(payload,
+      associatedData: '${thread.id}_photo');
 }

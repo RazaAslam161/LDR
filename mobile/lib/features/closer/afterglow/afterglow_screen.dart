@@ -255,15 +255,15 @@ class _ErrorState extends StatelessWidget {
 }
 
 /// A single sealed afterglow entry — two gratitude lines side by side.
-class _AfterglowCard extends StatefulWidget {
+class _AfterglowCard extends ConsumerStatefulWidget {
   const _AfterglowCard({required this.entry});
   final AfterglowEntry entry;
 
   @override
-  State<_AfterglowCard> createState() => _AfterglowCardState();
+  ConsumerState<_AfterglowCard> createState() => _AfterglowCardState();
 }
 
-class _AfterglowCardState extends State<_AfterglowCard> {
+class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
   String? _gratitudeA;
   String? _gratitudeB;
   String? _error;
@@ -277,13 +277,22 @@ class _AfterglowCardState extends State<_AfterglowCard> {
 
   Future<void> _decrypt() async {
     try {
+      // gratitude_a/b were encrypted with the author's uid as associated data;
+      // the alphabetically-first uid is "A". Pass it back or the MAC fails.
+      final session = ref.read(sessionProvider);
+      final ids = [
+        session.profile?.id ?? '',
+        session.partner?.id ?? '',
+      ]..sort();
+      final adA = ids[0];
+      final adB = ids[1];
       final results = await Future.wait([
         if (widget.entry.gratitudeABytes != null)
           _decryptGratitude(widget.entry.gratitudeABytes!,
-              widget.entry.nonceABytes!,),
+              widget.entry.nonceABytes!, adA),
         if (widget.entry.gratitudeBBytes != null)
           _decryptGratitude(widget.entry.gratitudeBBytes!,
-              widget.entry.nonceBBytes!,),
+              widget.entry.nonceBBytes!, adB),
       ]);
       if (!mounted) return;
       setState(() {
@@ -305,11 +314,12 @@ class _AfterglowCardState extends State<_AfterglowCard> {
     }
   }
 
-  Future<String> _decryptGratitude(Uint8List blob, Uint8List nonce) async {
+  Future<String> _decryptGratitude(
+      Uint8List blob, Uint8List nonce, String ad) async {
     // Afterglow schema has dedicated nonce columns but no separate MAC column,
-    // so the blob is packed as `mac || ciphertext`.
+    // so the blob is packed as `mac || ciphertext`. The author uid is the AD.
     final payload = unpackMacAndCiphertext(blob: blob, nonce: nonce);
-    return CryptoCore.decryptString(payload);
+    return CryptoCore.decryptString(payload, associatedData: ad);
   }
 
   @override

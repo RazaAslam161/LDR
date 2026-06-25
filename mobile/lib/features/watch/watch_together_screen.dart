@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
@@ -71,6 +72,25 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       _controller!.load(id);
     }
     if (broadcast) _broadcast();
+  }
+
+  /// Paste the clipboard link and play it (robust against the paste menu not
+  /// showing on some keyboards).
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) return;
+    _urlInput.text = text;
+    final id = YoutubePlayer.convertUrlToId(text);
+    if (id != null) {
+      _loadVideo(id);
+      _urlInput.clear();
+      if (mounted) FocusScope.of(context).unfocus();
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Clipboard isn’t a YouTube link.')),
+      );
+    }
   }
 
   void _onUrlSubmit() {
@@ -163,7 +183,12 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
                     onSubmitted: (_) => _onUrlSubmit(),
                   ),
                 ),
-                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Paste link',
+                  icon: const Icon(Icons.content_paste,
+                      color: MilesColors.emberSoft),
+                  onPressed: _paste,
+                ),
                 FilledButton(
                     onPressed: _onUrlSubmit, child: const Text('Play')),
               ],
