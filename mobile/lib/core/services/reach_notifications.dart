@@ -59,12 +59,65 @@ Future<void> showReachNotification({
   );
 }
 
+// ── Incoming calls ───────────────────────────────────────────────────────────
+const String kCallChannelId = 'call_channel';
+const String kCallChannelName = 'Incoming Calls';
+const String kCallChannelDesc = 'Ringing when your partner calls you';
+
+Int64List callVibrationPattern() =>
+    Int64List.fromList(<int>[0, 800, 600, 800, 600, 800]);
+
+AndroidNotificationChannel buildCallChannel() => AndroidNotificationChannel(
+      kCallChannelId,
+      kCallChannelName,
+      description: kCallChannelDesc,
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      vibrationPattern: callVibrationPattern(),
+    );
+
+/// A full-screen incoming-call ring. Tapping it opens the app to the ringing
+/// call screen (answer / decline happens in-app). Degrades to a max-priority
+/// heads-up when the full-screen-intent permission isn't granted.
+Future<void> showCallNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String fromName,
+  required String callId,
+  required bool video,
+  required bool fullScreen,
+}) async {
+  final android = AndroidNotificationDetails(
+    kCallChannelId,
+    kCallChannelName,
+    channelDescription: kCallChannelDesc,
+    importance: Importance.max,
+    priority: Priority.max,
+    category: AndroidNotificationCategory.call,
+    fullScreenIntent: fullScreen,
+    ongoing: true,
+    playSound: true,
+    enableVibration: true,
+    vibrationPattern: callVibrationPattern(),
+    icon: '@mipmap/ic_launcher',
+    ticker: 'Incoming call',
+  );
+  await plugin.show(
+    id: callId.hashCode & 0x7fffffff,
+    title: video ? '$fromName is video calling 📹' : '$fromName is calling 📞',
+    body: 'Tap to answer',
+    notificationDetails: NotificationDetails(android: android),
+    payload: 'call|$callId|$fromName|${video ? 1 : 0}',
+  );
+}
+
 // ── Care Nudges ──────────────────────────────────────────────────────────────
 const String kCareChannelId = 'care_channel';
 const String kCareChannelName = 'Care Reminders';
 const String kCareChannelDesc = 'Gentle reminders from your partner';
 
-AndroidNotificationChannel buildCareChannel() => const AndroidNotificationChannel(
+AndroidNotificationChannel buildCareChannel() =>
+    const AndroidNotificationChannel(
       kCareChannelId,
       kCareChannelName,
       description: kCareChannelDesc,
@@ -103,7 +156,7 @@ Future<void> showCareNotification({
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final type = message.data['type'];
-  if (type != 'reach' && type != 'care') return;
+  if (type != 'reach' && type != 'care' && type != 'call') return;
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final plugin = FlutterLocalNotificationsPlugin();
@@ -114,6 +167,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   );
   final androidPlugin = plugin.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
+
+  if (type == 'call') {
+    await androidPlugin?.createNotificationChannel(buildCallChannel());
+    final prefs = await SharedPreferences.getInstance();
+    final fullScreen = prefs.getBool('fsi_can_use') ?? false;
+    await showCallNotification(
+      plugin: plugin,
+      fromName: (message.data['from_name'] as String?) ?? 'Your partner',
+      callId: (message.data['call_id'] as String?) ?? '',
+      video: (message.data['video'] as String?) == 'true',
+      fullScreen: fullScreen,
+    );
+    return;
+  }
 
   if (type == 'care') {
     await androidPlugin?.createNotificationChannel(buildCareChannel());

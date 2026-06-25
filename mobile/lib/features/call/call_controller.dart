@@ -37,6 +37,8 @@ class CallController extends ChangeNotifier {
   String? peerName; // who's calling / being called
 
   final List<RTCIceCandidate> _pendingRemote = [];
+  final List<RTCIceCandidate> _localCandidates =
+      []; // re-sent if callee was closed
   bool _remoteSet = false;
   Timer? _connectTimer;
 
@@ -64,6 +66,45 @@ class CallController extends ChangeNotifier {
         _teardown(CallState.ended);
       }
     });
+  }
+
+  /// Store the offer durably so a CLOSED callee can still answer; the insert
+  /// trigger fires the FCM ring (call-notify).
+  Future<void> _insertInvite(String offerSdp, bool video) async {
+    final couple = _coupleId, me = _myUid;
+    final callee = _ref.read(sessionProvider).partner?.id;
+    if (couple == null || me == null || callee == null) return;
+    try {
+      await SupabaseService.client.from('call_invites').insert({
+        'couple_id': couple,
+        'caller_id': me,
+        'callee_id': callee,
+        'offer_sdp': offerSdp,
+        'video': video,
+      });
+    } catch (_) {}
+  }
+
+  /// Ring a call delivered by FCM (the realtime offer was likely missed because
+  /// the app was closed). Fetch the stored offer and present it as ringing.
+  Future<void> handlePendingCall(
+      String callId, String fromName, bool fallbackVideo) async {
+    if (state != CallState.idle || callId.isEmpty) return;
+    reconnect(); // make sure the call channel is live for the answer + ICE
+    try {
+      final row = await SupabaseService.client
+          .from('call_invites')
+          .select()
+          .eq('id', callId)
+          .maybeSingle();
+      final sdp = row?['offer_sdp'] as String?;
+      if (sdp == null || sdp.isEmpty || state != CallState.idle) return;
+      isCaller = false;
+      _pendingOffer = RTCSessionDescription(sdp, 'offer');
+      _pendingVideo = (row?['video'] as bool?) ?? fallbackVideo;
+      peerName = fromName;
+      _setState(CallState.ringing);
+    } catch (_) {}
   }
 
   static const Map<String, dynamic> _rtcConfig = {
@@ -117,6 +158,7 @@ class CallController extends ChangeNotifier {
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
+      _insertInvite(offer.sdp ?? '', video); // durable → FCM rings a closed app
       await CallForegroundService.start(peerName ?? 'Partner');
       _startConnectTimeout();
     } catch (_) {
@@ -204,6 +246,8 @@ class CallController extends ChangeNotifier {
       await pc.addTrack(track, _localStream!);
     }
     pc.onIceCandidate = (c) {
+      _localCandidates
+          .add(c); // keep so we can re-send if the callee was closed
       _send('ice', {
         'candidate': c.candidate,
         'sdpMid': c.sdpMid,
@@ -256,6 +300,15 @@ class CallController extends ChangeNotifier {
         RTCSessionDescription(map['sdp']?.toString(), map['type']?.toString()));
     _remoteSet = true;
     await _flushPending();
+    // The callee just came online (it answered). If it was a CLOSED app it
+    // missed our first ICE trickle — re-send everything we've gathered.
+    for (final c in _localCandidates) {
+      _send('ice', {
+        'candidate': c.candidate,
+        'sdpMid': c.sdpMid,
+        'sdpMLineIndex': c.sdpMLineIndex,
+      });
+    }
   }
 
   Future<void> _addIce(Map<String, dynamic> map) async {
@@ -298,6 +351,7 @@ class CallController extends ChangeNotifier {
     _localStream = null;
     _pendingOffer = null;
     _pendingRemote.clear();
+    _localCandidates.clear();
     _remoteSet = false;
     isCaller = false;
     micOn = true;

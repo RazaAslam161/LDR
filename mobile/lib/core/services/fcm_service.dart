@@ -16,6 +16,17 @@ class ReachTap {
 
 final ValueNotifier<ReachTap?> pendingReach = ValueNotifier<ReachTap?>(null);
 
+/// An incoming call to ring — from a foreground push, a tapped full-screen
+/// notification, or a cold start. The AppShell hands this to the CallController.
+class CallTap {
+  const CallTap(this.callId, this.fromName, this.video);
+  final String callId;
+  final String fromName;
+  final bool video;
+}
+
+final ValueNotifier<CallTap?> pendingCall = ValueNotifier<CallTap?>(null);
+
 /// Wires Firebase Messaging: permission, token lifecycle, the local-notification
 /// channel, and the foreground / tapped-notification handlers.
 ///
@@ -39,6 +50,7 @@ class FcmService {
         AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(buildReachChannel());
     await android?.createNotificationChannel(buildCareChannel());
+    await android?.createNotificationChannel(buildCallChannel());
 
     // Cold start via a tapped Reach notification.
     final launch = await _fln.getNotificationAppLaunchDetails();
@@ -108,6 +120,14 @@ class FcmService {
   // ── handlers ───────────────────────────────────────────────────────────────
   static void _onForeground(RemoteMessage m) {
     final type = m.data['type'];
+    if (type == 'call') {
+      pendingCall.value = CallTap(
+        (m.data['call_id'] as String?) ?? '',
+        (m.data['from_name'] as String?) ?? 'Your partner',
+        (m.data['video'] as String?) == 'true',
+      );
+      return;
+    }
     if (type == 'care') {
       // Foreground reminder: post the gentle notification directly.
       showCareNotification(
@@ -128,7 +148,16 @@ class FcmService {
   }
 
   static void _onOpenedApp(RemoteMessage m) {
-    if (m.data['type'] != 'reach') return;
+    final type = m.data['type'];
+    if (type == 'call') {
+      pendingCall.value = CallTap(
+        (m.data['call_id'] as String?) ?? '',
+        (m.data['from_name'] as String?) ?? 'Your partner',
+        (m.data['video'] as String?) == 'true',
+      );
+      return;
+    }
+    if (type != 'reach') return;
     pendingReach.value = ReachTap(
       (m.data['reach_id'] as String?) ?? '',
       (m.data['from_name'] as String?) ?? 'Your partner',
@@ -141,8 +170,19 @@ class FcmService {
   static void _routeFromPayload(String? payload) {
     if (payload == null || payload.isEmpty) return;
     final parts = payload.split('|');
+    final tag = parts.isNotEmpty ? parts[0] : '';
+    if (tag == 'call') {
+      // call|callId|fromName|video
+      pendingCall.value = CallTap(
+        parts.length > 1 ? parts[1] : '',
+        parts.length > 2 ? parts[2] : 'Your partner',
+        parts.length > 3 ? parts[3] == '1' : true,
+      );
+      return;
+    }
+    if (tag == 'care') return; // care taps just open the app
     pendingReach.value = ReachTap(
-      parts.isNotEmpty ? parts[0] : '',
+      tag,
       parts.length > 1 ? parts[1] : 'Your partner',
     );
   }

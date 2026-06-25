@@ -51,6 +51,7 @@ class _AppShellState extends ConsumerState<AppShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     pendingReach.addListener(_onPendingReach);
+    pendingCall.addListener(_onPendingCall);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
 
@@ -91,6 +92,7 @@ class _AppShellState extends ConsumerState<AppShell>
     FsiPermission.promptIfNeeded(context, partnerName);
     // A push may have been tapped before the listener attached.
     _onPendingReach();
+    _onPendingCall();
     // Let the partner see which screen we're on.
     reportActiveTab(ref);
   }
@@ -112,6 +114,16 @@ class _AppShellState extends ConsumerState<AppShell>
     _showReach(tap.reachId, name);
   }
 
+  /// An incoming call delivered by FCM (app was backgrounded / closed). Ring it.
+  void _onPendingCall() {
+    final tap = pendingCall.value;
+    if (tap == null) return;
+    pendingCall.value = null;
+    ref
+        .read(callControllerProvider)
+        .handlePendingCall(tap.callId, tap.fromName, tap.video);
+  }
+
   /// Single entry point for the overlay — de-duped by reach id so the realtime
   /// and push paths never double-show the same Reach.
   void _showReach(String reachId, String partnerName) {
@@ -131,6 +143,7 @@ class _AppShellState extends ConsumerState<AppShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     pendingReach.removeListener(_onPendingReach);
+    pendingCall.removeListener(_onPendingCall);
     _reachChannel?.unsubscribe();
     super.dispose();
   }
