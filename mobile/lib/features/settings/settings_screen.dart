@@ -14,6 +14,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -600,9 +601,9 @@ class _AvatarEditor extends StatelessWidget {
                       child: Text(initial,
                           style: const TextStyle(
                               color: MilesColors.cream50, fontSize: 34)))
-                  : Image.network(url!,
+                  : NetImage(url!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Center(
+                      error: Center(
                           child: Text(initial,
                               style: const TextStyle(
                                   color: MilesColors.cream50, fontSize: 34)))),

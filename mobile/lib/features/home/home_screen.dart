@@ -13,6 +13,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -361,9 +362,9 @@ class _Avatar extends StatelessWidget {
                           color: MilesColors.cream50, fontSize: 24)))
               : Hero(
                   tag: 'snap-$url',
-                  child: Image.network(url,
+                  child: NetImage(url,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Center(
+                      error: Center(
                           child: Text(initial,
                               style: const TextStyle(
                                   color: MilesColors.cream50, fontSize: 24))))),

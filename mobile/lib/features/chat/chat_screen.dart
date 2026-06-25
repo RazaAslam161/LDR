@@ -13,6 +13,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
@@ -989,9 +990,9 @@ class _PartnerHere extends StatelessWidget {
                         child: Text(initial,
                             style: const TextStyle(
                                 color: MilesColors.cream50, fontSize: 10)))
-                    : Image.network(avatarUrl!,
+                    : NetImage(avatarUrl!,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Center(
+                        error: Center(
                             child: Text(initial,
                                 style: const TextStyle(
                                     color: MilesColors.cream50,
