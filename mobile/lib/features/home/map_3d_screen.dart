@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:miles/core/config.dart';
 import 'package:miles/core/theme.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-/// Full-screen Google **photorealistic 3D** map of the partner's location,
-/// rendered via the Maps `Map3DElement` web component inside a WebView.
-/// Needs GOOGLE_MAPS_3D_KEY in .env (Map Tiles API + Maps JavaScript API + billing).
+/// Full-screen realistic **3D map** of the partner's location — FREE, no API key:
+/// real satellite imagery (Esri) draped over real 3D terrain (AWS elevation) with
+/// 3D buildings (OpenStreetMap), tilted with a gentle auto-orbit. Rendered with
+/// MapLibre GL JS inside a WebView.
 class Map3DScreen extends StatefulWidget {
   const Map3DScreen({
     super.key,
@@ -24,21 +23,15 @@ class Map3DScreen extends StatefulWidget {
 }
 
 class _Map3DScreenState extends State<Map3DScreen> {
-  WebViewController? _controller;
-  bool _noKey = false;
+  late final WebViewController _controller;
 
   @override
   void initState() {
     super.initState();
-    final key = (dotenv.maybeGet(MilesConfig.mapsApiKeyKey) ?? '').trim();
-    if (key.isEmpty) {
-      _noKey = true;
-      return;
-    }
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(MilesColors.night)
-      ..loadHtmlString(_html(key, widget.lat, widget.lon, widget.name));
+      ..loadHtmlString(_html(widget.lat, widget.lon, widget.name));
   }
 
   @override
@@ -55,99 +48,69 @@ class _Map3DScreenState extends State<Map3DScreen> {
           onPressed: () => Navigator.of(context).maybePop(),
         ),
       ),
-      body: _noKey
-          ? _NoKeyMessage()
-          : _controller == null
-              ? const SizedBox.shrink()
-              : WebViewWidget(controller: _controller!),
+      body: WebViewWidget(controller: _controller),
     );
   }
 
   static String _esc(String s) =>
       s.replaceAll('\\', '').replaceAll('"', '').replaceAll('\n', ' ');
 
-  static String _html(String key, double lat, double lon, String name) {
-    final n = _esc(name);
+  static String _html(double lat, double lon, String name) {
+    _esc(name); // (name kept for the title bar; marker is unlabeled)
     return '''
 <!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<style>
-  html,body{height:100%;margin:0;background:#0a0a0a;}
-  gmp-map-3d{height:100%;width:100%;display:block;}
-  #err{color:#eee;font-family:sans-serif;padding:22px;font-size:15px;line-height:1.5;}
-</style>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>html,body,#map{height:100%;margin:0;padding:0;background:#0a0a0a;}</style>
 </head>
 <body>
-<gmp-map-3d id="map" mode="hybrid"></gmp-map-3d>
-<div id="err"></div>
+<div id="map"></div>
 <script>
-(g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await(a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.\${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({key:"$key",v:"alpha"});
-
-async function init(){
-  try{
-    const lib = await google.maps.importLibrary("maps3d");
-    const map = document.getElementById('map');
-    map.center = {lat: $lat, lng: $lon, altitude: 0};
-    map.range = 600;
-    map.tilt = 67;
-    map.heading = 30;
-    try {
-      const marker = new lib.Marker3DElement({
-        position: {lat: $lat, lng: $lon, altitude: 45},
-        label: "$n",
-        extruded: true
-      });
-      map.append(marker);
-    } catch(_) {}
-    // Gentle auto-orbit so the surroundings read as 3D.
-    let hdg = 30;
-    setInterval(()=>{ hdg=(hdg+0.15)%360; map.heading=hdg; }, 60);
-  }catch(e){
-    document.getElementById('map').style.display='none';
-    document.getElementById('err').innerText =
-      'Could not load 3D map: ' + (e && e.message ? e.message : e) +
-      '. Make sure the key has Map Tiles API + Maps JavaScript API enabled and billing on, with no HTTP-referrer restriction.';
+const LAT=$lat, LNG=$lon;
+const map = new maplibregl.Map({
+  container:'map',
+  center:[LNG, LAT],
+  zoom:16.5,
+  pitch:68,
+  bearing:28,
+  maxPitch:85,
+  attributionControl:false,
+  style:{
+    version:8,
+    sources:{
+      sat:{type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:19, attribution:'Esri'},
+      terrain:{type:'raster-dem', tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding:'terrarium', tileSize:256, maxzoom:15},
+      osm:{type:'vector', url:'https://tiles.openfreemap.org/planet'}
+    },
+    layers:[
+      {id:'sat', type:'raster', source:'sat'},
+      {id:'bld3d', type:'fill-extrusion', source:'osm', 'source-layer':'building', minzoom:14,
+        paint:{
+          'fill-extrusion-color':'#c9c9d2',
+          'fill-extrusion-height':['coalesce',['get','render_height'],['get','height'],6],
+          'fill-extrusion-base':['coalesce',['get','render_min_height'],0],
+          'fill-extrusion-opacity':0.82
+        }}
+    ],
+    terrain:{source:'terrain', exaggeration:1.4},
+    sky:{'sky-color':'#10131f','horizon-color':'#26304a','fog-color':'#0a0a0a','sky-horizon-blend':0.5,'horizon-fog-blend':0.5}
   }
-}
-init();
+});
+map.on('load', ()=>{
+  try { map.setTerrain({source:'terrain', exaggeration:1.4}); } catch(e){}
+  const el=document.createElement('div');
+  el.style.cssText='width:18px;height:18px;border-radius:50%;background:#E08AA0;border:2px solid #fff;box-shadow:0 0 12px #E08AA0;';
+  new maplibregl.Marker({element:el}).setLngLat([LNG,LAT]).addTo(map);
+  let b=28;
+  setInterval(()=>{ b=(b+0.12)%360; map.setBearing(b); }, 60);
+});
+map.on('error', e=>{ /* keep rendering whatever loaded (sat/terrain) */ });
 </script>
 </body>
 </html>
 ''';
-  }
-}
-
-class _NoKeyMessage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.threed_rotation, color: MilesColors.gilt, size: 48),
-            SizedBox(height: 16),
-            Text('3D map needs a Google Maps key',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: MilesColors.cream50,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600)),
-            SizedBox(height: 10),
-            Text(
-              'Add a Google Maps Platform API key (Map Tiles API + Maps '
-              'JavaScript API, billing on) to mobile/.env as GOOGLE_MAPS_3D_KEY, '
-              'then rebuild.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: MilesColors.taupe, fontSize: 13, height: 1.45),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
