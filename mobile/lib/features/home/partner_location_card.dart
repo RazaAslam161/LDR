@@ -28,8 +28,19 @@ class PartnerLocationCard extends StatefulWidget {
   State<PartnerLocationCard> createState() => _PartnerLocationCardState();
 }
 
-class _PartnerLocationCardState extends State<PartnerLocationCard> {
+class _PartnerLocationCardState extends State<PartnerLocationCard>
+    with SingleTickerProviderStateMixin {
   final _map = MapController();
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(PartnerLocationCard old) {
@@ -103,6 +114,9 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     }
 
     final point = LatLng(p.latitude!, p.longitude!);
+    final myPoint = (widget.myLat != null && widget.myLon != null)
+        ? LatLng(widget.myLat!, widget.myLon!)
+        : null;
     final dist = _distanceText();
 
     return GlassPanel(
@@ -136,7 +150,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
               ),
             ),
             SizedBox(
-              height: 190,
+              height: 210,
               child: FlutterMap(
                 mapController: _map,
                 options: MapOptions(
@@ -152,14 +166,32 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.miles.miles',
                   ),
+                  if (myPoint != null)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: [myPoint, point],
+                          color: MilesColors.blush.withValues(alpha: 0.55),
+                          strokeWidth: 2.5,
+                        ),
+                      ],
+                    ),
                   MarkerLayer(
                     markers: [
                       Marker(
                         point: point,
-                        width: 46,
-                        height: 46,
-                        child: _AvatarPin(name: widget.partnerName),
+                        width: 70,
+                        height: 70,
+                        child: _PulsingPin(
+                            pulse: _pulse, name: widget.partnerName),
                       ),
+                      if (myPoint != null)
+                        Marker(
+                          point: myPoint,
+                          width: 26,
+                          height: 26,
+                          child: const _MyDot(),
+                        ),
                     ],
                   ),
                 ],
@@ -181,6 +213,57 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Partner marker with an expanding "live" pulse ring.
+class _PulsingPin extends StatelessWidget {
+  const _PulsingPin({required this.pulse, required this.name});
+  final Animation<double> pulse;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: pulse,
+      builder: (context, _) {
+        final v = pulse.value;
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 30 + v * 38,
+              height: 30 + v * 38,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: MilesColors.blush.withValues(alpha: (1 - v) * 0.35),
+              ),
+            ),
+            _AvatarPin(name: name),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// "You are here" dot.
+class _MyDot extends StatelessWidget {
+  const _MyDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: MilesColors.sage,
+        border: Border.all(color: MilesColors.cream50, width: 2),
+        boxShadow: [
+          BoxShadow(
+              color: MilesColors.sage.withValues(alpha: 0.5), blurRadius: 8),
+        ],
       ),
     );
   }

@@ -116,15 +116,10 @@ class SupabaseRepository {
     });
   }
 
-  /// Returns the partner's public key (base64) or null if not yet published.
-  static Future<String?> fetchPartnerPublicKey(String partnerId) async {
-    final res = await _c
-        .from('partner_keys')
-        .select('public_key')
-        .eq('user_id', partnerId)
-        .maybeSingle();
-    return JsonUtils.parseStringOrNull(res?['public_key']);
-  }
+  /// E2EE removed — Closer no longer gates on key exchange, so this always
+  /// reports a key as "available" and the shared-key derivation is a no-op.
+  static Future<String?> fetchPartnerPublicKey(String partnerId) async =>
+      'plaintext-v1';
 
   // ─── Couple ──────────────────────────────────────────────────
 

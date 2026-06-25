@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Desire Temperature — daily private 1–10 slider.
 /// App only reveals when BOTH scored ≥7. Protects egos from mismatched states.
@@ -17,11 +18,39 @@ class _DesireTempScreenState extends ConsumerState<DesireTempScreen> {
   int? _partnerScore; // null = not yet today OR hidden by reveal logic
   bool _submittedToday = false;
   bool _loading = true;
+  RealtimeChannel? _channel;
+  bool _subscribed = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_subscribed) return;
+    _subscribed = true;
     _loadToday();
+    // Live sync: when the partner locks in their score, re-check the reveal.
+    final couple = ref.read(sessionProvider).couple;
+    if (couple != null) {
+      _channel = SupabaseService.client
+          .channel('desire_temps:${couple.id}')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'desire_temps',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'couple_id',
+              value: couple.id,
+            ),
+            callback: (_) => _loadToday(),
+          )
+          .subscribe();
+    }
+  }
+
+  @override
+  void dispose() {
+    _channel?.unsubscribe();
+    super.dispose();
   }
 
   Future<void> _loadToday() async {
