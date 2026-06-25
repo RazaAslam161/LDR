@@ -914,7 +914,7 @@ class _BurstAnimationState extends State<_BurstAnimation>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: Duration(milliseconds: widget.gifUrl != null ? 2800 : 1900),
+    duration: Duration(milliseconds: widget.gifUrl != null ? 5200 : 1900),
   )..forward();
 
   @override
@@ -939,14 +939,23 @@ class _BurstAnimationState extends State<_BurstAnimation>
           animation: _c,
           builder: (context, _) {
             final v = _c.value;
-            final opacity =
-                v < 0.15 ? v / 0.15 : (1 - (v - 0.15) / 0.85).clamp(0.0, 1.0);
+            final isGif = widget.gifUrl != null;
+            // GIFs: fade in fast, HOLD on screen while the GIF plays, fade out
+            // at the very end. Moods: the quick rise-and-fade.
+            final opacity = isGif
+                ? (v < 0.08
+                    ? v / 0.08
+                    : (v < 0.85 ? 1.0 : (1 - (v - 0.85) / 0.15)))
+                : (v < 0.15 ? v / 0.15 : (1 - (v - 0.15) / 0.85));
+            // GIFs drift up gently and linger near centre; moods rise away.
+            final dy = isGif ? 0.22 - v * 0.42 : 0.4 - v * 1.1;
+            final scale = isGif ? 0.9 + v * 0.18 : 0.6 + v * 0.9;
             return Align(
-              alignment: Alignment(0, 0.4 - v * 1.1),
+              alignment: Alignment(0, dy),
               child: Opacity(
                 opacity: opacity.clamp(0.0, 1.0),
                 child: Transform.scale(
-                  scale: 0.6 + v * 0.9,
+                  scale: scale,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
