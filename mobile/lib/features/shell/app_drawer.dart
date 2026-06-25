@@ -142,6 +142,14 @@ class AppDrawer extends ConsumerWidget {
                 },
               ),
               _DrawerTile(
+                icon: Icons.spa_outlined,
+                label: 'Cycle',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/app/cycle');
+                },
+              ),
+              _DrawerTile(
                 icon: Icons.schedule,
                 label: 'Rituals',
                 onTap: () {
