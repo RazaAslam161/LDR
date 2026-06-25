@@ -5,6 +5,7 @@ import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/root_scaffold_key.dart';
@@ -24,6 +25,7 @@ import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/chat/mood_selector.dart';
 import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:miles/features/closer/secure_screen.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 import 'package:video_player/video_player.dart';
@@ -95,6 +97,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final url = await ChatRepository.uploadGif(cid, f);
       _sendGifBurst(url);
     } catch (_) {}
+  }
+
+  /// Open the in-app GIPHY picker and SEND the chosen GIF into the chat as an
+  /// animated message (reliable — doesn't depend on the keyboard).
+  Future<void> _attachGif() async {
+    final url = await showGiphyPicker(context);
+    if (url == null) return;
+    final cid = _coupleId;
+    if (cid == null) return;
+    try {
+      final res =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
+      if (res.statusCode != 200) return;
+      final dir = await getTemporaryDirectory();
+      final f =
+          File('${dir.path}/gif_${DateTime.now().millisecondsSinceEpoch}.gif');
+      await f.writeAsBytes(res.bodyBytes);
+      await ChatRepository.sendImage(cid, f, replyToId: _takeReplyId());
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not send that GIF.')),
+        );
+      }
+    }
   }
 
   void _startReply(Message m) {
@@ -586,6 +613,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
                           replyToId: _takeReplyId()),
                       onFlingGif: _flingGifFile,
+                      onPickGif: _attachGif,
                     ),
                   ],
                 ),

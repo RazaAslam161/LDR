@@ -19,6 +19,7 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendVoice,
     required this.onSendVideo,
     required this.onFlingGif,
+    required this.onPickGif,
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
@@ -32,6 +33,9 @@ class ChatInputBar extends StatefulWidget {
 
   /// A GIF/sticker picked from the phone keyboard — flung (rises on both phones).
   final Future<void> Function(File gif) onFlingGif;
+
+  /// Open the in-app GIPHY picker to send a GIF into the chat.
+  final VoidCallback onPickGif;
 
   /// Called as the user types (used to broadcast the typing indicator).
   final ValueChanged<String>? onChanged;
@@ -168,6 +172,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading:
+                  const Icon(Icons.gif_box_outlined, color: MilesColors.blush),
+              title: const Text('GIF',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: const Text('Search & send an animated GIF',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 11.5)),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onPickGif();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.camera_alt_outlined,
                   color: MilesColors.cream50),
