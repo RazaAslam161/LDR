@@ -60,12 +60,31 @@ class FcmService {
     await FirebaseMessaging.instance.requestPermission();
   }
 
-  /// After login + pairing: ask permission, store the token, keep it fresh.
+  static bool _refreshHooked = false;
+
+  /// After login + pairing AND on every app resume: ask permission, fetch the
+  /// token (retrying if Google Play Services isn't ready yet), and re-save it.
+  ///
+  /// Re-saving on each foreground is the important part: the notify functions
+  /// null a recipient's token server-side when FCM reports it UNREGISTERED (a
+  /// stale token after a reinstall/GMS hiccup), which silently stops their
+  /// pushes. Re-registering on the next launch/resume self-heals that.
   static Future<void> registerToken() async {
     await requestPermission();
-    final token = await FirebaseMessaging.instance.getToken();
+    String? token;
+    for (var i = 0; i < 4 && token == null; i++) {
+      try {
+        token = await FirebaseMessaging.instance.getToken();
+      } catch (e) {
+        debugPrint('FcmService getToken attempt ${i + 1} failed: $e');
+      }
+      if (token == null) await Future<void>.delayed(const Duration(seconds: 2));
+    }
     if (token != null) await _save(token);
-    FirebaseMessaging.instance.onTokenRefresh.listen(_save);
+    if (!_refreshHooked) {
+      _refreshHooked = true;
+      FirebaseMessaging.instance.onTokenRefresh.listen(_save);
+    }
   }
 
   static Future<void> _save(String token) async {

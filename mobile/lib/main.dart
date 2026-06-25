@@ -96,8 +96,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // Biometric app-lock: raise on background, prompt to unlock on resume.
     if (state == AppLifecycleState.paused) {
       AppLock.lockIfEnabled();
-    } else if (state == AppLifecycleState.resumed && AppLock.locked.value) {
-      AppLock.authenticate(); // re-prompt on return
+    } else if (state == AppLifecycleState.resumed) {
+      if (AppLock.locked.value) AppLock.authenticate(); // re-prompt on return
+      // Refresh the FCM token every resume — self-heals a token the notify
+      // functions nulled server-side (UNREGISTERED), restoring pushes.
+      FcmService.registerToken();
     }
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
