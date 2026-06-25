@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
@@ -51,11 +52,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
 
-  void _sendMoodBurst(MoodData m) {
-    _moodChannel?.sendBroadcastMessage(event: 'mood', payload: {'mood': m.key});
-    _showMoodBurst(m); // also show it on my own screen
-  }
-
   void _sendGifBurst(String url) {
     _moodChannel?.sendBroadcastMessage(event: 'mood', payload: {'gif': url});
     _showGifBurst(url); // also show it on my own screen
@@ -85,14 +81,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (mounted) setState(() => _bursts.removeWhere((b) => b.id == id));
   }
 
-  Future<void> _pickMoodBurst() async {
-    final m = await showMoodSelector(context);
-    if (m != null) _sendMoodBurst(m);
-  }
-
   Future<void> _pickGifBurst() async {
     final url = await showGiphyPicker(context);
     if (url != null) _sendGifBurst(url);
+  }
+
+  /// A GIF/sticker picked from the phone's keyboard — upload it (so the partner
+  /// can load it) then fling it: it rises on BOTH phones like a mood burst.
+  Future<void> _flingGifFile(File f) async {
+    final cid = _coupleId;
+    if (cid == null) return;
+    try {
+      final url = await ChatRepository.uploadGif(cid, f);
+      _sendGifBurst(url);
+    } catch (_) {}
   }
 
   void _startReply(Message m) {
@@ -444,8 +446,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 switch (v) {
                   case 'mood':
                     _setMyMood();
-                  case 'burst':
-                    _pickMoodBurst();
                   case 'gif':
                     _pickGifBurst();
                   case 'theme':
@@ -456,7 +456,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'mood', child: Text('Set your mood')),
-                PopupMenuItem(value: 'burst', child: Text('Fling a mood')),
                 PopupMenuItem(value: 'gif', child: Text('Fling a GIF 🎞️')),
                 PopupMenuItem(value: 'theme', child: Text('Chat theme')),
                 PopupMenuItem(
@@ -586,6 +585,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           replyToId: _takeReplyId()),
                       onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
                           replyToId: _takeReplyId()),
+                      onFlingGif: _flingGifFile,
                     ),
                   ],
                 ),

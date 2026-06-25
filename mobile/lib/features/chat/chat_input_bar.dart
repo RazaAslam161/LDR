@@ -18,6 +18,7 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendImage,
     required this.onSendVoice,
     required this.onSendVideo,
+    required this.onFlingGif,
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
@@ -28,6 +29,9 @@ class ChatInputBar extends StatefulWidget {
   final Future<void> Function(File image) onSendImage;
   final Future<void> Function(File voice) onSendVoice;
   final Future<void> Function(File video) onSendVideo;
+
+  /// A GIF/sticker picked from the phone keyboard — flung (rises on both phones).
+  final Future<void> Function(File gif) onFlingGif;
 
   /// Called as the user types (used to broadcast the typing indicator).
   final ValueChanged<String>? onChanged;
@@ -94,7 +98,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           File('${dir.path}/kbd_${DateTime.now().millisecondsSinceEpoch}.$ext');
       await f.writeAsBytes(data);
       setState(() => _sending = true);
-      await widget.onSendImage(f);
+      await widget.onFlingGif(f); // rises on both phones like a mood burst
     } catch (_) {
     } finally {
       if (mounted) setState(() => _sending = false);

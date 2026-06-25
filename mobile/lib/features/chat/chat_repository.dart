@@ -156,6 +156,15 @@ class ChatRepository {
     });
   }
 
+  /// Uploads a GIF/sticker to couple_media and returns its PUBLIC URL — no
+  /// message row is inserted (used for flinging a GIF, which is ephemeral).
+  static Future<String> uploadGif(String coupleId, File file) async {
+    final ext = _ext(file.path) ?? 'gif';
+    final path = '$coupleId/${_randomName('gif', ext)}';
+    await _c.storage.from('couple_media').upload(path, file);
+    return _c.storage.from('couple_media').getPublicUrl(path);
+  }
+
   /// Uploads a video to the PRIVATE couple_intimate bucket and inserts a
   /// message of kind='video'. Served via short-lived signed URLs (couple-only).
   static Future<void> sendVideo(String coupleId, File file,
