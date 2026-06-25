@@ -4,9 +4,14 @@ import 'package:intl/intl.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+const _period = Color(0xFFE0564B);
 
 class CycleScreen extends ConsumerStatefulWidget {
   const CycleScreen({super.key});
@@ -19,96 +24,120 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
   String? _coupleId;
   String? _myUid;
   String? _partnerUid;
+  bool _isFemale = false;
   bool _loading = true;
+  bool _busy = false;
 
-  CycleSettings _mySettings = const CycleSettings();
-  CyclePrediction _mine = const CyclePrediction();
+  // mine (female)
+  CycleSettings _settings = const CycleSettings();
+  List<CycleEvent> _events = const [];
+  bool _onPeriod = false;
+  CyclePrediction _pred = const CyclePrediction();
 
+  // partner's (male view)
   bool _partnerShares = false;
-  CyclePrediction _partner = const CyclePrediction();
   bool _partnerOnPeriod = false;
+  CyclePrediction _partnerPred = const CyclePrediction();
+
+  RealtimeChannel? _channel;
 
   @override
   void initState() {
     super.initState();
-    final session = ref.read(sessionProvider);
-    _coupleId = session.couple?.id;
-    _myUid = session.profile?.id;
-    _partnerUid = session.partner?.id;
+    final s = ref.read(sessionProvider);
+    _coupleId = s.couple?.id;
+    _myUid = s.profile?.id;
+    _partnerUid = s.partner?.id;
+    _isFemale = s.profile?.isFemale ?? false;
     reportScreen(ref, 'Cycle');
     _load();
+    final cid = _coupleId;
+    if (cid != null) {
+      _channel = SupabaseService.client
+          .channel('cycle_events:$cid')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'cycle_events',
+            callback: (_) => _load(),
+          )
+          .subscribe();
+    }
   }
 
   @override
   void dispose() {
     reportActiveTab(ref);
+    _channel?.unsubscribe();
     super.dispose();
   }
 
   Future<void> _load() async {
-    final uid = _myUid;
-    if (uid == null) {
-      if (mounted) setState(() => _loading = false);
-      return;
-    }
     try {
-      final myStarts = await CycleRepository.starts(uid);
-      final mySettings = await CycleRepository.settings(uid);
-      final mine = CyclePrediction.compute(myStarts, mySettings);
-
-      var partnerShares = false;
-      var partner = const CyclePrediction();
-      var partnerOnPeriod = false;
-      final puid = _partnerUid;
-      if (puid != null) {
-        final ps = await CycleRepository.settings(puid);
-        partnerOnPeriod = ps.onPeriodNow; // the simple "on period now" hint
-        final pStarts = await CycleRepository.starts(puid); // RLS-gated
-        if (ps.shareWithPartner && pStarts.isNotEmpty) {
-          partnerShares = true;
-          partner = CyclePrediction.compute(pStarts, ps);
+      if (_isFemale) {
+        final uid = _myUid;
+        if (uid == null) return;
+        final events = await CycleRepository.events(uid);
+        final settings = await CycleRepository.settings(uid);
+        final pred = CyclePrediction.compute(
+            CycleRepository.startDates(events), settings);
+        if (mounted) {
+          setState(() {
+            _events = events;
+            _settings = settings;
+            _onPeriod = CycleRepository.onPeriod(events);
+            _pred = pred;
+            _loading = false;
+          });
         }
-      }
-
-      if (mounted) {
-        setState(() {
-          _mySettings = mySettings;
-          _mine = mine;
-          _partnerShares = partnerShares;
-          _partner = partner;
-          _partnerOnPeriod = partnerOnPeriod;
-          _loading = false;
-        });
+      } else {
+        final puid = _partnerUid;
+        var shares = false;
+        var onP = false;
+        var pred = const CyclePrediction();
+        if (puid != null) {
+          final ps = await CycleRepository.settings(puid);
+          if (ps.shareWithPartner) {
+            final pe = await CycleRepository.events(puid); // RLS-gated
+            shares = true;
+            onP = CycleRepository.onPeriod(pe) || ps.onPeriodNow;
+            pred = CyclePrediction.compute(CycleRepository.startDates(pe), ps);
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _partnerShares = shares;
+            _partnerOnPeriod = onP;
+            _partnerPred = pred;
+            _loading = false;
+          });
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _logToday() => _logDate(DateTime.now());
-
-  Future<void> _logPicked() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 120)),
-      lastDate: DateTime.now(),
-    );
-    if (picked != null) await _logDate(picked);
-  }
-
-  Future<void> _logDate(DateTime d) async {
-    final id = _coupleId, uid = _myUid;
-    if (id == null || uid == null) return;
-    await CycleRepository.logPeriodStart(coupleId: id, userId: uid, date: d);
-    await _load();
+  Future<void> _toggle(bool on) async {
+    final cid = _coupleId, uid = _myUid;
+    if (cid == null || uid == null) return;
+    setState(() {
+      _onPeriod = on;
+      _busy = true;
+    });
+    try {
+      await CycleRepository.setOnPeriod(coupleId: cid, userId: uid, on: on);
+      await _load();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _saveSettings(CycleSettings s) async {
-    final id = _coupleId, uid = _myUid;
-    if (id == null || uid == null) return;
-    setState(() => _mySettings = s);
-    await CycleRepository.saveSettings(userId: uid, coupleId: id, s: s);
+    final cid = _coupleId, uid = _myUid;
+    if (cid == null || uid == null) return;
+    setState(() => _settings = s);
+    await CycleRepository.saveSettings(userId: uid, coupleId: cid, s: s);
     await _load();
   }
 
@@ -131,257 +160,481 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
               ? const Center(child: CircularProgressIndicator())
               : ListView(
                   padding: const EdgeInsets.all(16),
-                  children: [
-                    if (_partnerOnPeriod) _periodHintCard(),
-                    if (_partnerShares) _partnerCard(),
-                    _myCard(),
-                  ],
+                  children: _isFemale ? _femaleTracker() : _partnerView(),
                 ),
         ),
       ),
     );
   }
 
-  Widget _partnerCard() {
-    final name = ref.watch(sessionProvider).partner?.displayName ?? 'Them';
-    final until = _partner.daysUntilNext;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(colors: [
-          MilesColors.blush.withValues(alpha: 0.22),
-          MilesColors.ember.withValues(alpha: 0.14),
-        ]),
-        border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('$name right now', style: _h),
-          const SizedBox(height: 6),
-          Text(_partner.phaseLabel,
-              style: const TextStyle(
-                  color: MilesColors.cream50,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600)),
-          if (until != null) ...[
-            const SizedBox(height: 2),
-            Text(
-                until <= 0
-                    ? 'Period due around now'
-                    : 'Next period in ~$until days',
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 12)),
-          ],
-          const SizedBox(height: 10),
-          Text(_partner.partnerNote,
-              style: const TextStyle(
-                  color: MilesColors.cream50, fontSize: 13.5, height: 1.35)),
-        ],
-      ),
-    );
-  }
-
-  /// Shown to the partner when she has the "on my period" toggle on.
-  Widget _periodHintCard() {
-    final name = ref.watch(sessionProvider).partner?.displayName ?? 'She';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(colors: [
-          const Color(0xFFE0564B).withValues(alpha: 0.30),
-          MilesColors.blush.withValues(alpha: 0.18),
-        ]),
-        border:
-            Border.all(color: const Color(0xFFE0564B).withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        children: [
-          const Text('🩸', style: TextStyle(fontSize: 28)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$name is on her period',
-                    style: const TextStyle(
-                        color: MilesColors.cream50,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                const Text(
-                    'Be extra gentle, patient, and sweet with her today 💛',
-                    style: TextStyle(
-                        color: MilesColors.cream50, fontSize: 13, height: 1.3)),
-              ],
+  // ──────────────────────────── Female tracker ───────────────────────────────
+  List<Widget> _femaleTracker() {
+    final avgCycle =
+        CycleRepository.avgCycleLength(_events, _settings.avgCycleLength);
+    final avgPeriod =
+        CycleRepository.avgPeriodLength(_events, _settings.avgPeriodLength);
+    return [
+      Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(colors: [
+            _period.withValues(alpha: _onPeriod ? 0.30 : 0.12),
+            MilesColors.blush.withValues(alpha: 0.14),
+          ]),
+          border: Border.all(
+              color: _period.withValues(alpha: _onPeriod ? 0.5 : 0.2)),
+        ),
+        child: Row(
+          children: [
+            const Text('🩸', style: TextStyle(fontSize: 30)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("I'm on my period",
+                      style: TextStyle(
+                          color: MilesColors.cream50,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600)),
+                  Text(
+                      _onPeriod
+                          ? 'Logged — turn off when it ends'
+                          : 'Toggle on when it starts',
+                      style: const TextStyle(
+                          color: MilesColors.taupe, fontSize: 12)),
+                ],
+              ),
             ),
-          ),
-        ],
+            Switch(
+              value: _onPeriod,
+              activeThumbColor: _period,
+              onChanged: _busy ? null : _toggle,
+            ),
+          ],
+        ),
       ),
-    );
+      const SizedBox(height: 14),
+      if (_pred.hasData)
+        _infoCard([
+          _row('Phase', _pred.phaseLabel),
+          if (_pred.dayOfCycle != null)
+            _row('Day of cycle', 'Day ${_pred.dayOfCycle} (estimate)'),
+          if (_pred.daysUntilNext != null)
+            _row(
+                'Next period',
+                _pred.daysUntilNext! <= 0
+                    ? 'around now (estimate)'
+                    : 'in ~${_pred.daysUntilNext} days (estimate)'),
+        ]),
+      if (_pred.hasData) const SizedBox(height: 14),
+      _CycleCalendar(
+        spans: CycleRepository.spans(_events),
+        predictedNext: _pred.nextPeriod,
+        predictedLen: avgPeriod,
+      ),
+      const SizedBox(height: 14),
+      _infoCard([
+        _row('Average cycle', '$avgCycle days'),
+        _row('Average period', '$avgPeriod days'),
+        _row('Cycles logged', '${CycleRepository.startDates(_events).length}'),
+      ]),
+      const SizedBox(height: 14),
+      _settingsCard(),
+      const SizedBox(height: 14),
+      _disclaimer(),
+    ];
   }
 
-  /// Her own one-tap "I'm on my period now" hint (partner sees the card above).
-  Widget _periodToggle() {
-    final on = _mySettings.onPeriodNow;
-    return Column(
+  Widget _settingsCard() {
+    final name =
+        ref.watch(sessionProvider).partner?.displayName ?? 'your partner';
+    return _wrapCard(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 2, 8, 2),
-          decoration: BoxDecoration(
-            color: on
-                ? const Color(0xFFE0564B).withValues(alpha: 0.18)
-                : MilesColors.surface2,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-                color: on
-                    ? const Color(0xFFE0564B).withValues(alpha: 0.5)
-                    : Colors.transparent),
-          ),
-          child: Row(
-            children: [
-              const Text('🩸', style: TextStyle(fontSize: 20)),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text("I'm on my period right now",
-                    style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
-              ),
-              Switch(
-                value: on,
-                activeThumbColor: const Color(0xFFE0564B),
-                onChanged: (v) =>
-                    _saveSettings(_mySettings.copyWith(onPeriod: v)),
-              ),
-            ],
+        Text('Settings', style: _h),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _settings.shareWithPartner,
+          activeThumbColor: MilesColors.ember,
+          onChanged: (v) => _saveSettings(_settings.copyWith(share: v)),
+          title: Text('Share with $name',
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 14)),
+          subtitle: Text(
+              _settings.shareWithPartner
+                  ? 'They see a gentle heads-up — never the details'
+                  : 'Private to you',
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 12)),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Average cycle length',
+              style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+          trailing: _stepper(
+            _settings.avgCycleLength,
+            (v) => _saveSettings(_settings.copyWith(cycle: v)),
+            min: 20,
+            max: 45,
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.only(left: 4, top: 4),
-          child: Text('Your partner gets a gentle heads-up to be sweeter 💛',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 11)),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Average period length',
+              style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+          trailing: _stepper(
+            _settings.avgPeriodLength,
+            (v) => _saveSettings(_settings.copyWith(period: v)),
+            min: 2,
+            max: 10,
+          ),
         ),
       ],
-    );
+    ));
   }
 
-  Widget _myCard() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: MilesColors.surface1,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.15)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('My cycle', style: _h),
-          const SizedBox(height: 12),
-          _periodToggle(),
-          const SizedBox(height: 14),
-          if (_mine.hasData) ...[
-            _row('Phase', _mine.phaseLabel),
-            if (_mine.dayOfCycle != null)
-              _row('Day of cycle', 'Day ${_mine.dayOfCycle}'),
-            if (_mine.nextPeriod != null)
-              _row(
-                  'Next period',
-                  '${DateFormat('MMM d').format(_mine.nextPeriod!)}'
-                      '${_mine.daysUntilNext != null ? '  (~${_mine.daysUntilNext} days)' : ''}'),
-            const SizedBox(height: 12),
-          ] else
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Text(
-                  'Log when your period starts and I’ll predict the next one + your phases.',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12.5)),
-            ),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton(
-                    onPressed: _logToday,
-                    child: const Text('Period started today')),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                  onPressed: _logPicked, child: const Text('Another day')),
-            ],
-          ),
-          const Divider(color: MilesColors.surface2, height: 28),
-          _stepper('Average cycle length', _mySettings.avgCycleLength, 21, 35,
-              (v) => _saveSettings(_mySettings.copyWith(cycle: v)), 'days'),
-          const SizedBox(height: 8),
-          _stepper('Average period length', _mySettings.avgPeriodLength, 2, 9,
-              (v) => _saveSettings(_mySettings.copyWith(period: v)), 'days'),
-          const SizedBox(height: 6),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _mySettings.shareWithPartner,
-            activeThumbColor: MilesColors.ember,
-            onChanged: (v) => _saveSettings(_mySettings.copyWith(share: v)),
-            title: const Text('Share a gentle summary with my partner',
-                style: TextStyle(color: MilesColors.cream50, fontSize: 13)),
-            subtitle: const Text(
-                'They see your phase + a kind note — never your logs',
-                style: TextStyle(color: MilesColors.taupe, fontSize: 11)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _row(String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(k,
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
-            Text(v,
-                style: const TextStyle(
-                    color: MilesColors.cream50,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ),
-      );
-
-  Widget _stepper(String label, int value, int min, int max,
-      ValueChanged<int> onChanged, String unit) {
+  Widget _stepper(int value, ValueChanged<int> onChanged,
+      {required int min, required int max}) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-            child: Text(label,
-                style:
-                    const TextStyle(color: MilesColors.cream50, fontSize: 13))),
         IconButton(
-          icon: const Icon(Icons.remove_circle_outline,
-              color: MilesColors.taupe, size: 22),
+          icon:
+              const Icon(Icons.remove_circle_outline, color: MilesColors.gilt),
           onPressed: value > min ? () => onChanged(value - 1) : null,
         ),
-        SizedBox(
-          width: 54,
-          child: Text('$value $unit',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 13)),
-        ),
+        Text('$value',
+            style: const TextStyle(color: MilesColors.cream50, fontSize: 15)),
         IconButton(
-          icon: const Icon(Icons.add_circle_outline,
-              color: MilesColors.taupe, size: 22),
+          icon: const Icon(Icons.add_circle_outline, color: MilesColors.gilt),
           onPressed: value < max ? () => onChanged(value + 1) : null,
         ),
       ],
     );
   }
 
+  // ──────────────────────────── Partner (male) view ──────────────────────────
+  List<Widget> _partnerView() {
+    final name = ref.watch(sessionProvider).partner?.displayName ?? 'She';
+    if (!_partnerShares) {
+      return [
+        _wrapCard(Row(
+          children: [
+            const Icon(Icons.lock_outline, color: MilesColors.taupe),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text('$name keeps her cycle private right now.',
+                  style:
+                      const TextStyle(color: MilesColors.taupe, fontSize: 13)),
+            ),
+          ],
+        )),
+      ];
+    }
+    final until = _partnerPred.daysUntilNext;
+    return [
+      Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(colors: [
+            (_partnerOnPeriod ? _period : MilesColors.blush)
+                .withValues(alpha: 0.28),
+            MilesColors.ember.withValues(alpha: 0.14),
+          ]),
+          border: Border.all(
+              color: (_partnerOnPeriod ? _period : MilesColors.gilt)
+                  .withValues(alpha: 0.4)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(_partnerOnPeriod ? '🩸' : '💛',
+                    style: const TextStyle(fontSize: 26)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _partnerOnPeriod
+                        ? '$name started her period'
+                        : until == null
+                            ? "$name's cycle"
+                            : until <= 0
+                                ? 'Her period’s expected around now'
+                                : 'Next period in ~$until days',
+                    style: const TextStyle(
+                        color: MilesColors.cream50,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+                _partnerOnPeriod
+                    ? 'Maybe send some care — be extra gentle today 💕'
+                    : _partnerPred.partnerNote,
+                style: const TextStyle(
+                    color: MilesColors.cream50, fontSize: 13.5, height: 1.4)),
+            const SizedBox(height: 8),
+            const Text('Estimate only — for closeness, not medical use.',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 11)),
+          ],
+        ),
+      ),
+      const SizedBox(height: 14),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: MilesColors.blush,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          onPressed: _sendCareNote,
+          icon: const Icon(Icons.favorite),
+          label: const Text('Send a care note'),
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _sendCareNote() async {
+    final cid = _coupleId;
+    if (cid == null) return;
+    try {
+      await ChatRepository.sendText(
+          cid, 'Thinking of you 💕 take it easy today, I’ve got you.');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Care note sent 💕')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not send — try again.')),
+        );
+      }
+    }
+  }
+
+  // ──────────────────────────── Shared bits ──────────────────────────────────
+  Widget _disclaimer() => _wrapCard(const Row(
+        children: [
+          Icon(Icons.info_outline, color: MilesColors.taupe, size: 18),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'For tracking and closeness only — not for medical, fertility, or '
+              'contraception decisions. All predictions are estimates.',
+              style: TextStyle(
+                  color: MilesColors.taupe, fontSize: 11.5, height: 1.35),
+            ),
+          ),
+        ],
+      ));
+
+  Widget _infoCard(List<Widget> rows) => _wrapCard(Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows,
+      ));
+
+  Widget _wrapCard(Widget child) => Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: MilesColors.surface1,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.15)),
+        ),
+        child: child,
+      );
+
+  Widget _row(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label,
+                style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
+            Text(value,
+                style:
+                    const TextStyle(color: MilesColors.cream50, fontSize: 14)),
+          ],
+        ),
+      );
+
   static const _h = TextStyle(
       color: MilesColors.gilt,
-      fontSize: 11,
-      letterSpacing: 1.2,
+      fontSize: 12,
+      letterSpacing: 1.5,
       fontWeight: FontWeight.w600);
+}
+
+/// A compact month calendar: logged period days filled, predicted window ringed.
+class _CycleCalendar extends StatefulWidget {
+  const _CycleCalendar({
+    required this.spans,
+    required this.predictedNext,
+    required this.predictedLen,
+  });
+  final List<PeriodSpan> spans;
+  final DateTime? predictedNext;
+  final int predictedLen;
+
+  @override
+  State<_CycleCalendar> createState() => _CycleCalendarState();
+}
+
+class _CycleCalendarState extends State<_CycleCalendar> {
+  late DateTime _month;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _month = DateTime(now.year, now.month);
+  }
+
+  bool _isPeriodDay(DateTime day) {
+    final today = DateUtils.dateOnly(DateTime.now());
+    for (final s in widget.spans) {
+      final start = DateUtils.dateOnly(s.start);
+      final end = s.end != null ? DateUtils.dateOnly(s.end!) : today;
+      if (!day.isBefore(start) && !day.isAfter(end)) return true;
+    }
+    return false;
+  }
+
+  bool _isPredicted(DateTime day) {
+    final p = widget.predictedNext;
+    if (p == null) return false;
+    final start = DateUtils.dateOnly(p);
+    final end = start.add(Duration(days: widget.predictedLen - 1));
+    return !day.isBefore(start) && !day.isAfter(end);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final first = _month;
+    final daysInMonth = DateUtils.getDaysInMonth(first.year, first.month);
+    final leading = first.weekday % 7; // Sun=0
+    final today = DateUtils.dateOnly(DateTime.now());
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: MilesColors.surface1,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, color: MilesColors.gilt),
+                onPressed: () => setState(
+                    () => _month = DateTime(_month.year, _month.month - 1)),
+              ),
+              Text(DateFormat.yMMMM().format(_month),
+                  style: const TextStyle(
+                      color: MilesColors.cream50,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+              IconButton(
+                icon: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+                onPressed: () => setState(
+                    () => _month = DateTime(_month.year, _month.month + 1)),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              for (final d in const ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+                Expanded(
+                  child: Center(
+                    child: Text(d,
+                        style: const TextStyle(
+                            color: MilesColors.taupe, fontSize: 11)),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          GridView.count(
+            crossAxisCount: 7,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              for (var i = 0; i < leading; i++) const SizedBox(),
+              for (var d = 1; d <= daysInMonth; d++)
+                _dayCell(DateTime(first.year, first.month, d), today),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _legend(_period, 'Period'),
+              const SizedBox(width: 16),
+              _legend(null, 'Predicted', ring: true),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayCell(DateTime day, DateTime today) {
+    final period = _isPeriodDay(day);
+    final predicted = !period && _isPredicted(day);
+    final isToday = day == today;
+    return Padding(
+      padding: const EdgeInsets.all(3),
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: period ? _period : Colors.transparent,
+          border: predicted
+              ? Border.all(color: MilesColors.gilt.withValues(alpha: 0.7))
+              : isToday
+                  ? Border.all(
+                      color: MilesColors.cream50.withValues(alpha: 0.4))
+                  : null,
+        ),
+        child: Center(
+          child: Text('${day.day}',
+              style: TextStyle(
+                  color: period ? Colors.white : MilesColors.cream50,
+                  fontSize: 12,
+                  fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
+        ),
+      ),
+    );
+  }
+
+  Widget _legend(Color? fill, String label, {bool ring = false}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: fill,
+            border: ring
+                ? Border.all(color: MilesColors.gilt.withValues(alpha: 0.7))
+                : null,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(label,
+            style: const TextStyle(color: MilesColors.taupe, fontSize: 11)),
+      ],
+    );
+  }
 }

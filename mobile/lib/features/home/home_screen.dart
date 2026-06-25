@@ -15,6 +15,7 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:miles/features/reach/reach_button.dart';
@@ -189,6 +190,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     onStop: _stopLive,
                   ),
                 ],
+                const PartnerCycleCard(),
                 const SizedBox(height: 36),
                 Center(
                   child: ReachButton(

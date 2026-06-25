@@ -331,3 +331,40 @@ FormatException found in the touched code paths.
 **New packages:** `crypto` (already transitive) for the PIN hash.
 **Remaining:** iOS would need `NSFaceIDUsageDescription` (Android-only build here).
 **flutter analyze:** 0 errors.
+
+## Issue 4 — Couple gender/role setup
+
+- Migration `profiles_gender`: `gender` ('male'|'female') + `gender_set`.
+- `RoleSetupScreen` ("A little about you" → I'm male / I'm female); each user sets
+  their OWN. Router redirect: paired + `!genderSet` → `/role-setup` before `/app`.
+- `SupabaseRepository.setGender()`; Settings → Profile → Gender (change later).
+
+## Issue 2 — Cycle tracker not working — **ROOT CAUSE + rebuild**
+
+**Real root cause (captured):** the event store the spec needs — `cycle_events`
+(`period_start`/`period_end`) — **did not exist** (only `cycle_logs` held bare
+start dates, no end, no on/off). With no clear primary action and no logged data,
+predictions were empty and the screen effectively did nothing. There was also no
+gender-gating, so it showed to everyone with no female-specific workflow. (No
+FormatException — dates go through `JsonUtils.parseDate`, never raw `DateTime.parse`.)
+
+**What changed:**
+- Migration `cycle_events_table`: `cycle_events` (start/end, `date` type) +
+  `cycle_settings.tracking_enabled`; RLS mirrors `cycle_logs` (owner ALL; partner
+  SELECT only if `share_with_partner` + same couple via `current_user_couple_id()`);
+  `replica identity full` + added to the realtime publication.
+- Rebuilt `CycleRepository` around events: `setOnPeriod()` logs a start/end event
+  AND mirrors the live `on_period_now` flag; derivations for on-period, spans,
+  avg cycle/period length, and start-to-start prediction.
+- Rebuilt `CycleScreen`, **gender-gated**:
+  - Female → big "I'm on my period" toggle (start↔end events), phase ESTIMATE,
+    a month calendar (logged period days filled, predicted window ringed),
+    stats (avg cycle/period, cycles logged), share toggle + editable averages,
+    and the required medical disclaimer.
+  - Male → gentle partner view ("She started her period — send care 💕" /
+    "Next period in ~X days"), sharing-off hides it, + one-tap "Send a care note"
+    (drops a sweet message into chat via `ChatRepository.sendText`).
+- `PartnerCycleCard` on the dashboard for the male partner (same gentle hint),
+  updates live via a `cycle_events` realtime subscription.
+
+**flutter analyze:** 0 errors.
