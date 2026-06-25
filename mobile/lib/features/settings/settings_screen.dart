@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/models.dart';
+import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
@@ -31,6 +32,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _error;
   bool _seeded = false;
   String _locationMode = 'off';
+  bool _appLock = false;
   bool _changingAvatar = false;
   String? _localAvatarUrl;
 
@@ -65,7 +67,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLocationMode());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadLocationMode();
+      _loadAppLock();
+    });
+  }
+
+  Future<void> _loadAppLock() async {
+    final on = await AppLock.isEnabled();
+    if (mounted) setState(() => _appLock = on);
+  }
+
+  Future<void> _toggleAppLock(bool v) async {
+    if (v && !await AppLock.canAuthenticate()) {
+      _toast('Set up a fingerprint, face, or screen lock first.');
+      return;
+    }
+    await AppLock.setEnabled(v);
+    if (mounted) setState(() => _appLock = v);
+    _toast(v ? 'App lock on 🔒' : 'App lock off');
   }
 
   Future<void> _loadLocationMode() async {
@@ -396,6 +416,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 child:
                     Text(_error!, style: const TextStyle(color: MilesColors.blush)),
               ),
+
+            const SizedBox(height: 28),
+
+            // ── Security ─────────────────────────────────────────
+            const _SectionHeader(label: 'Security'),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _appLock,
+              onChanged: _toggleAppLock,
+              activeThumbColor: MilesColors.ember,
+              secondary:
+                  const Icon(Icons.fingerprint, color: MilesColors.gilt),
+              title: const Text('Biometric app lock',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: const Text(
+                  'Require fingerprint / face / PIN to open Tethered',
+                  style: TextStyle(fontSize: 12, color: MilesColors.taupe)),
+            ),
 
             const SizedBox(height: 28),
 

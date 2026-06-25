@@ -162,6 +162,14 @@ class AppDrawer extends ConsumerWidget {
                       },
                     ),
                     _DrawerTile(
+                      icon: Icons.casino_outlined,
+                      label: 'Games',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/games');
+                      },
+                    ),
+                    _DrawerTile(
                       icon: Icons.schedule,
                       label: 'Rituals',
                       onTap: () {

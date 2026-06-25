@@ -7,22 +7,31 @@ class CycleSettings {
     this.avgCycleLength = 28,
     this.avgPeriodLength = 5,
     this.shareWithPartner = true,
+    this.onPeriodNow = false,
   });
   final int avgCycleLength;
   final int avgPeriodLength;
   final bool shareWithPartner;
+  final bool onPeriodNow; // simple "I'm on my period right now" hint
 
   factory CycleSettings.fromJson(Map<String, dynamic> j) => CycleSettings(
         avgCycleLength: JsonUtils.parseInt(j['avg_cycle_length'], fallback: 28),
         avgPeriodLength: JsonUtils.parseInt(j['avg_period_length'], fallback: 5),
         shareWithPartner: (j['share_with_partner'] as bool?) ?? true,
+        onPeriodNow: (j['on_period_now'] as bool?) ?? false,
       );
 
-  CycleSettings copyWith({int? cycle, int? period, bool? share}) =>
+  CycleSettings copyWith({
+    int? cycle,
+    int? period,
+    bool? share,
+    bool? onPeriod,
+  }) =>
       CycleSettings(
         avgCycleLength: cycle ?? avgCycleLength,
         avgPeriodLength: period ?? avgPeriodLength,
         shareWithPartner: share ?? shareWithPartner,
+        onPeriodNow: onPeriod ?? onPeriodNow,
       );
 }
 
@@ -166,6 +175,7 @@ class CycleRepository {
       'avg_cycle_length': s.avgCycleLength,
       'avg_period_length': s.avgPeriodLength,
       'share_with_partner': s.shareWithPartner,
+      'on_period_now': s.onPeriodNow,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
   }

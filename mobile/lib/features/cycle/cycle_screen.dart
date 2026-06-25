@@ -26,6 +26,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
 
   bool _partnerShares = false;
   CyclePrediction _partner = const CyclePrediction();
+  bool _partnerOnPeriod = false;
 
   @override
   void initState() {
@@ -57,9 +58,11 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
 
       var partnerShares = false;
       var partner = const CyclePrediction();
+      var partnerOnPeriod = false;
       final puid = _partnerUid;
       if (puid != null) {
         final ps = await CycleRepository.settings(puid);
+        partnerOnPeriod = ps.onPeriodNow; // the simple "on period now" hint
         final pStarts = await CycleRepository.starts(puid); // RLS-gated
         if (ps.shareWithPartner && pStarts.isNotEmpty) {
           partnerShares = true;
@@ -73,6 +76,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           _mine = mine;
           _partnerShares = partnerShares;
           _partner = partner;
+          _partnerOnPeriod = partnerOnPeriod;
           _loading = false;
         });
       }
@@ -128,6 +132,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    if (_partnerOnPeriod) _periodHintCard(),
                     if (_partnerShares) _partnerCard(),
                     _myCard(),
                   ],
@@ -178,6 +183,91 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     );
   }
 
+  /// Shown to the partner when she has the "on my period" toggle on.
+  Widget _periodHintCard() {
+    final name = ref.watch(sessionProvider).partner?.displayName ?? 'She';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(colors: [
+          const Color(0xFFE0564B).withValues(alpha: 0.30),
+          MilesColors.blush.withValues(alpha: 0.18),
+        ]),
+        border:
+            Border.all(color: const Color(0xFFE0564B).withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          const Text('🩸', style: TextStyle(fontSize: 28)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$name is on her period',
+                    style: const TextStyle(
+                        color: MilesColors.cream50,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                const Text(
+                    'Be extra gentle, patient, and sweet with her today 💛',
+                    style: TextStyle(
+                        color: MilesColors.cream50, fontSize: 13, height: 1.3)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Her own one-tap "I'm on my period now" hint (partner sees the card above).
+  Widget _periodToggle() {
+    final on = _mySettings.onPeriodNow;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 2, 8, 2),
+          decoration: BoxDecoration(
+            color: on
+                ? const Color(0xFFE0564B).withValues(alpha: 0.18)
+                : MilesColors.surface2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: on
+                    ? const Color(0xFFE0564B).withValues(alpha: 0.5)
+                    : Colors.transparent),
+          ),
+          child: Row(
+            children: [
+              const Text('🩸', style: TextStyle(fontSize: 20)),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text("I'm on my period right now",
+                    style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+              ),
+              Switch(
+                value: on,
+                activeThumbColor: const Color(0xFFE0564B),
+                onChanged: (v) =>
+                    _saveSettings(_mySettings.copyWith(onPeriod: v)),
+              ),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(left: 4, top: 4),
+          child: Text('Your partner gets a gentle heads-up to be sweeter 💛',
+              style: TextStyle(color: MilesColors.taupe, fontSize: 11)),
+        ),
+      ],
+    );
+  }
+
   Widget _myCard() {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -190,7 +280,9 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('My cycle', style: _h),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
+          _periodToggle(),
+          const SizedBox(height: 14),
           if (_mine.hasData) ...[
             _row('Phase', _mine.phaseLabel),
             if (_mine.dayOfCycle != null)
@@ -231,11 +323,11 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
             contentPadding: EdgeInsets.zero,
             value: _mySettings.shareWithPartner,
             activeThumbColor: MilesColors.ember,
-            onChanged: (v) =>
-                _saveSettings(_mySettings.copyWith(share: v)),
+            onChanged: (v) => _saveSettings(_mySettings.copyWith(share: v)),
             title: const Text('Share a gentle summary with my partner',
                 style: TextStyle(color: MilesColors.cream50, fontSize: 13)),
-            subtitle: const Text('They see your phase + a kind note — never your logs',
+            subtitle: const Text(
+                'They see your phase + a kind note — never your logs',
                 style: TextStyle(color: MilesColors.taupe, fontSize: 11)),
           ),
         ],
@@ -248,7 +340,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(k, style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
+            Text(k,
+                style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
             Text(v,
                 style: const TextStyle(
                     color: MilesColors.cream50,
@@ -264,8 +357,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
       children: [
         Expanded(
             child: Text(label,
-                style: const TextStyle(
-                    color: MilesColors.cream50, fontSize: 13))),
+                style:
+                    const TextStyle(color: MilesColors.cream50, fontSize: 13))),
         IconButton(
           icon: const Icon(Icons.remove_circle_outline,
               color: MilesColors.taupe, size: 22),

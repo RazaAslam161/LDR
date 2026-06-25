@@ -10,10 +10,12 @@ import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/router.dart';
+import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
+import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
@@ -73,14 +75,26 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
     // First launch (any device): ask for all permissions at once.
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => PermissionsBootstrap.requestAllOnce());
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => PermissionsBootstrap.requestAllOnce());
+    // If the user enabled the biometric app-lock, raise it on launch.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await AppLock.lockIfEnabled();
+      if (AppLock.locked.value) await AppLock.tryUnlock();
+    });
     _initDeepLinks();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Biometric app-lock: raise on background, prompt to unlock on resume.
+    if (state == AppLifecycleState.paused) {
+      AppLock.lockIfEnabled();
+    } else if (state == AppLifecycleState.resumed && AppLock.locked.value) {
+      AppLock.tryUnlock();
+    }
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
     PresenceService.setOnline(
@@ -122,6 +136,16 @@ class _MilesAppState extends ConsumerState<MilesApp>
       debugShowCheckedModeBanner: false,
       theme: milesDarkTheme(),
       routerConfig: router,
+      builder: (context, child) => Stack(
+        children: [
+          child ?? const SizedBox.shrink(),
+          ValueListenableBuilder<bool>(
+            valueListenable: AppLock.locked,
+            builder: (context, locked, _) =>
+                locked ? const LockOverlay() : const SizedBox.shrink(),
+          ),
+        ],
+      ),
     );
   }
 }

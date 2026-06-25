@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/theme.dart';
 import 'package:miles/features/auth/couple_page.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
 import 'package:miles/features/auth/sign_up_page.dart';
@@ -26,6 +27,10 @@ import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
+import 'package:miles/features/games/games_screen.dart';
+import 'package:miles/features/games/party_decks.dart';
+import 'package:miles/features/games/simple_card_game_screen.dart';
+import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
 import 'package:miles/features/intimacy/intimacy_screen.dart';
@@ -167,6 +172,34 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/heartbeat',
         builder: (context, state) => const HeartbeatScreen(),
+      ),
+      GoRoute(
+        path: '/app/games',
+        builder: (context, state) => const GamesScreen(),
+      ),
+      GoRoute(
+        path: '/app/games/truth-dare',
+        builder: (context, state) => const TruthDareScreen(),
+      ),
+      GoRoute(
+        path: '/app/games/would-you-rather',
+        builder: (context, state) => const SimpleCardGameScreen(
+          title: 'Would You Rather',
+          subtitle: 'Yeh ya woh? Tap karke agla sawaal — saath socho.',
+          emoji: '🤔',
+          cards: wouldYouRatherDeck,
+          accent: MilesColors.sage,
+        ),
+      ),
+      GoRoute(
+        path: '/app/games/never-have-i-ever',
+        builder: (context, state) => const SimpleCardGameScreen(
+          title: 'Never Have I Ever',
+          subtitle: 'Maine kabhi nahi… sach bolo, hans-hans ke.',
+          emoji: '🙊',
+          cards: neverHaveIEverDeck,
+          accent: MilesColors.blush,
+        ),
       ),
       GoRoute(
         path: '/call',
