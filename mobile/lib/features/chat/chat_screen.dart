@@ -170,7 +170,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final f =
           File('${dir.path}/gif_${DateTime.now().millisecondsSinceEpoch}.gif');
       await f.writeAsBytes(res.bodyBytes);
-      await ChatRepository.sendImage(cid, f, replyToId: _takeReplyId());
+      await _sendImageFast(cid, f);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -178,6 +178,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         );
       }
     }
+  }
+
+  /// Send an image with INSTANT feedback: the local file shows as a bubble
+  /// immediately (status=sending), then uploads in the background. The DB echo
+  /// carries the same id, so it dedupes; we just flip the status to sent.
+  Future<void> _sendImageFast(String coupleId, File f) async {
+    final id = _uuid.v4();
+    final replyId = _takeReplyId();
+    final myUid = SupabaseService.currentUserId;
+    if (myUid != null) {
+      _onIncoming(Message(
+        id: id,
+        senderId: myUid,
+        createdAt: DateTime.now(),
+        kind: 'image',
+        localPath: f.path,
+        sendStatus: SendStatus.sending,
+        replyToId: replyId,
+      ));
+    }
+    try {
+      await ChatRepository.sendImage(coupleId, f, id: id, replyToId: replyId);
+      _updateStatus(id, SendStatus.sent);
+    } catch (_) {
+      _updateStatus(id, SendStatus.failed);
+    }
+  }
+
+  void _updateStatus(String id, SendStatus status) {
+    if (!mounted) return;
+    final i = _messages.indexWhere((m) => m.id == id);
+    if (i < 0) return;
+    setState(() => _messages[i] = _messages[i].copyWith(sendStatus: status));
   }
 
   void _startReply(Message m) {
@@ -711,8 +744,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       replyingTo: _replyingTo,
                       onCancelReply: _cancelReply,
                       onSendText: (t) => _sendTextFast(couple.id, t),
-                      onSendImage: (f) => ChatRepository.sendImage(couple.id, f,
-                          replyToId: _takeReplyId()),
+                      onSendImage: (f) => _sendImageFast(couple.id, f),
                       onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
                           replyToId: _takeReplyId()),
                       onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
@@ -1142,22 +1174,25 @@ class _Content extends StatelessWidget {
     final m = message;
     switch (m.kind) {
       case 'image':
+        final local = m.localPath;
         final url = m.imageUrl;
-        if (url == null) {
+        if (local == null && url == null) {
           return const Padding(
             padding: EdgeInsets.all(8),
             child: Text('📷 image unavailable',
                 style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
           );
         }
-        return GestureDetector(
-          onTap: () => MediaViewer.open(context, url, heroTag: url),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Hero(
-              tag: url,
-              child: Image.network(
-                url,
+        // Optimistic: render the local file instantly while it uploads; the
+        // partner (no localPath) gets the network image.
+        final Widget img = local != null
+            ? Image.file(File(local),
+                width: 220,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    const SizedBox(width: 220, height: 140))
+            : Image.network(
+                url!,
                 width: 220,
                 fit: BoxFit.cover,
                 loadingBuilder: (_, child, progress) => progress == null
@@ -1179,7 +1214,38 @@ class _Content extends StatelessWidget {
                       style:
                           TextStyle(color: MilesColors.cream50, fontSize: 14)),
                 ),
-              ),
+              );
+        return GestureDetector(
+          onTap: url == null
+              ? null
+              : () => MediaViewer.open(context, url, heroTag: url),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(
+              children: [
+                if (url != null) Hero(tag: url, child: img) else img,
+                if (m.sendStatus == SendStatus.sending)
+                  const Positioned.fill(
+                    child: ColoredBox(
+                      color: Color(0x55000000),
+                      child: Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (m.sendStatus == SendStatus.failed)
+                  const Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Icon(Icons.error_outline,
+                        color: Color(0xFFE0564B), size: 20),
+                  ),
+              ],
             ),
           ),
         );

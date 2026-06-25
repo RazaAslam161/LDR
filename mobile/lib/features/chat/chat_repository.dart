@@ -12,6 +12,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// - image: [imagePath] is the storage path; the public URL is derived
 /// - voice: [voicePath] is the storage path; client plays it back
 /// - video: [videoPath] is in the PRIVATE couple_intimate bucket (signed URL)
+/// Delivery state for an outgoing message shown optimistically.
+enum SendStatus { sent, sending, failed }
+
 class Message {
   Message({
     required this.id,
@@ -25,7 +28,30 @@ class Message {
     this.kind = 'text',
     this.deletedForEveryone = false,
     this.deletedBy = const [],
+    this.localPath,
+    this.sendStatus = SendStatus.sent,
   });
+
+  /// Transient: the local file rendered instantly while it uploads (optimistic
+  /// media). Never comes from the DB.
+  final String? localPath;
+  final SendStatus sendStatus;
+
+  Message copyWith({String? localPath, SendStatus? sendStatus}) => Message(
+        id: id,
+        senderId: senderId,
+        createdAt: createdAt,
+        body: body,
+        imagePath: imagePath,
+        voicePath: voicePath,
+        videoPath: videoPath,
+        replyToId: replyToId,
+        kind: kind,
+        deletedForEveryone: deletedForEveryone,
+        deletedBy: deletedBy,
+        localPath: localPath ?? this.localPath,
+        sendStatus: sendStatus ?? this.sendStatus,
+      );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
         id: JsonUtils.parseString(j['id']),
@@ -141,7 +167,7 @@ class ChatRepository {
   /// Uploads an image to couple_media/<coupleId>/<rand>.<ext> and inserts a
   /// message row of kind='image'.
   static Future<void> sendImage(String coupleId, File file,
-      {String? replyToId}) async {
+      {String? replyToId, String? id}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -149,6 +175,7 @@ class ChatRepository {
     final path = '$coupleId/${_randomName('img', ext)}';
     await _c.storage.from('couple_media').upload(path, file);
     await _c.from('messages').insert({
+      if (id != null) 'id': id,
       'couple_id': coupleId,
       'sender_id': uid,
       'image_path': path,
