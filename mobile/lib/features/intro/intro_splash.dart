@@ -136,13 +136,13 @@ class _IntroSplashState extends State<IntroSplash>
                           curve: const Interval(0.3, 0.9),
                         ),
                         child: const Text(
-                          'Mrs Raza',
+                          'My Forever',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: MilesColors.gilt,
-                            fontSize: 48,
+                            fontSize: 50,
                             fontWeight: FontWeight.w600,
-                            letterSpacing: 1.0,
+                            letterSpacing: 1.2,
                             shadows: [
                               Shadow(
                                 color: MilesColors.gilt,
