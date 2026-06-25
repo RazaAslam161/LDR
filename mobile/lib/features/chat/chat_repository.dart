@@ -53,6 +53,25 @@ class Message {
         sendStatus: sendStatus ?? this.sendStatus,
       );
 
+  /// Adopt the authoritative server row (its created_at fixes cross-device
+  /// ordering; its paths/deletions are canonical) while keeping the transient
+  /// local file so an optimistic image keeps showing without a re-download.
+  Message reconcileWith(Message server) => Message(
+        id: id,
+        senderId: server.senderId,
+        createdAt: server.createdAt,
+        body: server.body,
+        imagePath: server.imagePath,
+        voicePath: server.voicePath,
+        videoPath: server.videoPath,
+        replyToId: server.replyToId,
+        kind: server.kind,
+        deletedForEveryone: server.deletedForEveryone,
+        deletedBy: server.deletedBy,
+        localPath: localPath,
+        sendStatus: SendStatus.sent,
+      );
+
   factory Message.fromJson(Map<String, dynamic> j) => Message(
         id: JsonUtils.parseString(j['id']),
         senderId: JsonUtils.parseString(j['sender_id']),

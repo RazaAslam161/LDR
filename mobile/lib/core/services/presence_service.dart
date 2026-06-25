@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -230,6 +231,7 @@ class PresenceService {
 class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   PartnerPresenceNotifier(this.ref) : super(null) {
     _init();
+    realtimeResumed.addListener(_subscribe); // rejoin + refetch on reconnect
   }
 
   final Ref ref;
@@ -241,19 +243,32 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     if (couple == null) return;
     _coupleId = couple.id;
     state = await PresenceService.fetchPartner(couple.id);
+    _subscribe();
+  }
+
+  void _subscribe() {
+    final id = _coupleId;
+    if (id == null) return;
+    _channel?.unsubscribe();
     _channel = RealtimeService.coupleTable(
-      channelName: 'presence:${couple.id}',
+      channelName: 'presence:$id',
       table: 'presence',
-      coupleId: couple.id,
+      coupleId: id,
       onChange: (_) async {
-        final p = await PresenceService.fetchPartner(_coupleId!);
+        final p = await PresenceService.fetchPartner(id);
         if (mounted) state = p;
       },
     );
+    // Pull current presence on (re)connect so we don't sit on a stale value
+    // (e.g. a false 'offline') after a socket drop.
+    PresenceService.fetchPartner(id).then((p) {
+      if (mounted) state = p;
+    });
   }
 
   @override
   void dispose() {
+    realtimeResumed.removeListener(_subscribe);
     _channel?.unsubscribe();
     super.dispose();
   }

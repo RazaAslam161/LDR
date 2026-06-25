@@ -53,6 +53,7 @@ class _AppShellState extends ConsumerState<AppShell>
     WidgetsBinding.instance.addObserver(this);
     pendingReach.addListener(_onPendingReach);
     pendingCall.addListener(_onPendingCall);
+    realtimeResumed.addListener(_rearmAlwaysOn);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
 
@@ -65,22 +66,28 @@ class _AppShellState extends ConsumerState<AppShell>
   /// client keeps "connected" and stops delivering reaches/presence until a full
   /// restart. On resume we force a fresh socket + re-subscribe the reach channel
   /// so Reach (and presence/map, which rejoin on the new socket) recover.
-  void _reconnectRealtime() {
+  Future<void> _reconnectRealtime() async {
+    // Android doze can kill the socket silently; force a clean reconnect. When
+    // it re-opens, onOpen → realtimeResumed → _rearmAlwaysOn + every per-screen
+    // subscription rejoins. (Re-subscribing synchronously here raced the
+    // still-closing socket and left the channels joined-but-dead — the cause of
+    // chat not auto-rendering and the online/offline flicker.)
+    try {
+      await SupabaseService.client.realtime.disconnect();
+      await SupabaseService.client.realtime.connect();
+    } catch (_) {}
+  }
+
+  /// Re-arm the always-on realtime (reach / call / presence) whenever the
+  /// socket (re)connects — driven by realtimeResumed (the onOpen fan-out), so
+  /// it runs AFTER the socket is open, never against a closing one.
+  void _rearmAlwaysOn() {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
-    try {
-      SupabaseService.client.realtime.disconnect();
-    } catch (_) {}
     _reachChannel?.unsubscribe();
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
-    // Re-arm the other always-on realtime so calls keep ringing and the
-    // partner's presence / mood / avatar keep updating live after a
-    // background / Android-doze socket reset (was only re-arming Reach).
     ref.read(callControllerProvider).reconnect();
     ref.read(sessionProvider.notifier).reconnectPresence();
-    // Wake EVERY per-screen realtime subscription (cycle, games, touch, …) so
-    // they re-arm on the fresh socket instead of going silently dead.
-    realtimeResumed.value++;
   }
 
   void _onReady() {
@@ -149,6 +156,7 @@ class _AppShellState extends ConsumerState<AppShell>
     WidgetsBinding.instance.removeObserver(this);
     pendingReach.removeListener(_onPendingReach);
     pendingCall.removeListener(_onPendingCall);
+    realtimeResumed.removeListener(_rearmAlwaysOn);
     _reachChannel?.unsubscribe();
     super.dispose();
   }

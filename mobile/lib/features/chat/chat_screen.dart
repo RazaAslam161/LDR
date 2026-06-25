@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/mood.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
@@ -245,6 +246,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    realtimeResumed.addListener(_resubscribe); // rejoin on any socket reconnect
     _scroll.addListener(_onScroll);
     _init();
   }
@@ -262,7 +264,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final id = _coupleId;
     if (id == null || !mounted) return;
     _channel?.unsubscribe();
-    _channel = ChatRepository.subscribe(id, _onIncoming);
+    _channel =
+        ChatRepository.subscribe(id, (m) => _onIncoming(m, fromDb: true));
     _moodChannel?.unsubscribe();
     _moodChannel = SupabaseService.client
         .channel('mood_burst:$id')
@@ -294,7 +297,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } catch (_) {
       // first-run is fine
     }
-    _channel = ChatRepository.subscribe(couple.id, _onIncoming);
+    _channel = ChatRepository.subscribe(
+        couple.id, (m) => _onIncoming(m, fromDb: true));
     _moodChannel = SupabaseService.client
         .channel('mood_burst:${couple.id}')
         .onBroadcast(event: 'mood', callback: _onMoodBurst)
@@ -315,8 +319,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // reverse:true already pins the view to the newest message — no scroll needed.
   }
 
-  void _onIncoming(Message m) {
-    if (_ids.contains(m.id)) return;
+  void _onIncoming(Message m, {bool fromDb = false}) {
+    if (_ids.contains(m.id)) {
+      // Already shown (optimistic / broadcast). When the authoritative DB row
+      // arrives, adopt its SERVER timestamp + paths so ordering is correct
+      // across devices and the status flips to sent.
+      if (fromDb && mounted) {
+        final i = _messages.indexWhere((x) => x.id == m.id);
+        if (i >= 0) {
+          setState(() {
+            _messages[i] = _messages[i].reconcileWith(m);
+            _sortMessages();
+          });
+        }
+      }
+      return;
+    }
     _ids.add(m.id);
     if (!mounted) return;
     final mine = m.isMine(SupabaseService.currentUserId);
@@ -531,6 +549,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    realtimeResumed.removeListener(_resubscribe);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
     _readTimer?.cancel();

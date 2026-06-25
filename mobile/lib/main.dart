@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/router.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
@@ -55,6 +56,7 @@ Future<void> main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   TzHelper.ensureInit();
   await SupabaseService.init();
+  initRealtimeAutoResume(); // rejoin channels whenever the socket (re)connects
   await AdService.init();
   await FcmService.init();
   // Lets the call's background foreground-service talk to the UI isolate.
