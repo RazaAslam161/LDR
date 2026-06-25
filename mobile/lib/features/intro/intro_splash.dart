@@ -22,7 +22,7 @@ class _IntroSplashState extends State<IntroSplash>
     with TickerProviderStateMixin {
   late final AnimationController _scene = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 5200),
+    duration: const Duration(milliseconds: 4200),
   )..forward();
 
   double _opacity = 1;
@@ -34,11 +34,11 @@ class _IntroSplashState extends State<IntroSplash>
   @override
   void initState() {
     super.initState();
-    _minTimer = Timer(const Duration(milliseconds: 7000), () {
+    _minTimer = Timer(const Duration(milliseconds: 9500), () {
       _minPassed = true;
       _maybeDismiss();
     });
-    _maxTimer = Timer(const Duration(milliseconds: 14000), _dismiss);
+    _maxTimer = Timer(const Duration(milliseconds: 16000), _dismiss);
     AppLock.locked.addListener(_maybeDismiss);
   }
 
@@ -106,13 +106,13 @@ class _IntroSplashState extends State<IntroSplash>
                 final cloudFade = _seg(v, 0.78, 0.9);
                 final credit = _seg(v, 0.7, 1.0);
 
-                var xGroom = lerpDouble(-2.0, -0.30, slide)!;
-                var xBride = lerpDouble(2.0, 0.30, slide)!;
-                xGroom = lerpDouble(xGroom, -0.20, hug)!;
-                xBride = lerpDouble(xBride, 0.20, hug)!;
-                xGroom = lerpDouble(xGroom, -0.15, kiss)!;
-                xBride = lerpDouble(xBride, 0.15, kiss)!;
-                final lean = lerpDouble(0.0, 0.16, kiss)!;
+                var xGroom = lerpDouble(-2.0, -0.34, slide)!;
+                var xBride = lerpDouble(2.0, 0.34, slide)!;
+                xGroom = lerpDouble(xGroom, -0.28, hug)!;
+                xBride = lerpDouble(xBride, 0.28, hug)!;
+                xGroom = lerpDouble(xGroom, -0.24, kiss)!;
+                xBride = lerpDouble(xBride, 0.24, kiss)!;
+                final lean = lerpDouble(0.0, 0.19, kiss)!;
                 final bob = math.sin((hug + kiss) * math.pi) * 0.012;
 
                 return Stack(
