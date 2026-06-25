@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/features/shell/app_drawer.dart';
 
 /// Games hub — a little arcade of couple mini-games. Truth or Dare is synced
 /// (both phones share the turn); the rest are quick local card games.
@@ -59,12 +59,13 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('Games'),
         leading: Builder(
           builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu),
-            onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
       ),

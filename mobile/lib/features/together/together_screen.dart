@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/features/shell/app_drawer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 
 class _Action {
@@ -150,12 +150,13 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
     final myName = ref.watch(sessionProvider).profile?.displayName ?? 'You';
     return Scaffold(
       backgroundColor: Colors.transparent,
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('Together'),
         leading: Builder(
           builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu),
-            onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
         actions: [

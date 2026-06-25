@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/care/care_repository.dart';
+import 'package:miles/features/shell/app_drawer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _Preset {
@@ -127,12 +127,13 @@ class _CareScreenState extends ConsumerState<CareScreen> {
         ref.watch(sessionProvider).partner?.displayName ?? 'them';
     return Scaffold(
       backgroundColor: Colors.transparent,
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('Care Reminders'),
         leading: Builder(
           builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu),
-            onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
       ),

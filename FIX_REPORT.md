@@ -368,3 +368,24 @@ FormatException — dates go through `JsonUtils.parseDate`, never raw `DateTime.
   updates live via a `cycle_events` realtime subscription.
 
 **flutter analyze:** 0 errors.
+
+## Issue 3 — Drawer not accessible from every screen — ROOT CAUSE FOUND
+
+**Real root cause (captured):** the drawer lives on the `AppShell` Scaffold
+(`key: rootScaffoldKey`). The 6 bottom-nav tabs (home, chat, countdown, sky,
+breath, closer) ARE the shell's body, so `rootScaffoldKey.openDrawer()` works.
+But the 8 drawer-reached screens (care, cycle, games, heartbeat, reasons,
+together, touch, watch) are **pushed as separate routes on top of the shell** —
+calling `rootScaffoldKey.openDrawer()` from them opens the shell's drawer
+**behind** the opaque pushed route, so nothing appears. (Why not the spec's full
+ShellRoute rewrite: the prior pass deliberately avoided it to protect the working
+bottom-nav; a ShellRoute redo risks regressing nav for a layout-only bug.)
+
+**What changed (bulletproof, low-risk):** every pushed drawer-screen now hosts
+its OWN `drawer: const AppDrawer()` and opens it locally via
+`Scaffold.of(ctx).openDrawer()` (the `ctx` from the existing leading `Builder`,
+below that screen's Scaffold). No bottom nav underneath these routes, so the
+drawer is full-height. Dead `rootScaffoldKey` imports removed. The 6 shell tabs
+are unchanged (they already work). Drawer now opens from every screen.
+
+**flutter analyze:** 0 errors.
