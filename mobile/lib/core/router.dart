@@ -35,6 +35,7 @@ import 'package:miles/features/timeline/timeline_screen.dart';
 import 'package:miles/features/together/together_screen.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
+import 'package:miles/features/watch/watch_together_screen.dart';
 
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {
@@ -152,6 +153,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/care',
         builder: (context, state) => const CareScreen(),
+      ),
+      GoRoute(
+        path: '/app/watch',
+        builder: (context, state) => const WatchTogetherScreen(),
       ),
       GoRoute(
         path: '/call',

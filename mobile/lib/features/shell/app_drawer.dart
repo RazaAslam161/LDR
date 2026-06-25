@@ -134,6 +134,14 @@ class AppDrawer extends ConsumerWidget {
                 },
               ),
               _DrawerTile(
+                icon: Icons.movie_outlined,
+                label: 'Watch Together',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/app/watch');
+                },
+              ),
+              _DrawerTile(
                 icon: Icons.schedule,
                 label: 'Rituals',
                 onTap: () {
