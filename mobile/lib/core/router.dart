@@ -35,6 +35,7 @@ import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
 import 'package:miles/features/intimacy/intimacy_screen.dart';
+import 'package:miles/features/intro/intro_video_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
@@ -55,8 +56,13 @@ GoRouter buildRouter(Ref ref) {
 
       final isAuthRoute = path == '/signin' || path == '/signup';
 
+      // Let the intro video render without being bounced by auth redirects.
+      // It calls context.go('/signin') itself on completion/skip, and the
+      // redirect logic then takes over.
+      if (path == '/') return null;
+
       // While the session is resolving, don't bounce — let the current route
-      // (usually the '/' spinner) render until we know where to send them.
+      // render until we know where to send them.
       if (session.loading) return null;
 
       // ── Not signed in → only the auth pages are reachable. ──
@@ -276,16 +282,10 @@ GoRouter buildRouter(Ref ref) {
         path: '/app/closer/pick-for-us',
         builder: (context, state) => const PickForUsScreen(),
       ),
-      // Catch-all / → show loading spinner while session initialises,
-      // then the redirect logic will push to /signin or /app.
+      // Catch-all / → intro video on first launch.
       GoRoute(
         path: '/',
-        builder: (context, state) => const Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(
-            child: CircularProgressIndicator(),
-          ),
-        ),
+        builder: (context, state) => const IntroVideoScreen(),
       ),
     ],
   );
