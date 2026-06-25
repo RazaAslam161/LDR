@@ -73,15 +73,15 @@ const LAT=$lat, LNG=$lon;
 const map = new maplibregl.Map({
   container:'map',
   center:[LNG, LAT],
-  zoom:16.5,
-  pitch:68,
+  zoom:18.4,
+  pitch:58,
   bearing:28,
   maxPitch:85,
   attributionControl:false,
   style:{
     version:8,
     sources:{
-      sat:{type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:19, attribution:'Esri'},
+      sat:{type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:21, attribution:'Esri'},
       terrain:{type:'raster-dem', tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding:'terrarium', tileSize:256, maxzoom:15},
       osm:{type:'vector', url:'https://tiles.openfreemap.org/planet'}
     },
