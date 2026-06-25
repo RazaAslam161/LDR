@@ -126,6 +126,14 @@ class AppDrawer extends ConsumerWidget {
                 },
               ),
               _DrawerTile(
+                icon: Icons.volunteer_activism_outlined,
+                label: 'Care Reminders',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/app/care');
+                },
+              ),
+              _DrawerTile(
                 icon: Icons.schedule,
                 label: 'Rituals',
                 onTap: () {

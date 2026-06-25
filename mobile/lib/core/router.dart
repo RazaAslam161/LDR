@@ -12,6 +12,7 @@ import 'package:miles/features/capsule/capsule_detail_screen.dart';
 import 'package:miles/features/capsule/capsule_fill_screen.dart';
 import 'package:miles/features/capsule/capsule_list_screen.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
+import 'package:miles/features/care/care_screen.dart';
 import 'package:miles/features/closer/afterglow/afterglow_form_screen.dart';
 import 'package:miles/features/closer/afterglow/afterglow_screen.dart';
 import 'package:miles/features/closer/body_map/body_map_screen.dart';
@@ -147,6 +148,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/reasons',
         builder: (context, state) => const ReasonsScreen(),
+      ),
+      GoRoute(
+        path: '/app/care',
+        builder: (context, state) => const CareScreen(),
       ),
       GoRoute(
         path: '/call',

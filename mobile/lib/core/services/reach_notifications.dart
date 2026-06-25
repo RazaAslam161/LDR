@@ -59,11 +59,51 @@ Future<void> showReachNotification({
   );
 }
 
+// ── Care Nudges ──────────────────────────────────────────────────────────────
+const String kCareChannelId = 'care_channel';
+const String kCareChannelName = 'Care Reminders';
+const String kCareChannelDesc = 'Gentle reminders from your partner';
+
+AndroidNotificationChannel buildCareChannel() => const AndroidNotificationChannel(
+      kCareChannelId,
+      kCareChannelName,
+      description: kCareChannelDesc,
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+/// A gentle reminder notification ("eat lunch", "take your medicine"…).
+Future<void> showCareNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String title,
+  required String body,
+  required String nudgeId,
+}) async {
+  const android = AndroidNotificationDetails(
+    kCareChannelId,
+    kCareChannelName,
+    channelDescription: kCareChannelDesc,
+    importance: Importance.high,
+    priority: Priority.high,
+    icon: '@mipmap/ic_launcher',
+    ticker: 'Reminder',
+  );
+  await plugin.show(
+    id: nudgeId.hashCode & 0x7fffffff,
+    title: title,
+    body: body,
+    notificationDetails: const NotificationDetails(android: android),
+    payload: 'care|$nudgeId',
+  );
+}
+
 /// Background + terminated FCM handler. MUST be a top-level / static function
 /// annotated with @pragma('vm:entry-point') — it runs in its own isolate.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  if (message.data['type'] != 'reach') return;
+  final type = message.data['type'];
+  if (type != 'reach' && type != 'care') return;
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final plugin = FlutterLocalNotificationsPlugin();
@@ -72,10 +112,21 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     ),
   );
-  await plugin
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(buildReachChannel());
+  final androidPlugin = plugin.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>();
+
+  if (type == 'care') {
+    await androidPlugin?.createNotificationChannel(buildCareChannel());
+    await showCareNotification(
+      plugin: plugin,
+      title: (message.data['title'] as String?) ?? 'A reminder 💛',
+      body: (message.data['body'] as String?) ?? '',
+      nudgeId: (message.data['nudge_id'] as String?) ?? '',
+    );
+    return;
+  }
+
+  await androidPlugin?.createNotificationChannel(buildReachChannel());
 
   // The background isolate has no Activity, so it can't query the FSI
   // permission live — it reads the value the foreground last cached.

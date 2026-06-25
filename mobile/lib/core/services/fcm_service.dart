@@ -35,10 +35,10 @@ class FcmService {
       ),
       onDidReceiveNotificationResponse: _onLocalTap,
     );
-    await _fln
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(buildReachChannel());
+    final android = _fln.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(buildReachChannel());
+    await android?.createNotificationChannel(buildCareChannel());
 
     // Cold start via a tapped Reach notification.
     final launch = await _fln.getNotificationAppLaunchDetails();
@@ -88,7 +88,18 @@ class FcmService {
 
   // ── handlers ───────────────────────────────────────────────────────────────
   static void _onForeground(RemoteMessage m) {
-    if (m.data['type'] != 'reach') return;
+    final type = m.data['type'];
+    if (type == 'care') {
+      // Foreground reminder: post the gentle notification directly.
+      showCareNotification(
+        plugin: _fln,
+        title: (m.data['title'] as String?) ?? 'A reminder 💛',
+        body: (m.data['body'] as String?) ?? '',
+        nudgeId: (m.data['nudge_id'] as String?) ?? '',
+      );
+      return;
+    }
+    if (type != 'reach') return;
     // Foreground: surface the in-app overlay. AppShell de-dupes by reach_id so
     // this and the Supabase realtime listener never double-show.
     pendingReach.value = ReachTap(
