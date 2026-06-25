@@ -87,12 +87,13 @@ const map = new maplibregl.Map({
     },
     layers:[
       {id:'sat', type:'raster', source:'sat'},
-      {id:'bld3d', type:'fill-extrusion', source:'osm', 'source-layer':'building', minzoom:14,
+      {id:'bld3d', type:'fill-extrusion', source:'osm', 'source-layer':'building', minzoom:13,
         paint:{
-          'fill-extrusion-color':'#c9c9d2',
-          'fill-extrusion-height':['coalesce',['get','render_height'],['get','height'],6],
-          'fill-extrusion-base':['coalesce',['get','render_min_height'],0],
-          'fill-extrusion-opacity':0.82
+          'fill-extrusion-color':'#d7d2c4',
+          'fill-extrusion-height':['coalesce',['get','render_height'],['get','height'],9],
+          'fill-extrusion-base':['coalesce',['get','render_min_height'],['get','min_height'],0],
+          'fill-extrusion-opacity':0.95,
+          'fill-extrusion-vertical-gradient':true
         }}
     ],
     terrain:{source:'terrain', exaggeration:1.4},

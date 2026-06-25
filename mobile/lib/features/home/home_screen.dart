@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
+import 'package:miles/core/services/bg_location.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -82,6 +83,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (mode == 'precise') {
       await LocationService.startLiveSharing(couple.id);
       await _refreshMyCoords();
+      // Periodic background updates (no notification) so the partner still gets
+      // movement when the app is closed. Best-effort (OEM battery limits apply).
+      await BgLocationService.enable();
     } else if (mode == 'city') {
       await LocationService.shareOnce(couple.id, mode);
     }
@@ -104,6 +108,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
     await LocationService.stopLiveSharing(couple.id);
+    await BgLocationService.disable();
     if (mounted) setState(() => _myMode = 'off');
   }
 
