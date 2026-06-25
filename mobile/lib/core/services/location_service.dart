@@ -61,16 +61,14 @@ class LocationService {
 
       String? label;
       try {
-        final marks = await placemarkFromCoordinates(
-            pos.latitude, pos.longitude);
+        final marks =
+            await placemarkFromCoordinates(pos.latitude, pos.longitude);
         if (marks.isNotEmpty) {
           final m = marks.first;
           final parts = mode == 'city'
               ? [m.locality, m.country]
               : [m.subLocality ?? m.locality, m.administrativeArea, m.country];
-          label = parts
-              .where((e) => e != null && e.isNotEmpty)
-              .join(', ');
+          label = parts.where((e) => e != null && e.isNotEmpty).join(', ');
         }
       } catch (_) {
         // geocoding can fail offline — fall through to a generic label
@@ -106,9 +104,11 @@ class LocationService {
       final marks = await placemarkFromCoordinates(lat, lon);
       if (marks.isNotEmpty) {
         final m = marks.first;
-        final label = [m.subLocality ?? m.locality, m.administrativeArea, m.country]
-            .where((e) => e != null && e.isNotEmpty)
-            .join(', ');
+        final label = [
+          m.subLocality ?? m.locality,
+          m.administrativeArea,
+          m.country
+        ].where((e) => e != null && e.isNotEmpty).join(', ');
         if (label.isNotEmpty) return label;
       }
     } catch (_) {
@@ -122,7 +122,8 @@ class LocationService {
   /// every 10 m tick.
   static Future<String?> _labelIfMoved(double lat, double lon) async {
     final moved = _lastLabelLat == null ||
-        Geolocator.distanceBetween(_lastLabelLat!, _lastLabelLon!, lat, lon) > 700;
+        Geolocator.distanceBetween(_lastLabelLat!, _lastLabelLon!, lat, lon) >
+            700;
     if (!moved) return null;
     final label = await _label(lat, lon);
     if (label != null) {
@@ -155,28 +156,17 @@ class LocationService {
           accuracy: first.accuracy,
           label: await _labelIfMoved(first.latitude, first.longitude));
 
-      // Always-on (opt-in + "allow all the time") keeps streaming with the app
-      // closed via a foreground service + persistent notification. Otherwise a
-      // lighter foreground-only stream. Background throttled to save battery.
-      final background = await isAlwaysOn() && await hasBackgroundPermission();
-      final LocationSettings settings = background
-          ? AndroidSettings(
-              accuracy: LocationAccuracy.high,
-              distanceFilter: 50,
-              intervalDuration: const Duration(minutes: 1),
-              foregroundNotificationConfig: const ForegroundNotificationConfig(
-                notificationTitle: 'Tethered',
-                notificationText: 'Sharing your live location',
-                enableWakeLock: true,
-              ),
-            )
-          : const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              distanceFilter: 10,
-            );
+      // Foreground-only streaming — NO persistent notification. Android requires
+      // a sticky notification for a background-location foreground service, which
+      // the couple didn't want, so we stream only while the app is alive.
+      const settings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      );
 
       await _liveSub?.cancel();
-      _liveSub = Geolocator.getPositionStream(locationSettings: settings).listen(
+      _liveSub =
+          Geolocator.getPositionStream(locationSettings: settings).listen(
         (pos) async => PresenceService.setLiveLocation(coupleId,
             lat: pos.latitude,
             lon: pos.longitude,
@@ -203,7 +193,6 @@ class LocationService {
   /// backgrounds / leaves Home. NO-OP when always-on is enabled, so opted-in
   /// users keep streaming (via the foreground service) with the app closed.
   static Future<void> pauseStream() async {
-    if (await isAlwaysOn() && await hasBackgroundPermission()) return;
     await _liveSub?.cancel();
     _liveSub = null;
   }

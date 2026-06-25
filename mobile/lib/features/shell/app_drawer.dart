@@ -85,106 +85,112 @@ class AppDrawer extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
               ],
-              _DrawerTile(
-                icon: Icons.lock_clock,
-                label: 'Capsule',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/capsule');
-                },
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    _DrawerTile(
+                      icon: Icons.lock_clock,
+                      label: 'Capsule',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/capsule');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.lock_outline,
+                      label: 'Vault',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/vault');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.touch_app_outlined,
+                      label: 'Touch',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/touch');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.favorite_border,
+                      label: 'Together',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/together');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.auto_awesome,
+                      label: 'Reasons I Love You',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/reasons');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.volunteer_activism_outlined,
+                      label: 'Care Reminders',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/care');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.movie_outlined,
+                      label: 'Watch Together',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/watch');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.spa_outlined,
+                      label: 'Cycle',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/cycle');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.favorite,
+                      label: 'Feel My Heartbeat',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/heartbeat');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.schedule,
+                      label: 'Rituals',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/rituals');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.question_answer,
+                      label: 'Daily Question',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/prompt');
+                      },
+                    ),
+                    _DrawerTile(
+                      icon: Icons.timeline,
+                      label: 'Timeline',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        context.push('/app/timeline');
+                      },
+                    ),
+                  ],
+                ),
               ),
-              _DrawerTile(
-                icon: Icons.lock_outline,
-                label: 'Vault',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/vault');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.touch_app_outlined,
-                label: 'Touch',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/touch');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.favorite_border,
-                label: 'Together',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/together');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.auto_awesome,
-                label: 'Reasons I Love You',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/reasons');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.volunteer_activism_outlined,
-                label: 'Care Reminders',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/care');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.movie_outlined,
-                label: 'Watch Together',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/watch');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.spa_outlined,
-                label: 'Cycle',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/cycle');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.favorite,
-                label: 'Feel My Heartbeat',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/heartbeat');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.schedule,
-                label: 'Rituals',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/rituals');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.question_answer,
-                label: 'Daily Question',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/prompt');
-                },
-              ),
-              _DrawerTile(
-                icon: Icons.timeline,
-                label: 'Timeline',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/timeline');
-                },
-              ),
-              const Spacer(),
+              const SizedBox(height: 8),
               ListTile(
-                leading:
-                    const Icon(Icons.settings, color: Color(0x80F5EFE6)),
+                leading: const Icon(Icons.settings, color: Color(0x80F5EFE6)),
                 title: const Text(
                   'Settings',
                   style: TextStyle(color: Color(0x80F5EFE6)),
@@ -240,7 +246,8 @@ class _PresenceDot extends StatelessWidget {
 }
 
 class _DrawerTile extends StatelessWidget {
-  const _DrawerTile({required this.icon, required this.label, required this.onTap});
+  const _DrawerTile(
+      {required this.icon, required this.label, required this.onTap});
   final IconData icon;
   final String label;
   final VoidCallback onTap;

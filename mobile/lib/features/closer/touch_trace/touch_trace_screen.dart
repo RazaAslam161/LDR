@@ -62,8 +62,10 @@ class _TouchTraceScreenState extends ConsumerState<TouchTraceScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_back,
-                          color: Color(0x80F5EFE6),),
+                      icon: const Icon(
+                        Icons.arrow_back,
+                        color: Color(0x80F5EFE6),
+                      ),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                     const Expanded(

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -18,6 +16,7 @@ import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/features/home/partner_location_card.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:miles/features/reach/reach_button.dart';
 
 /// The landing screen: how your partner is, right now — plus the Reach button
@@ -32,41 +31,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   bool _uploading = false;
-  bool _promptedLocation = false;
   String _myMode = 'off';
-  bool _alwaysOn = false;
   double? _myLat;
   double? _myLon;
-
-  void _snack(String msg) {
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
-    }
-  }
-
-  /// Opt in/out of always-on (background) sharing. Enabling needs "Allow all the
-  /// time" — if it isn't granted we open app settings and ask them to return.
-  Future<void> _setAlwaysOn(bool value) async {
-    final couple = ref.read(currentCoupleProvider);
-    if (couple == null) return;
-    if (!value) {
-      await LocationService.setAlwaysOnPref(value: false);
-      await LocationService.startLiveSharing(couple.id); // back to foreground-only
-      if (mounted) setState(() => _alwaysOn = false);
-      return;
-    }
-    final perm = await LocationService.ensurePermission();
-    if (LocationService.blocked(perm)) return;
-    if (!await LocationService.hasBackgroundPermission()) {
-      _snack("Set Location to 'Allow all the time', then turn this on again.");
-      await Geolocator.openAppSettings();
-      return;
-    }
-    await LocationService.setAlwaysOnPref(value: true);
-    await LocationService.startLiveSharing(couple.id); // restart with bg service
-    if (mounted) setState(() => _alwaysOn = true);
-  }
 
   @override
   void initState() {
@@ -98,24 +65,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
     final mine = await PresenceService.fetchMine(couple.id);
-    final mode = mine?.locationSharingMode ?? 'off';
-    final always = await LocationService.isAlwaysOn();
-    if (mounted) {
-      setState(() {
-        _myMode = mode;
-        _alwaysOn = always;
-      });
+    var mode = mine?.locationSharingMode ?? 'off';
+
+    // Auto-enable live sharing on first install (foreground-only, no persistent
+    // notification). Stays on until the user turns it off from the Home card.
+    final prefs = await SharedPreferences.getInstance();
+    if (!(prefs.getBool('location_auto_init') ?? false)) {
+      await prefs.setBool('location_auto_init', true);
+      mode = 'precise';
+      await PresenceService.setSharingMode(couple.id, 'precise');
     }
+
+    if (mounted) setState(() => _myMode = mode);
     await _refreshMyCoords();
-    if (mode == 'off') {
-      if (!_promptedLocation && mounted) {
-        _promptedLocation = true;
-        await _locationOnboarding();
-      }
-    } else if (mode == 'precise') {
+    if (mode == 'precise') {
       await LocationService.startLiveSharing(couple.id);
       await _refreshMyCoords();
-    } else {
+    } else if (mode == 'city') {
       await LocationService.shareOnce(couple.id, mode);
     }
   }
@@ -133,60 +99,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {}
   }
 
-  Future<void> _startLive() async {
-    final couple = ref.read(currentCoupleProvider);
-    if (couple == null) return;
-    final ok = await LocationService.startLiveSharing(couple.id);
-    if (mounted) setState(() => _myMode = ok ? 'precise' : 'off');
-    await _refreshMyCoords();
-  }
-
   Future<void> _stopLive() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
     await LocationService.stopLiveSharing(couple.id);
     if (mounted) setState(() => _myMode = 'off');
-  }
-
-  Future<void> _locationOnboarding() async {
-    final partnerName =
-        ref.read(partnerProfileProvider)?.displayName ?? 'your partner';
-    final couple = ref.read(currentCoupleProvider);
-    if (couple == null) return;
-    final mode = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: MilesColors.surface1,
-        title: const Text('See where each other is 💕'),
-        content: Text(
-          'Share your live location with $partnerName? You\'ll both see each '
-          'other on the map and always know you\'re close. You can turn this '
-          'off anytime.',
-          style: const TextStyle(color: MilesColors.taupe, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, 'off'),
-              child: const Text('Not now')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, 'city'),
-              child: const Text('City only')),
-          FilledButton(
-              style:
-                  FilledButton.styleFrom(backgroundColor: MilesColors.blush),
-              onPressed: () => Navigator.pop(ctx, 'precise'),
-              child: const Text('Share live')),
-        ],
-      ),
-    );
-    if (mode == null) return;
-    if (mode == 'off') {
-      await PresenceService.setSharingMode(couple.id, 'off');
-    } else if (mode == 'precise') {
-      await _startLive();
-    } else {
-      await LocationService.shareOnce(couple.id, mode);
-    }
   }
 
   Future<void> _shareSnap() async {
@@ -207,8 +124,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           .getPublicUrl(path);
       await PresenceService.setCheckinPhoto(couple.id, url);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Snap shared 📸')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Snap shared 📸')));
       }
     } catch (_) {
       if (mounted) {
@@ -240,7 +157,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   Builder(
                     builder: (ctx) => IconButton(
                       icon: const Icon(Icons.menu, color: MilesColors.gilt),
-                      onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
+                      onPressed: () =>
+                          rootScaffoldKey.currentState?.openDrawer(),
                     ),
                   ),
                 ],
@@ -268,8 +186,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const SizedBox(height: 8),
                   _LiveSharingBanner(
                     partnerName: partner.displayName,
-                    alwaysOn: _alwaysOn,
-                    onAlwaysOnChanged: _setAlwaysOn,
                     onStop: _stopLive,
                   ),
                 ],
@@ -342,8 +258,7 @@ class _PartnerStatusCard extends StatelessWidget {
                         Flexible(
                           child: Text(partner.displayName as String,
                               overflow: TextOverflow.ellipsis,
-                              style:
-                                  Theme.of(context).textTheme.headlineSmall),
+                              style: Theme.of(context).textTheme.headlineSmall),
                         ),
                         if (mood != null) ...[
                           const SizedBox(width: 6),
@@ -360,7 +275,8 @@ class _PartnerStatusCard extends StatelessWidget {
                           height: 7,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: online ? MilesColors.sage : MilesColors.faint,
+                            color:
+                                online ? MilesColors.sage : MilesColors.faint,
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -386,7 +302,8 @@ class _PartnerStatusCard extends StatelessWidget {
           _InfoRow(icon: Icons.place_outlined, text: locationText),
           if (mood != null) ...[
             const SizedBox(height: 8),
-            _InfoRow(icon: Icons.favorite_outline, text: 'Feeling ${mood.label}'),
+            _InfoRow(
+                icon: Icons.favorite_outline, text: 'Feeling ${mood.label}'),
           ],
           if (online && presence?.currentScreen != null) ...[
             const SizedBox(height: 8),
@@ -507,13 +424,9 @@ class _QuickActions extends StatelessWidget {
 class _LiveSharingBanner extends StatelessWidget {
   const _LiveSharingBanner({
     required this.partnerName,
-    required this.alwaysOn,
-    required this.onAlwaysOnChanged,
     required this.onStop,
   });
   final String partnerName;
-  final bool alwaysOn;
-  final ValueChanged<bool> onAlwaysOnChanged;
   final VoidCallback onStop;
 
   @override
@@ -525,45 +438,25 @@ class _LiveSharingBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: MilesColors.blush.withValues(alpha: 0.3)),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              const Icon(Icons.my_location, color: MilesColors.blush, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Sharing live location with $partnerName',
-                  style:
-                      const TextStyle(color: MilesColors.cream50, fontSize: 12),
-                ),
-              ),
-              GestureDetector(
-                onTap: onStop,
-                child: const Text(
-                  'Turn off',
-                  style: TextStyle(
-                      color: MilesColors.blush,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
+          const Icon(Icons.my_location, color: MilesColors.blush, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Sharing live location with $partnerName',
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
+            ),
           ),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Keep sharing when the app is closed',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 11),
-                ),
-              ),
-              Switch(
-                value: alwaysOn,
-                onChanged: onAlwaysOnChanged,
-                activeThumbColor: MilesColors.blush,
-              ),
-            ],
+          GestureDetector(
+            onTap: onStop,
+            child: const Text(
+              'Turn off',
+              style: TextStyle(
+                  color: MilesColors.blush,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
