@@ -18,6 +18,7 @@ import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_theme.dart';
 import 'package:miles/features/chat/chat_theme_controller.dart';
 import 'package:miles/features/chat/chat_theme_picker.dart';
+import 'package:miles/features/chat/giphy_picker.dart';
 import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/chat/mood_selector.dart';
 import 'package:miles/features/chat/typing_indicator.dart';
@@ -55,14 +56,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _showMoodBurst(m); // also show it on my own screen
   }
 
+  void _sendGifBurst(String url) {
+    _moodChannel?.sendBroadcastMessage(event: 'mood', payload: {'gif': url});
+    _showGifBurst(url); // also show it on my own screen
+  }
+
   void _onMoodBurst(Map<String, dynamic> payload) {
+    final gif = payload['gif']?.toString();
+    if (gif != null && gif.isNotEmpty) {
+      _showGifBurst(gif);
+      return;
+    }
     final m = moodByKey(payload['mood']?.toString());
     if (m != null) _showMoodBurst(m);
   }
 
   void _showMoodBurst(MoodData m) {
     if (!mounted) return;
-    setState(() => _bursts.add(_ActiveBurst(_burstId++, m)));
+    setState(() => _bursts.add(_ActiveBurst(_burstId++, mood: m)));
+  }
+
+  void _showGifBurst(String url) {
+    if (!mounted) return;
+    setState(() => _bursts.add(_ActiveBurst(_burstId++, gifUrl: url)));
   }
 
   void _removeBurst(int id) {
@@ -72,6 +88,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _pickMoodBurst() async {
     final m = await showMoodSelector(context);
     if (m != null) _sendMoodBurst(m);
+  }
+
+  Future<void> _pickGifBurst() async {
+    final url = await showGiphyPicker(context);
+    if (url != null) _sendGifBurst(url);
   }
 
   void _startReply(Message m) {
@@ -425,6 +446,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     _setMyMood();
                   case 'burst':
                     _pickMoodBurst();
+                  case 'gif':
+                    _pickGifBurst();
                   case 'theme':
                     showChatThemePicker(context);
                   case 'clear':
@@ -434,6 +457,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'mood', child: Text('Set your mood')),
                 PopupMenuItem(value: 'burst', child: Text('Fling a mood')),
+                PopupMenuItem(value: 'gif', child: Text('Fling a GIF 🎞️')),
                 PopupMenuItem(value: 'theme', child: Text('Chat theme')),
                 PopupMenuItem(
                     value: 'clear', child: Text('Clear conversation')),
@@ -537,6 +561,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                         _BurstAnimation(
                                           key: ValueKey(b.id),
                                           mood: b.mood,
+                                          gifUrl: b.gifUrl,
                                           onDone: () => _removeBurst(b.id),
                                         ),
                                     ],
@@ -834,16 +859,23 @@ class _PartnerHere extends StatelessWidget {
 }
 
 class _ActiveBurst {
-  _ActiveBurst(this.id, this.mood);
+  _ActiveBurst(this.id, {this.mood, this.gifUrl});
   final int id;
-  final MoodData mood;
+  final MoodData? mood;
+  final String? gifUrl;
 }
 
-/// A mood "fling" — a big emoji that rises up the chat and fades, on both
-/// phones in real time (sent over an ephemeral broadcast channel).
+/// A "fling" — a big animated emoji OR a GIF that rises up the chat and fades,
+/// on both phones in real time (sent over an ephemeral broadcast channel).
 class _BurstAnimation extends StatefulWidget {
-  const _BurstAnimation({super.key, required this.mood, required this.onDone});
-  final MoodData mood;
+  const _BurstAnimation({
+    super.key,
+    this.mood,
+    this.gifUrl,
+    required this.onDone,
+  });
+  final MoodData? mood;
+  final String? gifUrl;
   final VoidCallback onDone;
 
   @override
@@ -854,7 +886,7 @@ class _BurstAnimationState extends State<_BurstAnimation>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1900),
+    duration: Duration(milliseconds: widget.gifUrl != null ? 2800 : 1900),
   )..forward();
 
   @override
@@ -892,13 +924,26 @@ class _BurstAnimationState extends State<_BurstAnimation>
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: widget.mood.color.withValues(alpha: 0.5),
+                          color: (widget.mood?.color ?? MilesColors.blush)
+                              .withValues(alpha: 0.5),
                           blurRadius: 30,
                           spreadRadius: 4,
                         ),
                       ],
                     ),
-                    child: AnimatedMood(mood: widget.mood, size: 92),
+                    child: widget.gifUrl != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(18),
+                            child: Image.network(
+                              widget.gifUrl!,
+                              width: 160,
+                              height: 160,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : (widget.mood != null
+                            ? AnimatedMood(mood: widget.mood!, size: 92)
+                            : const SizedBox.shrink()),
                   ),
                 ),
               ),
