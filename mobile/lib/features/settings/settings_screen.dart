@@ -199,6 +199,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mounted) setState(() => _savingProfile = false);
   }
 
+  Future<void> _changeGender() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MilesColors.surface1,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final g in const [
+              ['male', 'Male'],
+              ['female', 'Female'],
+            ])
+              ListTile(
+                title: Text(g[1],
+                    style: const TextStyle(color: MilesColors.cream50)),
+                onTap: () => Navigator.pop(ctx, g[0]),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    try {
+      await SupabaseRepository.setGender(picked);
+      await ref.read(sessionProvider.notifier).loadProfile();
+      _toast('Updated');
+    } catch (_) {
+      _toast('Could not update');
+    }
+  }
+
   Future<void> _changeTimezone() async {
     final picked = await showModalBottomSheet<String>(
       context: context,
@@ -362,6 +393,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               color: MilesColors.blush,
               loading: _savingProfile,
               onPressed: _savingProfile ? null : _saveProfile,
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Gender',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: Text(
+                profile?.gender == 'female'
+                    ? 'Female'
+                    : profile?.gender == 'male'
+                        ? 'Male'
+                        : 'Not set',
+                style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: _changeGender,
             ),
 
             const SizedBox(height: 28),

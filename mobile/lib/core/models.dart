@@ -42,6 +42,7 @@ class Couple {
   final String? primaryTz;
   final String? stripeCustomerId;
   final DateTime? anniversaryDate;
+
   /// When true, hides the entire intimacy module for both partners.
   /// Coupled-scoped because it affects both partners' experience.
   final bool modestMode;
@@ -60,6 +61,8 @@ class Profile {
     this.sleepTime,
     this.birthDate,
     this.statusMessage,
+    this.gender,
+    this.genderSet = false,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -76,6 +79,8 @@ class Profile {
       createdAt: JsonUtils.parseDate(json['created_at']),
       birthDate: JsonUtils.parseStringOrNull(json['birth_date']),
       statusMessage: JsonUtils.parseStringOrNull(json['status_message']),
+      gender: JsonUtils.parseStringOrNull(json['gender']),
+      genderSet: JsonUtils.parseBool(json['gender_set'], fallback: false),
     );
   }
 
@@ -88,10 +93,18 @@ class Profile {
   final String? sleepTime;
   final PresenceStatus presenceStatus;
   final DateTime createdAt;
+
   /// ISO date (YYYY-MM-DD). Used for the 18+ age gate.
   final String? birthDate;
+
   /// Short status/bio line shown to the partner (max ~60 chars).
   final String? statusMessage;
+
+  /// 'male' | 'female' — each user sets their own. Gates the cycle feature.
+  final String? gender;
+  final bool genderSet;
+  bool get isFemale => gender == 'female';
+  bool get isMale => gender == 'male';
 
   /// True once the user has completed profile onboarding. The signup trigger
   /// auto-creates a bare profile (no birth_date), so profile-existence alone

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/auth/couple_page.dart';
+import 'package:miles/features/auth/role_setup_screen.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
 import 'package:miles/features/auth/sign_up_page.dart';
 import 'package:miles/features/auth/welcome_page.dart';
@@ -78,10 +79,17 @@ GoRouter buildRouter(Ref ref) {
         return path == '/couple' ? null : '/couple';
       }
 
+      // Paired but hasn't set their gender yet → one-time role setup (Issue 4).
+      final needsRole = session.profile != null && !session.profile!.genderSet;
+      if (needsRole) {
+        return path == '/role-setup' ? null : '/role-setup';
+      }
+
       // Fully set up → keep them out of the auth + onboarding routes.
       if (isAuthRoute ||
           path == '/welcome' ||
           path == '/couple' ||
+          path == '/role-setup' ||
           path == '/') {
         return '/app';
       }
@@ -106,6 +114,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/couple',
         builder: (context, state) => const CouplePage(),
+      ),
+      GoRoute(
+        path: '/role-setup',
+        builder: (context, state) => const RoleSetupScreen(),
       ),
       GoRoute(
         path: '/app',
@@ -185,7 +197,8 @@ GoRouter buildRouter(Ref ref) {
         path: '/app/games/would-you-rather',
         builder: (context, state) => SyncedCardGameScreen(
           title: 'Would You Rather',
-          subtitle: 'Yeh ya woh? Dono ke phone par ek hi sawaal — jawab neeche do.',
+          subtitle:
+              'Yeh ya woh? Dono ke phone par ek hi sawaal — jawab neeche do.',
           emoji: '🤔',
           cards: wyrPool,
           gameKey: 'wyr',

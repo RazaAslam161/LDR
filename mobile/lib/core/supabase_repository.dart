@@ -45,11 +45,7 @@ class SupabaseRepository {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
 
-    final res = await _c
-        .from('profiles')
-        .select()
-        .eq('id', uid)
-        .maybeSingle();
+    final res = await _c.from('profiles').select().eq('id', uid).maybeSingle();
 
     if (res == null) return null;
     return Profile.fromJson(res);
@@ -100,7 +96,9 @@ class SupabaseRepository {
     required String coupleId,
     required bool enabled,
   }) async {
-    await _c.from('couples').update({'modest_mode': enabled}).eq('id', coupleId);
+    await _c
+        .from('couples')
+        .update({'modest_mode': enabled}).eq('id', coupleId);
   }
 
   // ─── Partner key exchange (E2EE) ────────────────────────────
@@ -230,6 +228,16 @@ class SupabaseRepository {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     await _c.from('profiles').update({'avatar_url': url}).eq('id', uid);
+  }
+
+  /// Each user sets their OWN gender ('male' | 'female'); gates the cycle
+  /// feature. Marks gender_set so the role-setup screen isn't shown again.
+  static Future<void> setGender(String gender) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    await _c
+        .from('profiles')
+        .update({'gender': gender, 'gender_set': true}).eq('id', uid);
   }
 
   /// Persists (or clears) this device's FCM push token on the user's profile.
