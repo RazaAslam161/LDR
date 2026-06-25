@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Keep a voice/video call alive when the app is backgrounded -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Microphone for Time Capsule voice memos + chat voice notes + video calls -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- WebRTC video calling: audio routing + network state -->
@@ -92,6 +94,14 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
+        <!-- flutter_foreground_task: keeps a call running in the background.
+             Warning: do not change the service name. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="microphone"
+            android:exported="false"
+            android:stopWithTask="true" />
     </application>
 
     <!-- Supabase Auth deep-link for email confirmation + OAuth redirects -->

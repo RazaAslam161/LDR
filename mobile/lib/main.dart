@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/config.dart';
@@ -55,6 +56,8 @@ Future<void> main() async {
   await SupabaseService.init();
   await AdService.init();
   await FcmService.init();
+  // Lets the call's background foreground-service talk to the UI isolate.
+  FlutterForegroundTask.initCommunicationPort();
   debugPrint('STARTUP OK → booting app');
 
   runApp(const ProviderScope(child: MilesApp()));

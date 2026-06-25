@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/features/call/call_foreground.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum CallState { idle, calling, ringing, connected, ended }
@@ -87,6 +88,7 @@ class CallController extends ChangeNotifier {
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
+      await CallForegroundService.start(peerName ?? 'Partner');
     } catch (_) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
       _teardown(CallState.ended);
@@ -113,6 +115,7 @@ class CallController extends ChangeNotifier {
       _send('answer', {'sdp': answer.sdp, 'type': answer.type});
       _setState(CallState.connected);
       _pendingOffer = null;
+      await CallForegroundService.start(peerName ?? 'Partner');
     } catch (_) {
       _send('hangup', {});
       _teardown(CallState.ended);
@@ -252,6 +255,7 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> _teardown(CallState end) async {
+    await CallForegroundService.stop();
     try {
       await _localStream?.dispose();
     } catch (_) {}
