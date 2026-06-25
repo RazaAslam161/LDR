@@ -26,6 +26,7 @@ import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
+import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
 import 'package:miles/features/intimacy/intimacy_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
@@ -162,6 +163,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/cycle',
         builder: (context, state) => const CycleScreen(),
+      ),
+      GoRoute(
+        path: '/app/heartbeat',
+        builder: (context, state) => const HeartbeatScreen(),
       ),
       GoRoute(
         path: '/call',

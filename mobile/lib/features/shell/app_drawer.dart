@@ -150,6 +150,14 @@ class AppDrawer extends ConsumerWidget {
                 },
               ),
               _DrawerTile(
+                icon: Icons.favorite,
+                label: 'Feel My Heartbeat',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/app/heartbeat');
+                },
+              ),
+              _DrawerTile(
                 icon: Icons.schedule,
                 label: 'Rituals',
                 onTap: () {
