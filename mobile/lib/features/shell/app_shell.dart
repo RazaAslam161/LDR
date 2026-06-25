@@ -71,6 +71,11 @@ class _AppShellState extends ConsumerState<AppShell>
     } catch (_) {}
     _reachChannel?.unsubscribe();
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
+    // Re-arm the other always-on realtime so calls keep ringing and the
+    // partner's presence / mood / avatar keep updating live after a
+    // background / Android-doze socket reset (was only re-arming Reach).
+    ref.read(callControllerProvider).reconnect();
+    ref.read(sessionProvider.notifier).reconnectPresence();
   }
 
   void _onReady() {

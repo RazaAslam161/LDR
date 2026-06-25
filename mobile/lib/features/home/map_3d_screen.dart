@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/core/theme.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -48,7 +50,15 @@ class _Map3DScreenState extends State<Map3DScreen> {
           onPressed: () => Navigator.of(context).maybePop(),
         ),
       ),
-      body: WebViewWidget(controller: _controller),
+      // Hand ALL touches (incl. 2-finger pinch) to the native WebView so
+      // MapLibre can pan/zoom/rotate — without this, Flutter's gesture arena
+      // eats the pinch and the map won't zoom.
+      body: WebViewWidget(
+        controller: _controller,
+        gestureRecognizers: {
+          Factory<EagerGestureRecognizer>(() => EagerGestureRecognizer()),
+        },
+      ),
     );
   }
 

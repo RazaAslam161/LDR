@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -36,6 +38,33 @@ class CallController extends ChangeNotifier {
 
   final List<RTCIceCandidate> _pendingRemote = [];
   bool _remoteSet = false;
+  Timer? _connectTimer;
+
+  /// Re-subscribe the call channel after the realtime socket is reset (e.g. on
+  /// app resume / Android doze) so incoming calls keep ringing.
+  void reconnect() {
+    final id = _coupleId;
+    if (id == null) return;
+    try {
+      _chan?.unsubscribe();
+    } catch (_) {}
+    _chan = SupabaseService.client
+        .channel('call:$id')
+        .onBroadcast(event: 'signal', callback: _onSignal)
+        .subscribe();
+  }
+
+  /// If the peer connection doesn't connect within a window, stop hanging on
+  /// "Calling…"/"Connecting…" and end the call cleanly.
+  void _startConnectTimeout() {
+    _connectTimer?.cancel();
+    _connectTimer = Timer(const Duration(seconds: 35), () {
+      if (state != CallState.connected) {
+        _send('hangup', {});
+        _teardown(CallState.ended);
+      }
+    });
+  }
 
   static const Map<String, dynamic> _rtcConfig = {
     'iceServers': [
@@ -89,6 +118,7 @@ class CallController extends ChangeNotifier {
       await _pc!.setLocalDescription(offer);
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
       await CallForegroundService.start(peerName ?? 'Partner');
+      _startConnectTimeout();
     } catch (_) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
       _teardown(CallState.ended);
@@ -188,6 +218,7 @@ class CallController extends ChangeNotifier {
     };
     pc.onConnectionState = (s) {
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _connectTimer?.cancel();
         _setState(CallState.connected);
       } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
@@ -255,6 +286,7 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> _teardown(CallState end) async {
+    _connectTimer?.cancel();
     await CallForegroundService.stop();
     try {
       await _localStream?.dispose();

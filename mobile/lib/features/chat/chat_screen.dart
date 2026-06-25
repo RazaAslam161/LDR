@@ -38,7 +38,8 @@ class ChatScreen extends ConsumerStatefulWidget {
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends ConsumerState<ChatScreen> {
+class _ChatScreenState extends ConsumerState<ChatScreen>
+    with WidgetsBindingObserver {
   final _scroll = ScrollController();
   final List<Message> _messages = [];
   final Set<String> _ids = {};
@@ -209,8 +210,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
     _init();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState s) {
+    // The shell resets the realtime socket on resume; re-arm the chat channels
+    // just after so messages + flings keep arriving without leaving the screen.
+    if (s == AppLifecycleState.resumed) {
+      Future.delayed(const Duration(milliseconds: 300), _resubscribe);
+    }
+  }
+
+  void _resubscribe() {
+    final id = _coupleId;
+    if (id == null || !mounted) return;
+    _channel?.unsubscribe();
+    _channel = ChatRepository.subscribe(id, _onIncoming);
+    _moodChannel?.unsubscribe();
+    _moodChannel = SupabaseService.client
+        .channel('mood_burst:$id')
+        .onBroadcast(event: 'mood', callback: _onMoodBurst)
+        .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
+        .subscribe();
+    PresenceService.setChatLastRead(id);
   }
 
   void _onScroll() {
@@ -449,6 +474,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _typingTimer?.cancel();
     _readTimer?.cancel();
     final id = _coupleId;

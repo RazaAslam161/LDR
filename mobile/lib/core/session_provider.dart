@@ -131,6 +131,13 @@ class SessionNotifier extends StateNotifier<SessionState> {
     );
   }
 
+  /// Re-subscribe presence after the realtime socket is reset (app resume) so
+  /// the partner's mood / avatar / online status keep updating live.
+  void reconnectPresence() {
+    final couple = state.couple;
+    if (couple != null) _subscribePresence(couple.id);
+  }
+
   Future<void> signOut() async {
     await _presenceChannel?.unsubscribe();
     _presenceChannel = null;
