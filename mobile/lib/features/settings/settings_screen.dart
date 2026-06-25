@@ -13,6 +13,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
@@ -37,8 +38,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _localAvatarUrl;
 
   Future<void> _changeAvatar() async {
-    final file =
-        await PhotoPickerService.pickFromSheet(context, shape: PhotoShape.square);
+    final file = await PhotoPickerService.pickFromSheet(context,
+        shape: PhotoShape.square);
     if (file == null) return;
     final couple = ref.read(sessionProvider).couple;
     setState(() => _changingAvatar = true);
@@ -79,13 +80,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _toggleAppLock(bool v) async {
-    if (v && !await AppLock.canAuthenticate()) {
-      _toast('Set up a fingerprint, face, or screen lock first.');
-      return;
+    if (v) {
+      // Enabling: a 4-digit PIN is required so there's ALWAYS a way in (even
+      // with no biometrics) — set one if there isn't one yet.
+      final needPin = !await AppLock.hasPin();
+      if (!mounted) return;
+      if (needPin) {
+        final set = await showAppLockPinSetup(context);
+        if (!set) return; // cancelled → leave the lock off
+      }
+      await AppLock.setEnabled(true);
+      final bio = await AppLock.availableBiometrics();
+      if (!mounted) return;
+      setState(() => _appLock = true);
+      _toast(bio.isEmpty
+          ? 'App lock on 🔒 — unlock with your PIN'
+          : 'App lock on 🔒 — fingerprint/face or PIN');
+    } else {
+      // Disabling: confirm with the PIN first.
+      final ok = await showAppLockPinVerify(context);
+      if (!ok || !mounted) return;
+      await AppLock.setEnabled(false);
+      setState(() => _appLock = false);
+      _toast('App lock off');
     }
-    await AppLock.setEnabled(v);
-    if (mounted) setState(() => _appLock = v);
-    _toast(v ? 'App lock on 🔒' : 'App lock off');
   }
 
   Future<void> _loadLocationMode() async {
@@ -158,8 +176,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   void _toast(String m) {
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(m)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
     }
   }
 
@@ -359,7 +376,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               subtitle: const Text('Used for the countdown & sky',
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeTimezone,
             ),
 
@@ -373,7 +391,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   style: const TextStyle(color: MilesColors.cream50)),
               subtitle: const Text('Only your partner can ever see this',
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeLocationSharing,
             ),
 
@@ -388,7 +407,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               subtitle: const Text(
                   'Let your partner wake your screen when they reach for you',
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: FsiPermission.openSettings,
             ),
 
@@ -413,8 +433,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                child:
-                    Text(_error!, style: const TextStyle(color: MilesColors.blush)),
+                child: Text(_error!,
+                    style: const TextStyle(color: MilesColors.blush)),
               ),
 
             const SizedBox(height: 28),
@@ -426,8 +446,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               value: _appLock,
               onChanged: _toggleAppLock,
               activeThumbColor: MilesColors.ember,
-              secondary:
-                  const Icon(Icons.fingerprint, color: MilesColors.gilt),
+              secondary: const Icon(Icons.fingerprint, color: MilesColors.gilt),
               title: const Text('Biometric app lock',
                   style: TextStyle(color: MilesColors.cream50)),
               subtitle: const Text(
@@ -503,7 +522,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
 /// Tappable round avatar with a camera badge (Issue 7 — profile photo, 1:1).
 class _AvatarEditor extends StatelessWidget {
-  const _AvatarEditor({required this.url, required this.name, required this.busy});
+  const _AvatarEditor(
+      {required this.url, required this.name, required this.busy});
   final String? url;
   final String name;
   final bool busy;
@@ -586,8 +606,9 @@ class _TimezonePickerState extends State<_TimezonePicker> {
   @override
   Widget build(BuildContext context) {
     final filtered = commonTimezones
-        .where((tz) =>
-            tz.toLowerCase().contains(_query.toLowerCase().replaceAll(' ', '_')))
+        .where((tz) => tz
+            .toLowerCase()
+            .contains(_query.toLowerCase().replaceAll(' ', '_')))
         .toList();
     return Padding(
       padding: EdgeInsets.only(

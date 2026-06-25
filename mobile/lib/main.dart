@@ -19,6 +19,7 @@ import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/firebase_options.dart';
 
@@ -83,11 +84,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // First launch (any device): ask for all permissions at once.
     WidgetsBinding.instance
         .addPostFrameCallback((_) => PermissionsBootstrap.requestAllOnce());
-    // If the user enabled the biometric app-lock, raise it on launch.
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await AppLock.lockIfEnabled();
-      if (AppLock.locked.value) await AppLock.tryUnlock();
-    });
+    // If the user enabled the biometric app-lock, raise it on launch. The
+    // LockScreen auto-prompts biometrics when it appears.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => AppLock.lockIfEnabled());
     _initDeepLinks();
   }
 
@@ -97,7 +97,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     if (state == AppLifecycleState.paused) {
       AppLock.lockIfEnabled();
     } else if (state == AppLifecycleState.resumed && AppLock.locked.value) {
-      AppLock.tryUnlock();
+      AppLock.authenticate(); // re-prompt on return
     }
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
@@ -149,7 +149,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
           ValueListenableBuilder<bool>(
             valueListenable: AppLock.locked,
             builder: (context, locked, _) =>
-                locked ? const LockOverlay() : const SizedBox.shrink(),
+                locked ? const LockScreen() : const SizedBox.shrink(),
           ),
         ],
       ),

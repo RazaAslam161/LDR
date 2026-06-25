@@ -295,3 +295,39 @@ mood columns · `reach_events` · `vault_items` + `vault_pin`. Each ships with i
 - Issue 3: ✅ pure robustness, positive (fewer crashes).
 - Issue 2 location & Issue 5 body map: **compliance-sensitive** — built opt-in/symmetric and with illustrated silhouettes (no nudity) specifically to stay ad-eligible and avoid surveillance-policy removal.
 - Issue 8 FCM full-screen intent: allowed for person-to-person "reach"/call use; must be user-initiated (it is).
+
+---
+
+# ⟶ Precision fix pass #2 (2026-06-25)
+
+**Global error handler / FormatException:** already in `main.dart`
+(`FlutterError.onError` + `PlatformDispatcher.onError` → full exception + stack).
+FormatException is mitigated app-wide by `core/utils/json_utils.dart`
+(`parseDate`/`parseInt`, never raw `DateTime.parse` on Supabase data). No active
+FormatException found in the touched code paths.
+
+## Issue 1 — Biometric lock: locks but can't unlock — **ROOT CAUSE FOUND + FIXED**
+
+**Real root cause (captured):** `MainActivity.kt` extended **`FlutterActivity`**.
+`local_auth` needs a **`FragmentActivity`** host — with `FlutterActivity`,
+`auth.authenticate()` throws `PlatformException(no_fragment_activity)`. My earlier
+`tryUnlock()` swallowed it, so the biometric prompt **never fired** → user stuck.
+
+**What changed:**
+- **`MainActivity` now extends `FlutterFragmentActivity`** — the actual fix.
+  (Manifest already had `USE_BIOMETRIC`.)
+- Rewrote `core/services/app_lock.dart`: `authenticate()` uses `biometricOnly:false`
+  (device PIN/passcode fallback) + `stickyAuth` + `useErrorDialogs`, and **logs the
+  real PlatformException** instead of swallowing it. Added a 4-digit **app-lock PIN**
+  (SHA-256 hashed, SharedPreferences) — a guaranteed non-biometric way in — plus
+  capability detection (`availableBiometrics` → dynamic "Unlock with Face/fingerprint").
+- New `core/widgets/lock_screen.dart`: full-screen, `PopScope(canPop:false)`,
+  **auto-prompts** on display, a **retry button** (the previously-missing piece), and
+  **"Use PIN instead"** → `PinPad`. No biometrics enrolled → straight to PIN.
+- New `core/widgets/app_lock_pin_sheet.dart`: PIN setup (enter+confirm) / verify.
+- Settings → Security: enabling **requires a PIN** (always a way in); disabling
+  **requires PIN confirmation**.
+
+**New packages:** `crypto` (already transitive) for the PIN hash.
+**Remaining:** iOS would need `NSFaceIDUsageDescription` (Android-only build here).
+**flutter analyze:** 0 errors.

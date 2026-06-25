@@ -8,11 +8,15 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+// Must extend FlutterFragmentActivity (NOT FlutterActivity): local_auth's
+// biometric prompt requires a FragmentActivity host. With FlutterActivity,
+// authenticate() throws `no_fragment_activity` and silently fails — which is
+// why the app-lock could lock but never unlock.
+class MainActivity : FlutterFragmentActivity() {
 
     private var secureFlagSet = false
 
