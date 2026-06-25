@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:miles/core/session_provider.dart';
@@ -107,22 +108,59 @@ class CallController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  static const Map<String, dynamic> _rtcConfig = {
-    'iceServers': [
+  /// WebRTC ICE config. STUN alone can't traverse mobile-carrier (symmetric)
+  /// NATs — a working TURN relay is required. Put a real free TURN in .env
+  /// (METERED_TURN_HOST / METERED_TURN_USERNAME / METERED_TURN_CREDENTIAL from a
+  /// free metered.ca account) and it's used; otherwise we fall back to the public
+  /// openrelay relay (often down). Includes TURN-over-TCP/TLS:443 for restrictive
+  /// networks that block UDP.
+  static Map<String, dynamic> get _rtcConfig {
+    final servers = <Map<String, dynamic>>[
       {'urls': 'stun:stun.l.google.com:19302'},
-      {
-        'urls': 'turn:openrelay.metered.ca:80',
-        'username': 'openrelayproject',
-        'credential': 'openrelayproject',
-      },
-      {
-        'urls': 'turn:openrelay.metered.ca:443',
-        'username': 'openrelayproject',
-        'credential': 'openrelayproject',
-      },
-    ],
-    'sdpSemantics': 'unified-plan',
-  };
+      {'urls': 'stun:stun1.l.google.com:19302'},
+      {'urls': 'stun:stun2.l.google.com:19302'},
+      {'urls': 'stun:stun.cloudflare.com:3478'},
+    ];
+    final host = dotenv.maybeGet('METERED_TURN_HOST') ?? '';
+    final user = dotenv.maybeGet('METERED_TURN_USERNAME') ?? '';
+    final cred = dotenv.maybeGet('METERED_TURN_CREDENTIAL') ?? '';
+    if (host.isNotEmpty && user.isNotEmpty && cred.isNotEmpty) {
+      servers.addAll([
+        {'urls': 'turn:$host:80', 'username': user, 'credential': cred},
+        {
+          'urls': 'turn:$host:80?transport=tcp',
+          'username': user,
+          'credential': cred
+        },
+        {'urls': 'turn:$host:443', 'username': user, 'credential': cred},
+        {
+          'urls': 'turns:$host:443?transport=tcp',
+          'username': user,
+          'credential': cred
+        },
+      ]);
+    } else {
+      const u = 'openrelayproject';
+      servers.addAll([
+        {
+          'urls': 'turn:openrelay.metered.ca:80',
+          'username': u,
+          'credential': u
+        },
+        {
+          'urls': 'turn:openrelay.metered.ca:443',
+          'username': u,
+          'credential': u
+        },
+        {
+          'urls': 'turns:openrelay.metered.ca:443?transport=tcp',
+          'username': u,
+          'credential': u
+        },
+      ]);
+    }
+    return {'iceServers': servers, 'sdpSemantics': 'unified-plan'};
+  }
 
   bool _inited = false;
 
