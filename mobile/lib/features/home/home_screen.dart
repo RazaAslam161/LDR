@@ -16,6 +16,7 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -343,22 +344,30 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '🤍';
-    return ClipOval(
-      child: Container(
-        width: 64,
-        height: 64,
-        color: MilesColors.surface2,
-        child: photoUrl == null
-            ? Center(
-                child: Text(initial,
-                    style: const TextStyle(
-                        color: MilesColors.cream50, fontSize: 24)))
-            : Image.network(photoUrl!,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Center(
-                    child: Text(initial,
-                        style: const TextStyle(
-                            color: MilesColors.cream50, fontSize: 24)))),
+    final url = photoUrl;
+    return GestureDetector(
+      onTap: url == null
+          ? null
+          : () => MediaViewer.open(context, url, heroTag: 'snap-$url'),
+      child: ClipOval(
+        child: Container(
+          width: 64,
+          height: 64,
+          color: MilesColors.surface2,
+          child: url == null
+              ? Center(
+                  child: Text(initial,
+                      style: const TextStyle(
+                          color: MilesColors.cream50, fontSize: 24)))
+              : Hero(
+                  tag: 'snap-$url',
+                  child: Image.network(url,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Center(
+                          child: Text(initial,
+                              style: const TextStyle(
+                                  color: MilesColors.cream50, fontSize: 24))))),
+        ),
       ),
     );
   }

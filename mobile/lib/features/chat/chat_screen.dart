@@ -17,6 +17,7 @@ import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_theme.dart';
 import 'package:miles/features/chat/chat_theme_controller.dart';
 import 'package:miles/features/chat/chat_theme_picker.dart';
+import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/chat/mood_selector.dart';
 import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -476,22 +477,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                                   !DateUtils.isSameDay(
                                                       visible[i + 1].createdAt,
                                                       m.createdAt);
-                                          return GestureDetector(
-                                            onLongPress: () =>
-                                                _showMessageActions(
-                                                    m, m.isMine(uid)),
-                                            child: _Bubble(
-                                              message: m,
-                                              mine: m.isMine(uid),
-                                              showDateHeader: showTime,
-                                              repliedTo: _byId(m.replyToId),
-                                              player: _player,
-                                              theme: chatTheme,
-                                              status: m.isMine(uid)
-                                                  ? _statusFor(m, presence)
-                                                  : null,
-                                            ),
-                                          );
+                                          return Dismissible(
+                                              key: ValueKey('rpl-${m.id}'),
+                                              direction:
+                                                  DismissDirection.startToEnd,
+                                              dismissThresholds: const {
+                                                DismissDirection.startToEnd:
+                                                    0.22
+                                              },
+                                              confirmDismiss: (_) async {
+                                                _startReply(m); // slide → reply
+                                                return false; // snap back
+                                              },
+                                              background: const Padding(
+                                                padding:
+                                                    EdgeInsets.only(left: 28),
+                                                child: Align(
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: Icon(Icons.reply,
+                                                      color: MilesColors.blush),
+                                                ),
+                                              ),
+                                              child: GestureDetector(
+                                                onLongPress: () =>
+                                                    _showMessageActions(
+                                                        m, m.isMine(uid)),
+                                                child: _Bubble(
+                                                  message: m,
+                                                  mine: m.isMine(uid),
+                                                  showDateHeader: showTime,
+                                                  repliedTo: _byId(m.replyToId),
+                                                  player: _player,
+                                                  theme: chatTheme,
+                                                  status: m.isMine(uid)
+                                                      ? _statusFor(m, presence)
+                                                      : null,
+                                                ),
+                                              ));
                                         },
                                       ),
                                       if (_hasNewMessage)
@@ -939,29 +962,36 @@ class _Content extends StatelessWidget {
                 style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
           );
         }
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Image.network(
-            url,
-            width: 220,
-            fit: BoxFit.cover,
-            loadingBuilder: (_, child, progress) => progress == null
-                ? child
-                : const SizedBox(
-                    width: 220,
-                    height: 140,
-                    child: Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+        return GestureDetector(
+          onTap: () => MediaViewer.open(context, url, heroTag: url),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Hero(
+              tag: url,
+              child: Image.network(
+                url,
+                width: 220,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : const SizedBox(
+                        width: 220,
+                        height: 140,
+                        child: Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-            errorBuilder: (_, __, ___) => const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('📷 could not load',
-                  style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                errorBuilder: (_, __, ___) => const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('📷 could not load',
+                      style:
+                          TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                ),
+              ),
             ),
           ),
         );
