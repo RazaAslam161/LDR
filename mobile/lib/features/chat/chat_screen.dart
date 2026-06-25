@@ -831,17 +831,24 @@ class _VoicePlayer extends StatefulWidget {
 
 class _VoicePlayerState extends State<_VoicePlayer> {
   bool _playing = false;
+  StreamSubscription? _stateSub;
 
   @override
   void initState() {
     super.initState();
-    widget.player.playerStateStream.listen((state) {
+    _stateSub = widget.player.playerStateStream.listen((state) {
       final playing =
           state.processingState != ProcessingState.completed && state.playing;
       if (playing != _playing) {
         if (mounted) setState(() => _playing = playing);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _stateSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _toggle() async {

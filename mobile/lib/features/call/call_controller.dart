@@ -76,11 +76,16 @@ class CallController extends ChangeNotifier {
     isCaller = true;
     peerName = _ref.read(sessionProvider).partner?.displayName ?? 'Partner';
     _setState(CallState.calling);
-    await _openMedia();
-    await _createPc();
-    final offer = await _pc!.createOffer();
-    await _pc!.setLocalDescription(offer);
-    _send('offer', {'sdp': offer.sdp, 'type': offer.type});
+    try {
+      await _openMedia();
+      await _createPc();
+      final offer = await _pc!.createOffer();
+      await _pc!.setLocalDescription(offer);
+      _send('offer', {'sdp': offer.sdp, 'type': offer.type});
+    } catch (_) {
+      // e.g. camera/mic permission denied — don't hang on "Calling…".
+      _teardown(CallState.ended);
+    }
   }
 
   // ── Incoming ──────────────────────────────────────────────────────────────
@@ -89,16 +94,21 @@ class CallController extends ChangeNotifier {
   Future<void> accept() async {
     if (state != CallState.ringing || _pendingOffer == null) return;
     isCaller = false;
-    await _openMedia();
-    await _createPc();
-    await _pc!.setRemoteDescription(_pendingOffer!);
-    _remoteSet = true;
-    await _flushPending();
-    final answer = await _pc!.createAnswer();
-    await _pc!.setLocalDescription(answer);
-    _send('answer', {'sdp': answer.sdp, 'type': answer.type});
-    _setState(CallState.connected);
-    _pendingOffer = null;
+    try {
+      await _openMedia();
+      await _createPc();
+      await _pc!.setRemoteDescription(_pendingOffer!);
+      _remoteSet = true;
+      await _flushPending();
+      final answer = await _pc!.createAnswer();
+      await _pc!.setLocalDescription(answer);
+      _send('answer', {'sdp': answer.sdp, 'type': answer.type});
+      _setState(CallState.connected);
+      _pendingOffer = null;
+    } catch (_) {
+      _send('hangup', {});
+      _teardown(CallState.ended);
+    }
   }
 
   void decline() {

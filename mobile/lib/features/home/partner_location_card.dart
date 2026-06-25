@@ -70,6 +70,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     final p = widget.partner;
     if (p == null || !p.isSharingLive) return null;
     if (widget.myLat == null || widget.myLon == null) return null;
+    if (p.latitude == null || p.longitude == null) return null;
     final m = const Distance().as(
       LengthUnit.Meter,
       LatLng(widget.myLat!, widget.myLon!),

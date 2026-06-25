@@ -2,15 +2,33 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_canvas.dart';
 
 /// Full-screen Touch Trace experience.
 /// Both partners open this screen; whatever one draws appears on the other's.
-class TouchTraceScreen extends ConsumerWidget {
+class TouchTraceScreen extends ConsumerStatefulWidget {
   const TouchTraceScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TouchTraceScreen> createState() => _TouchTraceScreenState();
+}
+
+class _TouchTraceScreenState extends ConsumerState<TouchTraceScreen> {
+  @override
+  void initState() {
+    super.initState();
+    SecureScreen.setSecure(); // intimate — block screenshots / recording
+  }
+
+  @override
+  void dispose() {
+    SecureScreen.clearSecure();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
     final couple = session.couple;
     final me = session.profile;

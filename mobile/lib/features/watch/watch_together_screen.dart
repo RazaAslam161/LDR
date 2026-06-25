@@ -145,8 +145,9 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       if (!playing && c.value.isPlaying) c.pause();
       _lastPlaying = playing;
     }
-    Future.delayed(const Duration(milliseconds: 600),
-        () => _applyingRemote = false);
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) _applyingRemote = false;
+    });
   }
 
   @override

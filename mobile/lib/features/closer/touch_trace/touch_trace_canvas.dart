@@ -122,6 +122,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
 
   @override
   void dispose() {
+    _channel.unsubscribe();
     SupabaseService.client.removeChannel(_channel);
     super.dispose();
   }
