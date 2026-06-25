@@ -169,9 +169,13 @@ class _AppShellState extends ConsumerState<AppShell>
       if (fire && context.mounted) GoRouter.of(context).push('/call');
     });
 
-    final session = ref.watch(sessionProvider);
-    final isAdult = session.profile?.isAdult ?? false;
-    final isModest = session.couple?.modestMode ?? true;
+    // Only rebuild the shell when these specific flags flip — NOT on every
+    // partner presence / mood / typing tick (all of which flow through
+    // sessionProvider and were rebuilding the whole tab scaffold + active screen).
+    final isAdult =
+        ref.watch(sessionProvider.select((s) => s.profile?.isAdult ?? false));
+    final isModest =
+        ref.watch(sessionProvider.select((s) => s.couple?.modestMode ?? true));
     final index = ref.watch(shellTabProvider);
 
     final showCloser = isAdult;
