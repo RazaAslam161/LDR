@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/features/home/map_3d_screen.dart';
 
 /// Live partner location on the dashboard. Shows an OpenStreetMap (no API key)
 /// with the partner's marker that animates to each new fix, "updated Xs ago",
@@ -103,6 +104,17 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
     } catch (_) {}
   }
 
+  /// Opens the full-screen Google photorealistic 3D map at the partner's spot.
+  void _open3D(LatLng point) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => Map3DScreen(
+        lat: point.latitude,
+        lon: point.longitude,
+        name: widget.partnerName,
+      ),
+    ));
+  }
+
   String _agoText(DateTime? at) {
     if (at == null) return 'live';
     final secs = DateTime.now().difference(at).inSeconds;
@@ -175,6 +187,12 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                       style: const TextStyle(
                           color: MilesColors.cream50, fontSize: 13),
                     ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.threed_rotation,
+                        color: MilesColors.gilt, size: 20),
+                    onPressed: () => _open3D(point),
+                    tooltip: 'View in 3D',
                   ),
                   IconButton(
                     icon: const Icon(Icons.my_location,
