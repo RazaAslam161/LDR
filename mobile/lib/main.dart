@@ -15,10 +15,10 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
-import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/firebase_options.dart';
 
 Future<void> main() async {
@@ -40,7 +40,8 @@ Future<void> main() async {
   // (masked) and fail fast with a clear message rather than a cryptic crash.
   final envUrl = dotenv.maybeGet(MilesConfig.supabaseUrlKey) ?? '';
   final envKey = dotenv.maybeGet(MilesConfig.supabaseAnonKeyKey) ?? '';
-  debugPrint('ENV CHECK → url len: ${envUrl.length}, key len: ${envKey.length}');
+  debugPrint(
+      'ENV CHECK → url len: ${envUrl.length}, key len: ${envKey.length}');
   if (envUrl.isEmpty || envKey.isEmpty) {
     throw StateError('Supabase env missing: ensure mobile/.env has '
         '${MilesConfig.supabaseUrlKey} and ${MilesConfig.supabaseAnonKeyKey}.');
@@ -77,8 +78,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
     WidgetsBinding.instance.addObserver(this);
 
     // First launch (any device): ask for all permissions at once.
-    WidgetsBinding.instance.addPostFrameCallback(
-        (_) => PermissionsBootstrap.requestAllOnce());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => PermissionsBootstrap.requestAllOnce());
     // If the user enabled the biometric app-lock, raise it on launch.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await AppLock.lockIfEnabled();
@@ -139,6 +140,9 @@ class _MilesAppState extends ConsumerState<MilesApp>
       builder: (context, child) => Stack(
         children: [
           child ?? const SizedBox.shrink(),
+          // Return-to-call pill while a call is minimised.
+          const CallPill(),
+          // Biometric lock sits on top of everything.
           ValueListenableBuilder<bool>(
             valueListenable: AppLock.locked,
             builder: (context, locked, _) =>

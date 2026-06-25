@@ -155,7 +155,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _videoCall() async {
     // In-app WebRTC call. The shell listens for the state change and pushes the
     // call screen; the partner's app rings if it's open.
-    await ref.read(callControllerProvider).startCall();
+    await ref.read(callControllerProvider).startCall(video: true);
+  }
+
+  Future<void> _voiceCall() async {
+    await ref.read(callControllerProvider).startCall(video: false);
   }
 
   void _sortMessages() {
@@ -385,6 +389,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               icon: const Icon(Icons.emoji_emotions_outlined,
                   color: MilesColors.blush),
               onPressed: _pickMoodBurst,
+            ),
+          if (couple != null)
+            IconButton(
+              tooltip: 'Voice call',
+              icon: const Icon(Icons.call_outlined, color: MilesColors.ember),
+              onPressed: _voiceCall,
             ),
           if (couple != null)
             IconButton(
@@ -1124,3 +1134,4 @@ class _NotLinked extends StatelessWidget {
     );
   }
 }
+

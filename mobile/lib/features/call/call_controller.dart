@@ -29,6 +29,8 @@ class CallController extends ChangeNotifier {
   bool isCaller = false;
   bool micOn = true;
   bool camOn = true;
+  bool isVideo = true; // false = voice-only call
+  bool minimized = false; // call screen dismissed but call still running
   String? peerName; // who's calling / being called
 
   final List<RTCIceCandidate> _pendingRemote = [];
@@ -71,17 +73,20 @@ class CallController extends ChangeNotifier {
   }
 
   // ── Outgoing ──────────────────────────────────────────────────────────────
-  Future<void> startCall() async {
+  Future<void> startCall({bool video = true}) async {
     if (state != CallState.idle || _coupleId == null) return;
     isCaller = true;
+    isVideo = video;
+    camOn = video;
+    minimized = false;
     peerName = _ref.read(sessionProvider).partner?.displayName ?? 'Partner';
     _setState(CallState.calling);
     try {
-      await _openMedia();
+      await _openMedia(video: video);
       await _createPc();
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
-      _send('offer', {'sdp': offer.sdp, 'type': offer.type});
+      _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
     } catch (_) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
       _teardown(CallState.ended);
@@ -90,12 +95,15 @@ class CallController extends ChangeNotifier {
 
   // ── Incoming ──────────────────────────────────────────────────────────────
   RTCSessionDescription? _pendingOffer;
+  bool _pendingVideo = true;
 
   Future<void> accept() async {
     if (state != CallState.ringing || _pendingOffer == null) return;
     isCaller = false;
+    isVideo = _pendingVideo;
+    camOn = _pendingVideo;
     try {
-      await _openMedia();
+      await _openMedia(video: isVideo);
       await _createPc();
       await _pc!.setRemoteDescription(_pendingOffer!);
       _remoteSet = true;
@@ -139,11 +147,18 @@ class CallController extends ChangeNotifier {
     if (track != null) await Helper.switchCamera(track);
   }
 
+  /// Hide/show the call screen without ending the call (background pill).
+  void setMinimized(bool v) {
+    if (minimized == v) return;
+    minimized = v;
+    notifyListeners();
+  }
+
   // ── Internals ───────────────────────────────────────────────────────────────
-  Future<void> _openMedia() async {
+  Future<void> _openMedia({bool video = true}) async {
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
-      'video': {'facingMode': 'user'},
+      'video': video ? {'facingMode': 'user'} : false,
     });
     localRenderer.srcObject = _localStream;
     notifyListeners();
@@ -189,6 +204,7 @@ class CallController extends ChangeNotifier {
         if (state != CallState.idle) return; // busy
         _pendingOffer = RTCSessionDescription(
             map['sdp']?.toString(), map['type']?.toString());
+        _pendingVideo = map['video'] as bool? ?? true;
         peerName = _ref.read(sessionProvider).partner?.displayName ?? 'Partner';
         _setState(CallState.ringing);
       case 'answer':
@@ -250,6 +266,8 @@ class CallController extends ChangeNotifier {
     isCaller = false;
     micOn = true;
     camOn = true;
+    isVideo = true;
+    minimized = false;
     localRenderer.srcObject = null;
     remoteRenderer.srcObject = null;
     _setState(end);
