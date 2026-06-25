@@ -55,6 +55,53 @@ class TouchHaptics {
             duration: 150,
             amplitude: _amp ? _amp255(95, heat) : -1,
           );
+        case 'grab':
+          // A firm, sustained squeeze.
+          await Vibration.vibrate(
+            duration: 320,
+            amplitude: _amp ? _amp255(190, heat) : -1,
+          );
+        case 'pinch':
+          // A sharp little nip.
+          await Vibration.vibrate(
+            duration: 40,
+            amplitude: _amp ? _amp255(220, heat) : -1,
+          );
+        case 'tongue':
+          // A soft, wavy lick.
+          await Vibration.vibrate(
+            pattern: [0, 90, 50, 90, 50, 90],
+            intensities: _amp
+                ? [
+                    0,
+                    _amp255(90, heat),
+                    0,
+                    _amp255(120, heat),
+                    0,
+                    _amp255(90, heat)
+                  ]
+                : const [],
+          );
+        case 'poke':
+          // A single sharp tap.
+          await Vibration.vibrate(
+            duration: 28,
+            amplitude: _amp ? _amp255(210, heat) : -1,
+          );
+        case 'spank':
+          // A hard, sudden smack.
+          await Vibration.vibrate(
+            duration: 70,
+            amplitude: _amp ? _amp255(255, heat) : -1,
+          );
+        case 'bite':
+          // A quick double clench.
+          await Vibration.vibrate(
+            pattern: [0, 45, 45, 70],
+            intensities: _amp
+                ? [0, _amp255(200, heat), 0, _amp255(240, heat)]
+                : const [],
+          );
         default: // glow
           await Vibration.vibrate(
             duration: 70,

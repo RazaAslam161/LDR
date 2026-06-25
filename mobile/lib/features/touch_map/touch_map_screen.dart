@@ -28,7 +28,22 @@ const List<_TouchType> _types = [
   _TouchType('glow', '💫', 'Glow', MilesColors.blush),
   _TouchType('kiss', '💋', 'Kiss', Color(0xFFD45A77)),
   _TouchType('hug', '🤗', 'Hug', MilesColors.emberSoft),
+  _TouchType('grab', '✊', 'Grab', Color(0xFFC85B7A)),
+  _TouchType('pinch', '🤏', 'Pinch', Color(0xFFE08AA0)),
+  _TouchType('tongue', '👅', 'Lick', Color(0xFFE0566B)),
+  _TouchType('poke', '👉', 'Poke', MilesColors.gilt),
+  _TouchType('spank', '🖐️', 'Spank', Color(0xFFD45A77)),
+  _TouchType('bite', '🫦', 'Bite', Color(0xFFB23A5A)),
 ];
+
+/// A live pan/zoom frame applied to a body photo, synced to both phones so you
+/// can frame the part you want to touch.
+class _Frame {
+  const _Frame({this.scale = 1, this.dx = 0, this.dy = 0});
+  final double scale;
+  final double dx;
+  final double dy;
+}
 
 _TouchType _typeOf(String key) =>
     _types.firstWhere((t) => t.key == key, orElse: () => _types.first);
@@ -74,6 +89,40 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   double _heat = 0; // shared warmth 0..1
   Timer? _heatTimer;
 
+  // Live, synced pan/zoom framing per body.
+  final Map<String, _Frame> _frames = {};
+  String? _adjusting; // which body is currently in adjust (pan/zoom) mode
+  double _frameBaseScale = 1;
+
+  void _onFrameStart(String owner) =>
+      _frameBaseScale = _frames[owner]?.scale ?? 1;
+
+  void _onFrameUpdate(String owner, ScaleUpdateDetails d, double w, double h) {
+    final f = _frames[owner] ?? const _Frame();
+    final scale = (_frameBaseScale * d.scale).clamp(1.0, 4.0);
+    final dx = (f.dx + d.focalPointDelta.dx / w).clamp(-0.7, 0.7);
+    final dy = (f.dy + d.focalPointDelta.dy / h).clamp(-0.7, 0.7);
+    setState(() => _frames[owner] = _Frame(scale: scale, dx: dx, dy: dy));
+    _channel?.sendBroadcastMessage(event: 'frame', payload: {
+      'from': _myUid,
+      'target': owner,
+      'scale': scale,
+      'dx': dx,
+      'dy': dy,
+    });
+  }
+
+  void _onFrameMsg(Map<String, dynamic> p) {
+    if (!mounted || p['from'] == _myUid) return;
+    final target = p['target']?.toString();
+    if (target == null) return;
+    setState(() => _frames[target] = _Frame(
+          scale: (p['scale'] as num?)?.toDouble() ?? 1,
+          dx: (p['dx'] as num?)?.toDouble() ?? 0,
+          dy: (p['dy'] as num?)?.toDouble() ?? 0,
+        ));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -105,6 +154,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _channel = SupabaseService.client
         .channel('touch:$id')
         .onBroadcast(event: 'touch', callback: _onTouchMsg)
+        .onBroadcast(event: 'frame', callback: _onFrameMsg)
         .subscribe();
   }
 
@@ -267,31 +317,38 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   }
 
   Widget _typeSelector() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (final t in _types)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: GestureDetector(
-              onTap: () => setState(() => _type = t.key),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: t.color.withValues(alpha: _type == t.key ? 0.3 : 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: t.color
-                          .withValues(alpha: _type == t.key ? 0.8 : 0.3)),
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          for (final t in _types)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: GestureDetector(
+                onTap: () => setState(() => _type = t.key),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color:
+                        t.color.withValues(alpha: _type == t.key ? 0.3 : 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: t.color
+                            .withValues(alpha: _type == t.key ? 0.8 : 0.3)),
+                  ),
+                  child: Center(
+                    child: Text('${t.emoji} ${t.label}',
+                        style: const TextStyle(
+                            color: MilesColors.cream50, fontSize: 13)),
+                  ),
                 ),
-                child: Text('${t.emoji} ${t.label}',
-                    style: const TextStyle(
-                        color: MilesColors.cream50, fontSize: 13)),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -350,32 +407,49 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         child: LayoutBuilder(
           builder: (context, c) {
             final w = c.maxWidth, h = c.maxHeight;
+            final adjusting = _adjusting == owner;
+            final f = _frames[owner] ?? const _Frame();
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTapDown: (d) => _touch(
-                  owner,
-                  (d.localPosition.dx / w).clamp(0.0, 1.0),
-                  (d.localPosition.dy / h).clamp(0.0, 1.0)),
-              onPanUpdate: (d) {
-                final x = (d.localPosition.dx / w).clamp(0.0, 1.0);
-                final y = (d.localPosition.dy / h).clamp(0.0, 1.0);
-                if (_lastPan == null ||
-                    (Offset(x, y) - _lastPan!).distance > 0.05) {
-                  _lastPan = Offset(x, y);
-                  _touch(owner, x, y);
-                }
-              },
-              onPanEnd: (_) => _lastPan = null,
+              onTapDown: adjusting
+                  ? null
+                  : (d) => _touch(
+                      owner,
+                      (d.localPosition.dx / w).clamp(0.0, 1.0),
+                      (d.localPosition.dy / h).clamp(0.0, 1.0)),
+              onPanUpdate: adjusting
+                  ? null
+                  : (d) {
+                      final x = (d.localPosition.dx / w).clamp(0.0, 1.0);
+                      final y = (d.localPosition.dy / h).clamp(0.0, 1.0);
+                      if (_lastPan == null ||
+                          (Offset(x, y) - _lastPan!).distance > 0.05) {
+                        _lastPan = Offset(x, y);
+                        _touch(owner, x, y);
+                      }
+                    },
+              onPanEnd: adjusting ? null : (_) => _lastPan = null,
+              onScaleStart: adjusting ? (_) => _onFrameStart(owner) : null,
+              onScaleUpdate:
+                  adjusting ? (d) => _onFrameUpdate(owner, d, w, h) : null,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (photoUrl != null)
-                    Image.network(photoUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
-                            CustomPaint(painter: _SilhouettePainter()))
-                  else
-                    CustomPaint(painter: _SilhouettePainter()),
+                  // The photo, with the live (synced) pan/zoom frame applied.
+                  ClipRect(
+                    child: Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.identity()
+                        ..translate(f.dx * w, f.dy * h)
+                        ..scale(f.scale),
+                      child: photoUrl != null
+                          ? Image.network(photoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  CustomPaint(painter: _SilhouettePainter()))
+                          : CustomPaint(painter: _SilhouettePainter()),
+                    ),
+                  ),
                   // Name tag
                   Positioned(
                     top: 6,
@@ -395,6 +469,47 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       ),
                     ),
                   ),
+                  // Frame toggle — pinch/drag to set which part shows (synced).
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: GestureDetector(
+                      onTap: () =>
+                          setState(() => _adjusting = adjusting ? null : owner),
+                      child: Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: adjusting
+                              ? MilesColors.ember
+                              : MilesColors.night.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(adjusting ? Icons.check : Icons.crop_free,
+                            color: MilesColors.cream50, size: 16),
+                      ),
+                    ),
+                  ),
+                  if (adjusting)
+                    Positioned(
+                      bottom: 10,
+                      left: 6,
+                      right: 6,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: MilesColors.night.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Pinch to zoom · drag to move — live',
+                            style: TextStyle(
+                                color: MilesColors.cream50, fontSize: 10.5),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (photoUrl == null)
                     Positioned(
                       bottom: 14,
