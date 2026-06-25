@@ -6,6 +6,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
+import 'package:miles/features/closer/closer_crypto.dart';
 
 /// One pin on the body map, with decrypted note.
 class BodyMapPin {
@@ -53,16 +54,16 @@ class BodyMapRepository {
     final combined = Uint8List(ct.length + mac.length);
     combined.setRange(0, ct.length, ct);
     combined.setRange(ct.length, combined.length, mac);
-    return base64Encode(combined);
+    return bytesToBytea(combined);
   }
 
-  static EncryptedPayload _unpack(String cipherB64, String nonceB64) {
-    final combined = base64Decode(cipherB64);
+  static EncryptedPayload _unpack(dynamic cipherVal, dynamic nonceVal) {
+    final combined = byteaToBytes(cipherVal);
     final ct = combined.sublist(0, combined.length - 16);
     final mac = combined.sublist(combined.length - 16);
     return EncryptedPayload(
       ciphertextB64: base64Encode(ct),
-      nonceB64: nonceB64,
+      nonceB64: base64Encode(byteaToBytes(nonceVal)),
       macB64: base64Encode(mac),
     );
   }
@@ -84,7 +85,7 @@ class BodyMapRepository {
       'x': x,
       'y': y,
       'note_cipher': _pack(payload),
-      'note_nonce': payload.nonceB64,
+      'note_nonce': bytesToBytea(base64Decode(payload.nonceB64)),
     });
   }
 
@@ -105,11 +106,9 @@ class BodyMapRepository {
     final out = <BodyMapPin>[];
     for (final row in rows as List) {
       try {
-        final cipherB64 = row['note_cipher'] as String;
-        final nonceB64 = row['note_nonce'] as String;
         final authorId = JsonUtils.parseString(row['author']);
         final note = await CryptoCore.decryptString(
-          _unpack(cipherB64, nonceB64),
+          _unpack(row['note_cipher'], row['note_nonce']),
           associatedData: authorId,
         );
         out.add(BodyMapPin(

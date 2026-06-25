@@ -6,6 +6,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
+import 'package:miles/features/closer/closer_crypto.dart';
 
 /// Fixed tag taxonomy for Fantasy Jar entries. Tags are hashed before storage
 /// (see §F2 of INTIMACY_LAYER.md) so the server never sees plaintext tags.
@@ -91,16 +92,16 @@ class FantasyJarRepository {
     final combined = Uint8List(ct.length + mac.length);
     combined.setRange(0, ct.length, ct);
     combined.setRange(ct.length, combined.length, mac);
-    return base64Encode(combined);
+    return bytesToBytea(combined);
   }
 
-  static EncryptedPayload _unpack(String cipherB64, String nonceB64) {
-    final combined = base64Decode(cipherB64);
+  static EncryptedPayload _unpack(dynamic cipherVal, dynamic nonceVal) {
+    final combined = byteaToBytes(cipherVal);
     final ct = combined.sublist(0, combined.length - 16);
     final mac = combined.sublist(combined.length - 16);
     return EncryptedPayload(
       ciphertextB64: base64Encode(ct),
-      nonceB64: nonceB64,
+      nonceB64: base64Encode(byteaToBytes(nonceVal)),
       macB64: base64Encode(mac),
     );
   }
@@ -125,7 +126,7 @@ class FantasyJarRepository {
       'couple_id': coupleId,
       'author': authorId,
       'ciphertext': _pack(payload),
-      'nonce': payload.nonceB64,
+      'nonce': bytesToBytea(base64Decode(payload.nonceB64)),
       'tag_hashes': tagHashes,
     }).select('id').single();
 
@@ -155,10 +156,8 @@ class FantasyJarRepository {
     final out = <FantasyEntry>[];
     for (final row in rows as List) {
       try {
-        final cipherB64 = row['ciphertext'] as String;
-        final nonceB64 = row['nonce'] as String;
         final plain = await CryptoCore.decryptString(
-          _unpack(cipherB64, nonceB64),
+          _unpack(row['ciphertext'], row['nonce']),
           associatedData: myId,
         );
         final hashes = (row['tag_hashes'] as List? ?? [])

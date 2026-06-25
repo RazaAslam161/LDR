@@ -191,8 +191,8 @@ class PrivateVaultRepository {
     await _c.from('vault_items').insert({
       'couple_id': coupleId,
       'kind': _stringifyKind(kind),
-      'ciphertext': cipherBlob,
-      'nonce': nonceBytes,
+      'ciphertext': bytesToBytea(cipherBlob),
+      'nonce': bytesToBytea(nonceBytes),
       'ad': ad,
       'created_by': createdBy,
       'retention': retention == VaultRetention.ephemeral

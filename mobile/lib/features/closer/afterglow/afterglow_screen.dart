@@ -513,13 +513,13 @@ class AfterglowRepository {
       'couple_id': coupleId,
       'happened_at': now.toIso8601String(),
       if (isA) ...{
-        'gratitude_a': textBlob,
-        'nonce_a': nonceBytes,
-        if (photoBlob != null) 'photo_a': photoBlob,
+        'gratitude_a': bytesToBytea(textBlob),
+        'nonce_a': bytesToBytea(nonceBytes),
+        if (photoBlob != null) 'photo_a': bytesToBytea(photoBlob),
       } else ...{
-        'gratitude_b': textBlob,
-        'nonce_b': nonceBytes,
-        if (photoBlob != null) 'photo_b': photoBlob,
+        'gratitude_b': bytesToBytea(textBlob),
+        'nonce_b': bytesToBytea(nonceBytes),
+        if (photoBlob != null) 'photo_b': bytesToBytea(photoBlob),
       },
       'retention': ephemeral ? 'ephemeral' : 'keep',
     }).select().single();
@@ -552,13 +552,13 @@ class AfterglowRepository {
 
     await _c.from('afterglow_entries').update({
       if (isA) ...{
-        'gratitude_a': textBlob,
-        'nonce_a': nonceBytes,
-        if (photoBlob != null) 'photo_a': photoBlob,
+        'gratitude_a': bytesToBytea(textBlob),
+        'nonce_a': bytesToBytea(nonceBytes),
+        if (photoBlob != null) 'photo_a': bytesToBytea(photoBlob),
       } else ...{
-        'gratitude_b': textBlob,
-        'nonce_b': nonceBytes,
-        if (photoBlob != null) 'photo_b': photoBlob,
+        'gratitude_b': bytesToBytea(textBlob),
+        'nonce_b': bytesToBytea(nonceBytes),
+        if (photoBlob != null) 'photo_b': bytesToBytea(photoBlob),
       },
       'sealed_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', entryId);

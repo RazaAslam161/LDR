@@ -96,7 +96,33 @@ Uint8List byteaToBytes(dynamic value) {
     throw ArgumentError('bytea value was null');
   }
   if (value is Uint8List) return value;
-  if (value is String) return base64Decode(value);
+  if (value is String) {
+    // PostgREST returns bytea as a Postgres hex literal: `\x<hex>`. THIS is the
+    // bug that broke every Closer feature — the value was base64-decoded, which
+    // throws on hex and the row was silently dropped. Parse the hex here.
+    if (value.startsWith(r'\x')) {
+      final hex = value.substring(2);
+      final out = Uint8List(hex.length ~/ 2);
+      for (var i = 0; i < out.length; i++) {
+        out[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);
+      }
+      return out;
+    }
+    return base64Decode(value); // legacy fallback
+  }
   if (value is List) return Uint8List.fromList(value.cast<int>());
   throw ArgumentError('Unsupported bytea encoding: ${value.runtimeType}');
+}
+
+/// Serializes raw bytes for a Postgres `bytea` column over PostgREST. We send
+/// the Postgres hex literal (`\x<hex>`) so the bytes are stored VERBATIM. (Both
+/// old write styles were wrong: a raw Uint8List was JSON-encoded as an int
+/// array and stored as text; a base64 string was stored as its ASCII text — so
+/// neither round-tripped. Always write through this now.)
+String bytesToBytea(List<int> bytes) {
+  final sb = StringBuffer(r'\x');
+  for (final b in bytes) {
+    sb.write((b & 0xff).toRadixString(16).padLeft(2, '0'));
+  }
+  return sb.toString();
 }
