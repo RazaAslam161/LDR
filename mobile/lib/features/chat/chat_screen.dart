@@ -553,7 +553,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ],
               ],
             ),
-            if (partnerName != null) _ChatSubtitle(presence: presence),
+            if (partnerName != null)
+              _ChatSubtitle(presence: presence, partnerTyping: _partnerTyping),
           ],
         ),
         actions: [
@@ -729,8 +730,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
 /// Presence-aware AppBar subtitle: typing… / Online / Last seen.
 class _ChatSubtitle extends StatelessWidget {
-  const _ChatSubtitle({required this.presence});
+  const _ChatSubtitle({required this.presence, this.partnerTyping = false});
   final Presence? presence;
+  final bool partnerTyping;
 
   @override
   Widget build(BuildContext context) {
@@ -739,7 +741,7 @@ class _ChatSubtitle extends StatelessWidget {
       return const Text('together, even from here',
           style: TextStyle(fontSize: 11, color: MilesColors.taupe));
     }
-    if (_partnerTyping || (p.isTyping && p.typingInChat)) {
+    if (partnerTyping || (p.isTyping && p.typingInChat)) {
       return const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
