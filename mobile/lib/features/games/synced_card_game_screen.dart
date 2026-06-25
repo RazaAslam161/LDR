@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -53,23 +54,28 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     _coupleId = s.couple?.id;
     _myUid = s.profile?.id;
     reportScreen(ref, widget.gameKey);
+    _subscribe();
+    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
+  }
+
+  void _subscribe() {
     final cid = _coupleId;
-    if (cid != null) {
-      _ch = SupabaseService.client
-          .channel('gcard:${widget.gameKey}:$cid')
-          .onBroadcast(event: 'card', callback: _onCard)
-          .onBroadcast(event: 'sync', callback: _onSync)
-          .subscribe();
-      _syncTimer = Timer(const Duration(milliseconds: 900), () {
-        if (!_started) {
-          _ch?.sendBroadcastMessage(event: 'sync', payload: {'from': _myUid});
-        }
-      });
-    }
+    if (cid == null) return;
+    _ch?.unsubscribe();
+    _ch = SupabaseService.client
+        .channel('gcard:${widget.gameKey}:$cid')
+        .onBroadcast(event: 'card', callback: _onCard)
+        .onBroadcast(event: 'sync', callback: _onSync)
+        .subscribe();
+    _syncTimer?.cancel();
+    _syncTimer = Timer(const Duration(milliseconds: 900), () {
+      _ch?.sendBroadcastMessage(event: 'sync', payload: {'from': _myUid});
+    });
   }
 
   @override
   void dispose() {
+    realtimeResumed.removeListener(_subscribe);
     reportActiveTab(ref);
     _syncTimer?.cancel();
     _ch?.unsubscribe();

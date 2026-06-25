@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/fcm_service.dart';
@@ -77,6 +78,9 @@ class _AppShellState extends ConsumerState<AppShell>
     // background / Android-doze socket reset (was only re-arming Reach).
     ref.read(callControllerProvider).reconnect();
     ref.read(sessionProvider.notifier).reconnectPresence();
+    // Wake EVERY per-screen realtime subscription (cycle, games, touch, …) so
+    // they re-arm on the fresh socket instead of going silently dead.
+    realtimeResumed.value++;
   }
 
   void _onReady() {

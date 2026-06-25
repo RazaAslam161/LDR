@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -6,9 +7,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// on partners' screens of any size.
 class _TracePoint {
   const _TracePoint(this.dx, this.dy, this.t);
-  factory _TracePoint.fromJson(Map<String, dynamic> j) =>
-      _TracePoint((j['x'] as num).toDouble(), (j['y'] as num).toDouble(),
-          (j['t'] as num).toInt(),);
+  factory _TracePoint.fromJson(Map<String, dynamic> j) => _TracePoint(
+        (j['x'] as num).toDouble(),
+        (j['y'] as num).toDouble(),
+        (j['t'] as num).toInt(),
+      );
   final double dx;
   final double dy;
   final int t; // ms since stroke start
@@ -44,7 +47,10 @@ class _TraceStroke {
 /// Public widget — wraps the whole Touch Trace experience.
 class TouchTraceCanvas extends StatefulWidget {
   const TouchTraceCanvas({
-    required this.coupleId, required this.userId, required this.partnerId, super.key,
+    required this.coupleId,
+    required this.userId,
+    required this.partnerId,
+    super.key,
   });
 
   final String coupleId;
@@ -56,7 +62,7 @@ class TouchTraceCanvas extends StatefulWidget {
 }
 
 class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
-  late final RealtimeChannel _channel;
+  RealtimeChannel? _channel;
   final List<_TraceStroke> _strokes = [];
   _TraceStroke? _activeStroke;
   DateTime? _strokeStart;
@@ -74,10 +80,18 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
   @override
   void initState() {
     super.initState();
-    _channel = SupabaseService.client.channel('touch_trace:${widget.coupleId}');
+    _subscribe();
+    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
+  }
+
+  void _subscribe() {
+    try {
+      _channel?.unsubscribe();
+    } catch (_) {}
+    final ch = SupabaseService.client.channel('touch_trace:${widget.coupleId}');
 
     // Receive partner's strokes
-    _channel.onBroadcast(
+    ch.onBroadcast(
       event: 'stroke_point',
       callback: (payload) {
         final from = payload['from'] as String?;
@@ -88,8 +102,8 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
         setState(() {
           // If this is the first point of a new incoming stroke, append a new
           // stroke container; otherwise append to the most-recent incoming one.
-          final lastIsIncoming =
-              _strokes.isNotEmpty && _strokes.last.color.toARGB32() != _myColor().toARGB32();
+          final lastIsIncoming = _strokes.isNotEmpty &&
+              _strokes.last.color.toARGB32() != _myColor().toARGB32();
           if (!lastIsIncoming || _strokes.isEmpty) {
             _strokes.add(_TraceStroke.fromJson(strokeJson));
           }
@@ -98,7 +112,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       },
     );
 
-    _channel.onBroadcast(
+    ch.onBroadcast(
       event: 'stroke_end',
       callback: (payload) {
         final from = payload['from'] as String?;
@@ -108,7 +122,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       },
     );
 
-    _channel.onBroadcast(
+    ch.onBroadcast(
       event: 'clear',
       callback: (payload) {
         final from = payload['from'] as String?;
@@ -117,13 +131,18 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       },
     );
 
-    _channel.subscribe();
+    ch.subscribe();
+    _channel = ch;
   }
 
   @override
   void dispose() {
-    _channel.unsubscribe();
-    SupabaseService.client.removeChannel(_channel);
+    realtimeResumed.removeListener(_subscribe);
+    final ch = _channel;
+    if (ch != null) {
+      ch.unsubscribe();
+      SupabaseService.client.removeChannel(ch);
+    }
     super.dispose();
   }
 
@@ -137,8 +156,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
 
   void _onPanUpdate(DragUpdateDetails details, BoxConstraints constraints) {
     if (_activeStroke == null || _strokeStart == null) return;
-    final size =
-        Size(constraints.maxWidth, constraints.maxHeight);
+    final size = Size(constraints.maxWidth, constraints.maxHeight);
     final dx = (details.localPosition.dx / size.width).clamp(0.0, 1.0);
     final dy = (details.localPosition.dy / size.height).clamp(0.0, 1.0);
     final t = DateTime.now().difference(_strokeStart!).inMilliseconds;
@@ -151,7 +169,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
   }
 
   void _onPanEnd(DragEndDetails _) {
-    _channel.sendBroadcastMessage(
+    _channel?.sendBroadcastMessage(
       event: 'stroke_end',
       payload: {'from': widget.userId},
     );
@@ -167,7 +185,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       return;
     }
     _lastSend = now;
-    _channel.sendBroadcastMessage(
+    _channel?.sendBroadcastMessage(
       event: 'stroke_point',
       payload: {
         'from': widget.userId,
@@ -179,7 +197,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
 
   void _clearAll() {
     setState(_strokes.clear);
-    _channel.sendBroadcastMessage(
+    _channel?.sendBroadcastMessage(
       event: 'clear',
       payload: {'from': widget.userId},
     );
@@ -237,8 +255,11 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
                   ),
                   IconButton(
                     onPressed: _clearAll,
-                    icon: const Icon(Icons.refresh,
-                        color: Color(0x80F5EFE6), size: 20,),
+                    icon: const Icon(
+                      Icons.refresh,
+                      color: Color(0x80F5EFE6),
+                      size: 20,
+                    ),
                     tooltip: 'Clear',
                   ),
                 ],
@@ -290,8 +311,12 @@ class _TracePainter extends CustomPainter {
     }
   }
 
-  void _drawPath(Canvas canvas, Size size, List<_TracePoint> points,
-      Paint paint,) {
+  void _drawPath(
+    Canvas canvas,
+    Size size,
+    List<_TracePoint> points,
+    Paint paint,
+  ) {
     if (points.length == 1) {
       // Dot when only one point so far
       final p = points.first;

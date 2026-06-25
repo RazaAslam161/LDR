@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -51,22 +52,29 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     _isFemale = s.profile?.isFemale ?? false;
     reportScreen(ref, 'Cycle');
     _load();
+    _subscribe();
+    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
+  }
+
+  void _subscribe() {
     final cid = _coupleId;
-    if (cid != null) {
-      _channel = SupabaseService.client
-          .channel('cycle_events:$cid')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'cycle_events',
-            callback: (_) => _load(),
-          )
-          .subscribe();
-    }
+    if (cid == null) return;
+    _channel?.unsubscribe();
+    _channel = SupabaseService.client
+        .channel('cycle_events:$cid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'cycle_events',
+          callback: (_) => _load(),
+        )
+        .subscribe();
+    _load(); // pull anything missed while the socket was down
   }
 
   @override
   void dispose() {
+    realtimeResumed.removeListener(_subscribe);
     reportActiveTab(ref);
     _channel?.unsubscribe();
     super.dispose();

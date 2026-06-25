@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -90,17 +91,26 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _partnerName = session.partner?.displayName ?? 'Them';
     if (couple == null) return;
     _coupleId = couple.id;
-    // Ephemeral, low-latency touch sync (no DB writes).
-    _channel = SupabaseService.client
-        .channel('touch:${couple.id}')
-        .onBroadcast(event: 'touch', callback: _onTouchMsg)
-        .subscribe();
+    _subscribe();
+    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
     reportScreen(ref, 'Touch');
     _loadPhotos();
   }
 
+  void _subscribe() {
+    final id = _coupleId;
+    if (id == null) return;
+    _channel?.unsubscribe();
+    // Ephemeral, low-latency touch sync (no DB writes).
+    _channel = SupabaseService.client
+        .channel('touch:$id')
+        .onBroadcast(event: 'touch', callback: _onTouchMsg)
+        .subscribe();
+  }
+
   @override
   void dispose() {
+    realtimeResumed.removeListener(_subscribe);
     SecureScreen.clearSecure();
     _heatTimer?.cancel();
     reportActiveTab(ref);

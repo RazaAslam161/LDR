@@ -234,6 +234,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         .channel('mood_burst:$id')
         .onBroadcast(event: 'mood', callback: _onMoodBurst)
         .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
+        .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
         .subscribe();
     PresenceService.setChatLastRead(id);
   }
@@ -264,6 +265,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         .channel('mood_burst:${couple.id}')
         .onBroadcast(event: 'mood', callback: _onMoodBurst)
         .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
+        .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
         .subscribe();
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
@@ -339,18 +341,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     });
   }
 
+  bool _partnerTyping = false;
+  Timer? _partnerTypingTimer;
+
   void _onTyping(String _) {
     final id = _coupleId;
     if (id == null) return;
     if (!_typingActive) {
       _typingActive = true;
       PresenceService.setTyping(id, typing: true);
+      // Instant fast-path (no DB round-trip): dots appear on the partner in ~ms.
+      _moodChannel
+          ?.sendBroadcastMessage(event: 'typing', payload: {'typing': true});
     }
     _typingTimer?.cancel();
     _typingTimer = Timer(const Duration(milliseconds: 1500), () {
       _typingActive = false;
       PresenceService.setTyping(id, typing: false);
+      _moodChannel
+          ?.sendBroadcastMessage(event: 'typing', payload: {'typing': false});
     });
+  }
+
+  void _onTypingBroadcast(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    final typing = payload['typing'] == true;
+    setState(() => _partnerTyping = typing);
+    _partnerTypingTimer?.cancel();
+    if (typing) {
+      _partnerTypingTimer = Timer(const Duration(seconds: 4), () {
+        if (mounted) setState(() => _partnerTyping = false);
+      });
+    }
   }
 
   Future<void> _setMyMood() async {
@@ -476,6 +498,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _typingTimer?.cancel();
+    _partnerTypingTimer?.cancel();
     _readTimer?.cancel();
     final id = _coupleId;
     if (id != null) {
@@ -716,7 +739,7 @@ class _ChatSubtitle extends StatelessWidget {
       return const Text('together, even from here',
           style: TextStyle(fontSize: 11, color: MilesColors.taupe));
     }
-    if (p.isTyping && p.typingInChat) {
+    if (_partnerTyping || (p.isTyping && p.typingInChat)) {
       return const Row(
         mainAxisSize: MainAxisSize.min,
         children: [

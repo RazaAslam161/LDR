@@ -326,8 +326,10 @@ class SupabaseRepository {
     required String coupleId,
     required void Function(Profile) onPartnerUpdate,
   }) {
+    // Distinct channel name from the presence-table subscription so the two
+    // don't collide on one client (both were 'presence:$coupleId').
     return _c
-        .channel('presence:$coupleId')
+        .channel('profile-sync:$coupleId')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
