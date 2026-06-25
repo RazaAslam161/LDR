@@ -99,7 +99,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
     final p = widget.partner;
     if (p == null || !p.isSharingLive) return;
     try {
-      _map.move(LatLng(p.latitude!, p.longitude!), 14);
+      _map.move(LatLng(p.latitude!, p.longitude!), 16);
     } catch (_) {}
   }
 
@@ -191,23 +191,19 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                 mapController: _map,
                 options: MapOptions(
                   initialCenter: point,
-                  initialZoom: 13,
+                  initialZoom: 15.5,
                   interactionOptions: const InteractionOptions(
                     flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
                   ),
                 ),
                 children: [
-                  // Ultra-realistic satellite imagery (ESRI World Imagery,
-                  // no API key).
+                  // Dark, futuristic vector basemap (CARTO dark — no API key).
+                  // Clean black theme with streets + labels — far less busy than
+                  // satellite, with a closer zoom for a "right by them" feel.
                   TileLayer(
                     urlTemplate:
-                        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    userAgentPackageName: 'com.miles.miles',
-                  ),
-                  // Street + place labels on top (hybrid detail).
-                  TileLayer(
-                    urlTemplate:
-                        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+                        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+                    subdomains: const ['a', 'b', 'c', 'd'],
                     userAgentPackageName: 'com.miles.miles',
                   ),
                   if (myPoint != null)

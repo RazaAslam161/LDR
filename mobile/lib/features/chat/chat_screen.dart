@@ -40,6 +40,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _loading = true;
   String? _coupleId;
   Timer? _typingTimer;
+  Timer? _readTimer;
   bool _typingActive = false;
   bool _hasNewMessage = false;
   Message? _replyingTo;
@@ -133,6 +134,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         .subscribe();
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
+    // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
+    // the chat is open (the shell only keeps this screen alive while viewing).
+    PresenceService.setChatLastRead(couple.id);
+    _readTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      PresenceService.setChatLastRead(couple.id);
+      setState(() {}); // refresh time-based receipts + "is here" indicator
+    });
     if (mounted) setState(() => _loading = false);
     // reverse:true already pins the view to the newest message — no scroll needed.
   }
@@ -142,6 +151,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _ids.add(m.id);
     if (!mounted) return;
     final mine = m.isMine(SupabaseService.currentUserId);
+    // I'm viewing the chat, so the partner's new message is read immediately.
+    if (!mine && _coupleId != null) {
+      PresenceService.setChatLastRead(_coupleId!);
+    }
     final atBottom = _isAtBottom();
     setState(() {
       _messages.insert(0, m); // newest-first ordering
@@ -329,6 +342,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void dispose() {
     _typingTimer?.cancel();
+    _readTimer?.cancel();
     final id = _coupleId;
     if (id != null) {
       PresenceService.setTyping(id, typing: false);
@@ -371,7 +385,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 Flexible(
                   child: Text(partnerName ?? 'Chat',
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineMedium),
+                      style: const TextStyle(
+                          color: MilesColors.cream50,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600)),
                 ),
                 if (partnerMood != null) ...[
                   const SizedBox(width: 8),
@@ -383,19 +400,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ],
         ),
         actions: [
-          if (couple != null)
-            IconButton(
-              tooltip: 'Set your mood',
-              icon: const Icon(Icons.palette_outlined, color: MilesColors.gilt),
-              onPressed: _setMyMood,
-            ),
-          if (couple != null)
-            IconButton(
-              tooltip: 'Fling a mood',
-              icon: const Icon(Icons.emoji_emotions_outlined,
-                  color: MilesColors.blush),
-              onPressed: _pickMoodBurst,
-            ),
           if (couple != null)
             IconButton(
               tooltip: 'Voice call',
@@ -414,10 +418,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               icon: const Icon(Icons.more_vert, color: MilesColors.gilt),
               color: MilesColors.surface1,
               onSelected: (v) {
-                if (v == 'clear') _clearConversation();
-                if (v == 'theme') showChatThemePicker(context);
+                switch (v) {
+                  case 'mood':
+                    _setMyMood();
+                  case 'burst':
+                    _pickMoodBurst();
+                  case 'theme':
+                    showChatThemePicker(context);
+                  case 'clear':
+                    _clearConversation();
+                }
               },
               itemBuilder: (_) => const [
+                PopupMenuItem(value: 'mood', child: Text('Set your mood')),
+                PopupMenuItem(value: 'burst', child: Text('Fling a mood')),
                 PopupMenuItem(value: 'theme', child: Text('Chat theme')),
                 PopupMenuItem(
                     value: 'clear', child: Text('Clear conversation')),
@@ -473,6 +487,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                               repliedTo: _byId(m.replyToId),
                                               player: _player,
                                               theme: chatTheme,
+                                              status: m.isMine(uid)
+                                                  ? _statusFor(m, presence)
+                                                  : null,
                                             ),
                                           );
                                         },
@@ -502,6 +519,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   );
                                 }),
                     ),
+                    if (presence?.isInChatNow ?? false)
+                      _PartnerHere(
+                        name: partnerName,
+                        avatarUrl: session.partner?.avatarUrl,
+                      ),
                     ChatInputBar(
                       coupleId: couple.id,
                       onChanged: _onTyping,
@@ -592,6 +614,7 @@ class _Bubble extends StatelessWidget {
     required this.player,
     required this.theme,
     this.repliedTo,
+    this.status,
   });
 
   final Message message;
@@ -600,6 +623,7 @@ class _Bubble extends StatelessWidget {
   final AudioPlayer player;
   final ChatTheme theme;
   final Message? repliedTo;
+  final _MsgStatus? status;
 
   @override
   Widget build(BuildContext context) {
@@ -666,12 +690,121 @@ class _Bubble extends StatelessWidget {
             right: mine ? 6 : 0,
             bottom: 4,
           ),
-          child: Text(
-            DateFormat('h:mm a').format(message.createdAt),
-            style: const TextStyle(fontSize: 10, color: MilesColors.faint),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                DateFormat('h:mm a').format(message.createdAt),
+                style: const TextStyle(fontSize: 10, color: MilesColors.faint),
+              ),
+              if (mine && status != null) ...[
+                const SizedBox(width: 4),
+                _StatusTick(status: status!),
+              ],
+            ],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Read-receipt state for a sent message.
+enum _MsgStatus { sent, delivered, seen }
+
+_MsgStatus _statusFor(Message m, Presence? p) {
+  if (p == null) return _MsgStatus.sent;
+  final read = p.chatLastRead;
+  if (read != null && !read.isBefore(m.createdAt)) return _MsgStatus.seen;
+  final seen = p.lastSeen;
+  if (p.isOnline || (seen != null && !seen.isBefore(m.createdAt))) {
+    return _MsgStatus.delivered;
+  }
+  return _MsgStatus.sent;
+}
+
+class _StatusTick extends StatelessWidget {
+  const _StatusTick({required this.status});
+  final _MsgStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case _MsgStatus.sent:
+        return const Icon(Icons.check, size: 13, color: MilesColors.faint);
+      case _MsgStatus.delivered:
+        return const Icon(Icons.done_all, size: 13, color: MilesColors.faint);
+      case _MsgStatus.seen:
+        return const Icon(Icons.done_all, size: 13, color: MilesColors.sage);
+    }
+  }
+}
+
+/// Snapchat-style "partner is in the chat right now" — a small avatar with a
+/// green presence dot, shown just above the input while they're viewing.
+class _PartnerHere extends StatelessWidget {
+  const _PartnerHere({required this.name, required this.avatarUrl});
+  final String? name;
+  final String? avatarUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial =
+        (name != null && name!.isNotEmpty) ? name![0].toUpperCase() : '♥';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+      child: Row(
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: MilesColors.surface2,
+                  border: Border.all(
+                      color: MilesColors.sage.withValues(alpha: 0.6),
+                      width: 1.5),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: avatarUrl == null
+                    ? Center(
+                        child: Text(initial,
+                            style: const TextStyle(
+                                color: MilesColors.cream50, fontSize: 10)))
+                    : Image.network(avatarUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Center(
+                            child: Text(initial,
+                                style: const TextStyle(
+                                    color: MilesColors.cream50,
+                                    fontSize: 10)))),
+              ),
+              Positioned(
+                right: -1,
+                bottom: -1,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: MilesColors.sage,
+                    border: Border.all(color: MilesColors.night, width: 1.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 7),
+          Text('${name ?? 'They'} is here',
+              style: const TextStyle(
+                  color: MilesColors.sage,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500)),
+        ],
+      ),
     );
   }
 }

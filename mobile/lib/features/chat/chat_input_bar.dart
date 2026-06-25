@@ -47,9 +47,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
   String? _currentRecordingPath;
 
   bool get _hasText => _text.text.trim().isNotEmpty;
+  bool _lastHasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Rebuild the moment text goes empty↔non-empty so the send (✈) icon
+    // appears immediately instead of waiting for an unrelated rebuild.
+    _text.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    final h = _hasText;
+    if (h != _lastHasText) {
+      _lastHasText = h;
+      if (mounted) setState(() {});
+    }
+  }
 
   @override
   void dispose() {
+    _text.removeListener(_onTextChanged);
     _text.dispose();
     _recorder.dispose();
     super.dispose();

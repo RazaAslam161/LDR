@@ -27,6 +27,7 @@ class Presence {
     this.avatarEmoji,
     this.checkinPhotoUrl,
     this.checkinPhotoAt,
+    this.chatLastRead,
   });
 
   factory Presence.fromJson(Map<String, dynamic> j) => Presence(
@@ -40,8 +41,11 @@ class Presence {
         locationLabel: JsonUtils.parseStringOrNull(j['location_label']),
         locationSharingMode:
             JsonUtils.parseString(j['location_sharing_mode'], fallback: 'off'),
-        latitude: j['latitude'] == null ? null : JsonUtils.parseDouble(j['latitude']),
-        longitude: j['longitude'] == null ? null : JsonUtils.parseDouble(j['longitude']),
+        latitude:
+            j['latitude'] == null ? null : JsonUtils.parseDouble(j['latitude']),
+        longitude: j['longitude'] == null
+            ? null
+            : JsonUtils.parseDouble(j['longitude']),
         locationAccuracy: j['location_accuracy'] == null
             ? null
             : JsonUtils.parseDouble(j['location_accuracy']),
@@ -52,7 +56,9 @@ class Presence {
         bodyPhotoPath: JsonUtils.parseStringOrNull(j['body_photo_path']),
         avatarEmoji: JsonUtils.parseStringOrNull(j['avatar_emoji']),
         checkinPhotoUrl: JsonUtils.parseStringOrNull(j['checkin_photo_url']),
-        checkinPhotoAt: JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
+        checkinPhotoAt:
+            JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
+        chatLastRead: JsonUtils.parseDateOrNull(j['chat_last_read'])?.toLocal(),
       );
 
   final String userId;
@@ -74,6 +80,14 @@ class Presence {
   final String? avatarEmoji;
   final String? checkinPhotoUrl;
   final DateTime? checkinPhotoAt;
+  final DateTime? chatLastRead;
+
+  /// They're actively viewing the chat if they read within the last ~18s
+  /// (the chat screen refreshes this every few seconds while open).
+  bool get isInChatNow {
+    final r = chatLastRead;
+    return r != null && DateTime.now().difference(r).inSeconds < 18;
+  }
 
   bool get isSharingLive =>
       locationSharingMode == 'precise' && latitude != null && longitude != null;
@@ -86,7 +100,8 @@ class PresenceService {
 
   static SupabaseClient get _c => SupabaseService.client;
 
-  static Future<void> _upsert(String coupleId, Map<String, dynamic> patch) async {
+  static Future<void> _upsert(
+      String coupleId, Map<String, dynamic> patch) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     try {
@@ -110,11 +125,17 @@ class PresenceService {
   static Future<void> setTyping(String coupleId, {required bool typing}) =>
       _upsert(coupleId, {'is_typing': typing});
 
-  static Future<void> setTypingInChat(String coupleId, {required bool inChat}) =>
+  static Future<void> setTypingInChat(String coupleId,
+          {required bool inChat}) =>
       _upsert(coupleId, {'typing_in_chat': inChat});
 
-  static Future<void> setMood(
-          String coupleId, String mood, String color) =>
+  /// Marks the chat read "now" — refreshed periodically while the chat is open.
+  /// Drives the partner's read-receipts (seen) and the "in chat" avatar.
+  static Future<void> setChatLastRead(String coupleId) => _upsert(coupleId, {
+        'chat_last_read': DateTime.now().toUtc().toIso8601String(),
+      });
+
+  static Future<void> setMood(String coupleId, String mood, String color) =>
       _upsert(coupleId, {
         'current_mood': mood,
         'mood_color': color,
@@ -199,11 +220,8 @@ class PresenceService {
   static Future<Presence?> fetchMine(String coupleId) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
-    final res = await _c
-        .from('presence')
-        .select()
-        .eq('user_id', uid)
-        .maybeSingle();
+    final res =
+        await _c.from('presence').select().eq('user_id', uid).maybeSingle();
     return res == null ? null : Presence.fromJson(res);
   }
 }
