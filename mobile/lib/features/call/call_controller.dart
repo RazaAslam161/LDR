@@ -124,54 +124,73 @@ class CallController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// WebRTC ICE config. STUN alone can't traverse mobile-carrier (symmetric)
-  /// NATs — a working TURN relay is required. Put a real free TURN in .env
-  /// (METERED_TURN_HOST / METERED_TURN_USERNAME / METERED_TURN_CREDENTIAL from a
-  /// free metered.ca account) and it's used; otherwise we fall back to the public
-  /// openrelay relay (often down). Includes TURN-over-TCP/TLS:443 for restrictive
-  /// networks that block UDP.
-  static Map<String, dynamic> get _rtcConfig {
+  // ── ICE / TURN ─────────────────────────────────────────────────────────────
+  static List<Map<String, dynamic>> _cachedTurn = [];
+  static DateTime? _turnFetchedAt;
+
+  /// Short-lived Cloudflare TURN ICE servers, minted by the `turn-credentials`
+  /// edge function (the Cloudflare API token stays server-side, never in the
+  /// app). Cached ~12h (the creds live 24h). Best-effort: on any failure we
+  /// return whatever is cached (possibly nothing) and the call still connects on
+  /// permissive networks via STUN.
+  static Future<List<Map<String, dynamic>>> _turnServers() async {
+    final at = _turnFetchedAt;
+    if (at != null &&
+        _cachedTurn.isNotEmpty &&
+        DateTime.now().difference(at) < const Duration(hours: 12)) {
+      return _cachedTurn;
+    }
+    try {
+      final res = await SupabaseService.client.functions
+          .invoke('turn-credentials')
+          .timeout(const Duration(seconds: 8));
+      final data = res.data;
+      final raw = data is Map ? data['iceServers'] : null;
+      if (raw is List) {
+        final parsed = <Map<String, dynamic>>[];
+        for (final s in raw) {
+          if (s is! Map) continue;
+          final m = Map<String, dynamic>.from(s);
+          final urls = m['urls'];
+          if (urls is List) {
+            m['urls'] = urls.map((e) => e.toString()).toList();
+          }
+          parsed.add(m);
+        }
+        if (parsed.isNotEmpty) {
+          _cachedTurn = parsed;
+          _turnFetchedAt = DateTime.now();
+          return parsed;
+        }
+      }
+    } catch (_) {
+      // best-effort — never block a call on the credential fetch
+    }
+    return _cachedTurn;
+  }
+
+  /// Full WebRTC ICE config: Google/Cloudflare STUN + Cloudflare TURN (which
+  /// includes TURN-over-TLS:443 for carrier-NAT / UDP-blocked networks). A static
+  /// TURN from .env (METERED_TURN_*) is appended if present, as a manual override.
+  static Future<Map<String, dynamic>> _iceConfig() async {
     final servers = <Map<String, dynamic>>[
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
-      {'urls': 'stun:stun2.l.google.com:19302'},
       {'urls': 'stun:stun.cloudflare.com:3478'},
     ];
+    servers.addAll(await _turnServers());
+
     final host = dotenv.maybeGet('METERED_TURN_HOST') ?? '';
     final user = dotenv.maybeGet('METERED_TURN_USERNAME') ?? '';
     final cred = dotenv.maybeGet('METERED_TURN_CREDENTIAL') ?? '';
     if (host.isNotEmpty && user.isNotEmpty && cred.isNotEmpty) {
       servers.addAll([
         {'urls': 'turn:$host:80', 'username': user, 'credential': cred},
-        {
-          'urls': 'turn:$host:80?transport=tcp',
-          'username': user,
-          'credential': cred
-        },
         {'urls': 'turn:$host:443', 'username': user, 'credential': cred},
         {
           'urls': 'turns:$host:443?transport=tcp',
           'username': user,
           'credential': cred
-        },
-      ]);
-    } else {
-      const u = 'openrelayproject';
-      servers.addAll([
-        {
-          'urls': 'turn:openrelay.metered.ca:80',
-          'username': u,
-          'credential': u
-        },
-        {
-          'urls': 'turn:openrelay.metered.ca:443',
-          'username': u,
-          'credential': u
-        },
-        {
-          'urls': 'turns:openrelay.metered.ca:443?transport=tcp',
-          'username': u,
-          'credential': u
         },
       ]);
     }
@@ -192,6 +211,8 @@ class CallController extends ChangeNotifier {
     if (couple == null) return;
     _coupleId = couple.id;
     await _subscribeChannel();
+    unawaited(
+        _turnServers()); // pre-warm TURN creds so the first call is instant
   }
 
   // ── Outgoing ──────────────────────────────────────────────────────────────
@@ -291,7 +312,7 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> _createPc() async {
-    final pc = await createPeerConnection(_rtcConfig);
+    final pc = await createPeerConnection(await _iceConfig());
     _pc = pc;
     for (final track in _localStream!.getTracks()) {
       await pc.addTrack(track, _localStream!);
