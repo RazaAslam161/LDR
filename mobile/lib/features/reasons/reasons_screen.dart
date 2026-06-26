@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/reasons/reasons_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A jar of "reasons I love you" — both add notes; one is featured each day.
 class ReasonsScreen extends ConsumerStatefulWidget {
@@ -24,7 +24,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
   bool _adding = false;
   String? _coupleId;
   String? _myUid;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
 
   @override
   void initState() {
@@ -34,7 +34,8 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
     _myUid = session.profile?.id;
     reportScreen(ref, 'Reasons');
     if (_coupleId != null) {
-      _channel = ReasonsRepository.subscribe(_coupleId!, _load);
+      _channel = ManagedSubscription.start(
+          () => ReasonsRepository.subscribe(_coupleId!, _load));
     }
     _load();
   }
@@ -42,7 +43,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
   @override
   void dispose() {
     reportActiveTab(ref);
-    _channel?.unsubscribe();
+    _channel?.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();

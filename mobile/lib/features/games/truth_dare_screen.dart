@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/realtime_resume.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -12,7 +12,6 @@ import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Synced Truth or Dare. Both partners see the same card and take turns: on your
 /// turn you pick Truth or Dare, the deck draws a card (at the chosen heat
@@ -26,7 +25,7 @@ class TruthDareScreen extends ConsumerStatefulWidget {
 }
 
 class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   Timer? _syncTimer;
   String? _coupleId;
   String? _myUid;
@@ -50,31 +49,29 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     reportScreen(ref, 'TruthOrDare');
 
     _subscribe();
-    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
   }
 
   void _subscribe() {
     final cid = _coupleId;
     if (cid == null) return;
-    _channel?.unsubscribe();
-    _channel = SupabaseService.client
+    _channel = ManagedSubscription.start(() => SupabaseService.client
         .channel('game_td:$cid')
         .onBroadcast(event: 'state', callback: _onState)
         .onBroadcast(event: 'sync', callback: _onSync)
-        .subscribe();
+        .subscribe());
     // On (re)connect, ask the partner to re-share the current game state.
     _syncTimer?.cancel();
     _syncTimer = Timer(const Duration(milliseconds: 900), () {
-      _channel?.sendBroadcastMessage(event: 'sync', payload: {'from': _myUid});
+      _channel?.channel
+          ?.sendBroadcastMessage(event: 'sync', payload: {'from': _myUid});
     });
   }
 
   @override
   void dispose() {
-    realtimeResumed.removeListener(_subscribe);
     reportActiveTab(ref);
     _syncTimer?.cancel();
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 
@@ -103,7 +100,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
   }
 
   void _broadcast() {
-    _channel?.sendBroadcastMessage(event: 'state', payload: {
+    _channel?.channel?.sendBroadcastMessage(event: 'state', payload: {
       'from': _myUid,
       'turn': _turn,
       'tier': _tier.name,

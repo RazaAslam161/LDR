@@ -4,13 +4,13 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/heartbeat/ppg_detector.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Feel My Heartbeat — your fingertip over the camera + torch reads your pulse;
 /// your partner's phone throbs with your real heartbeat in real time, and vice
@@ -30,7 +30,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
   bool _processing = false;
   String? _error;
 
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   String? _coupleId;
   String? _myUid;
   late final PpgDetector _ppg;
@@ -53,10 +53,10 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
     _myUid = session.profile?.id;
     reportScreen(ref, 'Heartbeat');
     if (_coupleId != null) {
-      _channel = SupabaseService.client
+      _channel = ManagedSubscription.start(() => SupabaseService.client
           .channel('heartbeat:${_coupleId!}')
           .onBroadcast(event: 'hb', callback: _onMsg)
-          .subscribe();
+          .subscribe());
     }
   }
 
@@ -64,7 +64,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
   void dispose() {
     reportActiveTab(ref);
     _stopCamera();
-    _channel?.unsubscribe();
+    _channel?.dispose();
     _myPulse.dispose();
     _partnerPulse.dispose();
     super.dispose();
@@ -134,7 +134,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
         _myBpm = null;
       });
     }
-    _channel?.sendBroadcastMessage(
+    _channel?.channel?.sendBroadcastMessage(
         event: 'hb', payload: {'from': _myUid, 'stopped': true});
   }
 
@@ -161,13 +161,13 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
 
   void _onMyBpm(int bpm) {
     if (mounted) setState(() => _myBpm = bpm);
-    _channel?.sendBroadcastMessage(
+    _channel?.channel?.sendBroadcastMessage(
         event: 'hb', payload: {'from': _myUid, 'bpm': bpm});
   }
 
   void _onMyBeat() {
     if (mounted) _myPulse.forward(from: 0);
-    _channel?.sendBroadcastMessage(
+    _channel?.channel?.sendBroadcastMessage(
         event: 'hb', payload: {'from': _myUid, 'beat': true});
   }
 

@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Mood Lamp — pick a color; it glows on your partner's screen in real time.
 /// Pure broadcast, no persistence. Soft, ambient, no words.
@@ -16,7 +16,7 @@ class MoodLampScreen extends ConsumerStatefulWidget {
 }
 
 class _MoodLampScreenState extends ConsumerState<MoodLampScreen> {
-  late final RealtimeChannel _channel;
+  ManagedSubscription? _channel;
   Color _myColor = const Color(0xFFEF6F58);
   Color _partnerColor = const Color(0xFF1F2937); // dark = "no mood set"
   Timer? _autoFadeTimer;
@@ -39,22 +39,23 @@ class _MoodLampScreenState extends ConsumerState<MoodLampScreen> {
     final couple = ref.read(sessionProvider).couple;
     final coupleId = couple?.id ?? 'none';
 
-    _channel = SupabaseService.client.channel('mood_lamp:$coupleId');
-    _channel.onBroadcast(
-      event: 'mood',
-      callback: (payload) {
-        final from = payload['from'] as String?;
-        if (from == ref.read(sessionProvider).profile?.id) return;
-        final rgb = (payload['rgb'] as num).toInt();
-        setState(() => _partnerColor = Color(rgb | 0xFF000000));
-      },
-    ).subscribe();
+    _channel = ManagedSubscription.start(
+      () => SupabaseService.client.channel('mood_lamp:$coupleId').onBroadcast(
+        event: 'mood',
+        callback: (payload) {
+          final from = payload['from'] as String?;
+          if (from == ref.read(sessionProvider).profile?.id) return;
+          final rgb = (payload['rgb'] as num).toInt();
+          setState(() => _partnerColor = Color(rgb | 0xFF000000));
+        },
+      ).subscribe(),
+    );
   }
 
   @override
   void dispose() {
     _autoFadeTimer?.cancel();
-    SupabaseService.client.removeChannel(_channel);
+    _channel?.dispose();
     super.dispose();
   }
 
@@ -63,7 +64,7 @@ class _MoodLampScreenState extends ConsumerState<MoodLampScreen> {
     final rgb = (c.red << 16) | (c.green << 8) | c.blue;
 
     final me = ref.read(sessionProvider).profile;
-    _channel.sendBroadcastMessage(
+    _channel?.channel?.sendBroadcastMessage(
       event: 'mood',
       payload: {'from': me?.id, 'rgb': rgb},
     );

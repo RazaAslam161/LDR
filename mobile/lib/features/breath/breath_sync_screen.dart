@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/config.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -20,7 +21,7 @@ class BreathSyncScreen extends ConsumerStatefulWidget {
 class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
     with TickerProviderStateMixin {
   late final AnimationController _pulse;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   Timer? _cycleTimer;
 
   BreathPhase _phase = BreathPhase.idle;
@@ -39,14 +40,14 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   @override
   void dispose() {
     _cycleTimer?.cancel();
-    _channel?.unsubscribe();
+    _channel?.dispose();
     _pulse.dispose();
     super.dispose();
   }
 
   void _attachChannel(String coupleId) {
     if (_channel != null) return;
-    _channel = SupabaseService.client
+    _channel = ManagedSubscription.start(() => SupabaseService.client
         .channel('breath:$coupleId')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
@@ -66,7 +67,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
             }
           },
         )
-        .subscribe();
+        .subscribe());
   }
 
   void _onPartnerStartedCycle(int startedAtMs) {

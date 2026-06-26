@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A compact, real-time answer strip embedded in every game. Both partners type
 /// here and see each other's answers live (ephemeral broadcast — it's in-game
@@ -29,7 +29,7 @@ class _GameMsg {
 }
 
 class _GameChatPanelState extends ConsumerState<GameChatPanel> {
-  RealtimeChannel? _ch;
+  ManagedSubscription? _ch;
   final _msgs = <_GameMsg>[];
   final _input = TextEditingController();
   final _scroll = ScrollController();
@@ -42,15 +42,15 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
     final s = ref.read(sessionProvider);
     _myUid = s.profile?.id;
     _myName = s.profile?.displayName ?? 'Me';
-    _ch = SupabaseService.client
+    _ch = ManagedSubscription.start(() => SupabaseService.client
         .channel('gchat:${widget.gameKey}:${widget.coupleId}')
         .onBroadcast(event: 'msg', callback: _onMsg)
-        .subscribe();
+        .subscribe());
   }
 
   @override
   void dispose() {
-    _ch?.unsubscribe();
+    _ch?.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -67,7 +67,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
     final t = _input.text.trim();
     if (t.isEmpty) return;
     setState(() => _msgs.add(_GameMsg(true, t)));
-    _ch?.sendBroadcastMessage(
+    _ch?.channel?.sendBroadcastMessage(
       event: 'msg',
       payload: {'from': _myUid, 'name': _myName, 'text': t},
     );

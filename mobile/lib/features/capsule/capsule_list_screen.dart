@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The shelf of time capsules — sealed boxes the couple fills over months,
 /// each waiting for its unlock moment.
@@ -19,7 +19,7 @@ class CapsuleListScreen extends ConsumerStatefulWidget {
 
 class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
   List<Capsule> _capsules = const [];
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   bool _loading = true;
   String? _coupleId;
 
@@ -36,7 +36,8 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
       return;
     }
     _coupleId = couple.id;
-    _channel = CapsuleRepository.subscribe(couple.id, _load);
+    _channel = ManagedSubscription.start(
+        () => CapsuleRepository.subscribe(couple.id, _load));
     await _load();
   }
 
@@ -52,7 +53,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
 
   @override
   void dispose() {
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 

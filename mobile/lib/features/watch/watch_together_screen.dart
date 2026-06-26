@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 /// Watch & listen together — paste a YouTube link (movie, music video, playlist)
@@ -24,7 +24,7 @@ class WatchTogetherScreen extends ConsumerStatefulWidget {
 
 class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   YoutubePlayerController? _controller;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   final _urlInput = TextEditingController();
   String? _coupleId;
   String? _myUid;
@@ -41,10 +41,10 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _myUid = session.profile?.id;
     reportScreen(ref, 'Watch');
     if (_coupleId != null) {
-      _channel = SupabaseService.client
+      _channel = ManagedSubscription.start(() => SupabaseService.client
           .channel('watch:${_coupleId!}')
           .onBroadcast(event: 'watch', callback: _onMsg)
-          .subscribe();
+          .subscribe());
     }
     _heartbeat = Timer.periodic(
         const Duration(milliseconds: 2500), (_) => _broadcast());
@@ -54,7 +54,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   void dispose() {
     reportActiveTab(ref);
     _heartbeat?.cancel();
-    _channel?.unsubscribe();
+    _channel?.dispose();
     _controller?.dispose();
     _urlInput.dispose();
     super.dispose();
@@ -119,7 +119,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     final c = _controller;
     final id = _videoId;
     if (c == null || id == null || _applyingRemote) return;
-    _channel?.sendBroadcastMessage(event: 'watch', payload: {
+    _channel?.channel?.sendBroadcastMessage(event: 'watch', payload: {
       'from': _myUid,
       'videoId': id,
       'playing': c.value.isPlaying,

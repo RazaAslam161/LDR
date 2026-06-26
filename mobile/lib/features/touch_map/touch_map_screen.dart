@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:miles/core/realtime_resume.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -17,7 +17,6 @@ import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_repository.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _TouchType {
   const _TouchType(this.key, this.emoji, this.label, this.color);
@@ -82,7 +81,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   String? _myName;
   String? _partnerName;
 
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   final List<_ActiveTouch> _active = [];
   int _nextId = 0;
 
@@ -107,7 +106,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     final dx = (f.dx + d.focalPointDelta.dx / w).clamp(-0.7, 0.7);
     final dy = (f.dy + d.focalPointDelta.dy / h).clamp(-0.7, 0.7);
     setState(() => _frames[owner] = _Frame(scale: scale, dx: dx, dy: dy));
-    _channel?.sendBroadcastMessage(event: 'frame', payload: {
+    _channel?.channel?.sendBroadcastMessage(event: 'frame', payload: {
       'from': _myUid,
       'target': owner,
       'scale': scale,
@@ -169,7 +168,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _ensureNeonTimer();
     if (mine) {
       _bumpHeat();
-      _channel?.sendBroadcastMessage(event: 'neon', payload: {
+      _channel?.channel?.sendBroadcastMessage(event: 'neon', payload: {
         'from': _myUid,
         'owner': owner,
         'stroke': stroke,
@@ -220,7 +219,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (couple == null) return;
     _coupleId = couple.id;
     _subscribe();
-    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
     reportScreen(ref, 'Touch');
     _loadPhotos();
   }
@@ -228,25 +226,23 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   void _subscribe() {
     final id = _coupleId;
     if (id == null) return;
-    _channel?.unsubscribe();
     // Ephemeral, low-latency touch sync (no DB writes).
-    _channel = SupabaseService.client
+    _channel = ManagedSubscription.start(() => SupabaseService.client
         .channel('touch:$id')
         .onBroadcast(event: 'touch', callback: _onTouchMsg)
         .onBroadcast(event: 'frame', callback: _onFrameMsg)
         .onBroadcast(event: 'photo', callback: _onPhotoMsg)
         .onBroadcast(event: 'neon', callback: _onNeonMsg)
-        .subscribe();
+        .subscribe());
   }
 
   @override
   void dispose() {
-    realtimeResumed.removeListener(_subscribe);
     SecureScreen.clearSecure();
     _heatTimer?.cancel();
     _neonTimer?.cancel();
     reportActiveTab(ref);
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 
@@ -290,7 +286,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         });
       }
       // Tell the partner to reload my photo live.
-      _channel?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid});
+      _channel?.channel
+          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid});
     }
     if (mounted) setState(() => _uploadingPhoto = false);
   }
@@ -318,7 +315,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     TouchHaptics.touchTick(); // light feedback for the toucher
     _bumpHeat();
     _spawn(owner, x, y, _type);
-    _channel?.sendBroadcastMessage(event: 'touch', payload: {
+    _channel?.channel?.sendBroadcastMessage(event: 'touch', payload: {
       'from': _myUid,
       'target': owner,
       'x': x,

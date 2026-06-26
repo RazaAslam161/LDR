@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
@@ -50,7 +51,7 @@ class TogetherScreen extends ConsumerStatefulWidget {
 
 class _TogetherScreenState extends ConsumerState<TogetherScreen> {
   String? _coupleId;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   String _myEmoji = '🧑';
   String _partnerEmoji = '💖';
   final List<_Moment> _moments = [];
@@ -63,10 +64,10 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     _coupleId = couple.id;
-    _channel = SupabaseService.client
+    _channel = ManagedSubscription.start(() => SupabaseService.client
         .channel('together:${couple.id}')
         .onBroadcast(event: 'moment', callback: _onMoment)
-        .subscribe();
+        .subscribe());
     reportScreen(ref, 'Together');
     _load();
   }
@@ -74,7 +75,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
   @override
   void dispose() {
     reportActiveTab(ref);
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 
@@ -92,7 +93,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
   }
 
   void _send(_Action a) {
-    _channel?.sendBroadcastMessage(event: 'moment', payload: {'action': a.key});
+    _channel?.channel?.sendBroadcastMessage(event: 'moment', payload: {'action': a.key});
     _play(a);
   }
 

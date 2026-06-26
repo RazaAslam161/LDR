@@ -7,11 +7,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/features/capsule/proximity_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CapsuleDetailScreen extends ConsumerStatefulWidget {
   const CapsuleDetailScreen({super.key, required this.capsule});
@@ -36,12 +36,13 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   bool _checking = false;
 
   final AudioPlayer _player = AudioPlayer();
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
 
   @override
   void initState() {
     super.initState();
-    _channel = CapsuleRepository.subscribe(_capsule.coupleId, _reload);
+    _channel = ManagedSubscription.start(
+        () => CapsuleRepository.subscribe(_capsule.coupleId, _reload));
     if (_capsule.isUnlocked) {
       _revealAlreadyOpen();
     } else {
@@ -152,7 +153,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
 
   @override
   void dispose() {
-    _channel?.unsubscribe();
+    _channel?.dispose();
     _prox?.stop();
     _player.dispose();
     super.dispose();

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/care/care_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class _Preset {
   const _Preset(this.kind, this.emoji, this.label, this.message);
@@ -38,7 +38,7 @@ class CareScreen extends ConsumerStatefulWidget {
 class _CareScreenState extends ConsumerState<CareScreen> {
   String? _coupleId;
   String? _myUid;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   List<CareNudge> _nudges = const [];
   bool _loading = true;
 
@@ -50,7 +50,8 @@ class _CareScreenState extends ConsumerState<CareScreen> {
     _myUid = session.profile?.id;
     reportScreen(ref, 'Care');
     if (_coupleId != null) {
-      _channel = CareRepository.subscribe(_coupleId!, _load);
+      _channel = ManagedSubscription.start(
+          () => CareRepository.subscribe(_coupleId!, _load));
     }
     _load();
   }
@@ -58,7 +59,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
   @override
   void dispose() {
     reportActiveTab(ref);
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,7 +19,7 @@ class _DesireTempScreenState extends ConsumerState<DesireTempScreen> {
   int? _partnerScore; // null = not yet today OR hidden by reveal logic
   bool _submittedToday = false;
   bool _loading = true;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _channel;
   bool _subscribed = false;
 
   @override
@@ -30,26 +31,28 @@ class _DesireTempScreenState extends ConsumerState<DesireTempScreen> {
     // Live sync: when the partner locks in their score, re-check the reveal.
     final couple = ref.read(sessionProvider).couple;
     if (couple != null) {
-      _channel = SupabaseService.client
-          .channel('desire_temps:${couple.id}')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'desire_temps',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'couple_id',
-              value: couple.id,
-            ),
-            callback: (_) => _loadToday(),
-          )
-          .subscribe();
+      _channel = ManagedSubscription.start(
+        () => SupabaseService.client
+            .channel('desire_temps:${couple.id}')
+            .onPostgresChanges(
+              event: PostgresChangeEvent.all,
+              schema: 'public',
+              table: 'desire_temps',
+              filter: PostgresChangeFilter(
+                type: PostgresChangeFilterType.eq,
+                column: 'couple_id',
+                value: couple.id,
+              ),
+              callback: (_) => _loadToday(),
+            )
+            .subscribe(),
+      );
     }
   }
 
   @override
   void dispose() {
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 

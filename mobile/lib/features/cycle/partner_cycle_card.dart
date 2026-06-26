@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
@@ -24,7 +25,7 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
   bool _onPeriod = false;
   int? _daysUntil;
   String? _partnerUid;
-  RealtimeChannel? _ch;
+  ManagedSubscription? _ch;
 
   @override
   void initState() {
@@ -36,7 +37,7 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
     final cid = s.couple?.id;
     _load();
     if (cid != null) {
-      _ch = SupabaseService.client
+      _ch = ManagedSubscription.start(() => SupabaseService.client
           .channel('home_cycle:$cid')
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
@@ -44,13 +45,13 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
             table: 'cycle_events',
             callback: (_) => _load(),
           )
-          .subscribe();
+          .subscribe());
     }
   }
 
   @override
   void dispose() {
-    _ch?.unsubscribe();
+    _ch?.dispose();
     super.dispose();
   }
 
