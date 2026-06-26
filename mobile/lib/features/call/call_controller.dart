@@ -45,16 +45,32 @@ class CallController extends ChangeNotifier {
 
   /// Re-subscribe the call channel after the realtime socket is reset (e.g. on
   /// app resume / Android doze) so incoming calls keep ringing.
-  void reconnect() {
+  Future<void> reconnect() => _subscribeChannel();
+
+  bool _subscribingChan = false;
+
+  /// (Re)subscribe `call:<coupleId>` cleanly — Pattern A: await removeChannel(old)
+  /// before re-creating, so a reconnect never leaves a duplicate-topic channel
+  /// joined-but-dead (which would silently drop incoming offer/answer/ice/hangup).
+  Future<void> _subscribeChannel() async {
     final id = _coupleId;
-    if (id == null) return;
+    if (id == null || _subscribingChan) return;
+    _subscribingChan = true;
     try {
-      _chan?.unsubscribe();
-    } catch (_) {}
-    _chan = SupabaseService.client
-        .channel('call:$id')
-        .onBroadcast(event: 'signal', callback: _onSignal)
-        .subscribe();
+      final old = _chan;
+      _chan = null;
+      if (old != null) {
+        try {
+          await SupabaseService.client.removeChannel(old);
+        } catch (_) {}
+      }
+      _chan = SupabaseService.client
+          .channel('call:$id')
+          .onBroadcast(event: 'signal', callback: _onSignal)
+          .subscribe();
+    } finally {
+      _subscribingChan = false;
+    }
   }
 
   /// If the peer connection doesn't connect within a window, stop hanging on
@@ -175,10 +191,7 @@ class CallController extends ChangeNotifier {
     _myUid = session.profile?.id;
     if (couple == null) return;
     _coupleId = couple.id;
-    _chan = SupabaseService.client
-        .channel('call:${couple.id}')
-        .onBroadcast(event: 'signal', callback: _onSignal)
-        .subscribe();
+    await _subscribeChannel();
   }
 
   // ── Outgoing ──────────────────────────────────────────────────────────────
@@ -412,7 +425,9 @@ class CallController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _chan?.unsubscribe();
+    final ch = _chan;
+    _chan = null;
+    if (ch != null) SupabaseService.client.removeChannel(ch);
     localRenderer.dispose();
     remoteRenderer.dispose();
     _pc?.close();

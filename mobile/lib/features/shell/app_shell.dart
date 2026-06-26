@@ -81,10 +81,18 @@ class _AppShellState extends ConsumerState<AppShell>
   /// Re-arm the always-on realtime (reach / call / presence) whenever the
   /// socket (re)connects — driven by realtimeResumed (the onOpen fan-out), so
   /// it runs AFTER the socket is open, never against a closing one.
-  void _rearmAlwaysOn() {
+  Future<void> _rearmAlwaysOn() async {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
-    _reachChannel?.unsubscribe();
+    // Pattern A: remove the old reach channel (awaited) before re-subscribing so
+    // a reconnect never leaves a duplicate-topic 'reach:<id>' channel dead.
+    final old = _reachChannel;
+    _reachChannel = null;
+    if (old != null) {
+      try {
+        await SupabaseService.client.removeChannel(old);
+      } catch (_) {}
+    }
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
     ref.read(callControllerProvider).reconnect();
     ref.read(sessionProvider.notifier).reconnectPresence();
@@ -157,7 +165,9 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingReach.removeListener(_onPendingReach);
     pendingCall.removeListener(_onPendingCall);
     realtimeResumed.removeListener(_rearmAlwaysOn);
-    _reachChannel?.unsubscribe();
+    final ch = _reachChannel;
+    _reachChannel = null;
+    if (ch != null) SupabaseService.client.removeChannel(ch);
     super.dispose();
   }
 

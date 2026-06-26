@@ -121,14 +121,31 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
-  void _subscribePresence(String coupleId) {
-    _presenceChannel?.unsubscribe();
-    _presenceChannel = SupabaseRepository.subscribeToPresence(
-      coupleId: coupleId,
-      onPartnerUpdate: (p) {
-        state = state.copyWith(partner: p);
-      },
-    );
+  bool _subscribingPresence = false;
+
+  Future<void> _subscribePresence(String coupleId) async {
+    if (_subscribingPresence) return;
+    _subscribingPresence = true;
+    try {
+      // Pattern A: fully remove the old channel (awaited) before re-creating, so
+      // a reconnect never leaves a duplicate-topic 'profile-sync:<id>' channel
+      // joined-but-dead (which would freeze the partner's avatar/name/status).
+      final old = _presenceChannel;
+      _presenceChannel = null;
+      if (old != null) {
+        try {
+          await SupabaseService.client.removeChannel(old);
+        } catch (_) {}
+      }
+      _presenceChannel = SupabaseRepository.subscribeToPresence(
+        coupleId: coupleId,
+        onPartnerUpdate: (p) {
+          state = state.copyWith(partner: p);
+        },
+      );
+    } finally {
+      _subscribingPresence = false;
+    }
   }
 
   /// Re-subscribe presence after the realtime socket is reset (app resume) so
@@ -139,8 +156,13 @@ class SessionNotifier extends StateNotifier<SessionState> {
   }
 
   Future<void> signOut() async {
-    await _presenceChannel?.unsubscribe();
+    final ch = _presenceChannel;
     _presenceChannel = null;
+    if (ch != null) {
+      try {
+        await SupabaseService.client.removeChannel(ch);
+      } catch (_) {}
+    }
     await SupabaseRepository.signOut();
     state = const SessionState(loading: false);
   }
@@ -148,7 +170,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
   @override
   void dispose() {
     _authSub?.cancel();
-    _presenceChannel?.unsubscribe();
+    final ch = _presenceChannel;
+    _presenceChannel = null;
+    if (ch != null) SupabaseService.client.removeChannel(ch);
     super.dispose();
   }
 }

@@ -59,7 +59,11 @@ class RealtimeService {
           onChange: controller.add,
         );
       },
-      onCancel: () => channel?.unsubscribe(),
+      onCancel: () {
+        final c = channel;
+        channel = null;
+        if (c != null) _c.removeChannel(c);
+      },
     );
     return controller.stream;
   }
