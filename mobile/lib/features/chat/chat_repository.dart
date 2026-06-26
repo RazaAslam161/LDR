@@ -1,9 +1,15 @@
 import 'dart:io';
 import 'dart:math' show Random;
 
+import 'package:flutter/foundation.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// Flip to true to log realtime channel-join status to the console (for the
+/// 2-device subscription-health test). Compile-time const → dead-code-eliminated
+/// in release when false.
+const bool kRtChatDebug = false;
 
 /// A single chat message between the two partners.
 ///
@@ -279,7 +285,11 @@ class ChatRepository {
           ),
           callback: (payload) => onInsert(Message.fromJson(payload.newRecord)),
         )
-        .subscribe();
+        .subscribe((status, [error]) {
+      if (kRtChatDebug) {
+        debugPrint('[rt] messages:$coupleId join=$status err=${error ?? ''}');
+      }
+    });
   }
 
   // ─── deletion ─────────────────────────────────────────────────

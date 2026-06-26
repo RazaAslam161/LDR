@@ -12,6 +12,7 @@ class Presence {
     required this.userId,
     this.isOnline = false,
     this.lastSeen,
+    this.updatedAt,
     this.isTyping = false,
     this.typingInChat = false,
     this.currentMood,
@@ -35,6 +36,7 @@ class Presence {
         userId: JsonUtils.parseString(j['user_id']),
         isOnline: JsonUtils.parseBool(j['is_online']),
         lastSeen: JsonUtils.parseDateOrNull(j['last_seen'])?.toLocal(),
+        updatedAt: JsonUtils.parseDateOrNull(j['updated_at'])?.toLocal(),
         isTyping: JsonUtils.parseBool(j['is_typing']),
         typingInChat: JsonUtils.parseBool(j['typing_in_chat']),
         currentMood: JsonUtils.parseStringOrNull(j['current_mood']),
@@ -65,6 +67,7 @@ class Presence {
   final String userId;
   final bool isOnline;
   final DateTime? lastSeen;
+  final DateTime? updatedAt;
   final bool isTyping;
   final bool typingInChat;
   final String? currentMood;
@@ -89,6 +92,18 @@ class Presence {
     final r = chatLastRead;
     return r != null && DateTime.now().difference(r).inSeconds < 18;
   }
+
+  /// Liveness TTL: the presence row was written recently. A force-killed app
+  /// never writes is_online=false, so without this it would read as online
+  /// forever. Presence is refreshed every ~5s while the chat is open, so a
+  /// 30s window tolerates a few missed writes.
+  bool get isFresh {
+    final u = updatedAt;
+    return u != null && DateTime.now().difference(u).inSeconds < 30;
+  }
+
+  /// Honest "online now": the row claims online AND it's fresh.
+  bool get onlineNow => isOnline && isFresh;
 
   bool get isSharingLive =>
       locationSharingMode == 'precise' && latitude != null && longitude != null;
@@ -237,6 +252,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   final Ref ref;
   RealtimeChannel? _channel;
   String? _coupleId;
+  bool _subscribing = false;
 
   Future<void> _init() async {
     final couple = ref.read(currentCoupleProvider);
@@ -246,30 +262,44 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     _subscribe();
   }
 
-  void _subscribe() {
+  Future<void> _subscribe() async {
     final id = _coupleId;
-    if (id == null) return;
-    _channel?.unsubscribe();
-    _channel = RealtimeService.coupleTable(
-      channelName: 'presence:$id',
-      table: 'presence',
-      coupleId: id,
-      onChange: (_) async {
-        final p = await PresenceService.fetchPartner(id);
-        if (mounted) state = p;
-      },
-    );
-    // Pull current presence on (re)connect so we don't sit on a stale value
-    // (e.g. a false 'offline') after a socket drop.
-    PresenceService.fetchPartner(id).then((p) {
+    if (id == null || _subscribing) return;
+    _subscribing = true;
+    try {
+      // Fully REMOVE the old channel (awaited) before re-creating, so we never
+      // leave a duplicate-topic 'presence:<id>' channel joined-but-dead — that
+      // bug stopped the partner's presence updates (is_online=false on close)
+      // from ever arriving, leaving a stale "online"/"delivered".
+      final old = _channel;
+      _channel = null;
+      if (old != null) {
+        try {
+          await SupabaseService.client.removeChannel(old);
+        } catch (_) {}
+      }
+      _channel = RealtimeService.coupleTable(
+        channelName: 'presence:$id',
+        table: 'presence',
+        coupleId: id,
+        onChange: (_) async {
+          final p = await PresenceService.fetchPartner(id);
+          if (mounted) state = p;
+        },
+      );
+      // Pull current presence on (re)connect so we don't sit on a stale value.
+      final p = await PresenceService.fetchPartner(id);
       if (mounted) state = p;
-    });
+    } finally {
+      _subscribing = false;
+    }
   }
 
   @override
   void dispose() {
     realtimeResumed.removeListener(_subscribe);
-    _channel?.unsubscribe();
+    final c = _channel;
+    if (c != null) SupabaseService.client.removeChannel(c);
     super.dispose();
   }
 }

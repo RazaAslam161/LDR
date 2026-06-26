@@ -55,6 +55,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _hasNewMessage = false;
   Message? _replyingTo;
   RealtimeChannel? _moodChannel;
+  bool _subscribing = false; // re-entrancy guard for _subscribe
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
   static const _uuid = Uuid();
@@ -246,34 +247,61 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    realtimeResumed.addListener(_resubscribe); // rejoin on any socket reconnect
+    realtimeResumed.addListener(_subscribe); // rejoin on any socket reconnect
     _scroll.addListener(_onScroll);
     _init();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
-    // The shell resets the realtime socket on resume; re-arm the chat channels
-    // just after so messages + flings keep arriving without leaving the screen.
-    if (s == AppLifecycleState.resumed) {
-      Future.delayed(const Duration(milliseconds: 300), _resubscribe);
+    // The shell forces a socket reconnect on resume; the chat channels re-arm
+    // via realtimeResumed (onOpen). Just refresh presence so we read as online +
+    // in-chat again immediately on return.
+    if (s == AppLifecycleState.resumed && _coupleId != null) {
+      PresenceService.setOnline(_coupleId!, online: true);
+      PresenceService.setChatLastRead(_coupleId!);
     }
   }
 
-  void _resubscribe() {
+  /// Subscribe (or cleanly RE-subscribe) the chat's realtime channels. Idempotent
+  /// and re-entrancy-guarded: the old channels are FULLY removed (awaited) before
+  /// the new ones join. Supabase's `channel()` never dedupes by topic and
+  /// `unsubscribe()` leaves the old channel registered until its async leave
+  /// acks — so `unsubscribe()` + immediate re-`channel()` created duplicate-topic
+  /// channels whose join was rejected, leaving them joined-but-dead (no live
+  /// render). removeChannel() awaits the leave first, so the re-join is clean.
+  Future<void> _subscribe() async {
     final id = _coupleId;
-    if (id == null || !mounted) return;
-    _channel?.unsubscribe();
-    _channel =
-        ChatRepository.subscribe(id, (m) => _onIncoming(m, fromDb: true));
-    _moodChannel?.unsubscribe();
-    _moodChannel = SupabaseService.client
-        .channel('mood_burst:$id')
-        .onBroadcast(event: 'mood', callback: _onMoodBurst)
-        .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
-        .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
-        .subscribe();
-    PresenceService.setChatLastRead(id);
+    if (id == null || !mounted || _subscribing) return;
+    _subscribing = true;
+    try {
+      final client = SupabaseService.client;
+      final old1 = _channel, old2 = _moodChannel;
+      _channel = null;
+      _moodChannel = null;
+      if (old1 != null) {
+        try {
+          await client.removeChannel(old1);
+        } catch (_) {}
+      }
+      if (old2 != null) {
+        try {
+          await client.removeChannel(old2);
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      _channel =
+          ChatRepository.subscribe(id, (m) => _onIncoming(m, fromDb: true));
+      _moodChannel = client
+          .channel('mood_burst:$id')
+          .onBroadcast(event: 'mood', callback: _onMoodBurst)
+          .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
+          .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
+          .subscribe();
+      PresenceService.setChatLastRead(id);
+    } finally {
+      _subscribing = false;
+    }
   }
 
   void _onScroll() {
@@ -297,14 +325,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } catch (_) {
       // first-run is fine
     }
-    _channel = ChatRepository.subscribe(
-        couple.id, (m) => _onIncoming(m, fromDb: true));
-    _moodChannel = SupabaseService.client
-        .channel('mood_burst:${couple.id}')
-        .onBroadcast(event: 'mood', callback: _onMoodBurst)
-        .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
-        .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
-        .subscribe();
+    await _subscribe(); // single, idempotent channel-subscribe path
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
     // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
@@ -320,6 +341,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   void _onIncoming(Message m, {bool fromDb = false}) {
+    if (kRtChatDebug) {
+      debugPrint('[rt] incoming id=${m.id} fromDb=$fromDb kind=${m.kind}');
+    }
     if (_ids.contains(m.id)) {
       // Already shown (optimistic / broadcast). When the authoritative DB row
       // arrives, adopt its SERVER timestamp + paths so ordering is correct
@@ -549,7 +573,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    realtimeResumed.removeListener(_resubscribe);
+    realtimeResumed.removeListener(_subscribe);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
     _readTimer?.cancel();
@@ -558,8 +582,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       PresenceService.setTyping(id, typing: false);
       PresenceService.setTypingInChat(id, inChat: false);
     }
-    _channel?.unsubscribe();
-    _moodChannel?.unsubscribe();
+    final client = SupabaseService.client;
+    final c1 = _channel, c2 = _moodChannel;
+    if (c1 != null) client.removeChannel(c1);
+    if (c2 != null) client.removeChannel(c2);
     _scroll.dispose();
     _audioRecorder.dispose();
     _player.dispose();
@@ -948,13 +974,14 @@ class _Bubble extends StatelessWidget {
 enum _MsgStatus { sent, delivered, seen }
 
 _MsgStatus _statusFor(Message m, Presence? p) {
-  if (p == null) return _MsgStatus.sent;
+  // Only trust presence-derived receipts while the partner's row is FRESH. A
+  // force-killed app never writes is_online=false, and a wrong/ahead device
+  // clock can make a stale chat_last_read look "after" the message — both would
+  // fake "delivered"/"seen". Stale partner => a single "sent" tick.
+  if (p == null || !p.isFresh) return _MsgStatus.sent;
   final read = p.chatLastRead;
   if (read != null && !read.isBefore(m.createdAt)) return _MsgStatus.seen;
-  final seen = p.lastSeen;
-  if (p.isOnline || (seen != null && !seen.isBefore(m.createdAt))) {
-    return _MsgStatus.delivered;
-  }
+  if (p.isOnline) return _MsgStatus.delivered;
   return _MsgStatus.sent;
 }
 
