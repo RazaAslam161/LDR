@@ -14,6 +14,7 @@ class BakeRequest {
     required this.overlayScreen,
     required this.hasGrain,
     required this.grainIntensity,
+    this.mirror = false,
   });
 
   final Uint8List bytes;
@@ -24,9 +25,11 @@ class BakeRequest {
   final bool overlayScreen; // true = screen blend, false = overlay blend
   final bool hasGrain;
   final double grainIntensity;
+  final bool mirror; // flip horizontally (front camera, to match the preview)
 
-  static const int maxWidth = 1200;
-  static const int jpegQuality = 85;
+  // Quality: downscale only if wider than this, and encode at high quality.
+  static const int maxWidth = 1600;
+  static const int jpegQuality = 92;
 }
 
 /// compute() entry point — decode → resize → apply the SAME colour matrix as the
@@ -36,7 +39,13 @@ Uint8List bakeSnap(BakeRequest req) {
   var image = img.decodeImage(req.bytes);
   if (image == null) return req.bytes;
 
-  // Resize first (fewer pixels through every subsequent loop).
+  // Mirror to match the front-camera preview (which is flipped like a mirror),
+  // so the saved selfie reads the same way the user saw it.
+  if (req.mirror) {
+    image = img.flipHorizontal(image);
+  }
+
+  // Resize first (fewer pixels through every subsequent loop). Only downscale.
   if (image.width > BakeRequest.maxWidth) {
     image = img.copyResize(image, width: BakeRequest.maxWidth);
   }

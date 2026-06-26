@@ -796,7 +796,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   );
                                 }),
                     ),
-                    if (presence?.isInChatNow ?? false)
+                    if (presence?.isActivelyInChat ?? false)
                       _PartnerHere(
                         name: partnerName,
                         avatarUrl: session.partner?.avatarUrl,
@@ -836,7 +836,9 @@ class _ChatSubtitle extends StatelessWidget {
       return const Text('together, even from here',
           style: TextStyle(fontSize: 11, color: MilesColors.taupe));
     }
-    if (partnerTyping || (p.isTyping && p.typingInChat)) {
+    // Only show typing if the partner is genuinely online — prevents a stale
+    // typing flag (left over after they left) from showing "typing…" forever.
+    if ((partnerTyping || (p.isTyping && p.typingInChat)) && p.isTrulyOnline) {
       return const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -847,7 +849,9 @@ class _ChatSubtitle extends StatelessWidget {
         ],
       );
     }
-    if (p.isOnline) {
+    // Use the freshness-gated online check — isOnline alone is the stored bool
+    // which never expires on a hard kill.
+    if (p.isTrulyOnline) {
       return const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -858,9 +862,10 @@ class _ChatSubtitle extends StatelessWidget {
         ],
       );
     }
-    final seen = p.lastSeen;
+    // Stale / offline — show last seen via the freshness-derived text.
+    final text = p.lastSeenText ?? 'Offline';
     return Text(
-      seen == null ? 'Offline' : 'Last seen ${_ago(seen)}',
+      text,
       style: const TextStyle(fontSize: 11, color: MilesColors.taupe),
     );
   }
@@ -991,14 +996,28 @@ class _Bubble extends StatelessWidget {
 enum _MsgStatus { sent, delivered, seen }
 
 _MsgStatus _statusFor(Message m, Presence? p) {
-  // Only trust presence-derived receipts while the partner's row is FRESH. A
-  // force-killed app never writes is_online=false, and a wrong/ahead device
-  // clock can make a stale chat_last_read look "after" the message — both would
-  // fake "delivered"/"seen". Stale partner => a single "sent" tick.
-  if (p == null || !p.isFresh) return _MsgStatus.sent;
-  final read = p.chatLastRead;
-  if (read != null && !read.isBefore(m.createdAt)) return _MsgStatus.seen;
-  if (p.isOnline) return _MsgStatus.delivered;
+  // SEEN requires BOTH:
+  //   - partner is actively in chat right now (chat_last_read within 20s)
+  //   - chat_last_read is at/after this message's time
+  // The active-in-chat check prevents a stale chat_last_read (left over from
+  // when they were last in chat) from masquerading as "seen" while they're
+  // gone. The timestamp check prevents premature "seen" before they actually
+  // read this message.
+  if (p != null &&
+      p.isActivelyInChat &&
+      p.chatLastRead != null &&
+      p.chatLastRead!.isAfter(
+        m.createdAt.subtract(const Duration(seconds: 1)))) {
+    return _MsgStatus.seen;
+  }
+
+  // DELIVERED: partner is genuinely online right now (freshness window), not
+  // just the stored is_online bool (which never expires on a hard kill).
+  if (p != null && p.isTrulyOnline) {
+    return _MsgStatus.delivered;
+  }
+
+  // SENT: partner offline or status stale. Safe default.
   return _MsgStatus.sent;
 }
 

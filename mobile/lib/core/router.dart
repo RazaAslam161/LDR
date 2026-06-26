@@ -34,6 +34,7 @@ import 'package:miles/features/games/games_screen.dart';
 import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
+import 'package:miles/features/home/location_map_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
 import 'package:miles/features/intimacy/intimacy_screen.dart';
 import 'package:miles/features/intro/intro_video_screen.dart';
@@ -249,6 +250,16 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/timeline',
         builder: (context, state) => const TimelineScreen(),
+      ),
+      GoRoute(
+        path: '/app/location-map',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return LocationMapScreen(
+            coupleId: extra['coupleId'] as String? ?? '',
+            partnerName: extra['partnerName'] as String? ?? 'Partner',
+          );
+        },
       ),
       GoRoute(
         path: '/app/closer/touch-trace',

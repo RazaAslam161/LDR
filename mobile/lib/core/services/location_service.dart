@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:miles/core/services/bg_location.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/supabase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Symmetric, opt-in, revocable location sharing.
@@ -165,6 +167,9 @@ class LocationService {
       );
 
       await _liveSub?.cancel();
+      // LOCATION ONLY — this GPS stream must never call setOnline or any
+      // app-activity method. setLiveLocation never stamps app_last_active_at,
+      // so movement can't pollute the partner's online / last-seen.
       _liveSub =
           Geolocator.getPositionStream(locationSettings: settings).listen(
         (pos) async => PresenceService.setLiveLocation(coupleId,
@@ -174,6 +179,20 @@ class LocationService {
             label: await _labelIfMoved(pos.latitude, pos.longitude)),
         onError: (_) {},
       );
+
+      // Persist the sharing mode so the foreground-service isolate can read it
+      // and decide whether to keep writing coords while the app is backgrounded.
+      final uid = SupabaseService.client.auth.currentUser?.id ?? '';
+      if (uid.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('location_sharing_mode_$uid', 'precise');
+      }
+
+      // Also start the persistent background foreground service so location
+      // continues when the in-app stream is paused on background.
+      // Only 'precise' mode uses the service — city mode never starts it.
+      await LocationForegroundService.start(coupleId: coupleId, uid: uid);
+
       return true;
     } catch (_) {
       return false;
@@ -187,11 +206,25 @@ class LocationService {
     _lastLabelLat = null;
     _lastLabelLon = null;
     await PresenceService.clearLiveLocation(coupleId);
+
+    // Stop the persistent background service — sharing is fully off.
+    await LocationForegroundService.stop();
+
+    // Clear the persisted mode so the service isolate doesn't write stale
+    // coords if it gets woken by the OS later.
+    final uid = SupabaseService.client.auth.currentUser?.id ?? '';
+    if (uid.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('location_sharing_mode_$uid', 'off');
+    }
   }
 
-  /// Stop the stream WITHOUT changing the sharing mode — used when the app
-  /// backgrounds / leaves Home. NO-OP when always-on is enabled, so opted-in
-  /// users keep streaming (via the foreground service) with the app closed.
+  /// Stop the in-app stream WITHOUT changing the sharing mode — used when the
+  /// app backgrounds / leaves Home.
+  //
+  // Only the in-app stream is paused. The foreground service keeps running in
+  // the background, so opted-in users keep streaming live coords with the app
+  // closed. NO-OP for the service here by design.
   static Future<void> pauseStream() async {
     await _liveSub?.cancel();
     _liveSub = null;

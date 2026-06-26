@@ -196,6 +196,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 PartnerLocationCard(
                   partner: presence,
                   partnerName: partner.displayName,
+                  coupleId: couple.id,
                   myLat: _myLat,
                   myLon: _myLon,
                 ),
@@ -218,6 +219,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 _QuickActions(
                   onMessages: () =>
                       ref.read(shellTabProvider.notifier).state = 1,
+                  onCamera: () {
+                    final couple = ref.read(currentCoupleProvider);
+                    if (couple == null) return;
+                    context.push('/app/rapid-camera', extra: {
+                      'coupleId': couple.id,
+                      'myUid': SupabaseService.currentUserId ?? '',
+                    });
+                  },
                 ),
               ],
             ],
@@ -402,14 +411,16 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _QuickActions extends StatelessWidget {
-  const _QuickActions({required this.onMessages});
+  const _QuickActions({required this.onMessages, required this.onCamera});
   final VoidCallback onMessages;
+  final VoidCallback onCamera;
 
   @override
   Widget build(BuildContext context) {
     final actions = [
       (Icons.chat_bubble_outline, 'Messages', onMessages),
       (Icons.lock_clock, 'Capsule', () => context.push('/app/capsule')),
+      (Icons.camera_alt_outlined, 'Camera', onCamera), // centre tile
       (Icons.touch_app_outlined, 'Touch', () => context.push('/app/touch')),
       (Icons.lock_outline, 'Vault', () => context.push('/app/vault')),
     ];

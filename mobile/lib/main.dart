@@ -20,6 +20,7 @@ import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/firebase_options.dart';
@@ -95,10 +96,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
     _startHeartbeat(); // app launches foregrounded
   }
 
-  /// Foreground presence heartbeat: re-stamps is_online + updated_at every ~20s
-  /// so the freshness window (45s) reads the partner as honestly online across
-  /// the whole app, not just in chat. Foreground-only + best-effort (battery
-  /// reasonable; a single tiny upsert).
+  /// Foreground presence heartbeat: re-stamps app_last_active_at every 30s (via
+  /// setOnline(true)) so the 45s freshness window reads the partner as honestly
+  /// online while the app is foregrounded — not just on the moment of a tap.
+  /// Foreground-only + best-effort (battery reasonable; a single tiny upsert).
   void _startHeartbeat() {
     _heartbeat?.cancel();
     void beat() {
@@ -107,7 +108,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     }
 
     beat(); // immediate beat so we read online without waiting a cycle
-    _heartbeat = Timer.periodic(const Duration(seconds: 20), (_) => beat());
+    _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) => beat());
   }
 
   void _stopHeartbeat() {
@@ -137,7 +138,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _stopHeartbeat();
+      // Write offline hint + clear chat presence (kills phantom "is here"
+      // avatar and stale seen/delivered ticks on the partner's screen).
+      // Best-effort; the freshness TTL is the real safety net on a hard kill.
       PresenceService.setOnline(couple.id, online: false);
+      PresenceService.clearChatPresence(couple.id);
     }
   }
 
@@ -177,6 +182,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
       routerConfig: router,
       builder: (context, child) => Stack(
         children: [
+          // Always-present candle-glow backdrop so glassmorphism has something
+          // to blur against on every screen (including auth + settings).
+          const EmberBackground(child: SizedBox.shrink()),
+          // The routed screen, transparent so the glow shows through.
           child ?? const SizedBox.shrink(),
           // Return-to-call pill while a call is minimised.
           const CallPill(),

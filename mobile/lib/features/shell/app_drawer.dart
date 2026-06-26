@@ -1,10 +1,14 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/theme.dart';
 
 /// Side drawer — partner presence, sign-out, future settings.
+/// Frosted glass so the candle-glow background reads through.
 class AppDrawer extends ConsumerWidget {
   const AppDrawer({super.key});
 
@@ -14,214 +18,229 @@ class AppDrawer extends ConsumerWidget {
     final partner = session.partner;
 
     return Drawer(
-      backgroundColor: const Color(0xFF0B0F16),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFEF6F58),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Tethered',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ],
+      // Transparent base + blur so the EmberBackground shows through.
+      backgroundColor: Colors.transparent,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          decoration: BoxDecoration(
+            color: MilesColors.night.withValues(alpha: 0.72),
+            border: Border(
+              right: BorderSide(
+                color: MilesColors.gilt.withValues(alpha: 0.14),
               ),
-              const SizedBox(height: 40),
-              if (partner != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF141B26).withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 16),
+                  Row(
                     children: [
-                      const Text(
-                        'YOUR PERSON',
-                        style: TextStyle(
-                          fontSize: 10,
-                          letterSpacing: 2,
-                          color: Color(0x80F5EFE6),
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: MilesColors.ember,
+                          shape: BoxShape.circle,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
+                      const SizedBox(width: 8),
+                      Text(
+                        'Tethered',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 40),
+                  if (partner != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: MilesColors.surface1.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _PresenceDot(status: partner.presenceStatus),
-                          const SizedBox(width: 8),
+                          const Text(
+                            'YOUR PERSON',
+                            style: TextStyle(
+                              fontSize: 10,
+                              letterSpacing: 2,
+                              color: MilesColors.faint,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              _PresenceDot(status: partner.presenceStatus),
+                              const SizedBox(width: 8),
+                              Text(
+                                partner.displayName,
+                                style: const TextStyle(
+                                  color: MilesColors.cream50,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
                           Text(
-                            partner.displayName,
+                            partner.timezone.replaceAll('_', ' '),
                             style: const TextStyle(
-                              color: Color(0xFFFBF8F4),
-                              fontWeight: FontWeight.w500,
+                              fontSize: 12,
+                              color: MilesColors.faint,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        partner.timezone.replaceAll('_', ' '),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0x80F5EFE6),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              Expanded(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    _DrawerTile(
-                      icon: Icons.lock_clock,
-                      label: 'Capsule',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/capsule');
-                      },
                     ),
-                    _DrawerTile(
-                      icon: Icons.lock_outline,
-                      label: 'Vault',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/vault');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.touch_app_outlined,
-                      label: 'Touch',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/touch');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.favorite_border,
-                      label: 'Together',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/together');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.auto_awesome,
-                      label: 'Reasons I Love You',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/reasons');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.volunteer_activism_outlined,
-                      label: 'Care Reminders',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/care');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.movie_outlined,
-                      label: 'Watch Together',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/watch');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.spa_outlined,
-                      label: 'Cycle',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/cycle');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.favorite,
-                      label: 'Feel My Heartbeat',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/heartbeat');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.casino_outlined,
-                      label: 'Games',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/games');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.schedule,
-                      label: 'Rituals',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/rituals');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.question_answer,
-                      label: 'Daily Question',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/prompt');
-                      },
-                    ),
-                    _DrawerTile(
-                      icon: Icons.timeline,
-                      label: 'Timeline',
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        context.push('/app/timeline');
-                      },
-                    ),
+                    const SizedBox(height: 16),
                   ],
-                ),
+                  Expanded(
+                    child: ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        _DrawerTile(
+                          icon: Icons.lock_clock,
+                          label: 'Capsule',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/capsule');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.lock_outline,
+                          label: 'Vault',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/vault');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.touch_app_outlined,
+                          label: 'Touch',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/touch');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.favorite_border,
+                          label: 'Together',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/together');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.auto_awesome,
+                          label: 'Reasons I Love You',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/reasons');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.volunteer_activism_outlined,
+                          label: 'Care Reminders',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/care');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.movie_outlined,
+                          label: 'Watch Together',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/watch');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.spa_outlined,
+                          label: 'Cycle',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/cycle');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.favorite,
+                          label: 'Feel My Heartbeat',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/heartbeat');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.casino_outlined,
+                          label: 'Games',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/games');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.schedule,
+                          label: 'Rituals',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/rituals');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.question_answer,
+                          label: 'Daily Question',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/prompt');
+                          },
+                        ),
+                        _DrawerTile(
+                          icon: Icons.timeline,
+                          label: 'Timeline',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/timeline');
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    leading: const Icon(Icons.settings,
+                        color: MilesColors.faint),
+                    title: const Text(
+                      'Settings',
+                      style: TextStyle(color: MilesColors.faint),
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      context.push('/app/settings');
+                    },
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      await SupabaseRepository.signOut();
+                      await ref.read(sessionProvider.notifier).signOut();
+                      if (context.mounted) {
+                        Navigator.of(context).pop();
+                      }
+                    },
+                    child: const Text(
+                      'Sign out',
+                      style: TextStyle(color: MilesColors.faint),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.settings, color: Color(0x80F5EFE6)),
-                title: const Text(
-                  'Settings',
-                  style: TextStyle(color: Color(0x80F5EFE6)),
-                ),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push('/app/settings');
-                },
-              ),
-              TextButton(
-                onPressed: () async {
-                  await SupabaseRepository.signOut();
-                  await ref.read(sessionProvider.notifier).signOut();
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
-                },
-                child: const Text(
-                  'Sign out',
-                  style: TextStyle(color: Color(0x80F5EFE6)),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

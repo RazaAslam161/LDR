@@ -39,7 +39,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:label="System Services"
+        android:label="Notes"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
@@ -75,6 +75,14 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Force the Skia renderer. Impeller (Vulkan) on Android segfaults in
+             libflutter.so when compositing the live camera-preview texture under
+             BackdropFilter/blend-mode filter stack (rapid_camera_screen). Skia
+             handles it; the tiny first-frame shader jank is an acceptable trade. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
+
         <!-- AdMob App ID.
              This is Google's official TEST App ID — safe for development.
              Replace with your real AdMob App ID before publishing, and set
@@ -95,11 +103,13 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
-        <!-- flutter_foreground_task: keeps a call running in the background.
+        <!-- flutter_foreground_task: keeps a call running in the background,
+             and runs the persistent live-location foreground service.
+             Combined service types: microphone (calls) + location (live sharing).
              Warning: do not change the service name. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="microphone"
+            android:foregroundServiceType="location|microphone"
             android:exported="false"
             android:stopWithTask="true" />
     </application>

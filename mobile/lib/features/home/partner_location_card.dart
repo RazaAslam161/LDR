@@ -2,12 +2,15 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/features/home/location_toggle_bar.dart';
 import 'package:miles/features/home/map_3d_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Live partner location on the dashboard. Shows an OpenStreetMap (no API key)
 /// with the partner's marker that animates to each new fix, "updated Xs ago",
@@ -18,12 +21,14 @@ class PartnerLocationCard extends StatefulWidget {
     super.key,
     required this.partner,
     required this.partnerName,
+    required this.coupleId,
     this.myLat,
     this.myLon,
   });
 
   final Presence? partner;
   final String partnerName;
+  final String coupleId;
   final double? myLat;
   final double? myLon;
 
@@ -205,60 +210,122 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
             ),
             SizedBox(
               height: 210,
-              child: FlutterMap(
-                mapController: _map,
-                options: MapOptions(
-                  initialCenter: point,
-                  initialZoom: 15.5,
-                  interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
-                  ),
-                ),
-                children: [
-                  // Dark, futuristic vector basemap (CARTO dark — no API key).
-                  // Clean black theme with streets + labels — far less busy than
-                  // satellite, with a closer zoom for a "right by them" feel.
-                  TileLayer(
-                    urlTemplate:
-                        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-                    subdomains: const ['a', 'b', 'c', 'd'],
-                    userAgentPackageName: 'com.miles.miles',
-                  ),
-                  if (myPoint != null)
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: [myPoint, point],
-                          color: MilesColors.blush.withValues(alpha: 0.55),
-                          strokeWidth: 2.5,
+              child: GestureDetector(
+                onTap: () => context.push('/app/location-map', extra: {
+                  'coupleId': widget.coupleId,
+                  'partnerName': widget.partnerName,
+                }),
+                child: Stack(
+                  children: [
+                    FlutterMap(
+                      mapController: _map,
+                      options: MapOptions(
+                        initialCenter: point,
+                        initialZoom: 15.5,
+                        interactionOptions: const InteractionOptions(
+                          flags: InteractiveFlag.pinchZoom |
+                              InteractiveFlag.drag,
+                        ),
+                      ),
+                      children: [
+                        // CARTO Voyager — full OSM data with street names, POI
+                        // labels, building outlines, parks, transit. Free, no
+                        // API key, reliable CDN. (Standard raster tiles; the
+                        // "no labels" issue with OSM's free server was caused
+                        // by rate-limiting returning blank tiles.)
+                        TileLayer(
+                          urlTemplate:
+                              'https://tile.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.miles.miles',
+                          maxZoom: 19,
+                        ),
+                        RichAttributionWidget(
+                          attributions: [
+                            TextSourceAttribution(
+                              '© OpenStreetMap contributors',
+                              onTap: () => launchUrl(Uri.parse(
+                                  'https://www.openstreetmap.org/copyright')),
+                            ),
+                          ],
+                        ),
+                          if (myPoint != null)
+                            PolylineLayer(
+                              polylines: [
+                                Polyline(
+                                  points: [myPoint, point],
+                                  color: MilesColors.blush
+                                      .withValues(alpha: 0.55),
+                                  strokeWidth: 1.5,
+                                  pattern: StrokePattern.dotted(),
+                                ),
+                              ],
+                            ),
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: point,
+                              width: 48,
+                              height: 54,
+                              alignment: Alignment.bottomCenter,
+                              child: _CuteMarker(
+                                  pulse: _pulse, name: widget.partnerName),
+                            ),
+                            if (myPoint != null)
+                              Marker(
+                                point: myPoint,
+                                width: 26,
+                                height: 26,
+                                child: const _MyDot(),
+                              ),
+                          ],
                         ),
                       ],
                     ),
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: point,
-                        width: 48,
-                        height: 54,
-                        alignment: Alignment.bottomCenter,
-                        child: _CuteMarker(
-                            pulse: _pulse, name: widget.partnerName),
-                      ),
-                      if (myPoint != null)
-                        Marker(
-                          point: myPoint,
-                          width: 26,
-                          height: 26,
-                          child: const _MyDot(),
+                    // Tap affordance — "Full screen" pill, bottom-right.
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          color: Colors.black.withValues(alpha: 0.45),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.fullscreen_rounded,
+                                  color: MilesColors.cream50, size: 14),
+                              const SizedBox(width: 4),
+                              const Text(
+                                'Full screen',
+                                style: TextStyle(
+                                  color: MilesColors.cream50,
+                                  fontSize: 11,
+                                  fontFamily: 'Inter',
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                    ],
-                  ),
-                ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Inline live-location toggle — lives directly on the card,
+            // not buried in Settings.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+              child: LocationToggleBar(
+                coupleId: widget.coupleId,
+                partnerName: widget.partnerName,
               ),
             ),
             if (dist != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
                 child: Row(
                   children: [
                     const Icon(Icons.favorite,

@@ -2,12 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/services/presence_service.dart';
 
-/// Bottom-nav tab labels, indexed by [shellTabProvider].
+/// Bottom-nav tab labels, indexed by [shellTabProvider]. Index 2 (Camera) is a
+/// push button, not a persisted tab, but kept here so the indices line up.
 const List<String> kTabScreens = [
   'Home',
   'Chat',
-  'Reunion',
-  'Sky',
+  'Camera',
   'Breath',
   'Closer',
 ];

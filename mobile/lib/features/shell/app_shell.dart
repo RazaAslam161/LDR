@@ -14,12 +14,10 @@ import 'package:miles/features/breath/breath_sync_screen.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
-import 'package:miles/features/countdown/countdown_screen.dart';
 import 'package:miles/features/home/home_screen.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:miles/features/skybridge/sky_bridge_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Bottom-nav shell. Tab 0 is Home (the landing screen). The Closer tab is only
@@ -38,11 +36,11 @@ class _AppShellState extends ConsumerState<AppShell>
   final Set<String> _shownReach = {};
   CallState _lastCallState = CallState.idle;
 
+  // Bottom-nav bodies. The Camera tab (nav index 2) is a push with no body, so
+  // it is intentionally absent here. Indices map past it in build().
   static const List<Widget> _screens = <Widget>[
     HomeScreen(),
     ChatScreen(),
-    CountdownScreen(),
-    SkyBridgeScreen(),
     BreathSyncScreen(),
     CloserScreen(),
   ];
@@ -197,25 +195,35 @@ class _AppShellState extends ConsumerState<AppShell>
     final index = ref.watch(shellTabProvider);
 
     final showCloser = isAdult;
-    final screens =
+    // Bottom-nav bodies (Home, Chat, Breath, [Closer]). The Camera tab is a
+    // full-screen PUSH inserted at nav index 2 — it has no body, so nav indices
+    // map past it.
+    final bodies =
         showCloser ? _screens : _screens.sublist(0, _screens.length - 1);
-    final selected = index.clamp(0, screens.length - 1);
-    final isCloserTab = showCloser && selected == screens.length - 1;
-    // Ads only on the secondary feature tabs (Countdown / Sky / Breath).
-    final showAd = selected >= 2 && !isCloserTab;
+    const cameraTab = 2;
+    final destCount = bodies.length + 1; // + the Camera tab
+    final selected = index.clamp(0, destCount - 1);
+    final bodyIndex = (selected < cameraTab ? selected : selected - 1)
+        .clamp(0, bodies.length - 1);
+    final isCloserTab = showCloser && selected == destCount - 1;
+    final showAd = selected == 3 && !isCloserTab; // ads only on the Breath tab
 
     return Scaffold(
       key: rootScaffoldKey,
       drawer: const AppDrawer(),
       body: Column(
         children: [
-          Expanded(child: screens[selected]),
+          Expanded(child: bodies[bodyIndex]),
           if (showAd) const BannerAdSlot(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selected,
         onDestinationSelected: (i) {
+          if (i == cameraTab) {
+            _openCamera(); // a push — keep the current tab selected
+            return;
+          }
           ref.read(shellTabProvider.notifier).state = i;
           reportScreen(ref, kTabScreens[i.clamp(0, kTabScreens.length - 1)]);
         },
@@ -231,14 +239,9 @@ class _AppShellState extends ConsumerState<AppShell>
             label: 'Chat',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.hourglass_top_outlined),
-            selectedIcon: Icon(Icons.hourglass_top),
-            label: 'Reunion',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.dark_mode_outlined),
-            selectedIcon: Icon(Icons.dark_mode),
-            label: 'Sky',
+            icon: Icon(Icons.camera_alt_outlined),
+            selectedIcon: Icon(Icons.camera_alt),
+            label: 'Camera',
           ),
           const NavigationDestination(
             icon: Icon(Icons.air_outlined),
@@ -257,5 +260,16 @@ class _AppShellState extends ConsumerState<AppShell>
         ],
       ),
     );
+  }
+
+  /// Opens the in-app rapid camera (the centre nav button) — a full-screen push
+  /// that drops the snap into chat.
+  void _openCamera() {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    context.push('/app/rapid-camera', extra: {
+      'coupleId': couple.id,
+      'myUid': SupabaseService.currentUserId ?? '',
+    });
   }
 }

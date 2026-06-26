@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -8,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -18,8 +21,9 @@ import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:video_player/video_player.dart';
 
-enum _CamState { preview, captured, sending }
+enum _CamState { preview, recording, captured, sending }
 
 /// A fast, in-app camera with live filters baked into the photo on capture and a
 /// one-tap send straight into the partner's chat.
@@ -53,7 +57,9 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   int _cameraIndex = 0;
   bool _ready = false;
   bool _denied = false;
-  FlashMode _flash = FlashMode.auto;
+  bool _flashOn =
+      false; // Snapchat-style toggle: LED (back) / screen flash (front)
+  bool _screenFlash = false; // white full-screen overlay during a front capture
 
   CameraFilter _selectedFilter =
       kCameraFilters.firstWhere((f) => f.id == 'freesia');
@@ -61,6 +67,15 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   _CamState _state = _CamState.preview;
   File? _capturedFile;
   bool _annotating = false;
+
+  // ── video recording (hold-to-record) ──
+  bool _capturedIsVideo = false;
+  VideoPlayerController? _videoPreview;
+  Timer? _recordTimer;
+  Duration _recordElapsed = Duration.zero;
+  bool _recording = false; // guards start/stop re-entrancy
+  bool _micGranted = false; // gates enableAudio so a denied mic can't fail init
+  static const _maxRecord = Duration(seconds: 60);
 
   @override
   void initState() {
@@ -70,10 +85,30 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   }
 
   Future<void> _boot() async {
+    if (mounted) setState(() => _denied = false);
+    // Request camera permission EXPLICITLY up front. Relying on the camera
+    // plugin's implicit request races the app-lifecycle (the OS dialog
+    // backgrounds the app) and can leave initialize() hanging on a permanent
+    // loading wheel. Doing it here means the controller is only ever created
+    // once permission is already granted.
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        debugPrint('[camera] permission not granted: $status');
+        if (mounted) setState(() => _denied = true);
+        return;
+      }
+      // Mic for hold-to-record video sound; non-fatal if denied (silent video).
+      final mic = await Permission.microphone.request();
+      _micGranted = mic.isGranted;
+    } catch (e) {
+      debugPrint('[camera] permission request failed: $e');
+    }
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
-        setState(() => _denied = true);
+        debugPrint('[camera] no cameras available');
+        if (mounted) setState(() => _denied = true);
         return;
       }
       // Default to the FRONT camera (selfie — the common couple snap).
@@ -81,41 +116,67 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
           .indexWhere((c) => c.lensDirection == CameraLensDirection.front);
       if (_cameraIndex < 0) _cameraIndex = 0;
       await _initController(_cameras[_cameraIndex]);
-    } on CameraException {
-      if (mounted) setState(() => _denied = true);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[camera] boot failed: $e');
       if (mounted) setState(() => _denied = true);
     }
   }
 
   Future<void> _initController(CameraDescription camera) async {
+    // veryHigh (≈1080p) for sharp photos — the earlier crash was Impeller (now
+    // forced to Skia in the manifest), NOT memory, so we no longer need to cap
+    // at 480p. No imageFormatGroup: we only takePicture(), and forcing JPEG on
+    // the preview surface allocates extra buffers on some devices.
     final c = CameraController(
       camera,
-      ResolutionPreset.high,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      ResolutionPreset.veryHigh,
+      // Only enable audio if mic was granted — enableAudio:true with a denied
+      // mic can fail camera init on some devices.
+      enableAudio: _micGranted,
     );
     _controller = c;
     try {
-      await c.initialize();
-      await c.setFlashMode(_flash);
-      if (mounted) setState(() => _ready = true);
-    } on CameraException {
+      // Hard timeout so a stalled platform init can never hang the UI forever.
+      await c.initialize().timeout(const Duration(seconds: 12));
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      try {
+        await c.setFlashMode(FlashMode.off); // flash is applied at capture time
+      } catch (_) {
+        // some devices reject setFlashMode on the front camera — not fatal
+      }
+      setState(() => _ready = true);
+    } catch (e) {
+      debugPrint('[camera] init failed: $e');
       if (mounted) setState(() => _denied = true);
     }
+  }
+
+  void _retryBoot() {
+    setState(() {
+      _denied = false;
+      _ready = false;
+    });
+    _boot();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
-    // Release the camera when backgrounded; re-init on return (avoids the
-    // platform "camera in use"/black-preview crash).
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused) {
-      _ready = false;
-      c.dispose();
+    // Release the camera only on a REAL background (paused/detached) and re-init
+    // on return. NOT on `inactive` — that fires transiently when the camera
+    // window first grabs focus on some OEMs, and disposing on it tore the
+    // just-shown preview back down to a loading wheel.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       _controller = null;
+      c.dispose();
+      // setState so the UI rebuilds to the loading state instead of trying to
+      // paint a CameraPreview backed by a now-disposed controller.
+      if (mounted) setState(() => _ready = false);
     } else if (state == AppLifecycleState.resumed && _cameras.isNotEmpty) {
       _initController(_cameras[_cameraIndex]);
     }
@@ -124,9 +185,18 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recordTimer?.cancel();
+    _restoreBrightness(); // never leave the screen stuck at max brightness
+    _videoPreview?.dispose();
     _controller?.dispose();
     super.dispose();
   }
+
+  /// The active lens is the front (selfie) camera — drives mirroring of both the
+  /// preview and the saved photo so a selfie reads the same way the user saw it.
+  bool get _isFrontCamera =>
+      _cameras.isNotEmpty &&
+      _cameras[_cameraIndex].lensDirection == CameraLensDirection.front;
 
   // ── camera controls ───────────────────────────────────────────────────────
   Future<void> _flipCamera() async {
@@ -138,35 +208,56 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     await _initController(_cameras[_cameraIndex]); // filter is preserved
   }
 
-  Future<void> _cycleFlash() async {
-    const order = [
-      FlashMode.auto,
-      FlashMode.always,
-      FlashMode.off,
-      FlashMode.torch
-    ];
-    final next = order[(order.indexOf(_flash) + 1) % order.length];
-    setState(() => _flash = next);
+  void _toggleFlash() => setState(() => _flashOn = !_flashOn);
+
+  IconData get _flashIcon => _flashOn ? Icons.flash_on : Icons.flash_off;
+
+  Future<void> _boostBrightness() async {
     try {
-      await _controller?.setFlashMode(next);
+      await ScreenBrightness().setScreenBrightness(1.0);
     } catch (_) {}
   }
 
-  IconData get _flashIcon => switch (_flash) {
-        FlashMode.auto => Icons.flash_auto,
-        FlashMode.always => Icons.flash_on,
-        FlashMode.off => Icons.flash_off,
-        FlashMode.torch => Icons.highlight,
-      };
+  Future<void> _restoreBrightness() async {
+    try {
+      await ScreenBrightness().resetScreenBrightness();
+    } catch (_) {}
+  }
 
   // ── capture + bake ────────────────────────────────────────────────────────
   Future<void> _capture() async {
     final c = _controller;
     if (c == null || !c.value.isInitialized || c.value.isTakingPicture) return;
-    setState(
-        () => _state = _CamState.captured); // shows a brief processing veil
+    final mirror = _isFrontCamera; // capture now; flip can't change mid-bake
+    // Snapchat-style flash: front has no LED → flash the screen white at full
+    // brightness; back fires the real LED on capture.
+    final screenFlash = _flashOn && _isFrontCamera;
+    final ledFlash = _flashOn && !_isFrontCamera;
     try {
-      final xfile = await c.takePicture();
+      final XFile xfile;
+      if (screenFlash) {
+        setState(() => _screenFlash = true);
+        await _boostBrightness();
+        // let the white screen actually light the face + exposure settle
+        await Future.delayed(const Duration(milliseconds: 400));
+        xfile = await c.takePicture();
+        await _restoreBrightness();
+        if (mounted) setState(() => _screenFlash = false);
+      } else {
+        if (ledFlash) {
+          try {
+            await c.setFlashMode(FlashMode.always);
+          } catch (_) {}
+        }
+        xfile = await c.takePicture();
+        if (ledFlash) {
+          try {
+            await c.setFlashMode(FlashMode.off);
+          } catch (_) {}
+        }
+      }
+      if (!mounted) return;
+      setState(() => _state = _CamState.captured); // processing veil
       final bytes = await xfile.readAsBytes();
       final f = _selectedFilter;
       final out = await compute(
@@ -180,6 +271,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
           overlayScreen: f.overlayBlendMode == BlendMode.screen,
           hasGrain: f.hasGrain,
           grainIntensity: f.grainIntensity,
+          mirror: mirror,
         ),
       );
       final dir = await getTemporaryDirectory();
@@ -189,11 +281,16 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       if (!mounted) return;
       setState(() {
         _capturedFile = file;
+        _capturedIsVideo = false;
         _state = _CamState.captured;
       });
     } catch (_) {
+      await _restoreBrightness();
       if (mounted) {
-        setState(() => _state = _CamState.preview);
+        setState(() {
+          _screenFlash = false;
+          _state = _CamState.preview;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not take that photo.')),
         );
@@ -201,9 +298,104 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     }
   }
 
+  // ── hold-to-record video ────────────────────────────────────────────────────
+  Future<void> _startRecording() async {
+    final c = _controller;
+    if (c == null ||
+        !c.value.isInitialized ||
+        _recording ||
+        c.value.isRecordingVideo) {
+      return;
+    }
+    _recording = true;
+    try {
+      await c.startVideoRecording();
+      // Video flash: back → keep the LED torch on; front → boost screen
+      // brightness for fill light (no white overlay so the preview stays visible).
+      if (_flashOn) {
+        if (_isFrontCamera) {
+          await _boostBrightness();
+        } else {
+          try {
+            await c.setFlashMode(FlashMode.torch);
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      debugPrint('[camera] startVideoRecording failed: $e');
+      _recording = false;
+      return;
+    }
+    if (!mounted) return;
+    _recordElapsed = Duration.zero;
+    setState(() => _state = _CamState.recording);
+    _recordTimer?.cancel();
+    _recordTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (!mounted) return;
+      setState(() => _recordElapsed += const Duration(milliseconds: 200));
+      if (_recordElapsed >= _maxRecord)
+        _stopRecording(); // auto-stop at the cap
+    });
+  }
+
+  Future<void> _stopRecording() async {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+    final c = _controller;
+    if (c == null || !_recording) return;
+    _recording = false;
+    // Clear any video flash (LED torch / boosted brightness).
+    if (_flashOn) {
+      await _restoreBrightness();
+      try {
+        await c.setFlashMode(FlashMode.off);
+      } catch (_) {}
+    }
+    final elapsed = _recordElapsed;
+    XFile xfile;
+    try {
+      xfile = await c.stopVideoRecording();
+    } catch (e) {
+      debugPrint('[camera] stopVideoRecording failed: $e');
+      if (mounted) setState(() => _state = _CamState.preview);
+      return;
+    }
+    // A too-short hold is an accidental tap-ish — discard, don't send a blip.
+    if (elapsed < const Duration(milliseconds: 600)) {
+      try {
+        await File(xfile.path).delete();
+      } catch (_) {}
+      if (mounted) setState(() => _state = _CamState.preview);
+      return;
+    }
+    final file = File(xfile.path);
+    final vp = VideoPlayerController.file(file);
+    try {
+      await vp.initialize();
+      await vp.setLooping(true);
+      await vp.play();
+    } catch (e) {
+      debugPrint('[camera] video preview init failed: $e');
+    }
+    if (!mounted) {
+      vp.dispose();
+      return;
+    }
+    setState(() {
+      _capturedFile = file;
+      _capturedIsVideo = true;
+      _videoPreview = vp;
+      _state = _CamState.captured;
+    });
+  }
+
   Future<void> _retake() async {
     final f = _capturedFile;
     _capturedFile = null;
+    _capturedIsVideo = false;
+    final vp = _videoPreview;
+    _videoPreview = null;
+    vp?.dispose();
     setState(() => _state = _CamState.preview);
     try {
       await f?.delete();
@@ -215,23 +407,31 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     final file = _capturedFile;
     if (file == null) return;
 
-    if (widget.returnFile) {
-      Navigator.pop(context, file); // home check-in path uploads it itself
+    // Home check-in accepts a photo only — pop it back to the caller. A video
+    // always goes to chat (below).
+    if (widget.returnFile && !_capturedIsVideo) {
+      Navigator.pop(context, file);
       return;
     }
 
     setState(() => _state = _CamState.sending);
     try {
-      final sendId = const Uuid().v4();
-      final path =
-          await ChatRepository.sendImage(widget.coupleId, file, id: sendId);
-      if (path != null) {
-        // Fast-path: piggyback on the chat's live channel if it's open.
-        ChatBroadcastService.broadcastImage(
-          id: sendId,
-          senderId: widget.myUid,
-          imagePath: path,
-        );
+      if (_capturedIsVideo) {
+        // Video → private couple_intimate bucket + kind:'video'. The partner's
+        // chat renders it from the postgres echo (no image fast-path broadcast).
+        await ChatRepository.sendVideo(widget.coupleId, file);
+      } else {
+        final sendId = const Uuid().v4();
+        final path =
+            await ChatRepository.sendImage(widget.coupleId, file, id: sendId);
+        if (path != null) {
+          // Fast-path: piggyback on the chat's live channel if it's open.
+          ChatBroadcastService.broadcastImage(
+            id: sendId,
+            senderId: widget.myUid,
+            imagePath: path,
+          );
+        }
       }
       widget.onSent?.call();
       if (mounted) Navigator.pop(context);
@@ -253,11 +453,14 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     return Scaffold(
       backgroundColor: MilesColors.night,
       body: _denied
-          ? _PermissionDenied()
+          ? _CameraUnavailable(
+              onRetry: _retryBoot,
+              onClose: () => Navigator.pop(context),
+            )
           : !_ready && _state == _CamState.preview
               ? const Center(
                   child: CircularProgressIndicator(color: MilesColors.ember))
-              : _state == _CamState.preview
+              : (_state == _CamState.preview || _state == _CamState.recording)
                   ? _buildPreview()
                   : _buildCaptured(),
     );
@@ -265,50 +468,70 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
 
   // ── preview state ─────────────────────────────────────────────────────────
   Widget _buildPreview() {
-    final c = _controller!;
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) {
+      return const Center(
+          child: CircularProgressIndicator(color: MilesColors.ember));
+    }
+    // 1. live filtered viewfinder. The preview is NOT mirrored (shows the true
+    //    camera orientation) — the mirror is applied only to the SAVED photo
+    //    (bakeSnap flipHorizontal), per the requested behaviour.
+    final viewfinder = FilterPreviewLayer(
+      filter: _selectedFilter,
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: c.value.previewSize?.height ?? 1080,
+            height: c.value.previewSize?.width ?? 1920,
+            child: CameraPreview(c),
+          ),
+        ),
+      ),
+    );
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 1. live filtered viewfinder
-        FilterPreviewLayer(
-          filter: _selectedFilter,
-          child: SizedBox.expand(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: c.value.previewSize?.height ?? 1080,
-                height: c.value.previewSize?.width ?? 1920,
-                child: CameraPreview(c),
+        viewfinder,
+
+        // 2. top bar (hidden while recording)
+        if (_state != _CamState.recording)
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _RoundIcon(
+                    icon: Icons.arrow_back,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                  Row(
+                    children: [
+                      _RoundIcon(icon: _flashIcon, onTap: _toggleFlash),
+                      const SizedBox(width: 8),
+                      _RoundIcon(
+                        icon: Icons.flip_camera_android,
+                        onTap: _flipCamera,
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
-        ),
 
-        // 2. top bar
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _RoundIcon(
-                  icon: Icons.arrow_back,
-                  onTap: () => Navigator.pop(context),
-                ),
-                Row(
-                  children: [
-                    _RoundIcon(icon: _flashIcon, onTap: _cycleFlash),
-                    const SizedBox(width: 8),
-                    _RoundIcon(
-                      icon: Icons.flip_camera_android,
-                      onTap: _flipCamera,
-                    ),
-                  ],
-                ),
-              ],
+        // REC pill while recording
+        if (_state == _CamState.recording)
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _RecPill(elapsed: _recordElapsed),
+              ),
             ),
           ),
-        ),
 
         // 3. + 4. filter name label + bottom glass panel
         Align(
@@ -316,17 +539,24 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _FilterNameLabel(filter: _selectedFilter),
+              if (_state != _CamState.recording)
+                _FilterNameLabel(filter: _selectedFilter),
               const SizedBox(height: 10),
               _bottomPanel(),
             ],
           ),
         ),
+
+        // Snapchat-style front screen-flash: a full white sheet at max
+        // brightness that lights the face for the moment of capture.
+        if (_screenFlash)
+          const Positioned.fill(child: ColoredBox(color: Colors.white)),
       ],
     );
   }
 
   Widget _bottomPanel() {
+    final recording = _state == _CamState.recording;
     return ClipRect(
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
@@ -338,9 +568,33 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(height: 72, child: _filterStrip()),
+                SizedBox(
+                  height: 72,
+                  child: recording
+                      ? const Center(
+                          child: Text(
+                            'Recording… release to stop',
+                            style: TextStyle(
+                                color: MilesColors.cream100, fontSize: 12),
+                          ),
+                        )
+                      : _filterStrip(),
+                ),
                 const SizedBox(height: 14),
-                _CaptureButton(onTap: _capture),
+                _CaptureButton(
+                  recording: recording,
+                  onTap: _capture,
+                  onLongPressStart: _startRecording,
+                  onLongPressEnd: _stopRecording,
+                ),
+                if (!recording)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Tap for photo · hold for video',
+                      style: TextStyle(color: MilesColors.taupe, fontSize: 11),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -380,6 +634,16 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       );
     }
 
+    if (_capturedIsVideo) {
+      return _VideoReview(
+        controller: _videoPreview,
+        sending: _state == _CamState.sending,
+        sendLabel: 'Send 💌',
+        onRetake: _retake,
+        onSend: _send,
+      );
+    }
+
     return _AnnotateHost(
       key: ValueKey(file.path),
       imageFile: file,
@@ -404,38 +668,60 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
 // Small UI pieces
 // ════════════════════════════════════════════════════════════════════════════
 
-class _PermissionDenied extends StatelessWidget {
+class _CameraUnavailable extends StatelessWidget {
+  const _CameraUnavailable({required this.onRetry, required this.onClose});
+  final VoidCallback onRetry;
+  final VoidCallback onClose;
+
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: GlassPanel(
-          glow: MilesColors.ember,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.no_photography_outlined,
-                  color: MilesColors.emberSoft, size: 40),
-              const SizedBox(height: 14),
-              Text('Camera access needed',
-                  style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 8),
-              const Text(
-                'Allow camera access to send a quick snap.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: MilesColors.taupe),
-              ),
-              const SizedBox(height: 18),
-              GlowButton(
-                label: 'Open Settings',
-                expand: false,
-                onPressed: Geolocator.openAppSettings,
-              ),
-            ],
+    return Stack(
+      children: [
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: _RoundIcon(icon: Icons.arrow_back, onTap: onClose),
+            ),
           ),
         ),
-      ),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: GlassPanel(
+              glow: MilesColors.ember,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.no_photography_outlined,
+                      color: MilesColors.emberSoft, size: 40),
+                  const SizedBox(height: 14),
+                  Text('Camera unavailable',
+                      style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Allow camera access to send a quick snap.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: MilesColors.taupe),
+                  ),
+                  const SizedBox(height: 18),
+                  GlowButton(
+                    label: 'Try again',
+                    expand: false,
+                    onPressed: onRetry,
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: Geolocator.openAppSettings,
+                    child: const Text('Open Settings'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -557,32 +843,168 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _CaptureButton extends StatelessWidget {
-  const _CaptureButton({required this.onTap});
+  const _CaptureButton({
+    required this.onTap,
+    required this.onLongPressStart,
+    required this.onLongPressEnd,
+    this.recording = false,
+  });
   final VoidCallback onTap;
+  final VoidCallback onLongPressStart;
+  final VoidCallback onLongPressEnd;
+  final bool recording;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 72,
-        height: 72,
-        decoration: const BoxDecoration(
+      onLongPressStart: (_) => onLongPressStart(),
+      onLongPressEnd: (_) => onLongPressEnd(),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: recording ? 84 : 72,
+        height: recording ? 84 : 72,
+        decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: MilesGradients.cta,
-          boxShadow: [BoxShadow(color: MilesColors.ember, blurRadius: 16)],
+          gradient: recording ? null : MilesGradients.cta,
+          color: recording ? MilesColors.blush : null,
+          boxShadow: [
+            BoxShadow(
+              color: recording ? MilesColors.blush : MilesColors.ember,
+              blurRadius: 16,
+            ),
+          ],
         ),
         child: Center(
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: MilesColors.cream50, width: 3),
+          child: recording
+              ? Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: MilesColors.cream50,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                )
+              : Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: MilesColors.cream50, width: 3),
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecPill extends StatelessWidget {
+  const _RecPill({required this.elapsed});
+  final Duration elapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = elapsed.inSeconds;
+    final mm = (s ~/ 60).toString();
+    final ss = (s % 60).toString().padLeft(2, '0');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: const BoxDecoration(
+                color: MilesColors.blush, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text('$mm:$ss',
+              style: const TextStyle(
+                  color: MilesColors.cream50, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Review a just-recorded video (looping playback) with Retake / Send.
+class _VideoReview extends StatelessWidget {
+  const _VideoReview({
+    required this.controller,
+    required this.sending,
+    required this.sendLabel,
+    required this.onRetake,
+    required this.onSend,
+  });
+  final VideoPlayerController? controller;
+  final bool sending;
+  final String sendLabel;
+  final VoidCallback onRetake;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (c != null && c.value.isInitialized)
+          FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: c.value.size.width,
+              height: c.value.size.height,
+              child: VideoPlayer(c),
+            ),
+          )
+        else
+          const Center(
+              child: CircularProgressIndicator(color: MilesColors.ember)),
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: _RoundIcon(icon: Icons.arrow_back, onTap: onRetake),
             ),
           ),
         ),
-      ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: _GlassBar(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton(
+                  onPressed: onRetake,
+                  child: const Text('Retake',
+                      style: TextStyle(color: MilesColors.cream100)),
+                ),
+                SizedBox(
+                  width: 130,
+                  child: GlowButton(
+                    label: sendLabel,
+                    loading: sending,
+                    onPressed: sending ? null : onSend,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (sending)
+          Container(
+            color: MilesColors.ember.withValues(alpha: 0.3),
+            alignment: Alignment.center,
+            child: const CircularProgressIndicator(color: MilesColors.cream50),
+          ),
+      ],
     );
   }
 }

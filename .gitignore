@@ -30,3 +30,7 @@ next-env.d.ts
 # editor
 .vscode/
 .idea/
+
+# built APK artifacts (large binaries — never commit; install from disk)
+*.apk
+Tethered*.apk

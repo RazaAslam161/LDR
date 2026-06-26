@@ -119,9 +119,11 @@ ThemeData milesDarkTheme() {
   final base = ThemeData.dark(useMaterial3: true);
 
   return base.copyWith(
-    scaffoldBackgroundColor: MilesColors.night,
+    // Transparent so the root EmberBackground (candle glow + embers) shows
+    // through, and every glass surface has something warm to blur against.
+    scaffoldBackgroundColor: Colors.transparent,
     colorScheme: const ColorScheme.dark(
-      surface: MilesColors.night,
+      surface: Colors.transparent,
       onSurface: MilesColors.cream50,
       primary: MilesColors.ember,
       onPrimary: MilesColors.cream50,
@@ -132,7 +134,8 @@ ThemeData milesDarkTheme() {
     ),
     textTheme: _buildTextTheme(),
     appBarTheme: AppBarTheme(
-      backgroundColor: Colors.transparent,
+      // Translucent so the glass blur shows through to whatever is behind.
+      backgroundColor: MilesColors.night.withValues(alpha: 0.55),
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
@@ -145,17 +148,20 @@ ThemeData milesDarkTheme() {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: MilesColors.surface2.withValues(alpha: 0.7),
+      // Glass-tinted input fill — semi-transparent so blur reads through.
+      fillColor: MilesColors.surface2.withValues(alpha: 0.5),
       hintStyle: const TextStyle(color: MilesColors.faint),
       labelStyle: const TextStyle(color: MilesColors.taupe),
       floatingLabelStyle: const TextStyle(color: MilesColors.gilt),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide.none,
+        borderSide: BorderSide(
+            color: MilesColors.gilt.withValues(alpha: 0.12)),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide.none,
+        borderSide: BorderSide(
+            color: MilesColors.gilt.withValues(alpha: 0.12)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
@@ -185,15 +191,18 @@ ThemeData milesDarkTheme() {
       style: TextButton.styleFrom(foregroundColor: MilesColors.emberSoft),
     ),
     cardTheme: CardThemeData(
-      color: MilesColors.surface1,
+      // Glass card by default: semi-transparent so the ambient candle-glow
+      // background reads through it.
+      color: MilesColors.surface1.withValues(alpha: 0.7),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: MilesColors.gilt.withValues(alpha: 0.12)),
+        side: BorderSide(color: MilesColors.gilt.withValues(alpha: 0.14)),
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: MilesColors.surfaceGlass,
+      // Translucent so the frosted-glass blur reveals what's underneath.
+      backgroundColor: MilesColors.night.withValues(alpha: 0.72),
       surfaceTintColor: Colors.transparent,
       indicatorColor: MilesColors.ember.withValues(alpha: 0.18),
       elevation: 0,
@@ -215,13 +224,19 @@ ThemeData milesDarkTheme() {
       color: MilesColors.gilt.withValues(alpha: 0.1),
       thickness: 1,
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: MilesColors.surface1,
+    bottomSheetTheme: BottomSheetThemeData(
+      // Glass sheet — semi-transparent so blur reads through.
+      backgroundColor: MilesColors.surface1.withValues(alpha: 0.82),
       surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
     ),
-    snackBarTheme: const SnackBarThemeData(
-      backgroundColor: MilesColors.surface2,
-      contentTextStyle: TextStyle(color: MilesColors.cream50),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: MilesColors.surface2.withValues(alpha: 0.9),
+      contentTextStyle: const TextStyle(color: MilesColors.cream50),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
   );
 }

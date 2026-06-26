@@ -15,6 +15,7 @@ class Presence {
     bool isOnline = false,
     this.lastSeen,
     this.updatedAt,
+    this.appLastActiveAt,
     this.isTyping = false,
     this.typingInChat = false,
     this.currentMood,
@@ -39,6 +40,10 @@ class Presence {
         isOnline: JsonUtils.parseBool(j['is_online']),
         lastSeen: JsonUtils.parseDateOrNull(j['last_seen'])?.toLocal(),
         updatedAt: JsonUtils.parseDateOrNull(j['updated_at'])?.toLocal(),
+        // Dedicated app-activity timestamp (GPS-isolated). Parsed UTC because
+        // every reader compares it via DateTime.now().toUtc().difference(...).
+        appLastActiveAt:
+            JsonUtils.parseDateOrNull(j['app_last_active_at'])?.toUtc(),
         isTyping: JsonUtils.parseBool(j['is_typing']),
         typingInChat: JsonUtils.parseBool(j['typing_in_chat']),
         currentMood: JsonUtils.parseStringOrNull(j['current_mood']),
@@ -72,7 +77,14 @@ class Presence {
   /// it false, so never read this directly for UI; use [isOnline] (freshness-gated).
   final bool isOnlineFlag;
   final DateTime? lastSeen;
+
+  /// Generic "row last modified" — written by EVERY upsert, including GPS. Do
+  /// NOT use this for presence/last-seen (GPS pollutes it). Use [appLastActiveAt].
   final DateTime? updatedAt;
+
+  /// App-activity timestamp — written ONLY by genuine app usage, never by GPS.
+  /// The single source of truth for online / last-seen / delivered.
+  final DateTime? appLastActiveAt;
   final bool isTyping;
   final bool typingInChat;
   final String? currentMood;
@@ -91,30 +103,48 @@ class Presence {
   final DateTime? checkinPhotoAt;
   final DateTime? chatLastRead;
 
-  /// They're actively viewing the chat if they read within the last ~18s
-  /// (the chat screen refreshes this every few seconds while open).
-  bool get isInChatNow {
-    final r = chatLastRead;
-    return r != null && DateTime.now().difference(r).inSeconds < 18;
+  /// GETTER 2 — is the partner actively reading the chat RIGHT NOW?
+  /// Source: chat_last_read (written every 5s while the chat is open). Window
+  /// 20s (> the 5s write cadence, tolerates a missed cycle without flicker).
+  /// Drives: "is here" avatar + seen tick.
+  bool get isActivelyInChat {
+    if (chatLastRead == null) return false;
+    final age = DateTime.now().toUtc().difference(chatLastRead!.toUtc());
+    return age.inSeconds <= 20;
   }
 
-  /// Liveness TTL: the presence row was written recently. A force-killed app
-  /// runs no code and never writes is_online=false, so without this it would read
-  /// online forever. The app heartbeats every ~20s while foregrounded (every ~5s
-  /// in chat), so a 45s window tolerates a couple of missed writes. MUST stay
-  /// greater than the heartbeat interval.
-  bool get isFresh {
-    final u = updatedAt;
-    return u != null && DateTime.now().difference(u).inSeconds < 45;
+  /// GETTER 1 — is the partner genuinely using the app right now?
+  /// Source: app_last_active_at (NEVER updated_at / location). Window 45s — the
+  /// 30s foreground heartbeat keeps it fresh while active; on a kill it expires
+  /// within 45s. Drives: Online subtitle, delivered tick, online dot.
+  bool get isTrulyOnline {
+    final ts = appLastActiveAt;
+    if (ts == null) return false;
+    return DateTime.now().toUtc().difference(ts).inSeconds <= 45;
   }
 
-  /// HONEST online: the advisory flag AND a fresh heartbeat. This is the single
-  /// source of truth every reader (Home, chat ticks, drawer) must use — never
-  /// [isOnlineFlag] directly.
-  bool get isOnline => isOnlineFlag && isFresh;
+  /// HONEST online for every reader (Home, drawer, chat) — same as
+  /// [isTrulyOnline] (app-activity freshness, never the raw is_online flag, never
+  /// GPS-polluted updated_at).
+  bool get isOnline => isTrulyOnline;
 
-  /// Back-compat alias for [isOnline] (both are freshness-gated).
-  bool get onlineNow => isOnline;
+  /// Back-compat alias for [isTrulyOnline].
+  bool get onlineNow => isTrulyOnline;
+
+  /// GETTER 3 — human-readable last-seen string.
+  /// Source: app_last_active_at (NEVER updated_at, NEVER location). Returns null
+  /// when online (caller shows "Online").
+  String? get lastSeenText {
+    if (isTrulyOnline) return null;
+    final ts = appLastActiveAt;
+    if (ts == null) return 'Offline';
+    final age = DateTime.now().toUtc().difference(ts);
+    if (age.inSeconds < 60) return 'Just now';
+    if (age.inMinutes < 60) return '${age.inMinutes}m ago';
+    if (age.inHours < 24) return '${age.inHours}h ago';
+    if (age.inDays < 7) return '${age.inDays}d ago';
+    return 'A while ago';
+  }
 
   bool get isSharingLive =>
       locationSharingMode == 'precise' && latitude != null && longitude != null;
@@ -127,15 +157,23 @@ class PresenceService {
 
   static SupabaseClient get _c => SupabaseService.client;
 
+  /// [isAppActivity] true ⇒ also stamp `app_last_active_at` (the GPS-isolated
+  /// presence clock). Location upserts pass false (the default) so GPS pings
+  /// never pollute online / last-seen.
   static Future<void> _upsert(
-      String coupleId, Map<String, dynamic> patch) async {
+    String coupleId,
+    Map<String, dynamic> patch, {
+    bool isAppActivity = false,
+  }) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
+    final now = DateTime.now().toUtc().toIso8601String();
     try {
       await _c.from('presence').upsert({
         'user_id': uid,
         'couple_id': coupleId,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': now,
+        if (isAppActivity) 'app_last_active_at': now,
         ...patch,
       });
     } catch (_) {
@@ -143,43 +181,87 @@ class PresenceService {
     }
   }
 
+  // ╔═══════════════════════════════════════════════════════════════════════╗
+  // ║ APP ACTIVITY — these stamp app_last_active_at (drives online/last-seen) ║
+  // ╚═══════════════════════════════════════════════════════════════════════╝
+
+  /// Stamp app activity ONLY when coming online. Going offline (online:false on
+  /// pause/detach) must NOT stamp app_last_active_at — otherwise the partner
+  /// would read "Online" for the full 45s window after the app is backgrounded.
+  /// last_seen/is_online stay advisory; the honest clock is app_last_active_at.
   static Future<void> setOnline(String coupleId, {required bool online}) =>
-      _upsert(coupleId, {
-        'is_online': online,
-        'last_seen': DateTime.now().toUtc().toIso8601String(),
-      });
+      _upsert(
+        coupleId,
+        {
+          'is_online': online,
+          'last_seen': DateTime.now().toUtc().toIso8601String(),
+        },
+        isAppActivity: online,
+      );
 
   static Future<void> setTyping(String coupleId, {required bool typing}) =>
-      _upsert(coupleId, {'is_typing': typing});
+      _upsert(coupleId, {'is_typing': typing}, isAppActivity: true);
 
   static Future<void> setTypingInChat(String coupleId,
           {required bool inChat}) =>
-      _upsert(coupleId, {'typing_in_chat': inChat});
+      _upsert(coupleId, {'typing_in_chat': inChat}, isAppActivity: true);
 
   /// Marks the chat read "now" — refreshed periodically while the chat is open.
   /// Drives the partner's read-receipts (seen) and the "in chat" avatar.
-  static Future<void> setChatLastRead(String coupleId) => _upsert(coupleId, {
-        'chat_last_read': DateTime.now().toUtc().toIso8601String(),
+  static Future<void> setChatLastRead(String coupleId) => _upsert(
+        coupleId,
+        {'chat_last_read': DateTime.now().toUtc().toIso8601String()},
+        isAppActivity: true,
+      );
+
+  /// Clears the "in chat" + typing state on exit (app backgrounded / killed).
+  ///
+  /// Writes a past chat_last_read so [Presence.isActivelyInChat] returns false
+  /// immediately on the partner's next freshness check — killing the phantom
+  /// "is here" avatar and any premature "seen" tick within the 20s window.
+  /// Also clears typing flags so a half-finished typing indicator doesn't
+  /// linger after the partner has left.
+  ///
+  /// Intentionally NOT isAppActivity: this fires on leave/background, and
+  /// stamping app_last_active_at here would keep the partner reading "Online"
+  /// for the full 45s window. Letting it expire naturally (last heartbeat ≤30s
+  /// ago) shows "Just now" and flips to offline within the window — honest.
+  static Future<void> clearChatPresence(String coupleId) => _upsert(coupleId, {
+        'typing_in_chat': false,
+        'is_typing': false,
+        'chat_last_read': DateTime.now()
+            .toUtc()
+            .subtract(const Duration(minutes: 5))
+            .toIso8601String(),
       });
 
   static Future<void> setMood(String coupleId, String mood, String color) =>
-      _upsert(coupleId, {
-        'current_mood': mood,
-        'mood_color': color,
-        'mood_updated_at': DateTime.now().toUtc().toIso8601String(),
-      });
+      _upsert(
+        coupleId,
+        {
+          'current_mood': mood,
+          'mood_color': color,
+          'mood_updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        isAppActivity: true,
+      );
 
   /// Which feature/section the user is currently in (so the partner can see).
   static Future<void> setScreen(String coupleId, String? screen) =>
-      _upsert(coupleId, {'current_screen': screen});
+      _upsert(coupleId, {'current_screen': screen}, isAppActivity: true);
 
   /// The user's full-body photo for the Touch feature (private bucket path).
   static Future<void> setBodyPhoto(String coupleId, String path) =>
-      _upsert(coupleId, {'body_photo_path': path});
+      _upsert(coupleId, {'body_photo_path': path}, isAppActivity: true);
 
   /// The user's chosen avatar (emoji) for the "Together" space.
   static Future<void> setAvatarEmoji(String coupleId, String emoji) =>
-      _upsert(coupleId, {'avatar_emoji': emoji});
+      _upsert(coupleId, {'avatar_emoji': emoji}, isAppActivity: true);
+
+  // ╔═══════════════════════════════════════════════════════════════════════╗
+  // ║ LOCATION ONLY — never stamps app_last_active_at. GPS runs while the     ║
+  // ║ user is asleep; it must never touch the app-activity / last-seen clock.║
+  // ╚═══════════════════════════════════════════════════════════════════════╝
 
   static Future<void> setSharingMode(String coupleId, String mode) =>
       _upsert(coupleId, {'location_sharing_mode': mode});
@@ -226,11 +308,15 @@ class PresenceService {
         'location_accuracy': null,
       });
 
-  static Future<void> setCheckinPhoto(String coupleId, String url) =>
-      _upsert(coupleId, {
-        'checkin_photo_url': url,
-        'checkin_photo_at': DateTime.now().toUtc().toIso8601String(),
-      });
+  /// App activity (the user actively shared a snap) — stamps app_last_active_at.
+  static Future<void> setCheckinPhoto(String coupleId, String url) => _upsert(
+        coupleId,
+        {
+          'checkin_photo_url': url,
+          'checkin_photo_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        isAppActivity: true,
+      );
 
   static Future<Presence?> fetchPartner(String coupleId) async {
     final uid = SupabaseService.currentUserId;
