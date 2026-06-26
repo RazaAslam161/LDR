@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
@@ -10,7 +12,9 @@ import 'package:miles/core/services/touch_haptics.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
+import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -123,6 +127,81 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         ));
   }
 
+  /// The partner swapped their photo — reload it live (no need to leave + return).
+  void _onPhotoMsg(Map<String, dynamic> p) {
+    if (p['from'] == _myUid) return;
+    _loadPhotos();
+  }
+
+  // ── Neon "hot lines" — draw glowing trails that fade like a comet tail ──
+  bool _drawing =
+      false; // draw-mode toggle (drag draws neon instead of touches)
+  final List<_NP> _neon = [];
+  int _neonId = 0;
+  String? _curStroke;
+  Offset? _lastNeonPt;
+  Timer? _neonTimer;
+
+  void _neonStart(String owner, double x, double y) {
+    _curStroke = '$_myUid-${_neonId++}';
+    _addNeon(owner, x, y, _curStroke!, mine: true);
+  }
+
+  void _neonAdd(String owner, double x, double y) {
+    final s = _curStroke;
+    if (s == null) return;
+    if (_lastNeonPt != null && (Offset(x, y) - _lastNeonPt!).distance < 0.012) {
+      return;
+    }
+    _addNeon(owner, x, y, s, mine: true);
+  }
+
+  void _neonEnd() {
+    _curStroke = null;
+    _lastNeonPt = null;
+  }
+
+  void _addNeon(String owner, double x, double y, String stroke,
+      {required bool mine}) {
+    if (mine) _lastNeonPt = Offset(x, y);
+    setState(() => _neon
+        .add(_NP(owner, x, y, DateTime.now().millisecondsSinceEpoch, stroke)));
+    _ensureNeonTimer();
+    if (mine) {
+      _bumpHeat();
+      _channel?.sendBroadcastMessage(event: 'neon', payload: {
+        'from': _myUid,
+        'owner': owner,
+        'stroke': stroke,
+        'x': x,
+        'y': y,
+      });
+    }
+  }
+
+  void _onNeonMsg(Map<String, dynamic> p) {
+    if (!mounted || p['from'] == _myUid) return;
+    final owner = p['owner']?.toString();
+    final stroke = p['stroke']?.toString();
+    final x = (p['x'] as num?)?.toDouble();
+    final y = (p['y'] as num?)?.toDouble();
+    if (owner == null || stroke == null || x == null || y == null) return;
+    _addNeon(owner, x, y, stroke, mine: false);
+  }
+
+  void _ensureNeonTimer() {
+    _neonTimer ??= Timer.periodic(const Duration(milliseconds: 55), (_) {
+      if (!mounted) return;
+      final cutoff = DateTime.now().millisecondsSinceEpoch - 1300;
+      _neon.removeWhere((p) => p.t < cutoff);
+      if (_neon.isEmpty) {
+        _neonTimer?.cancel();
+        _neonTimer = null;
+      }
+      setState(() {});
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -155,6 +234,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         .channel('touch:$id')
         .onBroadcast(event: 'touch', callback: _onTouchMsg)
         .onBroadcast(event: 'frame', callback: _onFrameMsg)
+        .onBroadcast(event: 'photo', callback: _onPhotoMsg)
+        .onBroadcast(event: 'neon', callback: _onNeonMsg)
         .subscribe();
   }
 
@@ -163,6 +244,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     realtimeResumed.removeListener(_subscribe);
     SecureScreen.clearSecure();
     _heatTimer?.cancel();
+    _neonTimer?.cancel();
     reportActiveTab(ref);
     _channel?.unsubscribe();
     super.dispose();
@@ -200,9 +282,34 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (path != null) {
       await PresenceService.setBodyPhoto(id, path);
       final url = await TouchMapRepository.signedBodyUrl(path);
-      if (mounted) setState(() => _myPhotoUrl = url);
+      if (mounted) {
+        setState(() {
+          _myPhotoUrl = url;
+          if (_myUid != null)
+            _frames.remove(_myUid); // fresh photo, fresh frame
+        });
+      }
+      // Tell the partner to reload my photo live.
+      _channel?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid});
     }
     if (mounted) setState(() => _uploadingPhoto = false);
+  }
+
+  /// A quick snap — straight to the camera, no crop/confirm, sent to chat.
+  Future<void> _quickSnap() async {
+    final id = _coupleId;
+    if (id == null) return;
+    try {
+      final shot = await ImagePicker()
+          .pickImage(source: ImageSource.camera, imageQuality: 70);
+      if (shot == null) return;
+      await ChatRepository.sendImage(id, File(shot.path));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Snap sent 📸')),
+        );
+      }
+    } catch (_) {}
   }
 
   /// Local touch on [owner]'s body at normalized (x,y): show it here, buzz a
@@ -269,6 +376,18 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         ),
         actions: [
           IconButton(
+            tooltip:
+                _drawing ? 'Drawing hot lines — tap to stop' : 'Draw hot lines',
+            icon: Icon(Icons.gesture,
+                color: _drawing ? MilesColors.ember : MilesColors.gilt),
+            onPressed: () => setState(() => _drawing = !_drawing),
+          ),
+          IconButton(
+            tooltip: 'Quick snap',
+            icon: const Icon(Icons.camera_alt, color: MilesColors.blush),
+            onPressed: _quickSnap,
+          ),
+          IconButton(
             tooltip: 'Set my photo',
             icon: _uploadingPhoto
                 ? const SizedBox(
@@ -310,6 +429,11 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       ],
                     ),
                   ),
+                ),
+                // Quick whisper strip — text each other without leaving Touch.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                  child: GameChatPanel(coupleId: _coupleId!, gameKey: 'touch'),
                 ),
               ],
             ),
@@ -411,24 +535,34 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
             final f = _frames[owner] ?? const _Frame();
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTapDown: adjusting
+              onTapDown: (adjusting || _drawing)
                   ? null
                   : (d) => _touch(
                       owner,
                       (d.localPosition.dx / w).clamp(0.0, 1.0),
                       (d.localPosition.dy / h).clamp(0.0, 1.0)),
+              onPanStart: (!adjusting && _drawing)
+                  ? (d) => _neonStart(
+                      owner,
+                      (d.localPosition.dx / w).clamp(0.0, 1.0),
+                      (d.localPosition.dy / h).clamp(0.0, 1.0))
+                  : null,
               onPanUpdate: adjusting
                   ? null
                   : (d) {
                       final x = (d.localPosition.dx / w).clamp(0.0, 1.0);
                       final y = (d.localPosition.dy / h).clamp(0.0, 1.0);
-                      if (_lastPan == null ||
+                      if (_drawing) {
+                        _neonAdd(owner, x, y);
+                      } else if (_lastPan == null ||
                           (Offset(x, y) - _lastPan!).distance > 0.05) {
                         _lastPan = Offset(x, y);
                         _touch(owner, x, y);
                       }
                     },
-              onPanEnd: adjusting ? null : (_) => _lastPan = null,
+              onPanEnd: adjusting
+                  ? null
+                  : (_) => _drawing ? _neonEnd() : _lastPan = null,
               onScaleStart: adjusting ? (_) => _onFrameStart(owner) : null,
               onScaleUpdate:
                   adjusting ? (d) => _onFrameUpdate(owner, d, w, h) : null,
@@ -448,6 +582,17 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                               errorBuilder: (_, __, ___) =>
                                   CustomPaint(painter: _SilhouettePainter()))
                           : CustomPaint(painter: _SilhouettePainter()),
+                    ),
+                  ),
+                  // Neon hot-lines on THIS body — glowing trails that fade.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _NeonPainter(
+                          _neon.where((p) => p.owner == owner).toList(),
+                          DateTime.now().millisecondsSinceEpoch,
+                        ),
+                      ),
                     ),
                   ),
                   // Name tag
@@ -616,6 +761,59 @@ class _GlowState extends State<_Glow> with SingleTickerProviderStateMixin {
       ),
     );
   }
+}
+
+/// One neon point: normalized (x,y) on the body, ms timestamp, stroke key.
+class _NP {
+  _NP(this.owner, this.x, this.y, this.t, this.stroke);
+  final String owner;
+  final double x;
+  final double y;
+  final int t;
+  final String stroke;
+}
+
+/// Glowing neon "hot lines" that fade with age — connects consecutive points of
+/// the same stroke; newer segments are brighter (a comet tail).
+class _NeonPainter extends CustomPainter {
+  _NeonPainter(this.points, this.now);
+  final List<_NP> points;
+  final int now;
+
+  static const _life = 1300; // ms
+  static const _neon = Color(0xFFFF4D8D);
+
+  @override
+  void paint(Canvas c, Size s) {
+    for (var i = 1; i < points.length; i++) {
+      final a = points[i - 1], b = points[i];
+      if (a.stroke != b.stroke) continue; // don't bridge separate strokes
+      final age = now - b.t;
+      if (age > _life) continue;
+      final op = (1 - age / _life).clamp(0.0, 1.0);
+      final p1 = Offset(a.x * s.width, a.y * s.height);
+      final p2 = Offset(b.x * s.width, b.y * s.height);
+      c.drawLine(
+          p1,
+          p2,
+          Paint()
+            ..color = _neon.withValues(alpha: 0.35 * op)
+            ..strokeWidth = 14
+            ..strokeCap = StrokeCap.round
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
+      c.drawLine(
+          p1,
+          p2,
+          Paint()
+            ..color =
+                Color.lerp(_neon, Colors.white, 0.4)!.withValues(alpha: op)
+            ..strokeWidth = 3.5
+            ..strokeCap = StrokeCap.round);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _NeonPainter old) => true;
 }
 
 /// A simple, gender-neutral illustrated figure — the placeholder until a real
