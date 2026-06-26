@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/providers.dart';
@@ -10,7 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class Presence {
   Presence({
     required this.userId,
-    this.isOnline = false,
+    bool isOnline = false,
     this.lastSeen,
     this.updatedAt,
     this.isTyping = false,
@@ -30,7 +32,7 @@ class Presence {
     this.checkinPhotoUrl,
     this.checkinPhotoAt,
     this.chatLastRead,
-  });
+  }) : isOnlineFlag = isOnline;
 
   factory Presence.fromJson(Map<String, dynamic> j) => Presence(
         userId: JsonUtils.parseString(j['user_id']),
@@ -65,7 +67,10 @@ class Presence {
       );
 
   final String userId;
-  final bool isOnline;
+
+  /// The raw `is_online` DB flag — ADVISORY ONLY. A force-killed app never writes
+  /// it false, so never read this directly for UI; use [isOnline] (freshness-gated).
+  final bool isOnlineFlag;
   final DateTime? lastSeen;
   final DateTime? updatedAt;
   final bool isTyping;
@@ -94,16 +99,22 @@ class Presence {
   }
 
   /// Liveness TTL: the presence row was written recently. A force-killed app
-  /// never writes is_online=false, so without this it would read as online
-  /// forever. Presence is refreshed every ~5s while the chat is open, so a
-  /// 30s window tolerates a few missed writes.
+  /// runs no code and never writes is_online=false, so without this it would read
+  /// online forever. The app heartbeats every ~20s while foregrounded (every ~5s
+  /// in chat), so a 45s window tolerates a couple of missed writes. MUST stay
+  /// greater than the heartbeat interval.
   bool get isFresh {
     final u = updatedAt;
-    return u != null && DateTime.now().difference(u).inSeconds < 30;
+    return u != null && DateTime.now().difference(u).inSeconds < 45;
   }
 
-  /// Honest "online now": the row claims online AND it's fresh.
-  bool get onlineNow => isOnline && isFresh;
+  /// HONEST online: the advisory flag AND a fresh heartbeat. This is the single
+  /// source of truth every reader (Home, chat ticks, drawer) must use — never
+  /// [isOnlineFlag] directly.
+  bool get isOnline => isOnlineFlag && isFresh;
+
+  /// Back-compat alias for [isOnline] (both are freshness-gated).
+  bool get onlineNow => isOnline;
 
   bool get isSharingLive =>
       locationSharingMode == 'precise' && latitude != null && longitude != null;
@@ -253,6 +264,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   RealtimeChannel? _channel;
   String? _coupleId;
   bool _subscribing = false;
+  Timer? _poll;
 
   Future<void> _init() async {
     final couple = ref.read(currentCoupleProvider);
@@ -260,6 +272,16 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     _coupleId = couple.id;
     state = await PresenceService.fetchPartner(couple.id);
     _subscribe();
+    // Re-evaluate liveness even when no presence event fires (e.g. a hard-killed
+    // partner writes nothing): refetch a fresh row so the freshness-gated getters
+    // tick over and the UI drops to "offline" within the window. One shared poll
+    // (autoDispose stops it when no screen is watching).
+    _poll ??= Timer.periodic(const Duration(seconds: 15), (_) async {
+      final id = _coupleId;
+      if (id == null) return;
+      final p = await PresenceService.fetchPartner(id);
+      if (mounted) state = p;
+    });
   }
 
   Future<void> _subscribe() async {
@@ -297,6 +319,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
 
   @override
   void dispose() {
+    _poll?.cancel();
     realtimeResumed.removeListener(_subscribe);
     final c = _channel;
     if (c != null) SupabaseService.client.removeChannel(c);

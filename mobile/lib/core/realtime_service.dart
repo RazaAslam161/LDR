@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -66,4 +67,71 @@ class RealtimeService {
   /// An ephemeral broadcast channel (e.g. proximity pings, typing) — not
   /// persisted to any table.
   static RealtimeChannel broadcast(String name) => _c.channel(name);
+}
+
+/// A self-healing realtime subscription — the canonical Pattern A primitive.
+///
+/// It subscribes once and, on every socket reconnect ([realtimeResumed]), tears
+/// the channel down CLEANLY — awaiting `removeChannel(old)` BEFORE re-creating —
+/// so it never leaves a duplicate-topic "joined but dead" channel. (Supabase's
+/// `channel()` never dedupes by topic and `unsubscribe()` only schedules an async
+/// leave, so the old `unsubscribe()` + immediate re-`channel()` pattern created
+/// racing dead channels — the app-wide subscription-health bug.) Re-entrancy
+/// guarded; safe to dispose mid-reconnect.
+///
+/// Replaces the hand-rolled `RealtimeChannel _ch; realtimeResumed.addListener(
+/// _resubscribe);` boilerplate in screens/notifiers:
+/// ```dart
+/// _sub = ManagedSubscription.start(() => SupabaseService.client
+///     .channel('reach:$coupleId')
+///     .onPostgresChanges(event: ..., callback: _onChange)
+///     .subscribe());
+/// // ... for a broadcast send: _sub.channel?.sendBroadcastMessage(...)
+/// _sub.dispose(); // in State.dispose / Notifier.dispose
+/// ```
+class ManagedSubscription {
+  ManagedSubscription._(this._build);
+
+  /// Builds AND subscribes a fresh channel. Invoked on start + each reconnect.
+  final RealtimeChannel Function() _build;
+  RealtimeChannel? _channel;
+  bool _busy = false;
+  bool _disposed = false;
+
+  static ManagedSubscription start(RealtimeChannel Function() build) {
+    final s = ManagedSubscription._(build);
+    s._resubscribe();
+    realtimeResumed.addListener(s._resubscribe);
+    return s;
+  }
+
+  Future<void> _resubscribe() async {
+    if (_disposed || _busy) return;
+    _busy = true;
+    try {
+      final old = _channel;
+      _channel = null;
+      if (old != null) {
+        try {
+          await SupabaseService.client.removeChannel(old);
+        } catch (_) {}
+      }
+      if (_disposed) return;
+      _channel = _build();
+    } finally {
+      _busy = false;
+    }
+  }
+
+  /// The live channel — e.g. to send a broadcast. Null until the first subscribe
+  /// resolves or while a reconnect is in flight; guard sends with `?.`.
+  RealtimeChannel? get channel => _channel;
+
+  void dispose() {
+    _disposed = true;
+    realtimeResumed.removeListener(_resubscribe);
+    final c = _channel;
+    _channel = null;
+    if (c != null) SupabaseService.client.removeChannel(c);
+  }
 }

@@ -77,6 +77,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     with WidgetsBindingObserver {
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _sub;
+  Timer? _heartbeat;
 
   @override
   void initState() {
@@ -91,6 +92,27 @@ class _MilesAppState extends ConsumerState<MilesApp>
     WidgetsBinding.instance
         .addPostFrameCallback((_) => AppLock.lockIfEnabled());
     _initDeepLinks();
+    _startHeartbeat(); // app launches foregrounded
+  }
+
+  /// Foreground presence heartbeat: re-stamps is_online + updated_at every ~20s
+  /// so the freshness window (45s) reads the partner as honestly online across
+  /// the whole app, not just in chat. Foreground-only + best-effort (battery
+  /// reasonable; a single tiny upsert).
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    void beat() {
+      final c = ref.read(currentCoupleProvider);
+      if (c != null) PresenceService.setOnline(c.id, online: true);
+    }
+
+    beat(); // immediate beat so we read online without waiting a cycle
+    _heartbeat = Timer.periodic(const Duration(seconds: 20), (_) => beat());
+  }
+
+  void _stopHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = null;
   }
 
   @override
@@ -106,10 +128,17 @@ class _MilesAppState extends ConsumerState<MilesApp>
     }
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    PresenceService.setOnline(
-      couple.id,
-      online: state == AppLifecycleState.resumed,
-    );
+    // Only resumed => online + beating. paused/detached => stop + offline hint
+    // (best-effort; the freshness TTL is the real safety net on a hard kill).
+    // NB: `inactive` is transient (shade / app-switcher) — leave presence as-is
+    // so it doesn't flicker offline.
+    if (state == AppLifecycleState.resumed) {
+      _startHeartbeat();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _stopHeartbeat();
+      PresenceService.setOnline(couple.id, online: false);
+    }
   }
 
   Future<void> _initDeepLinks() async {
@@ -133,6 +162,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopHeartbeat();
     _sub?.cancel();
     super.dispose();
   }
