@@ -2,8 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
+import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:path_provider/path_provider.dart';
@@ -121,7 +123,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  Future<void> _pickFromCamera() => _pickAndSend(ImageSource.camera);
+  /// Opens the fast in-app camera (live filters + one-tap send) instead of the
+  /// slow system camera. Uses the bar's own context (valid after the attach
+  /// sheet pops).
+  void _openRapidCamera() {
+    context.push('/app/rapid-camera', extra: {
+      'coupleId': widget.coupleId,
+      'myUid': SupabaseService.currentUserId ?? '',
+    });
+  }
 
   Future<void> _pickFromGallery() => _pickAndSend(ImageSource.gallery);
 
@@ -191,7 +201,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   style: TextStyle(color: MilesColors.cream50)),
               onTap: () {
                 Navigator.pop(context);
-                _pickFromCamera();
+                _openRapidCamera();
               },
             ),
             ListTile(

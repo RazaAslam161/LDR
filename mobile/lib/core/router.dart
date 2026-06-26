@@ -10,6 +10,7 @@ import 'package:miles/features/auth/sign_up_page.dart';
 import 'package:miles/features/auth/welcome_page.dart';
 import 'package:miles/features/call/call_screen.dart';
 import 'package:miles/features/capsule/capsule_create_screen.dart';
+import 'package:miles/features/chat/rapid_camera_screen.dart';
 import 'package:miles/features/capsule/capsule_detail_screen.dart';
 import 'package:miles/features/capsule/capsule_fill_screen.dart';
 import 'package:miles/features/capsule/capsule_list_screen.dart';
@@ -132,6 +133,17 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/settings',
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: '/app/rapid-camera',
+        builder: (context, state) {
+          final extra = (state.extra as Map?) ?? const {};
+          return RapidCameraScreen(
+            coupleId: (extra['coupleId'] ?? '') as String,
+            myUid: (extra['myUid'] ?? '') as String,
+            returnFile: extra['mode'] == 'checkin',
+          );
+        },
       ),
       GoRoute(
         path: '/app/capsule',

@@ -18,6 +18,7 @@ import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
+import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_theme.dart';
 import 'package:miles/features/chat/chat_theme_controller.dart';
@@ -103,12 +104,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final created =
         DateTime.tryParse(payload['createdAt']?.toString() ?? '')?.toLocal() ??
             DateTime.now();
+    final kind = payload['kind']?.toString() ?? 'text';
     _onIncoming(Message(
       id: id,
       senderId: sender,
       createdAt: created,
-      body: payload['body']?.toString(),
-      kind: 'text',
+      kind: kind,
+      body: kind == 'text' ? payload['body']?.toString() : null,
+      imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
       replyToId: payload['replyToId']?.toString(),
     ));
   }
@@ -202,8 +205,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ));
     }
     try {
-      await ChatRepository.sendImage(coupleId, f, id: id, replyToId: replyId);
+      final path =
+          await ChatRepository.sendImage(coupleId, f, id: id, replyToId: replyId);
       _updateStatus(id, SendStatus.sent);
+      // Fast-path the photo to the partner's open chat (deduped by id on echo).
+      if (path != null && myUid != null) {
+        ChatBroadcastService.broadcastImage(
+          id: id,
+          senderId: myUid,
+          imagePath: path,
+          replyToId: replyId,
+        );
+      }
     } catch (_) {
       _updateStatus(id, SendStatus.failed);
     }
@@ -298,6 +311,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
           .subscribe();
+      // Let other screens (e.g. the rapid camera) push the fast-path on THIS
+      // live channel instead of creating a duplicate-topic one.
+      ChatBroadcastService.active = _moodChannel;
       PresenceService.setChatLastRead(id);
     } finally {
       _subscribing = false;
@@ -584,6 +600,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
     final client = SupabaseService.client;
     final c1 = _channel, c2 = _moodChannel;
+    if (ChatBroadcastService.active == c2) ChatBroadcastService.active = null;
     if (c1 != null) client.removeChannel(c1);
     if (c2 != null) client.removeChannel(c2);
     _scroll.dispose();

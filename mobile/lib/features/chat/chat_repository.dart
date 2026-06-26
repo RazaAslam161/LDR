@@ -190,11 +190,12 @@ class ChatRepository {
   }
 
   /// Uploads an image to couple_media/<coupleId>/<rand>.<ext> and inserts a
-  /// message row of kind='image'.
-  static Future<void> sendImage(String coupleId, File file,
+  /// message row of kind='image'. Returns the storage path (so callers can
+  /// broadcast the fast-path 'msg'), or null if there's no signed-in user.
+  static Future<String?> sendImage(String coupleId, File file,
       {String? replyToId, String? id}) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    if (uid == null) return null;
 
     final ext = _ext(file.path) ?? 'jpg';
     final path = '$coupleId/${_randomName('img', ext)}';
@@ -207,6 +208,7 @@ class ChatRepository {
       'kind': 'image',
       if (replyToId != null) 'reply_to_id': replyToId,
     });
+    return path;
   }
 
   /// Uploads a GIF/sticker to couple_media and returns its PUBLIC URL — no

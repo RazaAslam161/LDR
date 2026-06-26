@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -8,7 +10,6 @@ import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/bg_location.dart';
 import 'package:miles/core/services/location_service.dart';
-import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -118,11 +119,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _shareSnap() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    final file = await PhotoPickerService.pickFromSheet(context);
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    // Fast in-app camera (filters + one tap); it pops the baked file back to us.
+    final file = await context.push<File?>('/app/rapid-camera', extra: {
+      'coupleId': couple.id,
+      'myUid': uid,
+      'mode': 'checkin',
+    });
     if (file == null) return;
+    if (!mounted) return;
     setState(() => _uploading = true);
     try {
-      final uid = SupabaseService.currentUserId!;
       final path =
           '${couple.id}/checkins/${uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await SupabaseService.client.storage
