@@ -169,13 +169,17 @@ class PresenceService {
     if (uid == null) return;
     final now = DateTime.now().toUtc().toIso8601String();
     try {
+      // couple_id is ALWAYS written (never conditional) so that if a row
+      // somehow holds a stale couple_id, the very next presence write — any
+      // heartbeat, typing, mood, location ping — self-heals it. onConflict is
+      // pinned to the user_id primary key so the upsert updates in place.
       await _c.from('presence').upsert({
         'user_id': uid,
         'couple_id': coupleId,
         'updated_at': now,
         if (isAppActivity) 'app_last_active_at': now,
         ...patch,
-      });
+      }, onConflict: 'user_id');
     } catch (_) {
       // presence is best-effort; never surface an error to the user
     }

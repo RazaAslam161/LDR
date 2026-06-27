@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/models.dart';
+import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -112,7 +113,40 @@ class SessionNotifier extends StateNotifier<SessionState> {
       );
 
       if (couple != null) {
-        _subscribePresence(couple.id);
+        final coupleId = couple.id;
+        _subscribePresence(coupleId);
+
+        // PRESENCE INTEGRITY GUARD
+        // Silently verify and repair presence.couple_id. Catches the case
+        // where leave_couple + re-pair left presence pointing at the wrong
+        // couple_id. Runs on every app load — a ~200ms read that prevents the
+        // entire app from breaking. Never surfaces to the user: self-healing.
+        try {
+          final uid = SupabaseService.currentUserId;
+          if (uid != null) {
+            final row = await SupabaseService.client
+                .from('presence')
+                .select('couple_id')
+                .eq('user_id', uid)
+                .maybeSingle();
+            if (row != null && row['couple_id'] != coupleId) {
+              // Presence is stale — repair silently.
+              await SupabaseService.client.from('presence').update({
+                'couple_id': coupleId,
+                'updated_at': DateTime.now().toUtc().toIso8601String(),
+              }).eq('user_id', uid);
+            }
+          }
+        } catch (_) {
+          // Never surfaces to user — silent self-healing.
+        }
+
+        // Write presence to the new couple immediately. If this is a re-pair,
+        // presence.couple_id was just repaired above; stamp it active so the
+        // partner can see us online right away.
+        try {
+          await PresenceService.setOnline(coupleId, online: true);
+        } catch (_) {}
       }
     } catch (e) {
       // TimeoutException or network error — stop loading and let the

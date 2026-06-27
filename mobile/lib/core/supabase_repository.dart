@@ -221,6 +221,22 @@ class SupabaseRepository {
   /// Unlink from the partner (dissolves the couple; data preserved server-side).
   static Future<void> leaveCouple() async {
     await _c.rpc<dynamic>('leave_couple');
+
+    // The SQL function clears presence server-side, but we also do it
+    // client-side for instant effect. Best-effort — never surface an error.
+    try {
+      final uid = SupabaseService.currentUserId;
+      if (uid != null) {
+        await _c.from('presence').update({
+          'couple_id': null,
+          'is_online': false,
+          'app_last_active_at': null,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('user_id', uid);
+      }
+    } catch (_) {
+      // Swallow errors — presence cleanup is best-effort.
+    }
   }
 
   /// Sets the user's avatar URL (Issue 7 — profile photo).
