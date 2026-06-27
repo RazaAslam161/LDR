@@ -158,9 +158,9 @@ class LocationService {
           accuracy: first.accuracy,
           label: await _labelIfMoved(first.latitude, first.longitude));
 
-      // Foreground-only streaming — NO persistent notification. Android requires
-      // a sticky notification for a background-location foreground service, which
-      // the couple didn't want, so we stream only while the app is alive.
+      // In-app GPS stream (fast, foreground). The persistent foreground service
+      // (started below) keeps location flowing when backgrounded; Android requires
+      // its sticky notification, which therefore shows ONLY while live-sharing is on.
       const settings = LocationSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 10,
@@ -212,6 +212,31 @@ class LocationService {
 
     // Clear the persisted mode so the service isolate doesn't write stale
     // coords if it gets woken by the OS later.
+    final uid = SupabaseService.client.auth.currentUser?.id ?? '';
+    if (uid.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('location_sharing_mode_$uid', 'off');
+    }
+  }
+
+  /// Whether the user's persisted choice is live ('precise') sharing. Local +
+  /// offline-safe — the source of truth for "should we be live-sharing?". Kept
+  /// in sync by start/stopLiveSharing (including the Home location toggle).
+  static Future<bool> isLiveModeOn() async {
+    final uid = SupabaseService.client.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return false;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('location_sharing_mode_$uid') == 'precise';
+  }
+
+  /// Make sure live sharing is fully OFF: stops the in-app stream and the
+  /// persistent foreground service (removing its notification) and clears the
+  /// persisted intent. Does NOT write presence — used to reconcile stale device
+  /// state when the user isn't live-sharing (e.g. left over from an old build).
+  static Future<void> ensureLiveOff() async {
+    await _liveSub?.cancel();
+    _liveSub = null;
+    await LocationForegroundService.stop();
     final uid = SupabaseService.client.auth.currentUser?.id ?? '';
     if (uid.isNotEmpty) {
       final prefs = await SharedPreferences.getInstance();

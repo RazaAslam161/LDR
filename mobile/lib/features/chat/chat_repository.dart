@@ -270,10 +270,13 @@ class ChatRepository {
   }
 
   /// Live stream of new messages for this couple (both partners' sends).
+  /// [onDelete] is called on any DELETE event (e.g. clear-for-everyone) so the
+  /// partner's screen can reload without processing individual row payloads.
   static RealtimeChannel subscribe(
     String coupleId,
-    void Function(Message) onInsert,
-  ) {
+    void Function(Message) onInsert, {
+    VoidCallback? onDelete,
+  }) {
     return _c
         .channel('messages:$coupleId')
         .onPostgresChanges(
@@ -286,6 +289,17 @@ class ChatRepository {
             value: coupleId,
           ),
           callback: (payload) => onInsert(Message.fromJson(payload.newRecord)),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'couple_id',
+            value: coupleId,
+          ),
+          callback: (_) => onDelete?.call(),
         )
         .subscribe((status, [error]) {
       if (kRtChatDebug) {
@@ -306,9 +320,10 @@ class ChatRepository {
         params: {'p_message_id': messageId},
       );
 
-  /// Clears the whole conversation for the current user only.
+  /// Hard-deletes every message in the couple's conversation for both users.
+  /// The RPC derives the couple_id from auth.uid() server-side.
   static Future<void> clearConversation() =>
-      _c.rpc<dynamic>('clear_conversation');
+      _c.rpc<dynamic>('clear_conversation_everyone');
 
   // ─── helpers ──────────────────────────────────────────────────
 

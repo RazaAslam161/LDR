@@ -22,7 +22,6 @@ import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:miles/features/reach/reach_button.dart';
 
 /// The landing screen: how your partner is, right now — plus the Reach button
@@ -59,39 +58,51 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final couple = ref.read(currentCoupleProvider);
-    if (couple == null || _myMode != 'precise') return;
+    if (couple == null) return;
     if (state == AppLifecycleState.resumed) {
-      LocationService.startLiveSharing(couple.id);
+      _resumeLocation(couple.id);
     } else {
+      // Always safe: pausing the in-app stream never starts anything.
       LocationService.pauseStream();
     }
+  }
+
+  /// On resume, restart live streaming ONLY if the user's saved intent is still
+  /// 'precise'. Reading the persisted intent (not a cached field) means a
+  /// toggle-off from anywhere stays off — it never silently turns itself back on.
+  Future<void> _resumeLocation(String coupleId) async {
+    final on = await LocationService.isLiveModeOn();
+    if (mounted) {
+      setState(() =>
+          _myMode = on ? 'precise' : (_myMode == 'city' ? 'city' : 'off'));
+    }
+    if (on) await LocationService.startLiveSharing(coupleId);
   }
 
   Future<void> _initLocation() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
+    // Honour the user's saved choice. Live sharing (and its foreground-service
+    // notification) is NEVER auto-enabled — it only turns on when the user flips
+    // the location toggle. Default is OFF.
     final mine = await PresenceService.fetchMine(couple.id);
-    var mode = mine?.locationSharingMode ?? 'off';
-
-    // Auto-enable live sharing on first install (foreground-only, no persistent
-    // notification). Stays on until the user turns it off from the Home card.
-    final prefs = await SharedPreferences.getInstance();
-    if (!(prefs.getBool('location_auto_init') ?? false)) {
-      await prefs.setBool('location_auto_init', true);
-      mode = 'precise';
-      await PresenceService.setSharingMode(couple.id, 'precise');
-    }
+    final mode = mine?.locationSharingMode ?? 'off';
 
     if (mounted) setState(() => _myMode = mode);
     await _refreshMyCoords();
     if (mode == 'precise') {
       await LocationService.startLiveSharing(couple.id);
       await _refreshMyCoords();
-      // Periodic background updates (no notification) so the partner still gets
-      // movement when the app is closed. Best-effort (OEM battery limits apply).
+      // Periodic background updates so the partner still gets movement when the
+      // app is closed. Best-effort (OEM battery limits apply).
       await BgLocationService.enable();
     } else if (mode == 'city') {
       await LocationService.shareOnce(couple.id, mode);
+    } else {
+      // OFF: tear down any stale live-sharing (foreground service + its
+      // notification + persisted intent) left over from an older build.
+      await LocationService.ensureLiveOff();
+      await BgLocationService.disable();
     }
   }
 
@@ -467,13 +478,11 @@ class _LiveSharingBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GlassPanel(
+      color: MilesColors.glassEmber,
+      borderColor: MilesColors.blush.withValues(alpha: 0.3),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        color: MilesColors.blush.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MilesColors.blush.withValues(alpha: 0.3)),
-      ),
+      radius: 14,
       child: Row(
         children: [
           const Icon(Icons.my_location, color: MilesColors.blush, size: 16),

@@ -122,7 +122,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (couple == null) return;
     final mode = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: MilesColors.surface1,
+      backgroundColor: Colors.transparent,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -206,7 +206,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _changeGender() async {
     final picked = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: MilesColors.surface1,
+      backgroundColor: Colors.transparent,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -238,7 +238,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: MilesColors.surface1,
+      backgroundColor: Colors.transparent,
       builder: (_) => const _TimezonePicker(),
     );
     if (picked == null) return;
@@ -255,7 +255,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: MilesColors.surface1,
+        backgroundColor: Colors.transparent,
         title: Text('Disconnect from $partnerName?'),
         content: const Text(
           'This will unlink your accounts. Your private data and time capsules '
@@ -296,7 +296,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: MilesColors.surface1,
+          backgroundColor: Colors.transparent,
           title: const Text('Enable Closer?'),
           content: const Text(
             'This reveals the intimacy module for both of you. Everything in '

@@ -292,6 +292,65 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (mounted) setState(() => _uploadingPhoto = false);
   }
 
+  /// Remove a body photo — yours OR your partner's. Clears it here immediately,
+  /// nulls it server-side (couple-scoped RPC), and tells the other phone to
+  /// reload — so it disappears from both screens in real time.
+  Future<void> _deletePhoto(String owner) async {
+    final isMe = owner == _myUid;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: Text(
+          isMe ? 'Remove your photo?' : 'Remove ${_nameOf(owner)}’s photo?',
+        ),
+        content: const Text(
+          'It disappears from both of your screens right away.',
+          style: TextStyle(color: MilesColors.taupe, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style:
+                FilledButton.styleFrom(backgroundColor: MilesColors.emberDeep),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // Optimistic: clear it here now, remember the old urls in case we must revert.
+    final prevMine = _myPhotoUrl;
+    final prevPartner = _partnerPhotoUrl;
+    setState(() {
+      if (isMe) {
+        _myPhotoUrl = null;
+      } else {
+        _partnerPhotoUrl = null;
+      }
+      _frames.remove(owner);
+    });
+    try {
+      await TouchMapRepository.deleteBodyPhoto(owner);
+      // Tell the other phone to reload both photos live.
+      _channel?.channel
+          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid});
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _myPhotoUrl = prevMine;
+          _partnerPhotoUrl = prevPartner;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not remove the photo.')),
+        );
+      }
+    }
+  }
+
   /// A quick snap — straight to the camera, no crop/confirm, sent to chat.
   Future<void> _quickSnap() async {
     final id = _coupleId;
@@ -631,6 +690,24 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       ),
                     ),
                   ),
+                  // Delete this photo (yours or theirs) — clears both screens.
+                  if (photoUrl != null && !adjusting)
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: GestureDetector(
+                        onTap: () => _deletePhoto(owner),
+                        child: Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: MilesColors.night.withValues(alpha: 0.55),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.delete_outline,
+                              color: MilesColors.cream50, size: 16),
+                        ),
+                      ),
+                    ),
                   if (adjusting)
                     Positioned(
                       bottom: 10,

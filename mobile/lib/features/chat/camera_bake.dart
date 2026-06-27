@@ -27,44 +27,58 @@ class BakeRequest {
   final double grainIntensity;
   final bool mirror; // flip horizontally (front camera, to match the preview)
 
-  // Quality: downscale only if wider than this, and encode at high quality.
-  static const int maxWidth = 1600;
-  static const int jpegQuality = 92;
+  // Quality: keep near-native — only downscale if wider than this, encode at
+  // q95. High cap so an ultraHigh (≈2160px) capture is NOT shrunk.
+  static const int maxWidth = 2560;
+  static const int jpegQuality = 95;
 }
 
-/// compute() entry point — decode → resize → apply the SAME colour matrix as the
-/// preview → blur/overlay/grain → re-encode JPEG. Runs off the UI isolate so
-/// capture never janks. Returns the original bytes unchanged if decoding fails.
+/// compute() entry point. Maximises quality:
+/// - Unfiltered + no mirror → returns the camera's NATIVE JPEG untouched (zero
+///   recompression = true sensor quality).
+/// - Otherwise decode → mirror → filter/blur/overlay/grain → re-encode at q95,
+///   only downscaling if wider than [BakeRequest.maxWidth].
+/// On any decode/processing failure (e.g. OOM on a huge image) it falls back to
+/// the raw bytes, so a capture is never lost — just unprocessed.
 Uint8List bakeSnap(BakeRequest req) {
-  var image = img.decodeImage(req.bytes);
-  if (image == null) return req.bytes;
+  final isNone = req.filterId == 'none';
 
-  // Mirror to match the front-camera preview (which is flipped like a mirror),
-  // so the saved selfie reads the same way the user saw it.
-  if (req.mirror) {
-    image = img.flipHorizontal(image);
-  }
+  // Fast path: nothing to do → ship the original sensor JPEG with no quality loss.
+  if (isNone && !req.mirror) return req.bytes;
 
-  // Resize first (fewer pixels through every subsequent loop). Only downscale.
-  if (image.width > BakeRequest.maxWidth) {
-    image = img.copyResize(image, width: BakeRequest.maxWidth);
-  }
+  try {
+    var image = img.decodeImage(req.bytes);
+    if (image == null) return req.bytes;
 
-  if (req.filterId != 'none') {
-    _applyMatrix(image, req.matrix);
-    if (req.blurSigma > 0) {
-      image =
-          img.gaussianBlur(image, radius: req.blurSigma.round().clamp(1, 10));
+    // Mirror to match the front-camera selfie (preview shows true orientation;
+    // the saved photo is flipped so it reads the way the user expects).
+    if (req.mirror) {
+      image = img.flipHorizontal(image);
     }
-    if (req.overlayArgb != null) {
-      _applyOverlay(image, req.overlayArgb!, req.overlayScreen);
-    }
-    if (req.hasGrain) {
-      applyGrainBake(image, req.grainIntensity);
-    }
-  }
 
-  return img.encodeJpg(image, quality: BakeRequest.jpegQuality);
+    // Only downscale if larger than the cap (never upscale — keep native res).
+    if (image.width > BakeRequest.maxWidth) {
+      image = img.copyResize(image, width: BakeRequest.maxWidth);
+    }
+
+    if (!isNone) {
+      _applyMatrix(image, req.matrix);
+      if (req.blurSigma > 0) {
+        image =
+            img.gaussianBlur(image, radius: req.blurSigma.round().clamp(1, 10));
+      }
+      if (req.overlayArgb != null) {
+        _applyOverlay(image, req.overlayArgb!, req.overlayScreen);
+      }
+      if (req.hasGrain) {
+        applyGrainBake(image, req.grainIntensity);
+      }
+    }
+
+    return img.encodeJpg(image, quality: BakeRequest.jpegQuality);
+  } catch (_) {
+    return req.bytes; // never drop a capture — ship the raw photo on failure
+  }
 }
 
 /// Apply a 4×5 colour matrix (the preview's [ColorFilter.matrix]) per pixel.

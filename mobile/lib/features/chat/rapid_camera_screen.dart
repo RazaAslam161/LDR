@@ -123,13 +123,13 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   }
 
   Future<void> _initController(CameraDescription camera) async {
-    // veryHigh (≈1080p) for sharp photos — the earlier crash was Impeller (now
-    // forced to Skia in the manifest), NOT memory, so we no longer need to cap
-    // at 480p. No imageFormatGroup: we only takePicture(), and forcing JPEG on
-    // the preview surface allocates extra buffers on some devices.
+    // ultraHigh (≈2160p / 4K, ~8MP) for real-camera sharpness. The `camera`
+    // plugin ties preview res to capture res, so this is the highest safe step
+    // for a smooth preview; true sensor-max capture needs Phase 2 (camerawesome
+    // separates preview/capture). No imageFormatGroup: we only takePicture().
     final c = CameraController(
       camera,
-      ResolutionPreset.veryHigh,
+      ResolutionPreset.ultraHigh,
       // Only enable audio if mic was granted — enableAudio:true with a denied
       // mic can fail camera init on some devices.
       enableAudio: _micGranted,
@@ -257,6 +257,17 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
         }
       }
       if (!mounted) return;
+      // PEAK QUALITY: an unfiltered, un-mirrored shot is sent EXACTLY as the
+      // camera produced it — no decode/resize/re-encode, zero generation loss
+      // (true device quality). Only filtered/mirrored shots are re-processed.
+      if (_selectedFilter.id == 'none' && !mirror) {
+        setState(() {
+          _capturedFile = File(xfile.path);
+          _capturedIsVideo = false;
+          _state = _CamState.captured;
+        });
+        return;
+      }
       setState(() => _state = _CamState.captured); // processing veil
       final bytes = await xfile.readAsBytes();
       final f = _selectedFilter;

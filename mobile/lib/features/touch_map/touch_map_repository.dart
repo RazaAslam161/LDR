@@ -93,6 +93,14 @@ class TouchMapRepository {
     }
   }
 
+  /// Clears a body photo — yours OR your partner's — via the couple-scoped
+  /// `clear_body_photo` security-definer RPC. Nulls presence.body_photo_path
+  /// and best-effort deletes the stored file, so the photo disappears for both
+  /// partners. [targetUid] is whose photo to remove.
+  static Future<void> deleteBodyPhoto(String targetUid) async {
+    await _c.rpc<dynamic>('clear_body_photo', params: {'p_target': targetUid});
+  }
+
   static RealtimeChannel subscribe(
     String coupleId,
     void Function(BodyTouch) onTouch,

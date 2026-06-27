@@ -20,7 +20,7 @@ class MilesColors {
   static const navy800 = Color(0xFF2F1620); // surface-2: raised/input fill
   static const surface1 = Color(0xFF221017);
   static const surface2 = Color(0xFF2F1620);
-  static const surfaceGlass = Color(0xCC221017); // frosted nav/overlay over blur
+  static const surfaceGlass = Color(0x99221017); // frosted nav/overlay over blur
 
   // ─── Text (warm) ───────────────────────────────────────────────────
   static const cream50 = Color(0xFFFCEFE6); // primary
@@ -44,6 +44,33 @@ class MilesColors {
   static const coral500 = ember;
   static const coral600 = emberDeep;
   static const emerald400 = sage;
+
+  // ─── Glass / frosted surfaces ────────────────────────────────────
+  static const Color glass = Color(0x1AFFFFFF);
+  static const Color glassStrong = Color(0x28FFFFFF);
+  static const Color glassSubtle = Color(0x0FFFFFFF);
+  static const Color glassBorder = Color(0x33E8C49A);
+  static const Color glassEmber = Color(0x22E8784A);
+
+  static const double blurSm = 10.0;
+  static const double blurMd = 20.0;
+  static const double blurLg = 32.0;
+  static const double blurXl = 48.0;
+
+  static BoxDecoration glassDecoration({
+    double radius = 18,
+    Color? color,
+    Color? borderColor,
+    double borderWidth = 0.8,
+  }) =>
+      BoxDecoration(
+        color: color ?? MilesColors.glass,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: borderColor ?? MilesColors.glassBorder,
+          width: borderWidth,
+        ),
+      );
 }
 
 /// Named gradients for the Emberlight system.
@@ -134,8 +161,7 @@ ThemeData milesDarkTheme() {
     ),
     textTheme: _buildTextTheme(),
     appBarTheme: AppBarTheme(
-      // Translucent so the glass blur shows through to whatever is behind.
-      backgroundColor: MilesColors.night.withValues(alpha: 0.55),
+      backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
@@ -225,8 +251,7 @@ ThemeData milesDarkTheme() {
       thickness: 1,
     ),
     bottomSheetTheme: BottomSheetThemeData(
-      // Glass sheet — semi-transparent so blur reads through.
-      backgroundColor: MilesColors.surface1.withValues(alpha: 0.82),
+      backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),

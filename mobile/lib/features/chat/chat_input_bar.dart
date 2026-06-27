@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +26,7 @@ class ChatInputBar extends StatefulWidget {
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
+    this.onClearConversation,
   });
 
   final String coupleId;
@@ -45,6 +47,10 @@ class ChatInputBar extends StatefulWidget {
   /// The message being replied to (shows a quoted bar above the input).
   final Message? replyingTo;
   final VoidCallback? onCancelReply;
+
+  /// Clears the conversation on THIS device only (local + instant). The
+  /// partner's chat is untouched. When null, the clear button is hidden.
+  final Future<void> Function()? onClearConversation;
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -174,11 +180,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
   void _showAttachSheet() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: MilesColors.surface1,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
+      builder: (_) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: Container(
+            color: MilesColors.glassStrong,
+            child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -236,6 +244,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
             ),
             const SizedBox(height: 8),
           ],
+        ),
+      ),
+          ),
         ),
       ),
     );
@@ -327,7 +338,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           height: 48,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: MilesColors.surface1,
+                            color: MilesColors.glassStrong,
                             borderRadius: BorderRadius.circular(24),
                           ),
                           alignment: Alignment.centerLeft,
@@ -369,7 +380,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 color:
                                     MilesColors.cream50.withValues(alpha: 0.4)),
                             filled: true,
-                            fillColor: MilesColors.surface1,
+                            fillColor: MilesColors.glassSubtle,
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 12),
                             border: OutlineInputBorder(
@@ -380,6 +391,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         ),
                 ),
                 const SizedBox(width: 6),
+
+                // Clear conversation — local & instant, partner unaffected.
+                if (widget.onClearConversation != null) ...[
+                  CircleIconButton(
+                    icon: Icons.delete_sweep_outlined,
+                    onTap: (_sending || _recording)
+                        ? null
+                        : () => widget.onClearConversation!.call(),
+                  ),
+                  const SizedBox(width: 6),
+                ],
 
                 // Mic button (when no text) OR Send button (when text)
                 _sending
@@ -431,11 +453,15 @@ class _ReplyBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
       decoration: BoxDecoration(
-        color: MilesColors.surface1,
+        color: MilesColors.glassStrong,
         borderRadius: BorderRadius.circular(12),
         border: const Border(
           left: BorderSide(color: MilesColors.blush, width: 3),
@@ -467,6 +493,8 @@ class _ReplyBar extends StatelessWidget {
             onPressed: onCancel,
           ),
         ],
+      ),
+        ),
       ),
     );
   }

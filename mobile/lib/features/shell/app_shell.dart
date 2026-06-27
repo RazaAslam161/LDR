@@ -10,6 +10,7 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/features/breath/breath_sync_screen.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
@@ -217,47 +218,50 @@ class _AppShellState extends ConsumerState<AppShell>
           if (showAd) const BannerAdSlot(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selected,
-        onDestinationSelected: (i) {
-          if (i == cameraTab) {
-            _openCamera(); // a push — keep the current tab selected
-            return;
-          }
-          ref.read(shellTabProvider.notifier).state = i;
-          reportScreen(ref, kTabScreens[i.clamp(0, kTabScreens.length - 1)]);
-        },
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: 'Chat',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.camera_alt_outlined),
-            selectedIcon: Icon(Icons.camera_alt),
-            label: 'Camera',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.air_outlined),
-            selectedIcon: Icon(Icons.air),
-            label: 'Breath',
-          ),
-          if (showCloser)
-            NavigationDestination(
-              icon: const Icon(Icons.lock_outline),
-              selectedIcon: Icon(
-                isModest ? Icons.lock : Icons.lock_open,
-                color: const Color(0xFFEF6F58),
-              ),
-              label: 'Closer',
+      bottomNavigationBar: GlassNavBar(
+        child: NavigationBar(
+          backgroundColor: Colors.transparent,
+          selectedIndex: selected,
+          onDestinationSelected: (i) {
+            if (i == cameraTab) {
+              _openCamera(); // a push — keep the current tab selected
+              return;
+            }
+            ref.read(shellTabProvider.notifier).state = i;
+            reportScreen(ref, kTabScreens[i.clamp(0, kTabScreens.length - 1)]);
+          },
+          destinations: [
+            const NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home),
+              label: 'Home',
             ),
-        ],
+            const NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline),
+              selectedIcon: Icon(Icons.chat_bubble),
+              label: 'Chat',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.camera_alt_outlined),
+              selectedIcon: Icon(Icons.camera_alt),
+              label: 'Camera',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.air_outlined),
+              selectedIcon: Icon(Icons.air),
+              label: 'Breath',
+            ),
+            if (showCloser)
+              NavigationDestination(
+                icon: const Icon(Icons.lock_outline),
+                selectedIcon: Icon(
+                  isModest ? Icons.lock : Icons.lock_open,
+                  color: const Color(0xFFEF6F58),
+                ),
+                label: 'Closer',
+              ),
+          ],
+        ),
       ),
     );
   }

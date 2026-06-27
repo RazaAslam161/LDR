@@ -14,6 +14,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/features/call/call_controller.dart';
@@ -30,6 +31,7 @@ import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
@@ -56,7 +58,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _hasNewMessage = false;
   Message? _replyingTo;
   RealtimeChannel? _moodChannel;
+
+  /// Local-only "clear conversation" cutoff: messages at or before this are
+  /// hidden on THIS device. Never synced — the partner is unaffected.
+  DateTime? _clearedBefore;
   bool _subscribing = false; // re-entrancy guard for _subscribe
+  bool _reloadScheduled = false; // debounce flag for bulk-DELETE realtime events
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
   static const _uuid = Uuid();
@@ -303,8 +310,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         } catch (_) {}
       }
       if (!mounted) return;
-      _channel =
-          ChatRepository.subscribe(id, (m) => _onIncoming(m, fromDb: true));
+      _channel = ChatRepository.subscribe(
+        id,
+        (m) => _onIncoming(m, fromDb: true),
+        onDelete: _onRemoteDelete,
+      );
       _moodChannel = client
           .channel('mood_burst:$id')
           .onBroadcast(event: 'mood', callback: _onMoodBurst)
@@ -333,6 +343,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
     _coupleId = couple.id;
+    _clearedBefore = await _loadClearedBefore(couple.id);
     try {
       final msgs = await ChatRepository.fetch(couple.id);
       _messages.addAll(msgs);
@@ -497,7 +508,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (m.deletedForEveryone) return;
     final action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: MilesColors.surface1,
+      backgroundColor: Colors.transparent,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -553,15 +564,88 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
+  /// Called by the realtime DELETE callback when the partner clears the chat.
+  /// Debounced: a bulk delete fires one event per message; we reload once.
+  void _onRemoteDelete() {
+    if (_reloadScheduled) return;
+    _reloadScheduled = true;
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        _reload();
+        setState(() => _reloadScheduled = false);
+      }
+    });
+  }
+
   Future<void> _clearConversation() async {
+    final session = ref.read(sessionProvider);
+    final partnerName = session.partner?.displayName ?? 'your partner';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: MilesColors.surface1,
+        backgroundColor: Colors.transparent,
+        title: const Text('Clear conversation?'),
+        content: Text(
+          'This will permanently delete all messages for both you and '
+          '$partnerName. This cannot be undone.',
+          style: const TextStyle(color: MilesColors.taupe, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: MilesColors.ember),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete for everyone')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ChatRepository.clearConversation();
+      if (mounted) {
+        setState(() {
+          _messages.clear();
+          _ids.clear();
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not clear the conversation.')));
+      }
+    }
+  }
+
+  String _clearedKey(String coupleId) =>
+      'chat_cleared_${coupleId}_${SupabaseService.currentUserId ?? ''}';
+
+  Future<DateTime?> _loadClearedBefore(String coupleId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final s = prefs.getString(_clearedKey(coupleId));
+      return s == null ? null : DateTime.tryParse(s);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Clears the conversation on THIS device only — instant and local. Never
+  /// touches the server, so the partner's chat is completely unaffected. Newer
+  /// messages still arrive normally.
+  Future<void> _clearConversationLocal() async {
+    final id = _coupleId;
+    if (id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.transparent,
         title: const Text('Clear conversation?'),
         content: const Text(
-          "This deletes all messages for you only. Your partner's chat history "
-          "won't be affected.",
+          'Clears this chat on this device only — instantly. Nothing is '
+          "deleted from the server and your partner's chat is untouched.",
           style: TextStyle(color: MilesColors.taupe, height: 1.5),
         ),
         actions: [
@@ -575,15 +659,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ),
     );
     if (ok != true) return;
+    final now = DateTime.now();
     try {
-      await ChatRepository.clearConversation();
-      await _reload();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not clear the conversation.')));
-      }
-    }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_clearedKey(id), now.toIso8601String());
+    } catch (_) {}
+    if (mounted) setState(() => _clearedBefore = now);
   }
 
   @override
@@ -707,8 +788,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           : _messages.isEmpty
                               ? const _EmptyChat()
                               : Builder(builder: (_) {
+                                  final cleared = _clearedBefore;
                                   final visible = _messages
                                       .where((m) => !m.isHiddenFor(uid))
+                                      .where((m) =>
+                                          cleared == null ||
+                                          m.createdAt.isAfter(cleared))
                                       .toList();
                                   if (visible.isEmpty)
                                     return const _EmptyChat();
@@ -814,6 +899,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           replyToId: _takeReplyId()),
                       onFlingGif: _flingGifFile,
                       onPickGif: _attachGif,
+                      onClearConversation: _clearConversationLocal,
                     ),
                   ],
                 ),
@@ -1051,57 +1137,64 @@ class _PartnerHere extends StatelessWidget {
         (name != null && name!.isNotEmpty) ? name![0].toUpperCase() : '♥';
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
-      child: Row(
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: MilesColors.surface2,
-                  border: Border.all(
-                      color: MilesColors.sage.withValues(alpha: 0.6),
-                      width: 1.5),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: avatarUrl == null
-                    ? Center(
-                        child: Text(initial,
-                            style: const TextStyle(
-                                color: MilesColors.cream50, fontSize: 10)))
-                    : NetImage(avatarUrl!,
-                        fit: BoxFit.cover,
-                        error: Center(
-                            child: Text(initial,
-                                style: const TextStyle(
-                                    color: MilesColors.cream50,
-                                    fontSize: 10)))),
-              ),
-              Positioned(
-                right: -1,
-                bottom: -1,
-                child: Container(
-                  width: 8,
-                  height: 8,
+      child: GlassPanel(
+        elevated: true,
+        blur: MilesColors.blurSm,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        radius: 16,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: MilesColors.sage,
-                    border: Border.all(color: MilesColors.night, width: 1.5),
+                    color: MilesColors.surface2,
+                    border: Border.all(
+                        color: MilesColors.sage.withValues(alpha: 0.6),
+                        width: 1.5),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: avatarUrl == null
+                      ? Center(
+                          child: Text(initial,
+                              style: const TextStyle(
+                                  color: MilesColors.cream50, fontSize: 10)))
+                      : NetImage(avatarUrl!,
+                          fit: BoxFit.cover,
+                          error: Center(
+                              child: Text(initial,
+                                  style: const TextStyle(
+                                      color: MilesColors.cream50,
+                                      fontSize: 10)))),
+                ),
+                Positioned(
+                  right: -1,
+                  bottom: -1,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: MilesColors.sage,
+                      border: Border.all(color: MilesColors.night, width: 1.5),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 7),
-          Text('${name ?? 'They'} is here',
-              style: const TextStyle(
-                  color: MilesColors.sage,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500)),
-        ],
+              ],
+            ),
+            const SizedBox(width: 7),
+            Text('${name ?? 'They'} is here',
+                style: const TextStyle(
+                    color: MilesColors.sage,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
       ),
     );
   }
