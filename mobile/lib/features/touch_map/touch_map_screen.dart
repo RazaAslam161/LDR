@@ -32,16 +32,20 @@ class _PendingCameraIcon {
   const _PendingCameraIcon({required this.x, required this.y});
 }
 
+enum _CameraMode { photo, video }
+
 class _ActiveReactionGif {
-  final String gifUrl;
+  final String mediaUrl;
   final double x;
   final double y;
   final String id;
+  final bool isPhoto;
   const _ActiveReactionGif({
-    required this.gifUrl,
+    required this.mediaUrl,
     required this.x,
     required this.y,
     required this.id,
+    required this.isPhoto,
   });
 }
 
@@ -226,21 +230,27 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   void _onReactionGifMsg(Map<String, dynamic> payload) {
     if (!mounted || payload['from'] == _myUid) return;
-    final gifUrl = payload['gif_url'] as String?;
+    // Support new 'media_url' key; fall back to legacy 'gif_url'.
+    final mediaUrl = (payload['media_url'] ?? payload['gif_url']) as String?;
     final x = (payload['x'] as num?)?.toDouble();
     final y = (payload['y'] as num?)?.toDouble();
     final id = payload['id'] as String? ?? const Uuid().v4();
-    if (gifUrl != null && x != null && y != null) {
-      _addReaction(gifUrl, x, y, id);
+    final isPhoto = payload['is_photo'] as bool? ?? false;
+    if (mediaUrl != null && x != null && y != null) {
+      _addReaction(mediaUrl: mediaUrl, x: x, y: y, id: id, isPhoto: isPhoto);
     }
   }
 
   Future<void> _startReactionCapture(double x, double y) async {
-    // Capture messenger before any async gap.
     final messenger = ScaffoldMessenger.of(context);
 
-    final videoFile = await _ReactionCameraSheet.show(context);
-    if (videoFile == null || !mounted) return;
+    final mode = await _showCameraChoice(context);
+    if (mode == null || !mounted) return;
+
+    final mediaFile = mode == _CameraMode.photo
+        ? await _ReactionCameraSheet.showPhoto(context)
+        : await _ReactionCameraSheet.showVideo(context);
+    if (mediaFile == null || !mounted) return;
 
     messenger.showSnackBar(
       const SnackBar(
@@ -250,8 +260,15 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       ),
     );
 
-    final mediaUrl = await _uploadReaction(videoFile);
-    try { await videoFile.delete(); } catch (_) {}
+    final isPhoto = mode == _CameraMode.photo;
+    final mediaUrl = await _uploadReactionMedia(
+      mediaFile,
+      isPhoto ? 'image/jpeg' : 'video/mp4',
+      isPhoto ? 'jpg' : 'mp4',
+    );
+    try {
+      await mediaFile.delete();
+    } catch (_) {}
 
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
@@ -267,30 +284,130 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     }
 
     final reactionId = const Uuid().v4();
-    _addReaction(mediaUrl, x, y, reactionId);
+    _addReaction(
+      mediaUrl: mediaUrl,
+      x: x,
+      y: y,
+      id: reactionId,
+      isPhoto: isPhoto,
+    );
 
     _channel?.channel?.sendBroadcastMessage(
       event: 'reaction_gif',
       payload: {
         'from': _myUid,
-        'gif_url': mediaUrl,
+        'media_url': mediaUrl,
         'x': x,
         'y': y,
         'id': reactionId,
+        'is_photo': isPhoto,
       },
     );
   }
 
-  Future<String?> _uploadReaction(File videoFile) async {
+  Future<_CameraMode?> _showCameraChoice(BuildContext ctx) {
+    return showModalBottomSheet<_CameraMode>(
+      context: ctx,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => GlassPanel(
+        blur: MilesColors.blurLg,
+        radius: 24,
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: MilesColors.gilt,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'React with…',
+              style: GoogleFonts.fraunces(
+                color: MilesColors.cream50,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: _reactionChoiceBtn(
+                    sheetCtx,
+                    Icons.photo_camera_rounded,
+                    'Photo',
+                    _CameraMode.photo,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _reactionChoiceBtn(
+                    sheetCtx,
+                    Icons.videocam_rounded,
+                    'Video (5s)',
+                    _CameraMode.video,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _reactionChoiceBtn(
+    BuildContext ctx,
+    IconData icon,
+    String label,
+    _CameraMode mode,
+  ) {
+    return GestureDetector(
+      onTap: () => Navigator.of(ctx).pop(mode),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        decoration: BoxDecoration(
+          color: MilesColors.ember.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: MilesColors.ember.withValues(alpha: 0.35),
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: MilesColors.ember, size: 32),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _uploadReactionMedia(
+    File file,
+    String contentType,
+    String ext,
+  ) async {
     try {
-      final path = '$_coupleId/reactions/${const Uuid().v4()}.mp4';
+      final path = '$_coupleId/reactions/${const Uuid().v4()}.$ext';
       await SupabaseService.client.storage
           .from('couple_intimate')
-          .upload(path, videoFile,
-              fileOptions: const FileOptions(
-                contentType: 'video/mp4',
-                upsert: false,
-              ));
+          .upload(
+            path,
+            file,
+            fileOptions: FileOptions(contentType: contentType, upsert: false),
+          );
       return await SupabaseService.client.storage
           .from('couple_intimate')
           .createSignedUrl(path, 3600);
@@ -299,12 +416,38 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     }
   }
 
-  void _addReaction(String gifUrl, double x, double y, String id) {
-    final r = _ActiveReactionGif(gifUrl: gifUrl, x: x, y: y, id: id);
+  void _addReaction({
+    required String mediaUrl,
+    required double x,
+    required double y,
+    required String id,
+    required bool isPhoto,
+  }) {
+    final r = _ActiveReactionGif(
+      mediaUrl: mediaUrl,
+      x: x,
+      y: y,
+      id: id,
+      isPhoto: isPhoto,
+    );
     if (mounted) setState(() => _reactions.add(r));
     Timer(const Duration(seconds: 8), () {
       if (mounted) setState(() => _reactions.remove(r));
     });
+  }
+
+  double _reactionSize(double x, double y) {
+    if (y < 0.15) return 52; // head/face
+    if (y < 0.35) return 68; // neck/upper chest
+    if (y < 0.65) return 80; // chest/torso
+    if (y < 0.85) return 64; // waist/hips
+    return 48; // legs/feet
+  }
+
+  double _reactionBorderRadius(double y) {
+    if (y < 0.15) return 999; // face → full circle
+    if (y < 0.35) return 20; // neck → rounded pill
+    return 14; // elsewhere → card
   }
 
   void _ensureNeonTimer() {
@@ -1033,6 +1176,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           reaction: r,
                           containerWidth: w,
                           containerHeight: h,
+                          size: _reactionSize(r.x, r.y),
+                          borderRadius: _reactionBorderRadius(r.y),
                           onExpired: () {
                             if (mounted) setState(() => _reactions.remove(r));
                           },
@@ -1184,12 +1329,16 @@ class _ReactionGifWidget extends StatefulWidget {
   final _ActiveReactionGif reaction;
   final double containerWidth;
   final double containerHeight;
+  final double size;
+  final double borderRadius;
   final VoidCallback onExpired;
 
   const _ReactionGifWidget({
     required this.reaction,
     required this.containerWidth,
     required this.containerHeight,
+    required this.size,
+    required this.borderRadius,
     required this.onExpired,
   });
 
@@ -1198,35 +1347,43 @@ class _ReactionGifWidget extends StatefulWidget {
 }
 
 class _ReactionGifWidgetState extends State<_ReactionGifWidget>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
+    with TickerProviderStateMixin {
+  late AnimationController _fadeCtrl;
+  late AnimationController _pulseCtrl;
   VideoPlayerController? _vpc;
   bool _videoReady = false;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
+    _fadeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
       value: 1.0,
     );
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
 
-    _vpc = VideoPlayerController.networkUrl(
-      Uri.parse(widget.reaction.gifUrl),
-    )..initialize().then((_) {
-        if (mounted) {
-          setState(() => _videoReady = true);
-          _vpc!
-            ..setLooping(true)
-            ..play();
-        }
-      });
+    if (!widget.reaction.isPhoto) {
+      _vpc = VideoPlayerController.networkUrl(
+        Uri.parse(widget.reaction.mediaUrl),
+      )..initialize().then((_) {
+          if (mounted) {
+            setState(() => _videoReady = true);
+            _vpc!
+              ..setLooping(true)
+              ..play();
+          }
+        });
+    }
 
     final displayMs = 5000 + (widget.reaction.id.hashCode.abs() % 3000);
     Future.delayed(Duration(milliseconds: displayMs), () {
       if (mounted) {
-        _ctrl.reverse().then((_) {
+        _pulseCtrl.stop();
+        _fadeCtrl.reverse().then((_) {
           if (mounted) widget.onExpired();
         });
       }
@@ -1235,57 +1392,109 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _fadeCtrl.dispose();
+    _pulseCtrl.dispose();
     _vpc?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final sz = widget.size;
+    final br = widget.borderRadius;
+    final half = sz / 2;
     final pixelX = widget.reaction.x * widget.containerWidth;
     final pixelY = widget.reaction.y * widget.containerHeight;
     return Positioned(
-      left: (pixelX - 60).clamp(0.0, widget.containerWidth - 120),
-      top: (pixelY - 60).clamp(0.0, widget.containerHeight - 120),
+      left: (pixelX - half).clamp(0.0, widget.containerWidth - sz),
+      top: (pixelY - half).clamp(0.0, widget.containerHeight - sz),
       child: FadeTransition(
-        opacity: _ctrl,
-        child: Container(
-          width: 120,
-          height: 120,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: MilesColors.ember.withValues(alpha: 0.7),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: MilesColors.ember.withValues(alpha: 0.35),
-                blurRadius: 16,
-                spreadRadius: 2,
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: _videoReady && _vpc != null
-                ? FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: _vpc!.value.size.width,
-                      height: _vpc!.value.size.height,
-                      child: VideoPlayer(_vpc!),
-                    ),
-                  )
-                : ColoredBox(
-                    color: MilesColors.surface1,
-                    child: const Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        color: MilesColors.ember,
+        opacity: _fadeCtrl,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.3, end: 1.0),
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.elasticOut,
+          builder: (_, scale, child) =>
+              Transform.scale(scale: scale, child: child),
+          child: AnimatedBuilder(
+            animation: _pulseCtrl,
+            builder: (_, child) {
+              final pulseScale = 1.0 + _pulseCtrl.value * 0.18;
+              final pulseOpacity = (1 - _pulseCtrl.value) * 0.6;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Breathing outer ring
+                  Transform.scale(
+                    scale: pulseScale,
+                    child: Container(
+                      width: sz,
+                      height: sz,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(br),
+                        border: Border.all(
+                          color: MilesColors.ember
+                              .withValues(alpha: pulseOpacity),
+                          width: 2,
+                        ),
                       ),
                     ),
                   ),
+                  child!,
+                ],
+              );
+            },
+            child: Container(
+              width: sz,
+              height: sz,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(br),
+                border: Border.all(
+                  color: MilesColors.ember.withValues(alpha: 0.7),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: MilesColors.ember.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(br > 900 ? br : br - 2),
+                child: widget.reaction.isPhoto
+                    ? Image.network(
+                        widget.reaction.mediaUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const ColoredBox(
+                          color: MilesColors.surface1,
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            color: MilesColors.ember,
+                          ),
+                        ),
+                      )
+                    : (_videoReady && _vpc != null
+                        ? FittedBox(
+                            fit: BoxFit.cover,
+                            child: SizedBox(
+                              width: _vpc!.value.size.width,
+                              height: _vpc!.value.size.height,
+                              child: VideoPlayer(_vpc!),
+                            ),
+                          )
+                        : const ColoredBox(
+                            color: MilesColors.surface1,
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                                color: MilesColors.ember,
+                              ),
+                            ),
+                          )),
+              ),
+            ),
           ),
         ),
       ),
@@ -1294,14 +1503,24 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
 }
 
 class _ReactionCameraSheet extends StatefulWidget {
-  const _ReactionCameraSheet();
+  const _ReactionCameraSheet({this.mode = _CameraMode.video});
+  final _CameraMode mode;
 
-  static Future<File?> show(BuildContext context) {
+  static Future<File?> showPhoto(BuildContext context) {
     return showModalBottomSheet<File?>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const _ReactionCameraSheet(),
+      builder: (_) => const _ReactionCameraSheet(mode: _CameraMode.photo),
+    );
+  }
+
+  static Future<File?> showVideo(BuildContext context) {
+    return showModalBottomSheet<File?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _ReactionCameraSheet(mode: _CameraMode.video),
     );
   }
 
@@ -1373,6 +1592,12 @@ class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
     _timer?.cancel();
     final xfile = await _ctrl!.stopVideoRecording();
     setState(() => _recording = false);
+    if (mounted) Navigator.of(context).pop(File(xfile.path));
+  }
+
+  Future<void> _snap() async {
+    if (_ctrl == null) return;
+    final xfile = await _ctrl!.takePicture();
     if (mounted) Navigator.of(context).pop(File(xfile.path));
   }
 
@@ -1488,7 +1713,31 @@ class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
               ),
             ),
             const SizedBox(height: 20),
-            if (!_recording)
+            if (widget.mode == _CameraMode.photo)
+              GestureDetector(
+                onTap: _snap,
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    gradient: MilesGradients.cta,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: MilesColors.ember.withValues(alpha: 0.5),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.photo_camera_rounded,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+              )
+            else if (!_recording)
               GestureDetector(
                 onTap: _record,
                 child: Container(
@@ -1521,7 +1770,7 @@ class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
                 ),
               ),
             const SizedBox(height: 16),
-            if (!_recording)
+            if (widget.mode == _CameraMode.photo || !_recording)
               TextButton(
                 onPressed: () => Navigator.of(context).pop(null),
                 child: Text(
