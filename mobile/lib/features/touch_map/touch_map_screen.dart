@@ -1070,6 +1070,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   adjusting ? (d) => _onFrameUpdate(owner, d, w, h) : null,
               child: Stack(
                 fit: StackFit.expand,
+                // Clip.none lets a reaction's oversized glow aura + drifting
+                // sparkles spill past the zone box; the photo keeps its own
+                // ClipRect below so it never bleeds outside the card.
+                clipBehavior: Clip.none,
                 children: [
                   // The photo, with the live (synced) pan/zoom frame applied.
                   ClipRect(
@@ -1481,8 +1485,9 @@ class _ReactionGifWidget extends StatefulWidget {
 class _ReactionGifWidgetState extends State<_ReactionGifWidget>
     with TickerProviderStateMixin {
   late AnimationController _fadeCtrl;
-  late AnimationController _pulseCtrl;
+  late AnimationController _pulseCtrl; // repurposed: breathes the glow aura
   AnimationController? _trailCtrl;
+  late AnimationController _sparkleCtrl; // continuous slow upward drift
   VideoPlayerController? _vpc;
   bool _videoReady = false;
 
@@ -1513,6 +1518,12 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
       vsync: this,
       duration: _pulseDuration(widget.reaction.gesture),
     )..repeat(reverse: true);
+
+    // Sparkle particles drift upward on a continuous loop.
+    _sparkleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
 
     if (!widget.reaction.isPhoto) {
       _vpc = VideoPlayerController.networkUrl(
@@ -1553,159 +1564,247 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
     _fadeCtrl.dispose();
     _pulseCtrl.dispose();
     _trailCtrl?.dispose();
+    _sparkleCtrl.dispose();
     _vpc?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final sz = widget.size;
-    final half = sz / 2;
+    final s = widget.size; // zone-specific size
     final pixelX = widget.reaction.x * widget.containerWidth;
     final pixelY = widget.reaction.y * widget.containerHeight;
 
-    Widget mediaContent;
-    if (widget.reaction.isPhoto) {
-      mediaContent = Image.network(
-        widget.reaction.mediaUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const ColoredBox(
-          color: MilesColors.surface1,
-          child: Icon(Icons.broken_image_outlined, color: MilesColors.ember),
-        ),
-      );
-    } else if (_videoReady && _vpc != null) {
-      mediaContent = FittedBox(
-        fit: BoxFit.cover,
-        child: SizedBox(
-          width: _vpc!.value.size.width,
-          height: _vpc!.value.size.height,
-          child: VideoPlayer(_vpc!),
-        ),
-      );
-    } else {
-      mediaContent = const ColoredBox(
-        color: MilesColors.surface1,
-        child: Center(
-          child: CircularProgressIndicator(
-            strokeWidth: 1.5,
-            color: MilesColors.ember,
-          ),
-        ),
-      );
-    }
-
-    // The clipped content box (reused as the main child).
-    final clippedContent = SizedBox(
-      width: sz,
-      height: sz,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Motion trail (video only, palmFlat and pinch gestures).
-          if (_trailCtrl != null)
-            AnimatedBuilder(
-              animation: _trailCtrl!,
-              builder: (_, __) {
-                final isStroke =
-                    widget.reaction.gesture == ReactionGesture.palmFlat;
-                final dx = isStroke ? _trailCtrl!.value * 8.0 : 0.0;
-                final dy = isStroke ? 0.0 : _trailCtrl!.value * -4.0;
-                return Transform.translate(
-                  offset: Offset(dx, dy),
-                  child: Opacity(
-                    opacity: 0.25,
-                    child: ClipPath(
-                      clipper: widget.clipper,
-                      child: ColoredBox(
-                        color: MilesColors.ember.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          // Main content with zone clip.
-          ClipPath(
-            clipper: widget.clipper,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                mediaContent,
-                // Depth illusion — very subtle warm gradient.
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Color(0x1FE8C4A0)],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+    // Layer 2 content — the actual reaction, rendered translucent.
+    final Widget mediaContent = widget.reaction.isPhoto
+        ? Image.network(
+            widget.reaction.mediaUrl,
+            width: s,
+            height: s,
+            fit: BoxFit.cover,
+            // A failed load just shows the body photo — no broken-image box.
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          )
+        : _buildVideoWithTrail(s);
 
     return Positioned(
-      left: (pixelX - half).clamp(0.0, widget.containerWidth - sz),
-      top: (pixelY - half).clamp(0.0, widget.containerHeight - sz),
+      left: (pixelX - s / 2).clamp(0.0, widget.containerWidth - s),
+      top: (pixelY - s / 2).clamp(0.0, widget.containerHeight - s),
       child: FadeTransition(
         opacity: _fadeCtrl,
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.3, end: 1.0),
-          duration: const Duration(milliseconds: 400),
+          duration: const Duration(milliseconds: 500),
           curve: Curves.elasticOut,
-          builder: (_, scale, child) =>
-              Transform.scale(scale: scale, child: child),
-          child: AnimatedBuilder(
-            animation: _pulseCtrl,
-            builder: (_, child) {
-              final pulseScale = 1.0 + _pulseCtrl.value * 0.18;
-              final pulseOpacity = (1 - _pulseCtrl.value) * 0.6;
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Breathing outer ember ring.
-                  Transform.scale(
-                    scale: pulseScale,
-                    child: Container(
-                      width: sz,
-                      height: sz,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: MilesColors.ember
-                              .withValues(alpha: pulseOpacity),
-                          width: 2,
-                        ),
+          builder: (_, v, child) =>
+              Transform.scale(scale: v, child: child),
+          child: SizedBox(
+            width: s,
+            height: s,
+            // Clip.none lets the oversized glow aura + upward sparkles overflow.
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // ── LAYER 1: SOFT GLOW AURA (oversized, breathing) ──────────
+                Positioned(
+                  left: -s * 0.35,
+                  top: -s * 0.35,
+                  child: IgnorePointer(
+                    child: AnimatedBuilder(
+                      animation: _pulseCtrl,
+                      builder: (_, __) {
+                        final glowOpacity = 0.25 + (_pulseCtrl.value * 0.30);
+                        return Container(
+                          width: s * 1.7,
+                          height: s * 1.7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              radius: 0.5,
+                              colors: [
+                                MilesColors.ember.withValues(alpha: glowOpacity),
+                                MilesColors.blush
+                                    .withValues(alpha: glowOpacity * 0.5),
+                                Colors.transparent,
+                              ],
+                              stops: const [0.0, 0.4, 1.0],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
+                // ── LAYER 2: REACTION CONTENT (translucent, feathered) ──────
+                ClipPath(
+                  clipper: widget.clipper, // zone shape
+                  child: ShaderMask(
+                    // Radial alpha mask → edges dissolve into the body photo.
+                    shaderCallback: (bounds) => const RadialGradient(
+                      radius: 0.7,
+                      colors: [
+                        Colors.white,
+                        Color(0xD9FFFFFF), // white @ ~0.85
+                        Colors.transparent,
+                      ],
+                      stops: [0.0, 0.55, 1.0],
+                    ).createShader(bounds),
+                    blendMode: BlendMode.dstIn,
+                    child: Opacity(
+                      // Low opacity keeps the body photo dominant underneath.
+                      opacity: 0.50,
+                      child: SizedBox(
+                        width: s,
+                        height: s,
+                        child: mediaContent,
                       ),
                     ),
                   ),
-                  // Ember glow shadow.
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: MilesColors.ember.withValues(alpha: 0.35),
-                          blurRadius: 16,
-                          spreadRadius: 2,
-                        ),
-                      ],
+                ),
+
+                // ── LAYER 3: INNER SOFT LIGHT (luminous center) ─────────────
+                IgnorePointer(
+                  child: Container(
+                    width: s,
+                    height: s,
+                    decoration: const BoxDecoration(
+                      gradient: RadialGradient(
+                        radius: 0.5,
+                        colors: [
+                          Color(0x2EFFF3E0), // warm golden @ ~0.18
+                          Colors.transparent,
+                        ],
+                        stops: [0.0, 1.0],
+                      ),
                     ),
-                    child: child,
                   ),
-                ],
-              );
-            },
-            child: clippedContent,
+                ),
+
+                // ── LAYER 4: SPARKLE PARTICLES ──────────────────────────────
+                ..._buildSparkles(s),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// Video reaction content with the existing gesture motion trail, both at
+  /// dreamy-low opacity. (Videos are MP4 via VideoPlayer — not Image.network.)
+  Widget _buildVideoWithTrail(double s) {
+    final Widget video = (_videoReady && _vpc != null)
+        ? FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: _vpc!.value.size.width,
+              height: _vpc!.value.size.height,
+              child: VideoPlayer(_vpc!),
+            ),
+          )
+        : const SizedBox.shrink(); // transparent while loading → body shows
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Motion trail — a soft ember ghost that oscillates by gesture. We
+        // can't cheaply re-render the single VideoPlayer, so the trail is an
+        // ember wash (kept faint for the dreamy look).
+        if (_trailCtrl != null)
+          AnimatedBuilder(
+            animation: _trailCtrl!,
+            builder: (_, __) {
+              final isStroke =
+                  widget.reaction.gesture == ReactionGesture.palmFlat;
+              final dx = isStroke ? _trailCtrl!.value * 8.0 : 0.0;
+              final dy = isStroke ? 0.0 : _trailCtrl!.value * -4.0;
+              return Transform.translate(
+                offset: Offset(dx, dy),
+                child: Opacity(
+                  opacity: 0.15,
+                  child: ColoredBox(
+                    color: MilesColors.ember.withValues(alpha: 0.6),
+                  ),
+                ),
+              );
+            },
+          ),
+        video,
+      ],
+    );
+  }
+
+  /// 4 magical sparkle dots at deterministic positions (seeded by reaction id
+  /// so both phones match), drifting upward and fading individually.
+  List<Widget> _buildSparkles(double zoneSize) {
+    const sparkleColors = [
+      Color(0xFFE8784A), // ember
+      Color(0xFFFFB3BA), // blush
+      Color(0xFFFFF8E7), // cream/gold
+      Color(0xFFE8C49A), // gilt
+    ];
+
+    final seed = widget.reaction.id.hashCode.abs();
+    final positions = [
+      Offset(
+        (seed % 7 + 1) / 9.0 * zoneSize,
+        (seed % 5 + 1) / 8.0 * zoneSize,
+      ),
+      Offset(
+        ((seed ~/ 7) % 6 + 2) / 9.0 * zoneSize,
+        ((seed ~/ 5) % 7 + 1) / 9.0 * zoneSize,
+      ),
+      Offset(
+        ((seed ~/ 11) % 7 + 1) / 9.0 * zoneSize,
+        ((seed ~/ 3) % 5 + 3) / 9.0 * zoneSize,
+      ),
+      Offset(
+        ((seed ~/ 13) % 5 + 3) / 9.0 * zoneSize,
+        ((seed ~/ 7) % 6 + 1) / 9.0 * zoneSize,
+      ),
+    ];
+
+    const sizes = [3.5, 4.0, 3.0, 4.5];
+    const phases = [0.0, 0.25, 0.5, 0.75];
+
+    return List.generate(4, (i) {
+      return AnimatedBuilder(
+        animation: _sparkleCtrl,
+        builder: (_, __) {
+          final t = (_sparkleCtrl.value + phases[i]) % 1.0;
+          // Drift upward then reset (sawtooth).
+          final driftY = t * zoneSize * 0.4;
+          // Triangle fade: in for the first half, out for the second.
+          final opacity = t < 0.5 ? t * 2 * 0.9 : (1.0 - t) * 2 * 0.9;
+          final color = sparkleColors[i % sparkleColors.length];
+          return Positioned(
+            left: positions[i].dx,
+            top: positions[i].dy - driftY,
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: opacity.clamp(0.0, 0.9),
+                child: Container(
+                  width: sizes[i],
+                  height: sizes[i],
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.8),
+                        blurRadius: sizes[i] * 2,
+                        spreadRadius: sizes[i] * 0.5,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    });
   }
 }
 
