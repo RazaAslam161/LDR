@@ -5,15 +5,23 @@ import 'package:miles/core/widgets/save_media_button.dart';
 /// Full-screen image viewer with pinch-zoom + pan. Used for chat photos and the
 /// home snap. Tap the backdrop or the X to close.
 class MediaViewer extends StatelessWidget {
-  const MediaViewer({super.key, required this.imageUrl, this.heroTag});
+  const MediaViewer({
+    super.key,
+    required this.imageUrl,
+    this.heroTag,
+    this.senderName = 'a message',
+  });
 
   final String imageUrl;
   final Object? heroTag;
+  final String senderName;
 
-  static void open(BuildContext context, String url, {Object? heroTag}) {
+  static void open(BuildContext context, String url,
+      {Object? heroTag, String senderName = 'a message'}) {
     Navigator.of(context).push(MaterialPageRoute<void>(
       fullscreenDialog: true,
-      builder: (_) => MediaViewer(imageUrl: url, heroTag: heroTag),
+      builder: (_) =>
+          MediaViewer(imageUrl: url, heroTag: heroTag, senderName: senderName),
     ));
   }
 
@@ -66,7 +74,8 @@ class MediaViewer extends StatelessWidget {
                 child: SaveMediaButton(
                   size: 24,
                   color: Colors.white,
-                  onSave: () => SaveMediaService.savePhotoFromUrl(imageUrl),
+                  onSave: () => SaveMediaService.savePhotoToVault(
+                      url: imageUrl, senderName: senderName),
                 ),
               ),
             ),

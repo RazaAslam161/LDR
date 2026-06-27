@@ -10,8 +10,8 @@ class SaveMediaButton extends StatefulWidget {
     required this.onSave,
     this.color,
     this.size = 20,
-    this.successMessage = 'Saved to gallery ✓',
-    this.failureMessage = 'Could not save',
+    this.successMessage = 'Saved to your vault 🔒',
+    this.failureMessage = 'Could not save to vault',
   });
 
   /// Performs the save; returns true on success.

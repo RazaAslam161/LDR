@@ -4,6 +4,7 @@ import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,12 +17,14 @@ import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
+import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/features/fake_news/fake_news_screen.dart';
 import 'package:miles/firebase_options.dart';
@@ -92,6 +95,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _sub;
   Timer? _heartbeat;
+  final _volumeChannel = const MethodChannel('miles/volume_keys');
 
   @override
   void initState() {
@@ -107,6 +111,38 @@ class _MilesAppState extends ConsumerState<MilesApp>
         .addPostFrameCallback((_) => AppLock.lockIfEnabled());
     _initDeepLinks();
     _startHeartbeat(); // app launches foregrounded
+
+    // Panic lock: shake ×3 or volume up+down → snap back to the News cover.
+    // Detection only runs while the real app is visible and not already covered.
+    EmergencyLockService.init(
+      onLock: _emergencyLock,
+      shouldDetect: () => MilesApp.showRealApp.value && !stealthActive.value,
+    );
+    // Bridge native hardware volume keys (Android consumes them before they
+    // reach Flutter's key pipeline) for the combo + stealth dismiss.
+    _volumeChannel.setMethodCallHandler(_onVolumeMethod);
+  }
+
+  /// Instantly drop to the News cover (shake / volume combo). No animation.
+  void _emergencyLock() {
+    MilesApp.showRealApp.value = false;
+    stealthActive.value = false;
+  }
+
+  /// A native volume key-DOWN ('up' / 'down'). Volume-down dismisses the stealth
+  /// scrim; while the scrim is up we swallow keys so a stray press can't seed
+  /// the emergency combo. Otherwise (real app visible) feed the combo detector.
+  Future<void> _onVolumeMethod(MethodCall call) async {
+    if (call.method != 'volume') return;
+    final dir = call.arguments as String?;
+    if (dir == null) return;
+    if (stealthActive.value) {
+      if (dir == 'down') stealthActive.value = false;
+      return;
+    }
+    if (MilesApp.showRealApp.value) {
+      EmergencyLockService.handleVolumeDirection(dir);
+    }
   }
 
   /// Foreground presence heartbeat: re-stamps app_last_active_at every 30s (via
@@ -200,6 +236,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _volumeChannel.setMethodCallHandler(null);
+    EmergencyLockService.dispose();
     _stopHeartbeat();
     _sub?.cancel();
     super.dispose();
@@ -257,6 +295,9 @@ class _MilesAppState extends ConsumerState<MilesApp>
                 builder: (context, locked, _) =>
                     locked ? const LockScreen() : const SizedBox.shrink(),
               ),
+              // Stealth quick-cover: invisible top-right tap zone + scrim,
+              // present on every screen inside the real app.
+              const Positioned.fill(child: StealthLayer()),
             ],
           ),
         );

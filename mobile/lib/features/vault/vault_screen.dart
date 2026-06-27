@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// The unlocked vault — personal notes only the owner can see. Shown by
 /// VaultGateScreen after a successful PIN/biometric unlock.
@@ -74,6 +76,34 @@ class _VaultScreenState extends State<VaultScreen> {
     } catch (_) {}
   }
 
+  /// Opens a saved media item. Public couple_media URLs open directly; private
+  /// couple_intimate items (stored as `intimate:<path>`) get a fresh signed URL.
+  Future<void> _openMedia(VaultItem item) async {
+    final c = item.content ?? '';
+    String? url;
+    if (c.startsWith('intimate:')) {
+      url = await ChatRepository.signedVideoUrl(c.substring(9));
+    } else if (c.isNotEmpty) {
+      url = c;
+    }
+    var ok = false;
+    if (url != null && url.isNotEmpty) {
+      try {
+        ok = await launchUrl(Uri.parse(url),
+            mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Link expired — the original message has the latest version'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _delete(VaultItem item) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -99,6 +129,125 @@ class _VaultScreenState extends State<VaultScreen> {
       await VaultRepository.deleteItem(item.id);
       await _load();
     } catch (_) {}
+  }
+
+  bool _isMedia(VaultItem i) => i.type.startsWith('saved_');
+
+  Widget _buildList() {
+    final media = _items.where(_isMedia).toList();
+    final notes = _items.where((i) => !_isMedia(i)).toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
+      children: [
+        if (media.isNotEmpty) ...[
+          _sectionHeader('Saved media'),
+          for (final item in media) ...[
+            _mediaTile(item),
+            const SizedBox(height: 12),
+          ],
+          const SizedBox(height: 8),
+        ],
+        if (notes.isNotEmpty) ...[
+          _sectionHeader('Notes'),
+          for (final item in notes) ...[
+            _noteTile(item),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _sectionHeader(String label) => Padding(
+        padding: const EdgeInsets.only(bottom: 10, top: 4),
+        child: Text(label,
+            style: const TextStyle(
+                color: MilesColors.gilt,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5)),
+      );
+
+  Widget _noteTile(VaultItem item) => GestureDetector(
+        onLongPress: () => _delete(item),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: MilesColors.surface1,
+            borderRadius: BorderRadius.circular(18),
+            border:
+                Border.all(color: MilesColors.gilt.withValues(alpha: 0.12)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(item.content ?? '',
+                  style: const TextStyle(
+                      color: MilesColors.cream50, height: 1.4)),
+              const SizedBox(height: 8),
+              Text(
+                DateFormat('MMM d, y · h:mm a').format(item.createdAt),
+                style:
+                    const TextStyle(color: MilesColors.faint, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _mediaTile(VaultItem item) {
+    final IconData icon;
+    final String title;
+    switch (item.type) {
+      case 'saved_video':
+        icon = Icons.videocam_rounded;
+        title = 'Saved video';
+      case 'saved_voice':
+        icon = Icons.mic_rounded;
+        title = 'Saved voice note';
+      default:
+        icon = Icons.photo_rounded;
+        title = 'Saved photo';
+    }
+    return GestureDetector(
+      onLongPress: () => _delete(item),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: MilesColors.surface1,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.12)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: MilesColors.ember, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: MilesColors.cream50, fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(item.mediaUrl ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: MilesColors.taupe, fontSize: 11)),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.open_in_new_rounded,
+                  color: MilesColors.gilt),
+              onPressed: () => _openMedia(item),
+              tooltip: 'Open',
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -140,41 +289,7 @@ class _VaultScreenState extends State<VaultScreen> {
                       ),
                     ),
                   )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-                    itemCount: _items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (_, i) {
-                      final item = _items[i];
-                      return GestureDetector(
-                        onLongPress: () => _delete(item),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: MilesColors.surface1,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                                color: MilesColors.gilt.withValues(alpha: 0.12)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(item.content ?? '',
-                                  style: const TextStyle(
-                                      color: MilesColors.cream50, height: 1.4)),
-                              const SizedBox(height: 8),
-                              Text(
-                                DateFormat('MMM d, y · h:mm a')
-                                    .format(item.createdAt),
-                                style: const TextStyle(
-                                    color: MilesColors.faint, fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                : _buildList(),
       ),
     );
   }

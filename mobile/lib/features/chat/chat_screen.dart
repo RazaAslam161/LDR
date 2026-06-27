@@ -628,25 +628,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
-  /// Saves an image or video message to the gallery, with brief feedback.
+  /// Saves an image or video message to the private vault, with brief feedback.
   Future<void> _saveMessageMedia(Message m) async {
+    final uid = SupabaseService.currentUserId;
+    final partnerName =
+        ref.read(sessionProvider).partner?.displayName ?? 'your partner';
+    final sender = m.isMine(uid) ? 'you' : partnerName;
     var success = false;
-    var failure = 'Could not save';
     if (m.kind == 'image') {
       final url = m.imageUrl;
-      if (url != null) success = await SaveMediaService.savePhotoFromUrl(url);
-    } else if (m.kind == 'video') {
-      final url = await ChatRepository.signedVideoUrl(m.videoPath);
-      if (url == null) {
-        failure = 'Could not save — try opening it first';
-      } else {
-        success = await SaveMediaService.saveVideoFromUrl(url);
+      if (url != null) {
+        success =
+            await SaveMediaService.savePhotoToVault(url: url, senderName: sender);
       }
+    } else if (m.kind == 'video' && m.videoPath != null) {
+      success = await SaveMediaService.saveVideoToVault(
+          path: m.videoPath!, senderName: sender);
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'Saved to gallery ✓' : failure),
+        content: Text(
+            success ? 'Saved to your vault 🔒' : 'Could not save to vault'),
         backgroundColor: success ? MilesColors.sage : MilesColors.ember,
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
@@ -917,6 +920,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                   repliedTo: _byId(m.replyToId),
                                                   player: _player,
                                                   theme: chatTheme,
+                                                  senderName: m.isMine(uid)
+                                                      ? 'you'
+                                                      : (partnerName ??
+                                                          'your partner'),
                                                   status: m.isMine(uid)
                                                       ? _statusFor(m, presence)
                                                       : null,
@@ -1051,6 +1058,7 @@ class _Bubble extends StatelessWidget {
     required this.showDateHeader,
     required this.player,
     required this.theme,
+    required this.senderName,
     this.repliedTo,
     this.status,
   });
@@ -1060,6 +1068,7 @@ class _Bubble extends StatelessWidget {
   final bool showDateHeader;
   final AudioPlayer player;
   final ChatTheme theme;
+  final String senderName;
   final Message? repliedTo;
   final _MsgStatus? status;
 
@@ -1117,7 +1126,8 @@ class _Bubble extends StatelessWidget {
                     : _Content(
                         message: message,
                         player: player,
-                        textColor: theme.text),
+                        textColor: theme.text,
+                        senderName: senderName),
               ],
             ),
           ),
@@ -1382,10 +1392,12 @@ class _Content extends StatelessWidget {
   const _Content({
     required this.message,
     required this.player,
+    required this.senderName,
     this.textColor = MilesColors.cream50,
   });
   final Message message;
   final AudioPlayer player;
+  final String senderName;
   final Color textColor;
 
   @override
@@ -1437,7 +1449,8 @@ class _Content extends StatelessWidget {
         return GestureDetector(
           onTap: url == null
               ? null
-              : () => MediaViewer.open(context, url, heroTag: url),
+              : () => MediaViewer.open(context, url,
+                  heroTag: url, senderName: senderName),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: Stack(
@@ -1476,7 +1489,8 @@ class _Content extends StatelessWidget {
                       padding: const EdgeInsets.all(4),
                       child: SaveMediaButton(
                         size: 18,
-                        onSave: () => SaveMediaService.savePhotoFromUrl(url),
+                        onSave: () => SaveMediaService.savePhotoToVault(
+                            url: url, senderName: senderName),
                       ),
                     ),
                   ),
@@ -1493,9 +1507,10 @@ class _Content extends StatelessWidget {
                 style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
           );
         }
-        return _VoicePlayer(url: url, player: player);
+        return _VoicePlayer(
+            url: url, player: player, senderName: senderName);
       case 'video':
-        return _VideoBubble(path: m.videoPath);
+        return _VideoBubble(path: m.videoPath, senderName: senderName);
       default:
         return Text(
           m.body ?? '',
@@ -1555,9 +1570,11 @@ class _ChatBg extends StatelessWidget {
 }
 
 class _VoicePlayer extends StatefulWidget {
-  const _VoicePlayer({required this.url, required this.player});
+  const _VoicePlayer(
+      {required this.url, required this.player, required this.senderName});
   final String url;
   final AudioPlayer player;
+  final String senderName;
 
   @override
   State<_VoicePlayer> createState() => _VoicePlayerState();
@@ -1644,8 +1661,8 @@ class _VoicePlayerState extends State<_VoicePlayer> {
         SaveMediaButton(
           size: 16,
           color: MilesColors.taupe,
-          onSave: () => SaveMediaService.saveAudioFromUrl(widget.url),
-          successMessage: 'Voice note saved',
+          onSave: () => SaveMediaService.saveVoiceToVault(
+              url: widget.url, senderName: widget.senderName),
         ),
       ],
     );
@@ -1694,8 +1711,9 @@ class _NewMessageChip extends StatelessWidget {
 
 /// Tap-to-play thumbnail for a private video message → full-screen player.
 class _VideoBubble extends StatefulWidget {
-  const _VideoBubble({required this.path});
+  const _VideoBubble({required this.path, required this.senderName});
   final String? path;
+  final String senderName;
 
   @override
   State<_VideoBubble> createState() => _VideoBubbleState();
@@ -1716,7 +1734,9 @@ class _VideoBubbleState extends State<_VideoBubble> {
       return;
     }
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => _FullScreenVideo(url: url)),
+      MaterialPageRoute<void>(
+          builder: (_) => _FullScreenVideo(
+              url: url, videoPath: widget.path, senderName: widget.senderName)),
     );
   }
 
@@ -1760,13 +1780,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
               padding: const EdgeInsets.all(4),
               child: SaveMediaButton(
                 size: 18,
-                failureMessage: 'Could not save — try opening it first',
-                onSave: () async {
-                  final url =
-                      await ChatRepository.signedVideoUrl(widget.path);
-                  if (url == null) return false;
-                  return SaveMediaService.saveVideoFromUrl(url);
-                },
+                onSave: () => SaveMediaService.saveVideoToVault(
+                    path: widget.path!, senderName: widget.senderName),
               ),
             ),
           ),
@@ -1778,8 +1793,11 @@ class _VideoBubbleState extends State<_VideoBubble> {
 /// Full-screen player with FLAG_SECURE so intimate video can't be
 /// screenshotted / screen-recorded / shown in the recents preview.
 class _FullScreenVideo extends StatefulWidget {
-  const _FullScreenVideo({required this.url});
+  const _FullScreenVideo(
+      {required this.url, this.videoPath, this.senderName = 'a message'});
   final String url;
+  final String? videoPath;
+  final String senderName;
 
   @override
   State<_FullScreenVideo> createState() => _FullScreenVideoState();
@@ -1835,16 +1853,18 @@ class _FullScreenVideoState extends State<_FullScreenVideo> {
         backgroundColor: Colors.black,
         leading: const BackButton(color: Colors.white),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(
-              child: SaveMediaButton(
-                size: 24,
-                color: Colors.white,
-                onSave: () => SaveMediaService.saveVideoFromUrl(widget.url),
+          if (widget.videoPath != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: SaveMediaButton(
+                  size: 24,
+                  color: Colors.white,
+                  onSave: () => SaveMediaService.saveVideoToVault(
+                      path: widget.videoPath!, senderName: widget.senderName),
+                ),
               ),
             ),
-          ),
         ],
       ),
       body: Center(

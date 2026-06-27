@@ -50,8 +50,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // Pause the stream when leaving Home (mode persists; resumes on return).
-    LocationService.pauseStream();
+    // Do NOT pause the location stream here — the user may have just navigated
+    // to another tab (Chat/Games) with the app still open. Pausing on dispose
+    // froze the partner's map whenever Home wasn't the active tab. The stream
+    // is paused only on real app-background (didChangeAppLifecycleState.paused);
+    // LocationForegroundService covers true background updates.
     super.dispose();
   }
 

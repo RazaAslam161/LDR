@@ -1,123 +1,66 @@
-import 'dart:io';
+import 'package:miles/features/vault/vault_repository.dart';
 
-import 'package:gal/gal.dart';
-import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
-
-/// Centralised "save media to the device" logic, shared by chat + touch.
-///
-/// Photos/videos go to the system gallery via [Gal] (handles its own
-/// permissions + MediaStore on Android 29+). Audio isn't a gallery type, so
-/// voice notes are written to the app's external files directory instead.
+/// Saves received/sent chat + touch media into the Private Vault — and ONLY the
+/// vault. Zero bytes touch device storage: no gallery entry, no Downloads file,
+/// no temp file. We store a reference (public URL, or `intimate:<path>` for the
+/// private bucket) in the PIN-protected vault; the bytes stay in Supabase.
 class SaveMediaService {
   SaveMediaService._();
 
-  /// Save a photo from a URL (public couple_media or a signed couple_intimate
-  /// URL). Returns false on any failure (no throw).
-  static Future<bool> savePhotoFromUrl(String url) async {
+  /// couple_media (public) photo — e.g. a chat image. URL never expires.
+  static Future<bool> savePhotoToVault({
+    required String url,
+    required String senderName,
+  }) =>
+      _save(type: 'saved_photo', noun: 'Photo', senderName: senderName, publicUrl: url);
+
+  /// couple_media (public) voice note.
+  static Future<bool> saveVoiceToVault({
+    required String url,
+    required String senderName,
+  }) =>
+      _save(type: 'saved_voice', noun: 'Voice note', senderName: senderName, publicUrl: url);
+
+  /// couple_intimate (private) video — store the path, re-sign on open.
+  static Future<bool> saveVideoToVault({
+    required String path,
+    required String senderName,
+  }) =>
+      _save(type: 'saved_video', noun: 'Video', senderName: senderName, storagePath: path);
+
+  /// couple_intimate (private) photo — e.g. a Touch body photo. Path stored.
+  static Future<bool> saveIntimatePhotoToVault({
+    required String path,
+    required String senderName,
+  }) =>
+      _save(type: 'saved_photo', noun: 'Photo', senderName: senderName, storagePath: path);
+
+  static Future<bool> _save({
+    required String type,
+    required String noun,
+    required String senderName,
+    String? publicUrl,
+    String? storagePath,
+  }) async {
     try {
-      if (!await _ensureGalleryAccess()) return false;
-      final bytes = await _download(url, const Duration(seconds: 30));
-      if (bytes == null) return false;
-      final file = await _writeTemp(bytes, _extFromUrl(url) ?? 'jpg');
-      await Gal.putImage(file.path);
-      await _safeDelete(file);
+      final label = '$noun from $senderName · ${_formatDate(DateTime.now())}';
+      await VaultRepository.saveMediaToVault(
+        type: type,
+        label: label,
+        publicUrl: publicUrl,
+        storagePath: storagePath,
+      );
       return true;
     } catch (_) {
       return false;
     }
   }
 
-  /// Save a video from a URL (signed couple_intimate URL). Returns false on
-  /// failure (e.g. an expired signed URL → 403).
-  static Future<bool> saveVideoFromUrl(String url) async {
-    try {
-      if (!await _ensureGalleryAccess(toAlbum: false)) return false;
-      final bytes = await _download(url, const Duration(seconds: 120));
-      if (bytes == null) return false;
-      final file = await _writeTemp(bytes, 'mp4');
-      await Gal.putVideo(file.path);
-      await _safeDelete(file);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
+  static String _formatDate(DateTime dt) =>
+      '${dt.day} ${_month(dt.month)} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
 
-  /// Save an audio file (voice note) to the app's external files directory.
-  /// gal does not handle audio (gallery = photos/videos only).
-  static Future<bool> saveAudioFromUrl(String url) async {
-    try {
-      final bytes = await _download(url, const Duration(seconds: 60));
-      if (bytes == null) return false;
-      final dir =
-          await getExternalStorageDirectory() ?? await getTemporaryDirectory();
-      final file = File(
-          '${dir.path}/tethered_voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
-      await file.writeAsBytes(bytes);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Save a photo already on disk (e.g. just-captured camera file).
-  static Future<bool> savePhotoFromPath(String path) async {
-    try {
-      if (!await _ensureGalleryAccess()) return false;
-      await Gal.putImage(path);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Save a video already on disk.
-  static Future<bool> saveVideoFromPath(String path) async {
-    try {
-      if (!await _ensureGalleryAccess(toAlbum: false)) return false;
-      await Gal.putVideo(path);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  // ── helpers ────────────────────────────────────────────────────────────────
-
-  static Future<bool> _ensureGalleryAccess({bool toAlbum = true}) async {
-    if (await Gal.hasAccess(toAlbum: toAlbum)) return true;
-    return Gal.requestAccess(toAlbum: toAlbum);
-  }
-
-  static Future<List<int>?> _download(String url, Duration timeout) async {
-    final res = await http.get(Uri.parse(url)).timeout(timeout);
-    if (res.statusCode != 200) return null;
-    return res.bodyBytes;
-  }
-
-  static Future<File> _writeTemp(List<int> bytes, String ext) async {
-    final dir = await getTemporaryDirectory();
-    final file = File(
-        '${dir.path}/tethered_${DateTime.now().millisecondsSinceEpoch}.$ext');
-    await file.writeAsBytes(bytes);
-    return file;
-  }
-
-  static Future<void> _safeDelete(File file) async {
-    try {
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
-  }
-
-  static String? _extFromUrl(String url) {
-    try {
-      final path = Uri.parse(url).path;
-      final dot = path.lastIndexOf('.');
-      if (dot != -1 && dot < path.length - 1) {
-        return path.substring(dot + 1).toLowerCase();
-      }
-    } catch (_) {}
-    return null;
-  }
+  static String _month(int m) => const [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ][m - 1];
 }

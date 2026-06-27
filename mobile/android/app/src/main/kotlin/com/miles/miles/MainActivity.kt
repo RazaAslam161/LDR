@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.KeyEvent
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -20,8 +21,24 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var secureFlagSet = false
 
+    // Forwards hardware volume-key presses to Dart for the emergency-lock combo
+    // + stealth-scrim dismiss. Android consumes volume keys before Flutter's
+    // key pipeline sees them, so we must bridge them ourselves.
+    private var volumeChannel: MethodChannel? = null
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> volumeChannel?.invokeMethod("volume", "up")
+            KeyEvent.KEYCODE_VOLUME_DOWN -> volumeChannel?.invokeMethod("volume", "down")
+        }
+        // Return super so the system still adjusts the volume normally.
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        volumeChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/volume_keys")
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/secure_screen")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

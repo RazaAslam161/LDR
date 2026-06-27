@@ -129,11 +129,9 @@ class FcmService {
       return;
     }
     if (type == 'care') {
-      // Foreground reminder: post the gentle notification directly.
+      // Foreground reminder: post the (blank, secret) notification directly.
       showCareNotification(
         plugin: _fln,
-        title: (m.data['title'] as String?) ?? 'A reminder 💛',
-        body: (m.data['body'] as String?) ?? '',
         nudgeId: (m.data['nudge_id'] as String?) ?? '',
       );
       return;

@@ -89,6 +89,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   String? _myPhotoUrl;
   String? _partnerPhotoUrl;
+  // Raw couple_intimate storage paths (for saving to vault — we store the path,
+  // not the 1h signed URL, so the vault entry never expires).
+  String? _myBodyPath;
+  String? _partnerBodyPath;
   bool _uploadingPhoto = false;
   Offset? _lastPan; // throttle caress sends
   double _heat = 0; // shared warmth 0..1
@@ -266,6 +270,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       setState(() {
         _myPhotoUrl = myUrl;
         _partnerPhotoUrl = partnerUrl;
+        _myBodyPath = mine?.bodyPhotoPath;
+        _partnerBodyPath = partner?.bodyPhotoPath;
       });
     }
   }
@@ -283,6 +289,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       if (mounted) {
         setState(() {
           _myPhotoUrl = url;
+          _myBodyPath = path;
           if (_myUid != null)
             _frames.remove(_myUid); // fresh photo, fresh frame
         });
@@ -407,6 +414,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   String? _photoOf(String uid) =>
       uid == _myUid ? _myPhotoUrl : _partnerPhotoUrl;
+  String? _bodyPathOf(String uid) =>
+      uid == _myUid ? _myBodyPath : _partnerBodyPath;
   String _nameOf(String uid) =>
       uid == _myUid ? (_myName ?? 'You') : (_partnerName ?? 'Them');
 
@@ -724,9 +733,12 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         ),
                         child: SaveMediaButton(
                           size: 20,
-                          failureMessage: 'Could not save — try reopening',
-                          onSave: () =>
-                              SaveMediaService.savePhotoFromUrl(photoUrl),
+                          onSave: () {
+                            final p = _bodyPathOf(owner);
+                            if (p == null) return Future.value(false);
+                            return SaveMediaService.saveIntimatePhotoToVault(
+                                path: p, senderName: isMe ? 'you' : name);
+                          },
                         ),
                       ),
                     ),

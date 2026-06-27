@@ -48,12 +48,14 @@ Future<void> showReachNotification({
     vibrationPattern: reachVibrationPattern(),
     fullScreenIntent: fullScreen,
     icon: '@mipmap/ic_launcher',
-    ticker: 'Reach',
+    ticker: 'News update',
+    // Privacy: hidden entirely on the lock screen; no preview anywhere.
+    visibility: NotificationVisibility.secret,
   );
   await plugin.show(
     id: reachId.hashCode & 0x7fffffff,
-    title: '$fromName is reaching for you 💕',
-    body: 'Tap to reach back',
+    title: 'News update',
+    body: 'Tap to open',
     notificationDetails: NotificationDetails(android: android),
     payload: '$reachId|$fromName',
   );
@@ -100,12 +102,13 @@ Future<void> showCallNotification({
     enableVibration: true,
     vibrationPattern: callVibrationPattern(),
     icon: '@mipmap/ic_launcher',
-    ticker: 'Incoming call',
+    ticker: 'News update',
+    visibility: NotificationVisibility.secret,
   );
   await plugin.show(
     id: callId.hashCode & 0x7fffffff,
-    title: video ? '$fromName is video calling 📹' : '$fromName is calling 📞',
-    body: 'Tap to answer',
+    title: 'News update',
+    body: 'Tap to open',
     notificationDetails: NotificationDetails(android: android),
     payload: 'call|$callId|$fromName|${video ? 1 : 0}',
   );
@@ -129,8 +132,6 @@ AndroidNotificationChannel buildCareChannel() =>
 /// A gentle reminder notification ("eat lunch", "take your medicine"…).
 Future<void> showCareNotification({
   required FlutterLocalNotificationsPlugin plugin,
-  required String title,
-  required String body,
   required String nudgeId,
 }) async {
   const android = AndroidNotificationDetails(
@@ -140,12 +141,13 @@ Future<void> showCareNotification({
     importance: Importance.high,
     priority: Priority.high,
     icon: '@mipmap/ic_launcher',
-    ticker: 'Reminder',
+    ticker: 'News update',
+    visibility: NotificationVisibility.secret,
   );
   await plugin.show(
     id: nudgeId.hashCode & 0x7fffffff,
-    title: title,
-    body: body,
+    title: 'News update',
+    body: 'Tap to open',
     notificationDetails: const NotificationDetails(android: android),
     payload: 'care|$nudgeId',
   );
@@ -186,8 +188,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await androidPlugin?.createNotificationChannel(buildCareChannel());
     await showCareNotification(
       plugin: plugin,
-      title: (message.data['title'] as String?) ?? 'A reminder 💛',
-      body: (message.data['body'] as String?) ?? '',
       nudgeId: (message.data['nudge_id'] as String?) ?? '',
     );
     return;

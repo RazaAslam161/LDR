@@ -83,7 +83,6 @@ dependencies:
   http: ^1.6.0
   xml: ^7.0.1
   uuid: ^4.5.3
-  gal: ^1.1.0
   cached_network_image: ^3.4.1
   screen_brightness: ^2.1.11
 
