@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
@@ -13,12 +15,35 @@ import 'package:miles/core/services/touch_haptics.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_repository.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
+import 'package:video_player/video_player.dart';
+
+class _PendingCameraIcon {
+  final double x;
+  final double y;
+  const _PendingCameraIcon({required this.x, required this.y});
+}
+
+class _ActiveReactionGif {
+  final String gifUrl;
+  final double x;
+  final double y;
+  final String id;
+  const _ActiveReactionGif({
+    required this.gifUrl,
+    required this.x,
+    required this.y,
+    required this.id,
+  });
+}
 
 class _TouchType {
   const _TouchType(this.key, this.emoji, this.label, this.color);
@@ -86,6 +111,11 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   ManagedSubscription? _channel;
   final List<_ActiveTouch> _active = [];
   int _nextId = 0;
+
+  bool _reactionModeActive = false;
+  _PendingCameraIcon? _pendingCamera;
+  Timer? _cameraIconTimer;
+  final List<_ActiveReactionGif> _reactions = [];
 
   String? _myPhotoUrl;
   String? _partnerPhotoUrl;
@@ -194,6 +224,89 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _addNeon(owner, x, y, stroke, mine: false);
   }
 
+  void _onReactionGifMsg(Map<String, dynamic> payload) {
+    if (!mounted || payload['from'] == _myUid) return;
+    final gifUrl = payload['gif_url'] as String?;
+    final x = (payload['x'] as num?)?.toDouble();
+    final y = (payload['y'] as num?)?.toDouble();
+    final id = payload['id'] as String? ?? const Uuid().v4();
+    if (gifUrl != null && x != null && y != null) {
+      _addReaction(gifUrl, x, y, id);
+    }
+  }
+
+  Future<void> _startReactionCapture(double x, double y) async {
+    // Capture messenger before any async gap.
+    final messenger = ScaffoldMessenger.of(context);
+
+    final videoFile = await _ReactionCameraSheet.show(context);
+    if (videoFile == null || !mounted) return;
+
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Sending your reaction... 🎬'),
+        duration: Duration(seconds: 15),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    final mediaUrl = await _uploadReaction(videoFile);
+    try { await videoFile.delete(); } catch (_) {}
+
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+
+    if (mediaUrl == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not send reaction. Try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final reactionId = const Uuid().v4();
+    _addReaction(mediaUrl, x, y, reactionId);
+
+    _channel?.channel?.sendBroadcastMessage(
+      event: 'reaction_gif',
+      payload: {
+        'from': _myUid,
+        'gif_url': mediaUrl,
+        'x': x,
+        'y': y,
+        'id': reactionId,
+      },
+    );
+  }
+
+  Future<String?> _uploadReaction(File videoFile) async {
+    try {
+      final path = '$_coupleId/reactions/${const Uuid().v4()}.mp4';
+      await SupabaseService.client.storage
+          .from('couple_intimate')
+          .upload(path, videoFile,
+              fileOptions: const FileOptions(
+                contentType: 'video/mp4',
+                upsert: false,
+              ));
+      return await SupabaseService.client.storage
+          .from('couple_intimate')
+          .createSignedUrl(path, 3600);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _addReaction(String gifUrl, double x, double y, String id) {
+    final r = _ActiveReactionGif(gifUrl: gifUrl, x: x, y: y, id: id);
+    if (mounted) setState(() => _reactions.add(r));
+    Timer(const Duration(seconds: 8), () {
+      if (mounted) setState(() => _reactions.remove(r));
+    });
+  }
+
   void _ensureNeonTimer() {
     _neonTimer ??= Timer.periodic(const Duration(milliseconds: 55), (_) {
       if (!mounted) return;
@@ -239,6 +352,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         .onBroadcast(event: 'frame', callback: _onFrameMsg)
         .onBroadcast(event: 'photo', callback: _onPhotoMsg)
         .onBroadcast(event: 'neon', callback: _onNeonMsg)
+        .onBroadcast(event: 'reaction_gif', callback: _onReactionGifMsg)
         .subscribe());
   }
 
@@ -247,6 +361,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     SecureScreen.clearSecure();
     _heatTimer?.cancel();
     _neonTimer?.cancel();
+    _cameraIconTimer?.cancel();
     reportActiveTab(ref);
     _channel?.dispose();
     super.dispose();
@@ -390,6 +505,14 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       'y': y,
       'type': _type,
     });
+    // REACTION MODE ONLY — camera icon appears at touch point on partner's body.
+    if (_reactionModeActive && owner == _partnerUid) {
+      _cameraIconTimer?.cancel();
+      setState(() => _pendingCamera = _PendingCameraIcon(x: x, y: y));
+      _cameraIconTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _pendingCamera = null);
+      });
+    }
   }
 
   void _onTouchMsg(Map<String, dynamic> payload) {
@@ -442,6 +565,43 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           ),
         ),
         actions: [
+          GestureDetector(
+            onTap: () => setState(() {
+              _reactionModeActive = !_reactionModeActive;
+              if (!_reactionModeActive) {
+                _cameraIconTimer?.cancel();
+                _pendingCamera = null;
+              }
+            }),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    color: _reactionModeActive
+                        ? MilesColors.ember
+                        : MilesColors.faint,
+                    size: 24,
+                  ),
+                  if (_reactionModeActive)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: MilesColors.ember,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
           IconButton(
             tooltip:
                 _drawing ? 'Drawing hot lines — tap to stop' : 'Draw hot lines',
@@ -785,6 +945,98 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       top: t.y * h - 45,
                       child: _Glow(type: t.type, onDone: () => _remove(t.id)),
                     ),
+                  // ── Reaction mode overlays (partner column only) ──────────
+                  if (!isMe && _reactionModeActive)
+                    Positioned(
+                      top: 36,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: MilesColors.ember.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: MilesColors.ember.withValues(alpha: 0.4),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                  color: MilesColors.ember,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Reaction mode',
+                                style: TextStyle(
+                                  color: MilesColors.ember,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!isMe && _pendingCamera != null)
+                    Positioned(
+                      left: (_pendingCamera!.x * w) - 20,
+                      top: (_pendingCamera!.y * h) - 20,
+                      child: GestureDetector(
+                        onTap: () async {
+                          _cameraIconTimer?.cancel();
+                          final pos = _pendingCamera!;
+                          setState(() => _pendingCamera = null);
+                          await _startReactionCapture(pos.x, pos.y);
+                        },
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.0, end: 1.0),
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.elasticOut,
+                          builder: (_, v, child) =>
+                              Transform.scale(scale: v, child: child),
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: MilesColors.ember,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color:
+                                      MilesColors.ember.withValues(alpha: 0.5),
+                                  blurRadius: 12,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.videocam_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!isMe)
+                    ..._reactions.map((r) => _ReactionGifWidget(
+                          reaction: r,
+                          containerWidth: w,
+                          containerHeight: h,
+                          onExpired: () {
+                            if (mounted) setState(() => _reactions.remove(r));
+                          },
+                        )),
                 ],
               ),
             );
@@ -922,6 +1174,367 @@ class _NeonPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _NeonPainter old) => true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reaction GIF widgets
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ReactionGifWidget extends StatefulWidget {
+  final _ActiveReactionGif reaction;
+  final double containerWidth;
+  final double containerHeight;
+  final VoidCallback onExpired;
+
+  const _ReactionGifWidget({
+    required this.reaction,
+    required this.containerWidth,
+    required this.containerHeight,
+    required this.onExpired,
+  });
+
+  @override
+  State<_ReactionGifWidget> createState() => _ReactionGifWidgetState();
+}
+
+class _ReactionGifWidgetState extends State<_ReactionGifWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  VideoPlayerController? _vpc;
+  bool _videoReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+      value: 1.0,
+    );
+
+    _vpc = VideoPlayerController.networkUrl(
+      Uri.parse(widget.reaction.gifUrl),
+    )..initialize().then((_) {
+        if (mounted) {
+          setState(() => _videoReady = true);
+          _vpc!
+            ..setLooping(true)
+            ..play();
+        }
+      });
+
+    final displayMs = 5000 + (widget.reaction.id.hashCode.abs() % 3000);
+    Future.delayed(Duration(milliseconds: displayMs), () {
+      if (mounted) {
+        _ctrl.reverse().then((_) {
+          if (mounted) widget.onExpired();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _vpc?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pixelX = widget.reaction.x * widget.containerWidth;
+    final pixelY = widget.reaction.y * widget.containerHeight;
+    return Positioned(
+      left: (pixelX - 60).clamp(0.0, widget.containerWidth - 120),
+      top: (pixelY - 60).clamp(0.0, widget.containerHeight - 120),
+      child: FadeTransition(
+        opacity: _ctrl,
+        child: Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: MilesColors.ember.withValues(alpha: 0.7),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: MilesColors.ember.withValues(alpha: 0.35),
+                blurRadius: 16,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: _videoReady && _vpc != null
+                ? FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _vpc!.value.size.width,
+                      height: _vpc!.value.size.height,
+                      child: VideoPlayer(_vpc!),
+                    ),
+                  )
+                : ColoredBox(
+                    color: MilesColors.surface1,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: MilesColors.ember,
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReactionCameraSheet extends StatefulWidget {
+  const _ReactionCameraSheet();
+
+  static Future<File?> show(BuildContext context) {
+    return showModalBottomSheet<File?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _ReactionCameraSheet(),
+    );
+  }
+
+  @override
+  State<_ReactionCameraSheet> createState() => _ReactionCameraSheetState();
+}
+
+class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
+  CameraController? _ctrl;
+  List<CameraDescription> _cameras = [];
+  int _camIndex = 1; // front camera default
+  bool _recording = false;
+  int _countdown = 5;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    _cameras = await availableCameras();
+    if (_cameras.isEmpty) return;
+    _camIndex = _cameras.length > 1 ? 1 : 0;
+    await _setup(_cameras[_camIndex]);
+  }
+
+  Future<void> _setup(CameraDescription cam) async {
+    await _ctrl?.dispose();
+    _ctrl = CameraController(
+      cam,
+      ResolutionPreset.low,
+      enableAudio: true,
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+    await _ctrl!.initialize();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _flip() async {
+    if (_cameras.length < 2 || _recording) return;
+    _camIndex = (_camIndex + 1) % _cameras.length;
+    await _setup(_cameras[_camIndex]);
+  }
+
+  Future<void> _record() async {
+    if (_ctrl == null || _recording) return;
+    setState(() {
+      _recording = true;
+      _countdown = 5;
+    });
+    await _ctrl!.startVideoRecording();
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _countdown--);
+      if (_countdown <= 0) {
+        t.cancel();
+        await _stop();
+      }
+    });
+  }
+
+  Future<void> _stop() async {
+    if (!_recording) return;
+    _timer?.cancel();
+    final xfile = await _ctrl!.stopVideoRecording();
+    setState(() => _recording = false);
+    if (mounted) Navigator.of(context).pop(File(xfile.path));
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassPanel(
+      blur: MilesColors.blurLg,
+      radius: 24,
+      padding: EdgeInsets.zero,
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.62,
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: MilesColors.gilt,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: _ctrl?.value.isInitialized == true
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Transform.scale(
+                              scaleX: _camIndex == 1 ? -1 : 1,
+                              child: CameraPreview(_ctrl!),
+                            ),
+                            if (_recording)
+                              Center(
+                                child: Text(
+                                  '$_countdown',
+                                  style: GoogleFonts.fraunces(
+                                    fontSize: 80,
+                                    color: Colors.white.withValues(alpha: 0.85),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            if (_recording)
+                              Positioned(
+                                top: 14,
+                                left: 14,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 9,
+                                      height: 9,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    const Text(
+                                      'REC',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (!_recording && _cameras.length > 1)
+                              Positioned(
+                                top: 14,
+                                right: 14,
+                                child: GestureDetector(
+                                  onTap: _flip,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black45,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: const Icon(
+                                      Icons.flip_camera_android,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        )
+                      : Container(
+                          color: MilesColors.nightDeep,
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                                color: MilesColors.ember),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (!_recording)
+              GestureDetector(
+                onTap: _record,
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    gradient: MilesGradients.cta,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: MilesColors.ember.withValues(alpha: 0.5),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.videocam_rounded,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+              )
+            else
+              Text(
+                'Recording... $_countdown',
+                style: GoogleFonts.inter(
+                  color: MilesColors.taupe,
+                  fontSize: 14,
+                ),
+              ),
+            const SizedBox(height: 16),
+            if (!_recording)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(color: MilesColors.taupe),
+                ),
+              ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// A simple, gender-neutral illustrated figure — the placeholder until a real
