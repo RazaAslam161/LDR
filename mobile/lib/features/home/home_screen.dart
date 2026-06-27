@@ -82,27 +82,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _initLocation() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    // Honour the user's saved choice. Live sharing (and its foreground-service
-    // notification) is NEVER auto-enabled — it only turns on when the user flips
-    // the location toggle. Default is OFF.
+    // The foreground service (and its notification) starts ONLY when the user's
+    // LIVE toggle is on — tracked by the local live-intent pref, NOT the DB
+    // sharing mode. Settings' 'precise' mode sets the DB mode but never the live
+    // intent, so it must not auto-start the service here. Default = live OFF.
     final mine = await PresenceService.fetchMine(couple.id);
     final mode = mine?.locationSharingMode ?? 'off';
+    final liveOn = await LocationService.isLiveModeOn();
 
-    if (mounted) setState(() => _myMode = mode);
+    // The "Live sharing" banner reflects the LIVE state, not a static precise row.
+    if (mounted) {
+      setState(() =>
+          _myMode = liveOn ? 'precise' : (mode == 'city' ? 'city' : 'off'));
+    }
     await _refreshMyCoords();
-    if (mode == 'precise') {
+
+    if (liveOn) {
+      // Resume the live stream the user previously turned on (notification shows).
       await LocationService.startLiveSharing(couple.id);
       await _refreshMyCoords();
       // Periodic background updates so the partner still gets movement when the
       // app is closed. Best-effort (OEM battery limits apply).
       await BgLocationService.enable();
-    } else if (mode == 'city') {
-      await LocationService.shareOnce(couple.id, mode);
     } else {
-      // OFF: tear down any stale live-sharing (foreground service + its
-      // notification + persisted intent) left over from an older build.
+      // Not live: guarantee the foreground service is OFF (no phantom
+      // notification) and stop background streaming. Never wipe presence — a
+      // 'precise' static row keeps the partner's last-known pin visible.
       await LocationService.ensureLiveOff();
       await BgLocationService.disable();
+      if (mode == 'city') {
+        await LocationService.shareOnce(couple.id, 'city');
+      }
     }
   }
 
@@ -122,8 +132,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _stopLive() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    await LocationService.stopLiveSharing(couple.id);
-    await BgLocationService.disable();
+    // Keep the partner's last-known pin — stop live streaming + the foreground
+    // service + background work, but don't wipe coords (handled inside).
+    await LocationService.stopLiveSharingKeepLast(couple.id);
     if (mounted) setState(() => _myMode = 'off');
   }
 

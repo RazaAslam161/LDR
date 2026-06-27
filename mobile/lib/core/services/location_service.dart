@@ -219,6 +219,51 @@ class LocationService {
     }
   }
 
+  /// Turn OFF live streaming but KEEP the partner's view of your last position.
+  ///
+  /// Stops the in-app stream + the foreground service (its notification
+  /// disappears) and the WorkManager fallback, and clears the local "live"
+  /// intent so nothing auto-resumes. Unlike [stopLiveSharing] it does NOT wipe
+  /// the shared coords or set mode 'off': it pushes ONE final 'precise' fix so
+  /// the partner sees a static "last known" pin (with a growing "Xm ago"),
+  /// never "isn't sharing location".
+  static Future<void> stopLiveSharingKeepLast(String coupleId) async {
+    await _liveSub?.cancel();
+    _liveSub = null;
+    _lastLabelLat = null;
+    _lastLabelLon = null;
+
+    // Remove the persistent notification + the periodic background updates.
+    await LocationForegroundService.stop();
+    await BgLocationService.disable();
+
+    // Clear the persisted live intent so resume/init won't restart streaming
+    // and the service isolate won't write coords if the OS wakes it.
+    final uid = SupabaseService.client.auth.currentUser?.id ?? '';
+    if (uid.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('location_sharing_mode_$uid', 'off');
+    }
+
+    // Push ONE final fix (one-shot, not streaming) so the partner keeps seeing
+    // the last position as a static pin. Mode stays 'precise' — NOT 'off'.
+    try {
+      Position? pos = await Geolocator.getLastKnownPosition();
+      pos ??= await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      await PresenceService.setLocation(
+        coupleId,
+        mode: 'precise',
+        lat: pos.latitude,
+        lon: pos.longitude,
+      );
+    } catch (_) {
+      // Couldn't get a fix — leave the last live coords in place (still shown).
+    }
+  }
+
   /// Whether the user's persisted choice is live ('precise') sharing. Local +
   /// offline-safe — the source of truth for "should we be live-sharing?". Kept
   /// in sync by start/stopLiveSharing (including the Home location toggle).

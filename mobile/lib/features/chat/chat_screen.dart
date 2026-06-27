@@ -11,11 +11,13 @@ import 'package:miles/core/mood.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
@@ -64,6 +66,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   DateTime? _clearedBefore;
   bool _subscribing = false; // re-entrancy guard for _subscribe
   bool _reloadScheduled = false; // debounce flag for bulk-DELETE realtime events
+
+  /// IDs of my messages that have reached 'seen'. Seen is permanent — once a
+  /// message is in here it never downgrades back to delivered, even after the
+  /// partner leaves the chat / goes offline (WhatsApp semantics). Only grows.
+  final Set<String> _seenMessageIds = {};
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
   static const _uuid = Uuid();
@@ -320,6 +327,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           .onBroadcast(event: 'mood', callback: _onMoodBurst)
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
+          .onBroadcast(event: 'cleared', callback: _onClearedBroadcast)
           .subscribe();
       // Let other screens (e.g. the rapid camera) push the fast-path on THIS
       // live channel instead of creating a duplicate-topic one.
@@ -349,6 +357,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _messages.addAll(msgs);
       _sortMessages();
       _ids.addAll(msgs.map((m) => m.id));
+      _seedSeenLatch();
     } catch (_) {
       // first-run is fine
     }
@@ -501,7 +510,49 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           ..clear()
           ..addAll(msgs.map((m) => m.id));
       });
+      _seedSeenLatch();
     } catch (_) {}
+  }
+
+  /// Seeds the permanent "seen" latch from history so seen survives a reload /
+  /// reopen: any of MY messages at or before the partner's current chat_last_read
+  /// have definitely been seen. Without this, a reload would briefly recompute
+  /// old seen messages as delivered until the next presence tick.
+  void _seedSeenLatch() {
+    final read = ref.read(partnerPresenceProvider)?.chatLastRead;
+    if (read == null) return;
+    final myUid = SupabaseService.currentUserId;
+    for (final m in _messages) {
+      if (m.isMine(myUid) && !m.createdAt.isAfter(read)) {
+        _seenMessageIds.add(m.id);
+      }
+    }
+  }
+
+  /// Read-receipt status for one of MY messages. Seen is LATCHED: once true it
+  /// stays true forever (never downgrades to delivered when the partner leaves).
+  _MsgStatus _statusFor(Message m, Presence? p) {
+    // LATCH: if this message was ever seen, it stays seen.
+    if (_seenMessageIds.contains(m.id)) return _MsgStatus.seen;
+
+    // SEEN now? partner actively in chat (chat_last_read within 20s) AND has
+    // read at/after this message. Latch it the first time it's true.
+    final seenNow = p != null &&
+        p.isActivelyInChat &&
+        p.chatLastRead != null &&
+        p.chatLastRead!
+            .isAfter(m.createdAt.subtract(const Duration(seconds: 1)));
+    if (seenNow) {
+      _seenMessageIds.add(m.id);
+      return _MsgStatus.seen;
+    }
+
+    // DELIVERED: partner genuinely online right now (freshness-gated), not the
+    // stored is_online bool which never expires on a hard kill.
+    if (p != null && p.isTrulyOnline) return _MsgStatus.delivered;
+
+    // SENT: partner offline or status stale. Safe default.
+    return _MsgStatus.sent;
   }
 
   Future<void> _showMessageActions(Message m, bool mine) async {
@@ -519,6 +570,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   style: TextStyle(color: MilesColors.cream50)),
               onTap: () => Navigator.pop(ctx, 'reply'),
             ),
+            if (m.kind == 'image' || m.kind == 'video')
+              ListTile(
+                leading: const Icon(Icons.download_rounded,
+                    color: MilesColors.cream50),
+                title: const Text('Save to gallery',
+                    style: TextStyle(
+                        color: MilesColors.cream50, fontFamily: 'Inter')),
+                onTap: () => Navigator.pop(ctx, 'save'),
+              ),
             ListTile(
               leading:
                   const Icon(Icons.visibility_off, color: MilesColors.taupe),
@@ -549,6 +609,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _startReply(m);
       return;
     }
+    if (action == 'save') {
+      await _saveMessageMedia(m);
+      return;
+    }
     try {
       if (action == 'me') {
         await ChatRepository.deleteForMe(m.id);
@@ -564,6 +628,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
+  /// Saves an image or video message to the gallery, with brief feedback.
+  Future<void> _saveMessageMedia(Message m) async {
+    var success = false;
+    var failure = 'Could not save';
+    if (m.kind == 'image') {
+      final url = m.imageUrl;
+      if (url != null) success = await SaveMediaService.savePhotoFromUrl(url);
+    } else if (m.kind == 'video') {
+      final url = await ChatRepository.signedVideoUrl(m.videoPath);
+      if (url == null) {
+        failure = 'Could not save — try opening it first';
+      } else {
+        success = await SaveMediaService.saveVideoFromUrl(url);
+      }
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(success ? 'Saved to gallery ✓' : failure),
+        backgroundColor: success ? MilesColors.sage : MilesColors.ember,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   /// Called by the realtime DELETE callback when the partner clears the chat.
   /// Debounced: a bulk delete fires one event per message; we reload once.
   void _onRemoteDelete() {
@@ -574,6 +664,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         _reload();
         setState(() => _reloadScheduled = false);
       }
+    });
+  }
+
+  /// Partner cleared the whole conversation — instant signal over the broadcast
+  /// channel (the reliable path; postgres DELETE realtime is the backstop). The
+  /// rows are already gone server-side, so just empty the screen locally.
+  void _onClearedBroadcast(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    setState(() {
+      _messages.clear();
+      _ids.clear();
     });
   }
 
@@ -605,6 +706,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (ok != true) return;
     try {
       await ChatRepository.clearConversation();
+      // Instant fan-out to the partner over the live broadcast channel (same
+      // reliable path as typing/msg). Postgres DELETE realtime is the backstop.
+      _moodChannel?.sendBroadcastMessage(event: 'cleared', payload: const {});
       if (mounted) {
         setState(() {
           _messages.clear();
@@ -630,41 +734,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } catch (_) {
       return null;
     }
-  }
-
-  /// Clears the conversation on THIS device only — instant and local. Never
-  /// touches the server, so the partner's chat is completely unaffected. Newer
-  /// messages still arrive normally.
-  Future<void> _clearConversationLocal() async {
-    final id = _coupleId;
-    if (id == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.transparent,
-        title: const Text('Clear conversation?'),
-        content: const Text(
-          'Clears this chat on this device only — instantly. Nothing is '
-          "deleted from the server and your partner's chat is untouched.",
-          style: TextStyle(color: MilesColors.taupe, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Clear')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final now = DateTime.now();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_clearedKey(id), now.toIso8601String());
-    } catch (_) {}
-    if (mounted) setState(() => _clearedBefore = now);
   }
 
   @override
@@ -899,7 +968,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           replyToId: _takeReplyId()),
                       onFlingGif: _flingGifFile,
                       onPickGif: _attachGif,
-                      onClearConversation: _clearConversationLocal,
+                      onClearConversation: _clearConversation,
                     ),
                   ],
                 ),
@@ -1080,32 +1149,6 @@ class _Bubble extends StatelessWidget {
 
 /// Read-receipt state for a sent message.
 enum _MsgStatus { sent, delivered, seen }
-
-_MsgStatus _statusFor(Message m, Presence? p) {
-  // SEEN requires BOTH:
-  //   - partner is actively in chat right now (chat_last_read within 20s)
-  //   - chat_last_read is at/after this message's time
-  // The active-in-chat check prevents a stale chat_last_read (left over from
-  // when they were last in chat) from masquerading as "seen" while they're
-  // gone. The timestamp check prevents premature "seen" before they actually
-  // read this message.
-  if (p != null &&
-      p.isActivelyInChat &&
-      p.chatLastRead != null &&
-      p.chatLastRead!.isAfter(
-        m.createdAt.subtract(const Duration(seconds: 1)))) {
-    return _MsgStatus.seen;
-  }
-
-  // DELIVERED: partner is genuinely online right now (freshness window), not
-  // just the stored is_online bool (which never expires on a hard kill).
-  if (p != null && p.isTrulyOnline) {
-    return _MsgStatus.delivered;
-  }
-
-  // SENT: partner offline or status stale. Safe default.
-  return _MsgStatus.sent;
-}
 
 class _StatusTick extends StatelessWidget {
   const _StatusTick({required this.status});
@@ -1421,6 +1464,22 @@ class _Content extends StatelessWidget {
                     child: Icon(Icons.error_outline,
                         color: Color(0xFFE0564B), size: 20),
                   ),
+                // Save-to-gallery — only once uploaded (url available).
+                if (url != null && m.sendStatus == SendStatus.sent)
+                  Positioned(
+                    bottom: 6,
+                    right: 6,
+                    child: GlassPanel(
+                      blur: 8,
+                      radius: 12,
+                      color: MilesColors.glass,
+                      padding: const EdgeInsets.all(4),
+                      child: SaveMediaButton(
+                        size: 18,
+                        onSave: () => SaveMediaService.savePhotoFromUrl(url),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1581,6 +1640,13 @@ class _VoicePlayerState extends State<_VoicePlayer> {
             ),
           ),
         ),
+        const SizedBox(width: 8),
+        SaveMediaButton(
+          size: 16,
+          color: MilesColors.taupe,
+          onSave: () => SaveMediaService.saveAudioFromUrl(widget.url),
+          successMessage: 'Voice note saved',
+        ),
       ],
     );
   }
@@ -1656,30 +1722,55 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: _loading ? null : _open,
-      child: Container(
-        width: 220,
-        height: 140,
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          borderRadius: BorderRadius.circular(14),
+    return Stack(
+      children: [
+        GestureDetector(
+          onTap: _loading ? null : _open,
+          child: Container(
+            width: 220,
+            height: 140,
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Center(
+              child: _loading
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: const BoxDecoration(
+                          shape: BoxShape.circle, color: MilesColors.blush),
+                      child: const Icon(Icons.play_arrow,
+                          color: MilesColors.cream50, size: 30),
+                    ),
+            ),
+          ),
         ),
-        child: Center(
-          child: _loading
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                      shape: BoxShape.circle, color: MilesColors.blush),
-                  child: const Icon(Icons.play_arrow,
-                      color: MilesColors.cream50, size: 30),
-                ),
-        ),
-      ),
+        if (widget.path != null)
+          Positioned(
+            bottom: 6,
+            right: 6,
+            child: GlassPanel(
+              blur: 8,
+              radius: 12,
+              color: MilesColors.glass,
+              padding: const EdgeInsets.all(4),
+              child: SaveMediaButton(
+                size: 18,
+                failureMessage: 'Could not save — try opening it first',
+                onSave: () async {
+                  final url =
+                      await ChatRepository.signedVideoUrl(widget.path);
+                  if (url == null) return false;
+                  return SaveMediaService.saveVideoFromUrl(url);
+                },
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -1743,6 +1834,18 @@ class _FullScreenVideoState extends State<_FullScreenVideo> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         leading: const BackButton(color: Colors.white),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: SaveMediaButton(
+                size: 24,
+                color: Colors.white,
+                onSave: () => SaveMediaService.saveVideoFromUrl(widget.url),
+              ),
+            ),
+          ),
+        ],
       ),
       body: Center(
         child: _chewie == null

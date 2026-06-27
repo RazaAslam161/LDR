@@ -36,10 +36,13 @@ class _LocationToggleBarState extends State<LocationToggleBar> {
 
   Future<void> _seed() async {
     try {
-      final mine = await PresenceService.fetchMine(widget.coupleId);
+      // Seed from the LIVE intent (local), not the DB sharing mode. After a
+      // toggle-off we keep mode 'precise' (static last-known pin), so reading
+      // the mode here would wrongly re-show the switch as ON.
+      final on = await LocationService.isLiveModeOn();
       if (mounted) {
         setState(() {
-          _sharing = mine?.locationSharingMode == 'precise';
+          _sharing = on;
           _loading = false;
         });
       }
@@ -80,8 +83,10 @@ class _LocationToggleBarState extends State<LocationToggleBar> {
           });
         }
       } else {
-        await LocationService.stopLiveSharing(widget.coupleId);
-        await PresenceService.clearLiveLocation(widget.coupleId);
+        // Live OFF: stop streaming + the foreground service (notification
+        // disappears) but KEEP a static last-known pin for the partner — do
+        // NOT clear coords or set mode 'off'.
+        await LocationService.stopLiveSharingKeepLast(widget.coupleId);
         if (mounted) {
           setState(() {
             _sharing = false;

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/services/save_media_service.dart';
+import 'package:miles/core/widgets/save_media_button.dart';
 
 /// Full-screen image viewer with pinch-zoom + pan. Used for chat photos and the
 /// home snap. Tap the backdrop or the X to close.
@@ -53,6 +55,19 @@ class MediaViewer extends StatelessWidget {
               child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white, size: 28),
                 onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: SaveMediaButton(
+                  size: 24,
+                  color: Colors.white,
+                  onSave: () => SaveMediaService.savePhotoFromUrl(imageUrl),
+                ),
               ),
             ),
           ),

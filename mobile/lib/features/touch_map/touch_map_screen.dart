@@ -8,10 +8,12 @@ import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/services/touch_haptics.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
@@ -705,6 +707,26 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           ),
                           child: const Icon(Icons.delete_outline,
                               color: MilesColors.cream50, size: 16),
+                        ),
+                      ),
+                    ),
+                  // Save this photo to the gallery (yours or theirs). Explicit
+                  // user action, so allowed despite FLAG_SECURE on this screen.
+                  if (photoUrl != null && !adjusting)
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: MilesColors.night.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: SaveMediaButton(
+                          size: 20,
+                          failureMessage: 'Could not save — try reopening',
+                          onSave: () =>
+                              SaveMediaService.savePhotoFromUrl(photoUrl),
                         ),
                       ),
                     ),

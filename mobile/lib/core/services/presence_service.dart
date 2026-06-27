@@ -342,7 +342,20 @@ class PresenceService {
 /// Live partner presence — refetches on any presence change for the couple.
 class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   PartnerPresenceNotifier(this.ref) : super(null) {
-    _init();
+    // The couple resolves ASYNCHRONOUSLY — it's null until the profile load
+    // finishes. React to it instead of reading once: bind the moment a non-null
+    // couple appears, and rebind if it changes. Without this, a notifier created
+    // during the null-couple window (cold start, after a token refresh, or the
+    // always-mounted debug overlay) would early-return forever — null state and
+    // zero realtime events. fireImmediately covers the already-loaded case.
+    ref.listen(currentCoupleProvider, (prev, next) {
+      final id = next?.id;
+      if (id == null) {
+        _coupleId = null;
+      } else if (id != _coupleId) {
+        _bind(id);
+      }
+    }, fireImmediately: true);
     realtimeResumed.addListener(_subscribe); // rejoin + refetch on reconnect
   }
 
@@ -352,12 +365,14 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   bool _subscribing = false;
   Timer? _poll;
 
-  Future<void> _init() async {
-    final couple = ref.read(currentCoupleProvider);
-    if (couple == null) return;
-    _coupleId = couple.id;
-    state = await PresenceService.fetchPartner(couple.id);
-    _subscribe();
+  /// Binds to a (now-resolved) couple: fetch the partner row, subscribe to the
+  /// presence channel, and start the liveness poll. Called reactively when the
+  /// couple becomes available — never with a null id.
+  Future<void> _bind(String coupleId) async {
+    _coupleId = coupleId;
+    final p = await PresenceService.fetchPartner(coupleId);
+    if (mounted) state = p;
+    await _subscribe();
     // Re-evaluate liveness even when no presence event fires (e.g. a hard-killed
     // partner writes nothing): refetch a fresh row so the freshness-gated getters
     // tick over and the UI drops to "offline" within the window. One shared poll
@@ -365,8 +380,8 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     _poll ??= Timer.periodic(const Duration(seconds: 15), (_) async {
       final id = _coupleId;
       if (id == null) return;
-      final p = await PresenceService.fetchPartner(id);
-      if (mounted) state = p;
+      final fresh = await PresenceService.fetchPartner(id);
+      if (mounted) state = fresh;
     });
   }
 

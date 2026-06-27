@@ -23,6 +23,7 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/features/call/call_pill.dart';
+import 'package:miles/features/fake_news/fake_news_screen.dart';
 import 'package:miles/firebase_options.dart';
 
 Future<void> main() async {
@@ -69,6 +70,18 @@ Future<void> main() async {
 
 class MilesApp extends ConsumerStatefulWidget {
   const MilesApp({super.key});
+
+  /// Whether the real Tethered app is shown (true) or the fake News cover
+  /// (false). Reset to false on every background so returning always requires
+  /// re-authentication; only FakeNewsScreen sets it true after the biometric +
+  /// intro-video reveal. Static so the cover screen and the lifecycle handler
+  /// share one source of truth.
+  static final ValueNotifier<bool> showRealApp = ValueNotifier<bool>(false);
+
+  /// True only while the biometric prompt is on screen. The prompt itself makes
+  /// the app `inactive`; this guards that transition from resetting
+  /// [showRealApp] and cancelling the unlock mid-auth.
+  static bool authInProgress = false;
 
   @override
   ConsumerState<MilesApp> createState() => _MilesAppState();
@@ -118,11 +131,31 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Biometric app-lock: raise on background, prompt to unlock on resume.
+    // SECURITY (cover layer): drop back to the News screen the instant the app
+    // leaves the foreground, so returning ALWAYS requires re-authentication.
+    // NEVER set it true here — only the entry flow does, after biometric +
+    // intro video. This must run before the AppLock/presence logic below.
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        MilesApp.showRealApp.value = false;
+      case AppLifecycleState.inactive:
+        // The biometric prompt itself makes the app inactive — don't reset the
+        // cover mid-auth or it would cancel the unlock.
+        if (!MilesApp.authInProgress) MilesApp.showRealApp.value = false;
+      case AppLifecycleState.resumed:
+        break;
+    }
+
+    // Biometric app-lock: raise on background, prompt to unlock on resume — but
+    // only while the REAL app is visible, never unsolicited over the News cover.
     if (state == AppLifecycleState.paused) {
       AppLock.lockIfEnabled();
     } else if (state == AppLifecycleState.resumed) {
-      if (AppLock.locked.value) AppLock.authenticate(); // re-prompt on return
+      if (MilesApp.showRealApp.value && AppLock.locked.value) {
+        AppLock.authenticate(); // re-prompt on return
+      }
       // Refresh the FCM token every resume — self-heals a token the notify
       // functions nulled server-side (UNREGISTERED), restoring pushes.
       FcmService.registerToken();
@@ -174,29 +207,60 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   @override
   Widget build(BuildContext context) {
-    final router = ref.watch(routerProvider);
-    return MaterialApp.router(
-      title: 'Tethered',
-      debugShowCheckedModeBanner: false,
-      theme: milesDarkTheme(),
-      routerConfig: router,
-      builder: (context, child) => Stack(
-        children: [
-          // Always-present candle-glow backdrop so glassmorphism has something
-          // to blur against on every screen (including auth + settings).
-          const EmberBackground(child: SizedBox.shrink()),
-          // The routed screen, transparent so the glow shows through.
-          child ?? const SizedBox.shrink(),
-          // Return-to-call pill while a call is minimised.
-          const CallPill(),
-          // Biometric lock sits on top of everything.
-          ValueListenableBuilder<bool>(
-            valueListenable: AppLock.locked,
-            builder: (context, locked, _) =>
-                locked ? const LockScreen() : const SizedBox.shrink(),
+    // The cover/real swap is driven by the static showRealApp notifier so the
+    // lifecycle handler (and FakeNewsScreen) can flip it without setState.
+    return ValueListenableBuilder<bool>(
+      valueListenable: MilesApp.showRealApp,
+      builder: (context, isReal, _) {
+        // Cover layer: a convincing "News" app shown on cold start and the
+        // instant the app backgrounds. Only a secret trigger + biometric pass +
+        // the intro video swaps in the real app. Its clean light theme shares
+        // nothing with Tethered's Emberlight dark theme.
+        if (!isReal) {
+          return MaterialApp(
+            title: 'News',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(
+              brightness: Brightness.light,
+              scaffoldBackgroundColor: Colors.white,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: const Color(0xFF1A73E8),
+                brightness: Brightness.light,
+              ),
+              useMaterial3: true,
+            ),
+            home: FakeNewsScreen(
+              onAuthenticated: () => MilesApp.showRealApp.value = true,
+            ),
+          );
+        }
+
+        final router = ref.watch(routerProvider);
+        return MaterialApp.router(
+          // Keep the disguised name in the task switcher too.
+          title: 'News',
+          debugShowCheckedModeBanner: false,
+          theme: milesDarkTheme(),
+          routerConfig: router,
+          builder: (context, child) => Stack(
+            children: [
+              // Always-present candle-glow backdrop so glassmorphism has
+              // something to blur against on every screen.
+              const EmberBackground(child: SizedBox.shrink()),
+              // The routed screen, transparent so the glow shows through.
+              child ?? const SizedBox.shrink(),
+              // Return-to-call pill while a call is minimised.
+              const CallPill(),
+              // Biometric lock sits on top of everything.
+              ValueListenableBuilder<bool>(
+                valueListenable: AppLock.locked,
+                builder: (context, locked, _) =>
+                    locked ? const LockScreen() : const SizedBox.shrink(),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

@@ -37,7 +37,6 @@ import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/home/location_map_screen.dart';
 import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
 import 'package:miles/features/intimacy/intimacy_screen.dart';
-import 'package:miles/features/intro/intro_video_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
@@ -57,11 +56,6 @@ GoRouter buildRouter(Ref ref) {
       final path = state.uri.path;
 
       final isAuthRoute = path == '/signin' || path == '/signup';
-
-      // Let the intro video render without being bounced by auth redirects.
-      // It calls context.go('/signin') itself on completion/skip, and the
-      // redirect logic then takes over.
-      if (path == '/') return null;
 
       // While the session is resolving, don't bounce — let the current route
       // render until we know where to send them.
@@ -305,10 +299,12 @@ GoRouter buildRouter(Ref ref) {
         path: '/app/closer/pick-for-us',
         builder: (context, state) => const PickForUsScreen(),
       ),
-      // Catch-all / → intro video on first launch.
+      // Boot location. The News cover is the real cold-start; if the real app
+      // ever mounts at '/', funnel straight into the auth flow (the global
+      // redirect then sends signed-in + paired users on to /app).
       GoRoute(
         path: '/',
-        builder: (context, state) => const IntroVideoScreen(),
+        redirect: (_, __) => '/signin',
       ),
     ],
   );
