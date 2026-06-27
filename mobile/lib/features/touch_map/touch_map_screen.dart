@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -23,7 +24,10 @@ import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:miles/features/touch_map/reaction_gesture_service.dart';
+import 'package:miles/features/touch_map/reaction_segment_service.dart';
 import 'package:uuid/uuid.dart';
+import 'package:vibration/vibration.dart';
 import 'package:video_player/video_player.dart';
 
 class _PendingCameraIcon {
@@ -40,12 +44,14 @@ class _ActiveReactionGif {
   final double y;
   final String id;
   final bool isPhoto;
+  final ReactionGesture gesture;
   const _ActiveReactionGif({
     required this.mediaUrl,
     required this.x,
     required this.y,
     required this.id,
     required this.isPhoto,
+    this.gesture = ReactionGesture.unknown,
   });
 }
 
@@ -230,14 +236,25 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   void _onReactionGifMsg(Map<String, dynamic> payload) {
     if (!mounted || payload['from'] == _myUid) return;
-    // Support new 'media_url' key; fall back to legacy 'gif_url'.
     final mediaUrl = (payload['media_url'] ?? payload['gif_url']) as String?;
     final x = (payload['x'] as num?)?.toDouble();
     final y = (payload['y'] as num?)?.toDouble();
     final id = payload['id'] as String? ?? const Uuid().v4();
     final isPhoto = payload['is_photo'] as bool? ?? false;
+    final gestureStr = payload['gesture'] as String? ?? 'unknown';
+    final gesture = ReactionGesture.values.firstWhere(
+      (g) => g.name == gestureStr,
+      orElse: () => ReactionGesture.unknown,
+    );
     if (mediaUrl != null && x != null && y != null) {
-      _addReaction(mediaUrl: mediaUrl, x: x, y: y, id: id, isPhoto: isPhoto);
+      _addReaction(
+        mediaUrl: mediaUrl,
+        x: x,
+        y: y,
+        id: id,
+        isPhoto: isPhoto,
+        gesture: gesture,
+      );
     }
   }
 
@@ -254,21 +271,36 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
     messenger.showSnackBar(
       const SnackBar(
-        content: Text('Sending your reaction... 🎬'),
-        duration: Duration(seconds: 15),
+        content: Text('Creating your reaction… 💫'),
+        duration: Duration(seconds: 20),
         behavior: SnackBarBehavior.floating,
       ),
     );
 
     final isPhoto = mode == _CameraMode.photo;
-    final mediaUrl = await _uploadReactionMedia(
-      mediaFile,
-      isPhoto ? 'image/jpeg' : 'video/mp4',
-      isPhoto ? 'jpg' : 'mp4',
-    );
-    try {
-      await mediaFile.delete();
-    } catch (_) {}
+
+    // Gesture detection — photos only (video needs frame extraction).
+    var gesture = ReactionGesture.unknown;
+    if (isPhoto) {
+      gesture = await ReactionGestureService.detectGesture(mediaFile.path);
+    }
+
+    // Background removal — photos only; too slow per-frame for video.
+    var processedFile = mediaFile;
+    if (isPhoto) {
+      final segmented =
+          await ReactionSegmentService.removeBackground(mediaFile.path);
+      if (segmented != null) processedFile = segmented;
+    }
+
+    final contentType = isPhoto ? 'image/png' : 'video/mp4';
+    final ext = isPhoto ? 'png' : 'mp4';
+    final mediaUrl = await _uploadReactionMedia(processedFile, contentType, ext);
+
+    if (processedFile.path != mediaFile.path) {
+      try { await processedFile.delete(); } catch (_) {}
+    }
+    try { await mediaFile.delete(); } catch (_) {}
 
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
@@ -290,6 +322,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       y: y,
       id: reactionId,
       isPhoto: isPhoto,
+      gesture: gesture,
     );
 
     _channel?.channel?.sendBroadcastMessage(
@@ -301,6 +334,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         'y': y,
         'id': reactionId,
         'is_photo': isPhoto,
+        'gesture': gesture.name,
       },
     );
   }
@@ -422,6 +456,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     required double y,
     required String id,
     required bool isPhoto,
+    ReactionGesture gesture = ReactionGesture.unknown,
   }) {
     final r = _ActiveReactionGif(
       mediaUrl: mediaUrl,
@@ -429,11 +464,45 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       y: y,
       id: id,
       isPhoto: isPhoto,
+      gesture: gesture,
     );
     if (mounted) setState(() => _reactions.add(r));
+    _playGestureHaptic(gesture);
     Timer(const Duration(seconds: 8), () {
       if (mounted) setState(() => _reactions.remove(r));
     });
+  }
+
+  void _playGestureHaptic(ReactionGesture gesture) {
+    switch (gesture) {
+      case ReactionGesture.palmFlat:
+        Vibration.vibrate(
+          pattern: [0, 80, 200, 60, 200, 80, 200, 60],
+          intensities: [0, 60, 0, 50, 0, 55, 0, 50],
+        );
+        break;
+      case ReactionGesture.pinch:
+        Vibration.vibrate(
+          pattern: [0, 40, 30, 40],
+          intensities: [0, 255, 0, 255],
+        );
+        break;
+      case ReactionGesture.squeeze:
+        Vibration.vibrate(
+          pattern: [0, 300],
+          intensities: [0, 200],
+        );
+        break;
+      case ReactionGesture.point:
+        Vibration.vibrate(
+          pattern: [0, 60],
+          intensities: [0, 180],
+        );
+        break;
+      case ReactionGesture.unknown:
+        HapticFeedback.mediumImpact();
+        break;
+    }
   }
 
   double _reactionSize(double x, double y) {
@@ -448,6 +517,14 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (y < 0.15) return 999; // face → full circle
     if (y < 0.35) return 20; // neck → rounded pill
     return 14; // elsewhere → card
+  }
+
+  CustomClipper<Path> _zoneClipper(double y) {
+    if (y < 0.15) return _OvalClipper(); // head
+    if (y < 0.25) return _TightCircleClipper(); // neck
+    if (y < 0.45) return _TeardropClipper(); // chest
+    if (y < 0.75) return _LongOvalClipper(); // waist/hips
+    return _TightCircleClipper(); // legs/feet
   }
 
   void _ensureNeonTimer() {
@@ -1177,7 +1254,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           containerWidth: w,
                           containerHeight: h,
                           size: _reactionSize(r.x, r.y),
-                          borderRadius: _reactionBorderRadius(r.y),
+                          clipper: _zoneClipper(r.y),
                           onExpired: () {
                             if (mounted) setState(() => _reactions.remove(r));
                           },
@@ -1330,7 +1407,7 @@ class _ReactionGifWidget extends StatefulWidget {
   final double containerWidth;
   final double containerHeight;
   final double size;
-  final double borderRadius;
+  final CustomClipper<Path> clipper;
   final VoidCallback onExpired;
 
   const _ReactionGifWidget({
@@ -1338,7 +1415,7 @@ class _ReactionGifWidget extends StatefulWidget {
     required this.containerWidth,
     required this.containerHeight,
     required this.size,
-    required this.borderRadius,
+    required this.clipper,
     required this.onExpired,
   });
 
@@ -1350,8 +1427,24 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
     with TickerProviderStateMixin {
   late AnimationController _fadeCtrl;
   late AnimationController _pulseCtrl;
+  AnimationController? _trailCtrl;
   VideoPlayerController? _vpc;
   bool _videoReady = false;
+
+  Duration _pulseDuration(ReactionGesture g) {
+    switch (g) {
+      case ReactionGesture.palmFlat:
+        return const Duration(milliseconds: 1800);
+      case ReactionGesture.pinch:
+        return const Duration(milliseconds: 600);
+      case ReactionGesture.squeeze:
+        return const Duration(milliseconds: 1000);
+      case ReactionGesture.point:
+        return const Duration(milliseconds: 500);
+      default:
+        return const Duration(milliseconds: 1200);
+    }
+  }
 
   @override
   void initState() {
@@ -1363,7 +1456,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
     );
     _pulseCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: _pulseDuration(widget.reaction.gesture),
     )..repeat(reverse: true);
 
     if (!widget.reaction.isPhoto) {
@@ -1377,12 +1470,22 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
               ..play();
           }
         });
+
+      // Motion trail for strokes / pinches.
+      final g = widget.reaction.gesture;
+      if (g == ReactionGesture.palmFlat || g == ReactionGesture.pinch) {
+        _trailCtrl = AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 800),
+        )..repeat(reverse: true);
+      }
     }
 
     final displayMs = 5000 + (widget.reaction.id.hashCode.abs() % 3000);
     Future.delayed(Duration(milliseconds: displayMs), () {
       if (mounted) {
         _pulseCtrl.stop();
+        _trailCtrl?.stop();
         _fadeCtrl.reverse().then((_) {
           if (mounted) widget.onExpired();
         });
@@ -1394,6 +1497,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
   void dispose() {
     _fadeCtrl.dispose();
     _pulseCtrl.dispose();
+    _trailCtrl?.dispose();
     _vpc?.dispose();
     super.dispose();
   }
@@ -1401,10 +1505,95 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
   @override
   Widget build(BuildContext context) {
     final sz = widget.size;
-    final br = widget.borderRadius;
     final half = sz / 2;
     final pixelX = widget.reaction.x * widget.containerWidth;
     final pixelY = widget.reaction.y * widget.containerHeight;
+
+    Widget mediaContent;
+    if (widget.reaction.isPhoto) {
+      mediaContent = Image.network(
+        widget.reaction.mediaUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const ColoredBox(
+          color: MilesColors.surface1,
+          child: Icon(Icons.broken_image_outlined, color: MilesColors.ember),
+        ),
+      );
+    } else if (_videoReady && _vpc != null) {
+      mediaContent = FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: _vpc!.value.size.width,
+          height: _vpc!.value.size.height,
+          child: VideoPlayer(_vpc!),
+        ),
+      );
+    } else {
+      mediaContent = const ColoredBox(
+        color: MilesColors.surface1,
+        child: Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 1.5,
+            color: MilesColors.ember,
+          ),
+        ),
+      );
+    }
+
+    // The clipped content box (reused as the main child).
+    final clippedContent = SizedBox(
+      width: sz,
+      height: sz,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Motion trail (video only, palmFlat and pinch gestures).
+          if (_trailCtrl != null)
+            AnimatedBuilder(
+              animation: _trailCtrl!,
+              builder: (_, __) {
+                final isStroke =
+                    widget.reaction.gesture == ReactionGesture.palmFlat;
+                final dx = isStroke ? _trailCtrl!.value * 8.0 : 0.0;
+                final dy = isStroke ? 0.0 : _trailCtrl!.value * -4.0;
+                return Transform.translate(
+                  offset: Offset(dx, dy),
+                  child: Opacity(
+                    opacity: 0.25,
+                    child: ClipPath(
+                      clipper: widget.clipper,
+                      child: ColoredBox(
+                        color: MilesColors.ember.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          // Main content with zone clip.
+          ClipPath(
+            clipper: widget.clipper,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                mediaContent,
+                // Depth illusion — very subtle warm gradient.
+                Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Color(0x1FE8C4A0)],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
     return Positioned(
       left: (pixelX - half).clamp(0.0, widget.containerWidth - sz),
       top: (pixelY - half).clamp(0.0, widget.containerHeight - sz),
@@ -1424,14 +1613,14 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
               return Stack(
                 alignment: Alignment.center,
                 children: [
-                  // Breathing outer ring
+                  // Breathing outer ember ring.
                   Transform.scale(
                     scale: pulseScale,
                     child: Container(
                       width: sz,
                       height: sz,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(br),
+                        shape: BoxShape.circle,
                         border: Border.all(
                           color: MilesColors.ember
                               .withValues(alpha: pulseOpacity),
@@ -1440,61 +1629,24 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
                       ),
                     ),
                   ),
-                  child!,
+                  // Ember glow shadow.
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: MilesColors.ember.withValues(alpha: 0.35),
+                          blurRadius: 16,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: child,
+                  ),
                 ],
               );
             },
-            child: Container(
-              width: sz,
-              height: sz,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(br),
-                border: Border.all(
-                  color: MilesColors.ember.withValues(alpha: 0.7),
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: MilesColors.ember.withValues(alpha: 0.35),
-                    blurRadius: 16,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(br > 900 ? br : br - 2),
-                child: widget.reaction.isPhoto
-                    ? Image.network(
-                        widget.reaction.mediaUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const ColoredBox(
-                          color: MilesColors.surface1,
-                          child: Icon(
-                            Icons.broken_image_outlined,
-                            color: MilesColors.ember,
-                          ),
-                        ),
-                      )
-                    : (_videoReady && _vpc != null
-                        ? FittedBox(
-                            fit: BoxFit.cover,
-                            child: SizedBox(
-                              width: _vpc!.value.size.width,
-                              height: _vpc!.value.size.height,
-                              child: VideoPlayer(_vpc!),
-                            ),
-                          )
-                        : const ColoredBox(
-                            color: MilesColors.surface1,
-                            child: Center(
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                                color: MilesColors.ember,
-                              ),
-                            ),
-                          )),
-              ),
-            ),
+            child: clippedContent,
           ),
         ),
       ),
@@ -1784,6 +1936,61 @@ class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone-shape clippers
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _OvalClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) =>
+      Path()..addOval(Rect.fromLTWH(0, 0, size.width, size.height));
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> old) => false;
+}
+
+class _TeardropClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final cx = size.width / 2;
+    return Path()
+      ..moveTo(cx, 0)
+      ..cubicTo(size.width, 0, size.width, size.height * 0.6, cx, size.height)
+      ..cubicTo(0, size.height * 0.6, 0, 0, cx, 0)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> old) => false;
+}
+
+class _LongOvalClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) => Path()
+    ..addOval(Rect.fromLTWH(
+      size.width * 0.1,
+      0,
+      size.width * 0.8,
+      size.height,
+    ));
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> old) => false;
+}
+
+class _TightCircleClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final r = size.width * 0.45;
+    return Path()
+      ..addOval(Rect.fromCircle(
+        center: Offset(size.width / 2, size.height / 2),
+        radius: r,
+      ));
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> old) => false;
 }
 
 /// A simple, gender-neutral illustrated figure — the placeholder until a real
