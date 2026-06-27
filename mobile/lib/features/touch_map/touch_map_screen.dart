@@ -1,12 +1,19 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
@@ -35,8 +42,6 @@ class _PendingCameraIcon {
   final double y;
   const _PendingCameraIcon({required this.x, required this.y});
 }
-
-enum _CameraMode { photo, video }
 
 class _ActiveReactionGif {
   final String mediaUrl;
@@ -259,16 +264,37 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   }
 
   Future<void> _startReactionCapture(double x, double y) async {
+    // Choice: capture a fresh reaction (camera) or pick an existing photo.
+    final source = await _showMediaSourceSheet();
+    if (source == null || !mounted) return;
+
+    _ReactionCapture? captured;
+    if (source == 'camera') {
+      captured = await _ReactionFullCamera.open(context);
+    } else {
+      captured = await _pickFromGallery();
+    }
+    if (captured == null || !mounted) return;
+
+    await _processCapturedReaction(
+      file: captured.file,
+      isPhoto: captured.isPhoto,
+      x: x,
+      y: y,
+    );
+  }
+
+  /// The full reaction pipeline: compress → gesture detect → background removal
+  /// → upload → local add + broadcast to partner. Behaviour is unchanged from
+  /// the previous reaction prompts; it now lives in one method so both the
+  /// camera and gallery paths feed it.
+  Future<void> _processCapturedReaction({
+    required File file,
+    required bool isPhoto,
+    required double x,
+    required double y,
+  }) async {
     final messenger = ScaffoldMessenger.of(context);
-
-    final mode = await _showCameraChoice(context);
-    if (mode == null || !mounted) return;
-
-    final mediaFile = mode == _CameraMode.photo
-        ? await _ReactionCameraSheet.showPhoto(context)
-        : await _ReactionCameraSheet.showVideo(context);
-    if (mediaFile == null || !mounted) return;
-
     messenger.showSnackBar(
       const SnackBar(
         content: Text('Creating your reaction… 💫'),
@@ -277,19 +303,41 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       ),
     );
 
-    final isPhoto = mode == _CameraMode.photo;
+    var sourceFile = file;
+
+    // Camera photos arrive at ResolutionPreset.max — compress to ≤1200px before
+    // the heavier ML steps + upload. The decode/resize/encode runs off the UI
+    // isolate via compute(); the temp-file WRITE stays on the main isolate
+    // because path_provider's MethodChannel can't be reached from a background
+    // isolate. Gallery photos are already sized by ImagePicker, so re-compress
+    // here is cheap and harmless.
+    if (isPhoto) {
+      try {
+        final bytes = await compute(_compressReactionPhoto, file.path);
+        if (bytes != null) {
+          final dir = await getTemporaryDirectory();
+          final out = File(
+            '${dir.path}/reaction_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+          await out.writeAsBytes(bytes, flush: true);
+          sourceFile = out;
+        }
+      } catch (_) {
+        // Compression is best-effort — fall back to the original file.
+      }
+    }
 
     // Gesture detection — photos only (video needs frame extraction).
     var gesture = ReactionGesture.unknown;
     if (isPhoto) {
-      gesture = await ReactionGestureService.detectGesture(mediaFile.path);
+      gesture = await ReactionGestureService.detectGesture(sourceFile.path);
     }
 
     // Background removal — photos only; too slow per-frame for video.
-    var processedFile = mediaFile;
+    var processedFile = sourceFile;
     if (isPhoto) {
       final segmented =
-          await ReactionSegmentService.removeBackground(mediaFile.path);
+          await ReactionSegmentService.removeBackground(sourceFile.path);
       if (segmented != null) processedFile = segmented;
     }
 
@@ -297,10 +345,12 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     final ext = isPhoto ? 'png' : 'mp4';
     final mediaUrl = await _uploadReactionMedia(processedFile, contentType, ext);
 
-    if (processedFile.path != mediaFile.path) {
-      try { await processedFile.delete(); } catch (_) {}
+    // Clean up every temp file we touched (deduped so we never double-delete).
+    for (final p in {processedFile.path, sourceFile.path, file.path}) {
+      try {
+        await File(p).delete();
+      } catch (_) {}
     }
-    try { await mediaFile.delete(); } catch (_) {}
 
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
@@ -339,93 +389,104 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     );
   }
 
-  Future<_CameraMode?> _showCameraChoice(BuildContext ctx) {
-    return showModalBottomSheet<_CameraMode>(
-      context: ctx,
+  /// Source choice sheet — 'camera' (photo or video) or 'gallery' (photo only).
+  /// Returns null on cancel.
+  Future<String?> _showMediaSourceSheet() {
+    return showModalBottomSheet<String?>(
+      context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => GlassPanel(
         blur: MilesColors.blurLg,
         radius: 24,
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: MilesColors.gilt,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'React with…',
-              style: GoogleFonts.fraunces(
-                color: MilesColors.cream50,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
+        padding: EdgeInsets.zero,
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: _reactionChoiceBtn(
-                    sheetCtx,
-                    Icons.photo_camera_rounded,
-                    'Photo',
-                    _CameraMode.photo,
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: MilesColors.gilt,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _reactionChoiceBtn(
-                    sheetCtx,
-                    Icons.videocam_rounded,
-                    'Video (5s)',
-                    _CameraMode.video,
+                const SizedBox(height: 20),
+                Text(
+                  'Send a reaction',
+                  style: GoogleFonts.fraunces(
+                    fontSize: 20,
+                    fontStyle: FontStyle.italic,
+                    color: MilesColors.cream50,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'How do you want to react?',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: MilesColors.taupe,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SourceOption(
+                        icon: Icons.photo_camera_rounded,
+                        label: 'Camera',
+                        subtitle: 'Photo or video',
+                        onTap: () => Navigator.pop(sheetCtx, 'camera'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _SourceOption(
+                        icon: Icons.photo_library_rounded,
+                        label: 'Gallery',
+                        subtitle: 'Pick a photo',
+                        onTap: () => Navigator.pop(sheetCtx, 'gallery'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.pop(sheetCtx, null),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: MilesColors.taupe),
                   ),
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _reactionChoiceBtn(
-    BuildContext ctx,
-    IconData icon,
-    String label,
-    _CameraMode mode,
-  ) {
-    return GestureDetector(
-      onTap: () => Navigator.of(ctx).pop(mode),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(
-          color: MilesColors.ember.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: MilesColors.ember.withValues(alpha: 0.35),
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: MilesColors.ember, size: 32),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-    );
+  /// Pick a single photo from the gallery (pre-sized by ImagePicker, so it skips
+  /// the extra compression pass). Gallery videos aren't supported — kept simple.
+  Future<_ReactionCapture?> _pickFromGallery() async {
+    try {
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 90,
+      );
+      if (xfile == null) return null;
+      return _ReactionCapture(file: File(xfile.path), isPhoto: true);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _uploadReactionMedia(
@@ -511,12 +572,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (y < 0.65) return 80; // chest/torso
     if (y < 0.85) return 64; // waist/hips
     return 48; // legs/feet
-  }
-
-  double _reactionBorderRadius(double y) {
-    if (y < 0.15) return 999; // face → full circle
-    if (y < 0.35) return 20; // neck → rounded pill
-    return 14; // elsewhere → card
   }
 
   CustomClipper<Path> _zoneClipper(double y) {
@@ -1654,79 +1709,253 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
   }
 }
 
-class _ReactionCameraSheet extends StatefulWidget {
-  const _ReactionCameraSheet({this.mode = _CameraMode.video});
-  final _CameraMode mode;
+/// The captured reaction media handed back from the camera or gallery.
+class _ReactionCapture {
+  final File file;
+  final bool isPhoto;
+  const _ReactionCapture({required this.file, required this.isPhoto});
+}
 
-  static Future<File?> showPhoto(BuildContext context) {
-    return showModalBottomSheet<File?>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _ReactionCameraSheet(mode: _CameraMode.photo),
+/// One option tile in the reaction source sheet (Camera / Gallery).
+class _SourceOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _SourceOption({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: GlassPanel(
+        elevated: true,
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: MilesColors.ember, size: 30),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: GoogleFonts.fraunces(
+                fontSize: 15,
+                color: MilesColors.cream50,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                color: MilesColors.taupe,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+}
 
-  static Future<File?> showVideo(BuildContext context) {
-    return showModalBottomSheet<File?>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _ReactionCameraSheet(mode: _CameraMode.video),
+/// Full-screen reaction camera — the same capture quality and layout language
+/// as the chat [RapidCameraScreen], minus the filter strip. Photo + 5s video.
+class _ReactionFullCamera extends StatefulWidget {
+  const _ReactionFullCamera();
+
+  static Future<_ReactionCapture?> open(BuildContext context) {
+    return Navigator.of(context).push<_ReactionCapture>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const _ReactionFullCamera(),
+      ),
     );
   }
 
   @override
-  State<_ReactionCameraSheet> createState() => _ReactionCameraSheetState();
+  State<_ReactionFullCamera> createState() => _ReactionFullCameraState();
 }
 
-class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
+class _ReactionFullCameraState extends State<_ReactionFullCamera>
+    with WidgetsBindingObserver {
   CameraController? _ctrl;
-  List<CameraDescription> _cameras = [];
+  List<CameraDescription> _cameras = const [];
   int _camIndex = 1; // front camera default
+  bool _isVideoMode = false; // photo default
   bool _recording = false;
   int _countdown = 5;
-  Timer? _timer;
+  Timer? _countdownTimer;
+  FlashMode _flash = FlashMode.off;
+  bool _ready = false;
+  bool _denied = false;
+  bool _micGranted = false;
 
   @override
   void initState() {
     super.initState();
-    _init();
+    WidgetsBinding.instance.addObserver(this);
+    _boot();
   }
 
-  Future<void> _init() async {
-    _cameras = await availableCameras();
-    if (_cameras.isEmpty) return;
-    _camIndex = _cameras.length > 1 ? 1 : 0;
-    await _setup(_cameras[_camIndex]);
+  Future<void> _boot() async {
+    // Request camera permission up front so a denial is detected cleanly
+    // (same approach as RapidCameraScreen — avoids a hung loading wheel).
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (mounted) setState(() => _denied = true);
+        return;
+      }
+      // Mic powers video sound; non-fatal if denied (records silent). Gating
+      // enableAudio on the grant avoids init failures on some OEMs.
+      final mic = await Permission.microphone.request();
+      _micGranted = mic.isGranted;
+    } catch (_) {
+      // fall through to availableCameras — it'll flag denied if truly blocked
+    }
+
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        if (mounted) setState(() => _denied = true);
+        return;
+      }
+      // Default to the front (selfie) lens.
+      final front = _cameras
+          .indexWhere((c) => c.lensDirection == CameraLensDirection.front);
+      _camIndex = front >= 0 ? front : 0;
+      await _initController(_cameras[_camIndex]);
+    } catch (_) {
+      if (mounted) setState(() => _denied = true);
+    }
   }
 
-  Future<void> _setup(CameraDescription cam) async {
-    await _ctrl?.dispose();
-    _ctrl = CameraController(
+  Future<void> _initController(CameraDescription cam) async {
+    final c = CameraController(
       cam,
-      ResolutionPreset.low,
-      enableAudio: true,
+      ResolutionPreset.max,
+      enableAudio: _micGranted,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
-    await _ctrl!.initialize();
-    if (mounted) setState(() {});
+    _ctrl = c;
+    try {
+      await c.initialize().timeout(const Duration(seconds: 12));
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      try {
+        await c.setFlashMode(_flash);
+      } catch (_) {}
+      setState(() => _ready = true);
+    } catch (_) {
+      if (mounted) setState(() => _denied = true);
+    }
   }
 
-  Future<void> _flip() async {
+  bool get _isFront =>
+      _cameras.isNotEmpty &&
+      _cameras[_camIndex].lensDirection == CameraLensDirection.front;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _ctrl = null;
+      c.dispose();
+      if (mounted) setState(() => _ready = false);
+    } else if (state == AppLifecycleState.resumed && _cameras.isNotEmpty) {
+      _initController(_cameras[_camIndex]);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _countdownTimer?.cancel();
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  void _cycleFlash() {
+    setState(() {
+      _flash = _flash == FlashMode.off
+          ? FlashMode.auto
+          : _flash == FlashMode.auto
+              ? FlashMode.always
+              : FlashMode.off;
+    });
+    _applyFlash();
+  }
+
+  Future<void> _applyFlash() async {
+    try {
+      await _ctrl?.setFlashMode(_flash);
+    } catch (_) {}
+  }
+
+  IconData get _flashIcon => _flash == FlashMode.off
+      ? Icons.flash_off
+      : _flash == FlashMode.auto
+          ? Icons.flash_auto
+          : Icons.flash_on;
+
+  Future<void> _flipCamera() async {
     if (_cameras.length < 2 || _recording) return;
+    setState(() => _ready = false);
+    await _ctrl?.dispose();
+    _ctrl = null;
     _camIndex = (_camIndex + 1) % _cameras.length;
-    await _setup(_cameras[_camIndex]);
+    await _initController(_cameras[_camIndex]);
   }
 
-  Future<void> _record() async {
-    if (_ctrl == null || _recording) return;
+  Future<void> _capturePhoto() async {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized || c.value.isTakingPicture) return;
+    try {
+      await _applyFlash();
+      final xfile = await c.takePicture();
+      if (mounted) {
+        Navigator.of(context).pop(
+          _ReactionCapture(file: File(xfile.path), isPhoto: true),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not take that photo.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _startRecording() async {
+    final c = _ctrl;
+    if (c == null ||
+        !c.value.isInitialized ||
+        _recording ||
+        c.value.isRecordingVideo) {
+      return;
+    }
     setState(() {
       _recording = true;
       _countdown = 5;
     });
-    await _ctrl!.startVideoRecording();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) async {
+    try {
+      await c.startVideoRecording();
+    } catch (_) {
+      if (mounted) setState(() => _recording = false);
+      return;
+    }
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) async {
       if (!mounted) {
         t.cancel();
         return;
@@ -1734,207 +1963,348 @@ class _ReactionCameraSheetState extends State<_ReactionCameraSheet> {
       setState(() => _countdown--);
       if (_countdown <= 0) {
         t.cancel();
-        await _stop();
+        await _stopRecording();
       }
     });
   }
 
-  Future<void> _stop() async {
+  Future<void> _stopRecording() async {
     if (!_recording) return;
-    _timer?.cancel();
-    final xfile = await _ctrl!.stopVideoRecording();
-    setState(() => _recording = false);
-    if (mounted) Navigator.of(context).pop(File(xfile.path));
-  }
-
-  Future<void> _snap() async {
-    if (_ctrl == null) return;
-    final xfile = await _ctrl!.takePicture();
-    if (mounted) Navigator.of(context).pop(File(xfile.path));
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _ctrl?.dispose();
-    super.dispose();
+    _recording = false; // guard against the timer + a manual tap racing
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    final XFile xfile;
+    try {
+      xfile = await _ctrl!.stopVideoRecording();
+    } catch (_) {
+      if (mounted) setState(() {});
+      return;
+    }
+    if (mounted) {
+      Navigator.of(context).pop(
+        _ReactionCapture(file: File(xfile.path), isPhoto: false),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return GlassPanel(
-      blur: MilesColors.blurLg,
-      radius: 24,
-      padding: EdgeInsets.zero,
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: _denied
+          ? _buildDenied()
+          : (!_ready || _ctrl == null || !_ctrl!.value.isInitialized)
+              ? const Center(
+                  child: CircularProgressIndicator(color: MilesColors.ember),
+                )
+              : _buildCamera(),
+    );
+  }
+
+  Widget _buildDenied() {
+    return Stack(
+      children: [
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: _camCircleBtn(
+                Icons.arrow_back,
+                () => Navigator.of(context).pop(),
+              ),
+            ),
+          ),
+        ),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: GlassPanel(
+              glow: MilesColors.ember,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.no_photography_outlined,
+                      color: MilesColors.emberSoft, size: 40),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Camera access needed',
+                    style: GoogleFonts.fraunces(
+                      fontSize: 18,
+                      color: MilesColors.cream50,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Allow camera access to send a reaction.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: MilesColors.taupe,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  TextButton(
+                    onPressed: Geolocator.openAppSettings,
+                    child: const Text(
+                      'Open Settings',
+                      style: TextStyle(color: MilesColors.emberSoft),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCamera() {
+    final c = _ctrl!;
+    Widget preview = FittedBox(
+      fit: BoxFit.cover,
       child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.62,
-        child: Column(
-          children: [
-            const SizedBox(height: 12),
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: MilesColors.gilt,
-                  borderRadius: BorderRadius.circular(2),
+        width: c.value.previewSize?.height ?? 1080,
+        height: c.value.previewSize?.width ?? 1920,
+        child: CameraPreview(c),
+      ),
+    );
+    if (_isFront) {
+      preview = Transform.scale(scaleX: -1, child: preview);
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        SizedBox.expand(child: preview),
+
+        // Top chrome — back, flash, flip.
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _camCircleBtn(
+                  Icons.arrow_back,
+                  () => Navigator.of(context).pop(),
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: _ctrl?.value.isInitialized == true
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Transform.scale(
-                              scaleX: _camIndex == 1 ? -1 : 1,
-                              child: CameraPreview(_ctrl!),
-                            ),
-                            if (_recording)
-                              Center(
-                                child: Text(
-                                  '$_countdown',
-                                  style: GoogleFonts.fraunces(
-                                    fontSize: 80,
-                                    color: Colors.white.withValues(alpha: 0.85),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            if (_recording)
-                              Positioned(
-                                top: 14,
-                                left: 14,
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 9,
-                                      height: 9,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.red,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    const Text(
-                                      'REC',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            if (!_recording && _cameras.length > 1)
-                              Positioned(
-                                top: 14,
-                                right: 14,
-                                child: GestureDetector(
-                                  onTap: _flip,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black45,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: const Icon(
-                                      Icons.flip_camera_android,
-                                      color: Colors.white,
-                                      size: 22,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        )
-                      : Container(
-                          color: MilesColors.nightDeep,
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                                color: MilesColors.ember),
-                          ),
+                if (!_recording)
+                  Row(
+                    children: [
+                      _camCircleBtn(_flashIcon, _cycleFlash),
+                      const SizedBox(width: 8),
+                      if (_cameras.length > 1)
+                        _camCircleBtn(
+                          Icons.flip_camera_android,
+                          _flipCamera,
                         ),
-                ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+
+        // Bottom controls — mode pill + capture button.
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!_recording) _modePill(),
+              const SizedBox(height: 12),
+              _bottomBar(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _modePill() {
+    return GestureDetector(
+      onTap: () => setState(() => _isVideoMode = !_isVideoMode),
+      child: GlassPill(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _isVideoMode ? '🎥' : '📷',
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              _isVideoMode ? 'Video' : 'Photo',
+              style: GoogleFonts.inter(
+                color: MilesColors.cream50,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 20),
-            if (widget.mode == _CameraMode.photo)
-              GestureDetector(
-                onTap: _snap,
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    gradient: MilesGradients.cta,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: MilesColors.ember.withValues(alpha: 0.5),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.photo_camera_rounded,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                ),
-              )
-            else if (!_recording)
-              GestureDetector(
-                onTap: _record,
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    gradient: MilesGradients.cta,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: MilesColors.ember.withValues(alpha: 0.5),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.videocam_rounded,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                ),
-              )
-            else
-              Text(
-                'Recording... $_countdown',
-                style: GoogleFonts.inter(
-                  color: MilesColors.taupe,
-                  fontSize: 14,
-                ),
-              ),
-            const SizedBox(height: 16),
-            if (widget.mode == _CameraMode.photo || !_recording)
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(null),
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(color: MilesColors.taupe),
-                ),
-              ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
     );
+  }
+
+  Widget _bottomBar() {
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          width: double.infinity,
+          color: MilesColors.surfaceGlass,
+          padding: const EdgeInsets.only(top: 16, bottom: 24),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_recording)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '0:${_countdown.toString().padLeft(2, '0')}',
+                      style: GoogleFonts.inter(
+                        color: MilesColors.cream50,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                _captureButton(),
+                if (!_recording)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _isVideoMode ? 'Tap to record · 5s' : 'Tap for photo',
+                      style: const TextStyle(
+                        color: MilesColors.taupe,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _captureButton() {
+    // Photo — ember gradient circle.
+    if (!_isVideoMode) {
+      return GestureDetector(
+        onTap: _capturePhoto,
+        child: Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            gradient: MilesGradients.cta,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: MilesColors.ember.withValues(alpha: 0.5),
+                blurRadius: 20,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Center(
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: MilesColors.cream50, width: 3),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    // Video, idle — white ring + white dot.
+    if (!_recording) {
+      return GestureDetector(
+        onTap: _startRecording,
+        child: Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: MilesColors.cream50, width: 4),
+          ),
+          child: Center(
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: const BoxDecoration(
+                color: MilesColors.cream50,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    // Video, recording — red border + red square.
+    return GestureDetector(
+      onTap: _stopRecording,
+      child: Container(
+        width: 84,
+        height: 84,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.red, width: 4),
+        ),
+        child: Center(
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: Colors.red,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _camCircleBtn(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: Colors.black26,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, color: MilesColors.cream50, size: 24),
+        ),
+      ),
+    );
+  }
+}
+
+/// Decode → resize to ≤1200px wide → re-encode JPEG (q90). Runs in a background
+/// isolate via compute(); returns the encoded bytes (NOT a File) because
+/// path_provider can't be reached from a background isolate. Returns null on any
+/// failure so the caller falls back to the original image.
+Uint8List? _compressReactionPhoto(String path) {
+  try {
+    final bytes = File(path).readAsBytesSync();
+    var image = img.decodeImage(bytes);
+    if (image == null) return null;
+    if (image.width > 1200) {
+      image = img.copyResize(image, width: 1200);
+    }
+    return img.encodeJpg(image, quality: 90);
+  } catch (_) {
+    return null;
   }
 }
 
