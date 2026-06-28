@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/main.dart' show MilesApp;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:miles/core/realtime_service.dart';
@@ -392,6 +393,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   /// Source choice sheet — 'camera' (photo or video) or 'gallery' (photo only).
   /// Returns null on cancel.
   Future<String?> _showMediaSourceSheet() {
+    // Guard the cover while the sheet is up (cleared when it closes).
+    MilesApp.systemOverlayActive = true;
     return showModalBottomSheet<String?>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -468,12 +471,15 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           ),
         ),
       ),
-    );
+    ).whenComplete(() => MilesApp.systemOverlayActive = false);
   }
 
   /// Pick a single photo from the gallery (pre-sized by ImagePicker, so it skips
   /// the extra compression pass). Gallery videos aren't supported — kept simple.
   Future<_ReactionCapture?> _pickFromGallery() async {
+    // The system gallery picker bounces the app through `inactive`; guard the
+    // News cover so we don't return from the picker onto the cover screen.
+    MilesApp.systemOverlayActive = true;
     try {
       final picker = ImagePicker();
       final xfile = await picker.pickImage(
@@ -486,6 +492,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       return _ReactionCapture(file: File(xfile.path), isPhoto: true);
     } catch (_) {
       return null;
+    } finally {
+      MilesApp.systemOverlayActive = false;
     }
   }
 
@@ -1613,7 +1621,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
                     child: AnimatedBuilder(
                       animation: _pulseCtrl,
                       builder: (_, __) {
-                        final glowOpacity = 0.25 + (_pulseCtrl.value * 0.30);
+                        final glowOpacity = 0.35 + (_pulseCtrl.value * 0.30);
                         return Container(
                           width: s * 1.7,
                           height: s * 1.7,
@@ -1648,12 +1656,15 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
                         Color(0xD9FFFFFF), // white @ ~0.85
                         Colors.transparent,
                       ],
-                      stops: [0.0, 0.55, 1.0],
+                      // Feather only the outer 28% — content stays vivid in the
+                      // center, dissolves into the body photo at the very edge.
+                      stops: [0.0, 0.72, 1.0],
                     ).createShader(bounds),
                     blendMode: BlendMode.dstIn,
                     child: Opacity(
-                      // Low opacity keeps the body photo dominant underneath.
-                      opacity: 0.50,
+                      // High enough to read the reaction clearly; the dreamy
+                      // feel comes from the feathered edge + glow, not low alpha.
+                      opacity: 0.78,
                       child: SizedBox(
                         width: s,
                         height: s,
@@ -1672,7 +1683,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
                       gradient: RadialGradient(
                         radius: 0.5,
                         colors: [
-                          Color(0x2EFFF3E0), // warm golden @ ~0.18
+                          Color(0x14FFF3E0), // warm golden @ ~0.08
                           Colors.transparent,
                         ],
                         stops: [0.0, 1.0],
@@ -1868,13 +1879,20 @@ class _SourceOption extends StatelessWidget {
 class _ReactionFullCamera extends StatefulWidget {
   const _ReactionFullCamera();
 
-  static Future<_ReactionCapture?> open(BuildContext context) {
-    return Navigator.of(context).push<_ReactionCapture>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => const _ReactionFullCamera(),
-      ),
-    );
+  static Future<_ReactionCapture?> open(BuildContext context) async {
+    // The camera/mic permission dialogs make the app `inactive`; guard the
+    // News cover for the whole camera session so it can't slip in underneath.
+    MilesApp.systemOverlayActive = true;
+    try {
+      return await Navigator.of(context).push<_ReactionCapture>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const _ReactionFullCamera(),
+        ),
+      );
+    } finally {
+      MilesApp.systemOverlayActive = false;
+    }
   }
 
   @override
@@ -1938,7 +1956,9 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
   Future<void> _initController(CameraDescription cam) async {
     final c = CameraController(
       cam,
-      ResolutionPreset.max,
+      // high (~720p) is plenty — the reaction is downscaled anyway — and far
+      // lighter than max, which lagged preview + capture on mid-range phones.
+      ResolutionPreset.high,
       enableAudio: _micGranted,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -2022,9 +2042,28 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
     try {
       await _applyFlash();
       final xfile = await c.takePicture();
+      final file = File(xfile.path);
+
+      // The front camera saves the RAW (un-mirrored) frame, but the user
+      // composed the shot against a mirrored preview — flip the saved photo so
+      // the partner sees what the sender saw. Back camera is left as-is; video
+      // is never flipped (its orientation metadata handles that).
+      if (_isFront) {
+        try {
+          final decoded = img.decodeImage(await file.readAsBytes());
+          if (decoded != null) {
+            await file.writeAsBytes(
+              img.encodeJpg(img.flipHorizontal(decoded), quality: 90),
+            );
+          }
+        } catch (_) {
+          // Keep the un-flipped capture on any failure.
+        }
+      }
+
       if (mounted) {
         Navigator.of(context).pop(
-          _ReactionCapture(file: File(xfile.path), isPhoto: true),
+          _ReactionCapture(file: file, isPhoto: true),
         );
       }
     } catch (_) {

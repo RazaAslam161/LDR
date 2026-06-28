@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/providers.dart';
@@ -19,6 +20,7 @@ import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
+import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
@@ -85,6 +87,14 @@ class MilesApp extends ConsumerStatefulWidget {
   /// the app `inactive`; this guards that transition from resetting
   /// [showRealApp] and cancelling the unlock mid-auth.
   static bool authInProgress = false;
+
+  /// True while an in-app flow has intentionally handed focus to a system
+  /// overlay — the gallery picker, the full-screen reaction camera, the
+  /// media-source sheet, a permission dialog. These all bounce the app through
+  /// `inactive`; without this guard that transient state would drop the cover
+  /// and the user would return from the picker to the News screen. Set it true
+  /// BEFORE opening the overlay and false immediately after it closes.
+  static bool systemOverlayActive = false;
 
   @override
   ConsumerState<MilesApp> createState() => _MilesAppState();
@@ -177,9 +187,13 @@ class _MilesAppState extends ConsumerState<MilesApp>
       case AppLifecycleState.detached:
         MilesApp.showRealApp.value = false;
       case AppLifecycleState.inactive:
-        // The biometric prompt itself makes the app inactive — don't reset the
-        // cover mid-auth or it would cancel the unlock.
-        if (!MilesApp.authInProgress) MilesApp.showRealApp.value = false;
+        // The biometric prompt, gallery picker, reaction camera, and permission
+        // dialogs all make the app inactive — don't reset the cover while one of
+        // those is intentionally open, or returning would land on the News
+        // screen (and a mid-auth reset would cancel the unlock).
+        if (!MilesApp.authInProgress && !MilesApp.systemOverlayActive) {
+          MilesApp.showRealApp.value = false;
+        }
       case AppLifecycleState.resumed:
         break;
     }
@@ -274,6 +288,14 @@ class _MilesAppState extends ConsumerState<MilesApp>
         }
 
         final router = ref.watch(routerProvider);
+        // Branded loading screen (never a white blank) for the 1–3s the session
+        // takes to initialise right after authentication. Guard on profile==null
+        // so this only shows on the FIRST load — a later background reload (token
+        // refresh) keeps the old profile while loading flips true, so it won't
+        // flash over the running app.
+        final showSessionLoading = ref.watch(
+          sessionProvider.select((s) => s.loading && s.profile == null),
+        );
         return MaterialApp.router(
           // Keep the disguised name in the task switcher too.
           title: 'News',
@@ -285,8 +307,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // Always-present candle-glow backdrop so glassmorphism has
               // something to blur against on every screen.
               const EmberBackground(child: SizedBox.shrink()),
-              // The routed screen, transparent so the glow shows through.
-              child ?? const SizedBox.shrink(),
+              // The routed screen, transparent so the glow shows through — or a
+              // branded loading veil while the session is still initialising.
+              if (showSessionLoading)
+                const _SessionLoading()
+              else
+                child ?? const SizedBox.shrink(),
               // Return-to-call pill while a call is minimised.
               const CallPill(),
               // Biometric lock sits on top of everything.
@@ -302,6 +328,43 @@ class _MilesAppState extends ConsumerState<MilesApp>
           ),
         );
       },
+    );
+  }
+}
+
+/// Branded "session warming up" veil shown for the 1–3s between authentication
+/// and the first profile/couple load — replaces the white blank that used to
+/// flash while MaterialApp.router + the session providers initialised. Sits over
+/// the always-present [EmberBackground], so it reads as the Tethered candlelight,
+/// not a broken screen.
+class _SessionLoading extends StatelessWidget {
+  const _SessionLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'Tethered',
+            style: GoogleFonts.fraunces(
+              fontSize: 32,
+              fontStyle: FontStyle.italic,
+              color: MilesColors.cream50,
+            ),
+          ),
+          const SizedBox(height: 24),
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: MilesColors.ember,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
