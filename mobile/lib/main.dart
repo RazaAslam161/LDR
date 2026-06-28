@@ -184,23 +184,42 @@ class _MilesAppState extends ConsumerState<MilesApp>
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
+        // Real backgrounding → drop to the News cover immediately, UNLESS a
+        // system overlay we deliberately opened (gallery/camera/file picker,
+        // permission dialog) is up. A full-screen picker Activity obscures us
+        // and reports `paused` on most Android builds — dropping then is exactly
+        // what stranded the user on News (and lost the in-flight media) when
+        // they returned from the picker. The guard is cleared in a finally the
+        // instant the picker closes, so full stealth resumes immediately after.
+        if (!MilesApp.systemOverlayActive) {
+          MilesApp.showRealApp.value = false;
+        }
       case AppLifecycleState.detached:
         MilesApp.showRealApp.value = false;
       case AppLifecycleState.inactive:
-        // The biometric prompt, gallery picker, reaction camera, and permission
-        // dialogs all make the app inactive — don't reset the cover while one of
-        // those is intentionally open, or returning would land on the News
-        // screen (and a mid-auth reset would cancel the unlock).
-        if (!MilesApp.authInProgress && !MilesApp.systemOverlayActive) {
-          MilesApp.showRealApp.value = false;
-        }
+        // Transient focus loss: a picker grabbing focus, the notification-shade
+        // peek, the biometric prompt. Defer the check a beat so the overlay
+        // guard (set synchronously before opening any overlay) is definitely
+        // visible, then drop ONLY if we're STILL inactive and nothing is
+        // intentionally open — so a quick shade peek that returns to resumed
+        // doesn't force an unnecessary re-auth, and a picker keeps the cover up.
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (!mounted) return;
+          if (MilesApp.authInProgress || MilesApp.systemOverlayActive) return;
+          if (WidgetsBinding.instance.lifecycleState ==
+              AppLifecycleState.inactive) {
+            MilesApp.showRealApp.value = false;
+          }
+        });
       case AppLifecycleState.resumed:
         break;
     }
 
     // Biometric app-lock: raise on background, prompt to unlock on resume — but
-    // only while the REAL app is visible, never unsolicited over the News cover.
-    if (state == AppLifecycleState.paused) {
+    // only while the REAL app is visible, never unsolicited over the News cover,
+    // and NOT while a system picker we opened is up (else picking a photo would
+    // trip the lock and prompt biometrics on the way back).
+    if (state == AppLifecycleState.paused && !MilesApp.systemOverlayActive) {
       AppLock.lockIfEnabled();
     } else if (state == AppLifecycleState.resumed) {
       if (MilesApp.showRealApp.value && AppLock.locked.value) {

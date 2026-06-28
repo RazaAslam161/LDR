@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/main.dart' show MilesApp;
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:path_provider/path_provider.dart';
@@ -101,8 +102,14 @@ class _CapsuleFillScreenState extends ConsumerState<CapsuleFillScreen> {
   }
 
   Future<void> _addPhoto() async {
-    final XFile? file =
-        await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    XFile? file;
+    MilesApp.systemOverlayActive = true;
+    try {
+      file =
+          await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    } finally {
+      MilesApp.systemOverlayActive = false;
+    }
     if (file == null) return;
     setState(() => _busy = true);
     try {

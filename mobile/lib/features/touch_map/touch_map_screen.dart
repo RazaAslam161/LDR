@@ -777,6 +777,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   Future<void> _quickSnap() async {
     final id = _coupleId;
     if (id == null) return;
+    // Guard the News cover while the system camera is open.
+    MilesApp.systemOverlayActive = true;
     try {
       final shot = await ImagePicker()
           .pickImage(source: ImageSource.camera, imageQuality: 70);
@@ -787,7 +789,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           const SnackBar(content: Text('Snap sent 📸')),
         );
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      MilesApp.systemOverlayActive = false;
+    }
   }
 
   /// Local touch on [owner]'s body at normalized (x,y): show it here, buzz a

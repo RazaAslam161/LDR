@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/main.dart' show MilesApp;
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/features/closer/afterglow/afterglow_screen.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
@@ -43,8 +44,14 @@ class _AfterglowFormScreenState extends ConsumerState<AfterglowFormScreen> {
 
   Future<void> _pickPhoto() async {
     final picker = ImagePicker();
-    final xfile =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    XFile? xfile;
+    MilesApp.systemOverlayActive = true;
+    try {
+      xfile =
+          await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    } finally {
+      MilesApp.systemOverlayActive = false;
+    }
     if (xfile == null) return;
     final bytes = await xfile.readAsBytes();
     if (!mounted) return;

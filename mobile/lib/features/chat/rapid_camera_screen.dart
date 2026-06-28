@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:miles/main.dart' show MilesApp;
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
@@ -91,6 +92,9 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     // backgrounds the app) and can leave initialize() hanging on a permanent
     // loading wheel. Doing it here means the controller is only ever created
     // once permission is already granted.
+    // The OS camera/mic permission dialogs are system overlays — guard the
+    // News cover so the first-run prompt can't drop us to the cover screen.
+    MilesApp.systemOverlayActive = true;
     try {
       final status = await Permission.camera.request();
       if (!status.isGranted) {
@@ -103,6 +107,8 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       _micGranted = mic.isGranted;
     } catch (e) {
       debugPrint('[camera] permission request failed: $e');
+    } finally {
+      MilesApp.systemOverlayActive = false;
     }
     try {
       _cameras = await availableCameras();
