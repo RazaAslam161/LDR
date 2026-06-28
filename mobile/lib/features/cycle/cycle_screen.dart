@@ -7,8 +7,11 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
+import 'package:miles/features/cycle/love_note_preview_sheet.dart';
+import 'package:miles/features/cycle/love_notes_pool.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -406,6 +409,17 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           label: const Text('Send a care note'),
         ),
       ),
+      const SizedBox(height: 10),
+      // SECRET — reached only via _partnerView() (male partner). The female
+      // partner sees _femaleTracker(), so this button is invisible to her.
+      SizedBox(
+        width: double.infinity,
+        child: GlowButton(
+          label: '💌 Send a note',
+          color: MilesColors.blush,
+          onPressed: _showLoveNote,
+        ),
+      ),
     ];
   }
 
@@ -427,6 +441,46 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         );
       }
     }
+  }
+
+  /// Secret love-note sender. Lives ONLY inside _partnerView() (the male
+  /// partner's view), so the female partner — who sees _femaleTracker() — never
+  /// sees it. Pulls a never-repeating paragraph from the pool, lets him edit it,
+  /// then sends it to chat as a plain text message. She just receives a normal
+  /// message with no idea a pool or this feature exists.
+  Future<void> _showLoveNote() async {
+    final note = await LoveNotesTracker.getNextNote();
+    if (!mounted) return;
+    await LoveNotePreviewSheet.show(
+      context,
+      note: note,
+      onRegenerate: _showLoveNote,
+      onSend: (text) async {
+        final cid = _coupleId;
+        if (cid == null) return;
+        final body = text.trim();
+        if (body.isEmpty) return;
+        try {
+          await ChatRepository.sendText(cid, body);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Sent 💌'),
+                backgroundColor: MilesColors.sage,
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not send — try again.')),
+            );
+          }
+        }
+      },
+    );
   }
 
   // ──────────────────────────── Shared bits ──────────────────────────────────
