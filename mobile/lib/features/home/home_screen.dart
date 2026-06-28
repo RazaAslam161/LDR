@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,6 @@ import 'package:intl/intl.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
-import 'package:miles/core/services/bg_location.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -36,87 +36,53 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   bool _uploading = false;
-  String _myMode = 'off';
   double? _myLat;
   double? _myLon;
+  Timer? _locationTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initLocation());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startLocationUpdates());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // Do NOT pause the location stream here — the user may have just navigated
-    // to another tab (Chat/Games) with the app still open. Pausing on dispose
-    // froze the partner's map whenever Home wasn't the active tab. The stream
-    // is paused only on real app-background (didChangeAppLifecycleState.paused);
-    // LocationForegroundService covers true background updates.
+    _locationTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final couple = ref.read(currentCoupleProvider);
-    if (couple == null) return;
     if (state == AppLifecycleState.resumed) {
-      _resumeLocation(couple.id);
+      _startLocationUpdates();
     } else {
-      // Always safe: pausing the in-app stream never starts anything.
-      LocationService.pauseStream();
+      // Foreground-only: stop pushing location the moment we leave the app.
+      _locationTimer?.cancel();
     }
   }
 
-  /// On resume, restart live streaming ONLY if the user's saved intent is still
-  /// 'precise'. Reading the persisted intent (not a cached field) means a
-  /// toggle-off from anywhere stays off — it never silently turns itself back on.
-  Future<void> _resumeLocation(String coupleId) async {
-    final on = await LocationService.isLiveModeOn();
-    if (mounted) {
-      setState(() =>
-          _myMode = on ? 'precise' : (_myMode == 'city' ? 'city' : 'off'));
-    }
-    if (on) await LocationService.startLiveSharing(coupleId);
-  }
-
-  Future<void> _initLocation() async {
+  /// Simple foreground location sharing: while Home is open and the user's mode
+  /// isn't 'off', push the current position now and then every 15s. No live
+  /// toggle, no foreground service, no background location. [shareCurrent]
+  /// re-reads the saved mode each tick, so changing it in Settings (including to
+  /// 'off') is honoured within one tick.
+  Future<void> _startLocationUpdates() async {
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
-    // The foreground service (and its notification) starts ONLY when the user's
-    // LIVE toggle is on — tracked by the local live-intent pref, NOT the DB
-    // sharing mode. Settings' 'precise' mode sets the DB mode but never the live
-    // intent, so it must not auto-start the service here. Default = live OFF.
-    final mine = await PresenceService.fetchMine(couple.id);
-    final mode = mine?.locationSharingMode ?? 'off';
-    final liveOn = await LocationService.isLiveModeOn();
+    _locationTimer?.cancel();
 
-    // The "Live sharing" banner reflects the LIVE state, not a static precise row.
-    if (mounted) {
-      setState(() =>
-          _myMode = liveOn ? 'precise' : (mode == 'city' ? 'city' : 'off'));
-    }
     await _refreshMyCoords();
+    // One immediate push so the partner sees a fresh position without waiting.
+    await LocationService.shareCurrent(couple.id);
 
-    if (liveOn) {
-      // Resume the live stream the user previously turned on (notification shows).
-      await LocationService.startLiveSharing(couple.id);
+    _locationTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (!mounted) return;
+      await LocationService.shareCurrent(couple.id);
       await _refreshMyCoords();
-      // Periodic background updates so the partner still gets movement when the
-      // app is closed. Best-effort (OEM battery limits apply).
-      await BgLocationService.enable();
-    } else {
-      // Not live: guarantee the foreground service is OFF (no phantom
-      // notification) and stop background streaming. Never wipe presence — a
-      // 'precise' static row keeps the partner's last-known pin visible.
-      await LocationService.ensureLiveOff();
-      await BgLocationService.disable();
-      if (mode == 'city') {
-        await LocationService.shareOnce(couple.id, 'city');
-      }
-    }
+    });
   }
 
   /// My own coords (for the distance readout) — last-known is instant + prompt-free.
@@ -130,15 +96,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         });
       }
     } catch (_) {}
-  }
-
-  Future<void> _stopLive() async {
-    final couple = ref.read(currentCoupleProvider);
-    if (couple == null) return;
-    // Keep the partner's last-known pin — stop live streaming + the foreground
-    // service + background work, but don't wipe coords (handled inside).
-    await LocationService.stopLiveSharingKeepLast(couple.id);
-    if (mounted) setState(() => _myMode = 'off');
   }
 
   Future<void> _shareSnap() async {
@@ -225,13 +182,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   myLat: _myLat,
                   myLon: _myLon,
                 ),
-                if (_myMode == 'precise') ...[
-                  const SizedBox(height: 8),
-                  _LiveSharingBanner(
-                    partnerName: partner.displayName,
-                    onStop: _stopLive,
-                  ),
-                ],
                 const PartnerCycleCard(),
                 const SizedBox(height: 36),
                 Center(
@@ -482,47 +432,6 @@ class _QuickActions extends StatelessWidget {
 
 /// "📍 Sharing live location with X" indicator + one-tap off switch (privacy:
 /// the sharer always sees they're sharing, and can stop instantly).
-class _LiveSharingBanner extends StatelessWidget {
-  const _LiveSharingBanner({
-    required this.partnerName,
-    required this.onStop,
-  });
-  final String partnerName;
-  final VoidCallback onStop;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassPanel(
-      color: MilesColors.glassEmber,
-      borderColor: MilesColors.blush.withValues(alpha: 0.3),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      radius: 14,
-      child: Row(
-        children: [
-          const Icon(Icons.my_location, color: MilesColors.blush, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Sharing live location with $partnerName',
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
-            ),
-          ),
-          GestureDetector(
-            onTap: onStop,
-            child: const Text(
-              'Turn off',
-              style: TextStyle(
-                  color: MilesColors.blush,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _Centered extends StatelessWidget {
   const _Centered(this.text);
   final String text;

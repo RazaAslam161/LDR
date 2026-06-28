@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/core/services/bg_location.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
@@ -147,10 +146,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mode == null) return;
     if (mode == 'off') {
       await PresenceService.setSharingMode(couple.id, 'off');
-      await BgLocationService.disable();
     } else {
+      // Push one fix now; Home's foreground loop keeps it fresh while open.
       await LocationService.shareOnce(couple.id, mode);
-      if (mode == 'precise') await BgLocationService.enable();
     }
     if (mounted) {
       setState(() => _locationMode = mode);

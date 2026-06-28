@@ -275,13 +275,19 @@ class PresenceService {
     required String mode,
     double? lat,
     double? lon,
+    double? accuracy,
     String? label,
   }) =>
       _upsert(coupleId, {
         'location_sharing_mode': mode,
         'latitude': lat,
         'longitude': lon,
+        'location_accuracy': accuracy,
         'location_label': label,
+        // Freshness for the partner's "Xs ago". GPS-only: _upsert never stamps
+        // app_last_active_at (isAppActivity:false), so location updates can't
+        // make anyone read as falsely "online" / "active".
+        'location_updated_at': DateTime.now().toUtc().toIso8601String(),
       });
 
   /// A single live-location tick (precise mode): coords + accuracy + freshness.

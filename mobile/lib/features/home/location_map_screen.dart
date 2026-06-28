@@ -15,11 +15,9 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:miles/core/providers.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
-import 'package:miles/features/home/location_toggle_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class LocationMapScreen extends ConsumerStatefulWidget {
@@ -346,16 +344,6 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      LocationToggleBar(
-                        coupleId: widget.coupleId,
-                        partnerName: widget.partnerName,
-                      ),
-                      const SizedBox(height: 12),
-                      Divider(
-                          color: MilesColors.gilt,
-                          thickness: 0.5,
-                          height: 1),
-                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(

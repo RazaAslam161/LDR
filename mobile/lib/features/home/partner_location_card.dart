@@ -8,7 +8,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
-import 'package:miles/features/home/location_toggle_bar.dart';
 import 'package:miles/features/home/map_3d_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -312,15 +311,6 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                     ),
                   ],
                 ),
-              ),
-            ),
-            // Inline live-location toggle — lives directly on the card,
-            // not buried in Settings.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-              child: LocationToggleBar(
-                coupleId: widget.coupleId,
-                partnerName: widget.partnerName,
               ),
             ),
             if (dist != null)
