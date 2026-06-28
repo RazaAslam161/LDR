@@ -112,42 +112,63 @@ class SessionNotifier extends StateNotifier<SessionState> {
         partner: partner,
       );
 
-      if (couple != null) {
-        final coupleId = couple.id;
-        _subscribePresence(coupleId);
-
-        // PRESENCE INTEGRITY GUARD
-        // Silently verify and repair presence.couple_id. Catches the case
-        // where leave_couple + re-pair left presence pointing at the wrong
-        // couple_id. Runs on every app load — a ~200ms read that prevents the
-        // entire app from breaking. Never surfaces to the user: self-healing.
+      if (couple == null) {
+        // No couple (just left, or never paired): clear any stale presence
+        // couple_id so a future partner can't inherit a dangling link. The DB
+        // trigger + leave_couple() already handle this server-side; this is the
+        // client-side belt-and-suspenders. Filtered with .not(is null) so we
+        // only write when there's actually something to clear.
         try {
           final uid = SupabaseService.currentUserId;
           if (uid != null) {
-            final row = await SupabaseService.client
+            await SupabaseService.client
                 .from('presence')
-                .select('couple_id')
+                .update({
+                  'couple_id': null,
+                  'is_online': false,
+                  'updated_at': DateTime.now().toUtc().toIso8601String(),
+                })
                 .eq('user_id', uid)
-                .maybeSingle();
-            if (row != null && row['couple_id'] != coupleId) {
-              // Presence is stale — repair silently.
-              await SupabaseService.client.from('presence').update({
-                'couple_id': coupleId,
-                'updated_at': DateTime.now().toUtc().toIso8601String(),
-              }).eq('user_id', uid);
-            }
+                .not('couple_id', 'is', null);
           }
-        } catch (_) {
-          // Never surfaces to user — silent self-healing.
-        }
-
-        // Write presence to the new couple immediately. If this is a re-pair,
-        // presence.couple_id was just repaired above; stamp it active so the
-        // partner can see us online right away.
-        try {
-          await PresenceService.setOnline(coupleId, online: true);
         } catch (_) {}
+        return; // No couple = nothing more to load.
       }
+
+      final coupleId = couple.id;
+      _subscribePresence(coupleId);
+
+      // PRESENCE INTEGRITY GUARD
+      // Silently verify and repair presence.couple_id. Catches the case
+      // where leave_couple + re-pair left presence pointing at the wrong
+      // couple_id. Runs on every app load — a ~200ms read that prevents the
+      // entire app from breaking. Never surfaces to the user: self-healing.
+      try {
+        final uid = SupabaseService.currentUserId;
+        if (uid != null) {
+          final row = await SupabaseService.client
+              .from('presence')
+              .select('couple_id')
+              .eq('user_id', uid)
+              .maybeSingle();
+          if (row != null && row['couple_id'] != coupleId) {
+            // Presence is stale — repair silently.
+            await SupabaseService.client.from('presence').update({
+              'couple_id': coupleId,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            }).eq('user_id', uid);
+          }
+        }
+      } catch (_) {
+        // Never surfaces to user — silent self-healing.
+      }
+
+      // Write presence to the new couple immediately. If this is a re-pair,
+      // presence.couple_id was just repaired above; stamp it active so the
+      // partner can see us online right away.
+      try {
+        await PresenceService.setOnline(coupleId, online: true);
+      } catch (_) {}
     } catch (e) {
       // TimeoutException or network error — stop loading and let the
       // router redirect to sign-in so the user is never stuck forever.

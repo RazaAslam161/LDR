@@ -237,6 +237,13 @@ class SupabaseRepository {
     } catch (_) {
       // Swallow errors — presence cleanup is best-effort.
     }
+
+    // Refresh the auth session so anything keyed off the JWT re-resolves, and
+    // so the resulting token-refresh event re-runs loadProfile() into a clean
+    // no-couple state. Best-effort — offline just means the next load heals it.
+    try {
+      await SupabaseService.client.auth.refreshSession();
+    } catch (_) {}
   }
 
   /// Sets the user's avatar URL (Issue 7 — profile photo).
