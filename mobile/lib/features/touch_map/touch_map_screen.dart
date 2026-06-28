@@ -51,6 +51,12 @@ class _ActiveReactionGif {
   final String id;
   final bool isPhoto;
   final ReactionGesture gesture;
+
+  /// Mirror the media at display time. True for front-camera VIDEO (which we
+  /// can't flip on the file without FFmpeg) so the played-back reaction matches
+  /// the mirrored selfie preview. Photos are flipped at capture instead.
+  final bool mirror;
+
   const _ActiveReactionGif({
     required this.mediaUrl,
     required this.x,
@@ -58,6 +64,7 @@ class _ActiveReactionGif {
     required this.id,
     required this.isPhoto,
     this.gesture = ReactionGesture.unknown,
+    this.mirror = false,
   });
 }
 
@@ -252,6 +259,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       (g) => g.name == gestureStr,
       orElse: () => ReactionGesture.unknown,
     );
+    final mirror = payload['mirror'] as bool? ?? false;
     if (mediaUrl != null && x != null && y != null) {
       _addReaction(
         mediaUrl: mediaUrl,
@@ -260,6 +268,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         id: id,
         isPhoto: isPhoto,
         gesture: gesture,
+        mirror: mirror,
       );
     }
   }
@@ -280,6 +289,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     await _processCapturedReaction(
       file: captured.file,
       isPhoto: captured.isPhoto,
+      mirror: captured.mirror,
       x: x,
       y: y,
     );
@@ -294,6 +304,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     required bool isPhoto,
     required double x,
     required double y,
+    bool mirror = false,
   }) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
@@ -374,6 +385,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       id: reactionId,
       isPhoto: isPhoto,
       gesture: gesture,
+      mirror: mirror,
     );
 
     _channel?.channel?.sendBroadcastMessage(
@@ -386,6 +398,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         'id': reactionId,
         'is_photo': isPhoto,
         'gesture': gesture.name,
+        'mirror': mirror,
       },
     );
   }
@@ -526,6 +539,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     required String id,
     required bool isPhoto,
     ReactionGesture gesture = ReactionGesture.unknown,
+    bool mirror = false,
   }) {
     final r = _ActiveReactionGif(
       mediaUrl: mediaUrl,
@@ -534,6 +548,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       id: id,
       isPhoto: isPhoto,
       gesture: gesture,
+      mirror: mirror,
     );
     if (mounted) setState(() => _reactions.add(r));
     _playGestureHaptic(gesture);
@@ -1595,6 +1610,35 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
           )
         : _buildVideoWithTrail(s);
 
+    // Layer 2 — zone-clipped reaction, kept CLEARLY visible. Photos get a soft
+    // ShaderMask feather (works on raster images). Video does NOT: a ShaderMask
+    // over a platform Texture (VideoPlayer) composites to nothing on Android —
+    // that's why the animated reaction showed up empty. So video is ClipPath +
+    // opacity only, and the glow aura softens its edge instead.
+    final Widget layer2 = widget.reaction.isPhoto
+        ? ClipPath(
+            clipper: widget.clipper,
+            child: ShaderMask(
+              shaderCallback: (bounds) => const RadialGradient(
+                radius: 0.95,
+                colors: [Colors.white, Colors.white, Colors.transparent],
+                stops: [0.0, 0.82, 1.0],
+              ).createShader(bounds),
+              blendMode: BlendMode.dstIn,
+              child: Opacity(
+                opacity: 0.92,
+                child: SizedBox(width: s, height: s, child: mediaContent),
+              ),
+            ),
+          )
+        : ClipPath(
+            clipper: widget.clipper,
+            child: Opacity(
+              opacity: 0.96,
+              child: SizedBox(width: s, height: s, child: mediaContent),
+            ),
+          );
+
     return Positioned(
       left: (pixelX - s / 2).clamp(0.0, widget.containerWidth - s),
       top: (pixelY - s / 2).clamp(0.0, widget.containerHeight - s),
@@ -1644,35 +1688,8 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
                   ),
                 ),
 
-                // ── LAYER 2: REACTION CONTENT (translucent, feathered) ──────
-                ClipPath(
-                  clipper: widget.clipper, // zone shape
-                  child: ShaderMask(
-                    // Radial alpha mask → edges dissolve into the body photo.
-                    shaderCallback: (bounds) => const RadialGradient(
-                      radius: 0.7,
-                      colors: [
-                        Colors.white,
-                        Color(0xD9FFFFFF), // white @ ~0.85
-                        Colors.transparent,
-                      ],
-                      // Feather only the outer 28% — content stays vivid in the
-                      // center, dissolves into the body photo at the very edge.
-                      stops: [0.0, 0.72, 1.0],
-                    ).createShader(bounds),
-                    blendMode: BlendMode.dstIn,
-                    child: Opacity(
-                      // High enough to read the reaction clearly; the dreamy
-                      // feel comes from the feathered edge + glow, not low alpha.
-                      opacity: 0.78,
-                      child: SizedBox(
-                        width: s,
-                        height: s,
-                        child: mediaContent,
-                      ),
-                    ),
-                  ),
-                ),
+                // ── LAYER 2: REACTION CONTENT (zone-clipped, clearly visible) ─
+                layer2,
 
                 // ── LAYER 3: INNER SOFT LIGHT (luminous center) ─────────────
                 IgnorePointer(
@@ -1716,7 +1733,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
           )
         : const SizedBox.shrink(); // transparent while loading → body shows
 
-    return Stack(
+    final content = Stack(
       fit: StackFit.expand,
       children: [
         // Motion trail — a soft ember ghost that oscillates by gesture. We
@@ -1744,6 +1761,12 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
         video,
       ],
     );
+
+    // Front-camera selfie video: mirror at display so it matches the mirrored
+    // preview the sender saw (the file itself is the raw, un-mirrored frame).
+    return widget.reaction.mirror
+        ? Transform.scale(scaleX: -1, child: content)
+        : content;
   }
 
   /// 4 magical sparkle dots at deterministic positions (seeded by reaction id
@@ -1823,7 +1846,16 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
 class _ReactionCapture {
   final File file;
   final bool isPhoto;
-  const _ReactionCapture({required this.file, required this.isPhoto});
+
+  /// Display-mirror this media when it's shown as a reaction. Set for
+  /// front-camera VIDEO (photos are flipped on the file at capture instead).
+  final bool mirror;
+
+  const _ReactionCapture({
+    required this.file,
+    required this.isPhoto,
+    this.mirror = false,
+  });
 }
 
 /// One option tile in the reaction source sheet (Camera / Gallery).
@@ -1956,11 +1988,16 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
   Future<void> _initController(CameraDescription cam) async {
     final c = CameraController(
       cam,
-      // high (~720p) is plenty — the reaction is downscaled anyway — and far
-      // lighter than max, which lagged preview + capture on mid-range phones.
-      ResolutionPreset.high,
+      // medium (~480p): light enough to keep the preview smooth on older phones
+      // AND to keep the recorded clip small so it reaches the partner quickly.
+      // The reaction is downscaled to a tiny zone overlay anyway, so 480p is
+      // plenty of detail.
+      ResolutionPreset.medium,
       enableAudio: _micGranted,
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      // NO imageFormatGroup here: forcing ImageFormatGroup.jpeg made the plugin
+      // convert every preview frame to JPEG, which is what made the preview lag.
+      // The default platform format keeps the preview smooth; takePicture still
+      // writes a JPEG regardless.
     );
     _ctrl = c;
     try {
@@ -2120,7 +2157,13 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
     }
     if (mounted) {
       Navigator.of(context).pop(
-        _ReactionCapture(file: File(xfile.path), isPhoto: false),
+        // Front-camera video can't be flipped on the file (no FFmpeg), so flag
+        // it to mirror at display — matching the mirrored selfie preview.
+        _ReactionCapture(
+          file: File(xfile.path),
+          isPhoto: false,
+          mirror: _isFront,
+        ),
       );
     }
   }
