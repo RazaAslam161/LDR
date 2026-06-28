@@ -281,8 +281,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _ReactionCapture? captured;
     if (source == 'camera') {
       captured = await _ReactionFullCamera.open(context);
+    } else if (source == 'gallery_video') {
+      captured = await _pickVideoFromGallery();
     } else {
-      captured = await _pickFromGallery();
+      captured = await _pickPhotoFromGallery();
     }
     if (captured == null || !mounted) return;
 
@@ -464,9 +466,18 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                     Expanded(
                       child: _SourceOption(
                         icon: Icons.photo_library_rounded,
-                        label: 'Gallery',
-                        subtitle: 'Pick a photo',
+                        label: 'Photo',
+                        subtitle: 'From gallery',
                         onTap: () => Navigator.pop(sheetCtx, 'gallery'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _SourceOption(
+                        icon: Icons.video_library_rounded,
+                        label: 'Video',
+                        subtitle: 'From gallery',
+                        onTap: () => Navigator.pop(sheetCtx, 'gallery_video'),
                       ),
                     ),
                   ],
@@ -488,8 +499,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   }
 
   /// Pick a single photo from the gallery (pre-sized by ImagePicker, so it skips
-  /// the extra compression pass). Gallery videos aren't supported — kept simple.
-  Future<_ReactionCapture?> _pickFromGallery() async {
+  /// the extra compression pass).
+  Future<_ReactionCapture?> _pickPhotoFromGallery() async {
     // The system gallery picker bounces the app through `inactive`; guard the
     // News cover so we don't return from the picker onto the cover screen.
     MilesApp.systemOverlayActive = true;
@@ -503,6 +514,52 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       );
       if (xfile == null) return null;
       return _ReactionCapture(file: File(xfile.path), isPhoto: true);
+    } catch (_) {
+      return null;
+    } finally {
+      MilesApp.systemOverlayActive = false;
+    }
+  }
+
+  /// Pick a video from the gallery, capped at 10s. ImagePicker's maxDuration
+  /// only limits NEW recordings (not gallery selections), and there's no FFmpeg
+  /// to trim here — so we validate the duration with the video player and reject
+  /// anything longer than ~10s. (The reaction also auto-fades after ~8s.)
+  Future<_ReactionCapture?> _pickVideoFromGallery() async {
+    final messenger = ScaffoldMessenger.of(context);
+    MilesApp.systemOverlayActive = true;
+    try {
+      final picker = ImagePicker();
+      final xfile = await picker.pickVideo(
+        source: ImageSource.gallery,
+        maxDuration: const Duration(seconds: 10),
+      );
+      if (xfile == null) return null;
+      final file = File(xfile.path);
+
+      // Enforce the 10s cap (no FFmpeg trim available).
+      try {
+        final probe = VideoPlayerController.file(file);
+        await probe.initialize();
+        final dur = probe.value.duration;
+        await probe.dispose();
+        if (dur > const Duration(seconds: 11)) {
+          if (mounted) {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Please pick a video up to 10 seconds.'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return null;
+        }
+      } catch (_) {
+        // Couldn't read the duration — allow it; the reaction caps display ~8s.
+      }
+
+      // Gallery video is not a front-camera selfie, so no display mirror.
+      return _ReactionCapture(file: file, isPhoto: false);
     } catch (_) {
       return null;
     } finally {
@@ -1772,33 +1829,39 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
   }
 
   Future<void> _initController(CameraDescription cam) async {
-    final c = CameraController(
-      cam,
-      // medium (~480p): light enough to keep the preview smooth on older phones
-      // AND to keep the recorded clip small so it reaches the partner quickly.
-      // The reaction is downscaled to a tiny zone overlay anyway, so 480p is
-      // plenty of detail.
-      ResolutionPreset.medium,
-      enableAudio: _micGranted,
-      // NO imageFormatGroup here: forcing ImageFormatGroup.jpeg made the plugin
-      // convert every preview frame to JPEG, which is what made the preview lag.
-      // The default platform format keeps the preview smooth; takePicture still
-      // writes a JPEG regardless.
-    );
+    // Prefer veryHigh (~1080p) for a crisp reaction, fall back to high (~720p)
+    // if the device can't initialise it. NO imageFormatGroup: forcing
+    // ImageFormatGroup.jpeg made the plugin convert every preview frame and lag
+    // these phones; takePicture still writes a JPEG regardless.
+    CameraController make(ResolutionPreset preset) =>
+        CameraController(cam, preset, enableAudio: _micGranted);
+
+    var c = make(ResolutionPreset.veryHigh);
     _ctrl = c;
     try {
       await c.initialize().timeout(const Duration(seconds: 12));
-      if (!mounted) {
+    } catch (_) {
+      // veryHigh unsupported / failed — retry at high.
+      try {
         await c.dispose();
+      } catch (_) {}
+      c = make(ResolutionPreset.high);
+      _ctrl = c;
+      try {
+        await c.initialize().timeout(const Duration(seconds: 12));
+      } catch (_) {
+        if (mounted) setState(() => _denied = true);
         return;
       }
-      try {
-        await c.setFlashMode(_flash);
-      } catch (_) {}
-      setState(() => _ready = true);
-    } catch (_) {
-      if (mounted) setState(() => _denied = true);
     }
+    if (!mounted) {
+      await c.dispose();
+      return;
+    }
+    try {
+      await c.setFlashMode(_flash);
+    } catch (_) {}
+    setState(() => _ready = true);
   }
 
   bool get _isFront =>
@@ -1876,7 +1939,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
           final decoded = img.decodeImage(await file.readAsBytes());
           if (decoded != null) {
             await file.writeAsBytes(
-              img.encodeJpg(img.flipHorizontal(decoded), quality: 90),
+              img.encodeJpg(img.flipHorizontal(decoded), quality: 95),
             );
           }
         } catch (_) {
@@ -2038,7 +2101,13 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
       ),
     );
     if (_isFront) {
-      preview = Transform.scale(scaleX: -1, child: preview);
+      // Mirror the front preview (selfie). Matrix4 scale(-1,1,1) is more
+      // reliable across devices than Transform.scale(scaleX: -1).
+      preview = Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
+        child: preview,
+      );
     }
 
     return Stack(

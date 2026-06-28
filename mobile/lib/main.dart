@@ -26,6 +26,7 @@ import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/features/fake_news/fake_news_screen.dart';
@@ -334,6 +335,14 @@ class _MilesAppState extends ConsumerState<MilesApp>
                 child ?? const SizedBox.shrink(),
               // Return-to-call pill while a call is minimised.
               const CallPill(),
+              // "Partner is here" — floats top-center on every screen, shown
+              // only when the partner is on the same screen (real-time sync).
+              const SafeArea(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: PartnerHereBadge(),
+                ),
+              ),
               // Biometric lock sits on top of everything.
               ValueListenableBuilder<bool>(
                 valueListenable: AppLock.locked,
