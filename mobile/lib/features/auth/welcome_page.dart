@@ -144,6 +144,9 @@ class _WelcomePageState extends ConsumerState<WelcomePage> {
                 label: 'Your name',
                 child: TextField(
                   controller: _name,
+                  // Her real name must not end up in the keyboard's dictionary
+                  // and resurface as a suggestion in some other app.
+                  enableIMEPersonalizedLearning: false,
                   decoration: const InputDecoration(
                     hintText: 'What should we call you?',
                   ),

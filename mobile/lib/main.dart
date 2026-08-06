@@ -31,6 +31,7 @@ import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/features/fake_news/fake_news_screen.dart';
 import 'package:miles/firebase_options.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +65,9 @@ Future<void> main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   TzHelper.ensureInit();
   await SupabaseService.init();
+  // Must land before the first lifecycle event, or a restart would hand the
+  // first-run cover exemption back to an already-set-up device.
+  await MilesApp.loadSetupFlag();
   initRealtimeAutoResume(); // rejoin channels whenever the socket (re)connects
   await AdService.init();
   await FcmService.init();
@@ -96,6 +100,25 @@ class MilesApp extends ConsumerStatefulWidget {
   /// and the user would return from the picker to the News screen. Set it true
   /// BEFORE opening the overlay and false immediately after it closes.
   static bool systemOverlayActive = false;
+
+  /// True once this device has reached a fully set-up state (signed in,
+  /// onboarded, paired) at least once. Only a device that never got there gets
+  /// the first-run cover exemption in [_MilesAppState.didChangeAppLifecycleState];
+  /// afterwards the cover applies unconditionally, even if the couple is later
+  /// disconnected. Persisted so a restart can't hand the exemption back.
+  static bool setupCompletedOnce = false;
+  static const _setupDoneKey = 'setup_completed_once';
+
+  static Future<void> loadSetupFlag() async {
+    setupCompletedOnce =
+        (await SharedPreferences.getInstance()).getBool(_setupDoneKey) ?? false;
+  }
+
+  static Future<void> markSetupComplete() async {
+    if (setupCompletedOnce) return;
+    setupCompletedOnce = true;
+    await (await SharedPreferences.getInstance()).setBool(_setupDoneKey, true);
+  }
 
   @override
   ConsumerState<MilesApp> createState() => _MilesAppState();
@@ -207,6 +230,29 @@ class _MilesAppState extends ConsumerState<MilesApp>
         Future.delayed(const Duration(milliseconds: 300), () {
           if (!mounted) return;
           if (MilesApp.authInProgress || MilesApp.systemOverlayActive) return;
+          // First-time setup (sign-in → profile → couple) is exempt: nothing
+          // private is on screen yet, and those forms bounce us through
+          // `inactive` on every keyboard and system dialog — dropping to News
+          // then made finishing account creation impossible.
+          //
+          // Gated on [MilesApp.setupCompletedOnce] so it really is FIRST-time.
+          // Without that, disconnecting a partner later (which nulls `couple`
+          // while the session stays live) would silently switch the cover off
+          // for good, and the sign-out listener in build() wouldn't catch it
+          // because the user is still authenticated.
+          if (!MilesApp.setupCompletedOnce) {
+            final session = ref.read(sessionProvider);
+            if (!session.isAuthenticated ||
+                session.profile?.isOnboarded != true ||
+                session.couple == null) {
+              return;
+            }
+            // Fully set up but the flag is still false — the listener in
+            // build() never saw the transition (it resolved before the listener
+            // was registered). Catch up here so the exemption can't outlive
+            // setup no matter which of the two observes it first.
+            MilesApp.markSetupComplete();
+          }
           if (WidgetsBinding.instance.lifecycleState ==
               AppLifecycleState.inactive) {
             MilesApp.showRealApp.value = false;
@@ -279,6 +325,23 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<SessionState>(sessionProvider, (previous, next) {
+      // Signing out from inside the app drops straight back to the News cover,
+      // rather than leaving the unmistakably-not-a-news-app sign-in screen on
+      // display. Also what stops the first-run exemption in
+      // didChangeAppLifecycleState from stranding a logged-out session
+      // uncovered.
+      if (previous?.isAuthenticated == true && !next.isAuthenticated) {
+        MilesApp.showRealApp.value = false;
+      }
+      // Setup finished → the first-run exemption is spent, permanently.
+      if (next.isAuthenticated &&
+          next.profile?.isOnboarded == true &&
+          next.couple != null) {
+        MilesApp.markSetupComplete();
+      }
+    });
+
     // The cover/real swap is driven by the static showRealApp notifier so the
     // lifecycle handler (and FakeNewsScreen) can flip it without setState.
     return ValueListenableBuilder<bool>(

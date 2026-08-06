@@ -72,6 +72,9 @@ class LoveTextField extends StatelessWidget {
             maxLength: maxLength,
             inputFormatters: inputFormatters,
             autocorrect: false,
+            // Nothing typed in a disguised app should land in the keyboard's
+            // dictionary and resurface as a suggestion elsewhere.
+            enableIMEPersonalizedLearning: false,
             style: textStyle ?? const TextStyle(color: MilesColors.cream50),
             decoration: InputDecoration(
               hintText: hint,

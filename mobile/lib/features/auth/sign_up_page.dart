@@ -82,6 +82,11 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                   controller: _email,
                   keyboardType: TextInputType.emailAddress,
                   autocorrect: false,
+                  // No suggestion strip, and nothing learned into the
+                  // keyboard's dictionary — a disguised app must not surface
+                  // its own email back on any other app's keyboard.
+                  enableSuggestions: false,
+                  enableIMEPersonalizedLearning: false,
                   decoration: const InputDecoration(hintText: 'you@home.com'),
                 ),
               ),
