@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/features/cycle/love_notes_pool.dart';
 
 /// Editable preview for a pooled love note. The (male) sender can tweak the
 /// wording, swap for a fresh note, or send it straight to chat. Nothing here
@@ -10,19 +11,29 @@ import 'package:miles/core/widgets/glow_button.dart';
 class LoveNotePreviewSheet extends StatefulWidget {
   const LoveNotePreviewSheet({
     super.key,
-    required this.note,
+    required this.template,
+    required this.recipientName,
     required this.onRegenerate,
+    required this.onChangeName,
     required this.onSend,
   });
 
-  final String note;
+  /// Raw pooled paragraph, still holding the `{name}` placeholder.
+  final String template;
+  final String recipientName;
   final VoidCallback onRegenerate;
+
+  /// Asks for a new name; returns it, or null if he backed out. The sheet stays
+  /// open either way — closing it early would strand him and burn the note.
+  final Future<String?> Function() onChangeName;
   final Future<void> Function(String) onSend;
 
   static Future<void> show(
     BuildContext context, {
-    required String note,
+    required String template,
+    required String recipientName,
     required VoidCallback onRegenerate,
+    required Future<String?> Function() onChangeName,
     required Future<void> Function(String) onSend,
   }) {
     return showModalBottomSheet<void>(
@@ -30,8 +41,10 @@ class LoveNotePreviewSheet extends StatefulWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => LoveNotePreviewSheet(
-        note: note,
+        template: template,
+        recipientName: recipientName,
         onRegenerate: onRegenerate,
+        onChangeName: onChangeName,
         onSend: onSend,
       ),
     );
@@ -42,9 +55,40 @@ class LoveNotePreviewSheet extends StatefulWidget {
 }
 
 class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
+  late String _name = widget.recipientName;
   late final TextEditingController _ctrl =
-      TextEditingController(text: widget.note);
+      TextEditingController(text: renderLoveNote(widget.template, _name));
   bool _sending = false;
+  bool _changingName = false;
+
+  /// Swaps in a new name. Keeps the sheet open, so backing out of the prompt
+  /// costs neither the note nor his edits — and substitutes into the CURRENT
+  /// text rather than re-rendering the template, so a rename doesn't wipe
+  /// whatever he has already typed.
+  Future<void> _handleChangeName() async {
+    if (_changingName) return; // the prompt is a channel hop; don't stack two
+    _changingName = true;
+    try {
+      final name = await widget.onChangeName();
+      if (name == null || !mounted) return;
+      setState(() {
+        if (_ctrl.text.contains(_name)) {
+          // Normal case: swap in place so his edits survive.
+          _ctrl.text = _ctrl.text.replaceAll(_name, name);
+        } else if (widget.template.contains(kLoveNoteNameToken)) {
+          // He has edited her name out of a paragraph that is written around
+          // it. Re-render rather than leave the body silently unchanged while
+          // the header claims the new name. Costs his edits, but the note has
+          // to actually address the person it says it does.
+          _ctrl.text = renderLoveNote(widget.template, name);
+        }
+        // Otherwise the note never carried a name — nothing to substitute.
+        _name = name;
+      });
+    } finally {
+      _changingName = false;
+    }
+  }
 
   @override
   void dispose() {
@@ -103,12 +147,29 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                'Edit before sending — she’ll never know 😏',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: MilesColors.taupe,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'For $_name — edit before sending 😏',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: MilesColors.taupe,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _sending ? null : _handleChangeName,
+                    style: TextButton.styleFrom(
+                      foregroundColor: MilesColors.blush,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Change name',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
 

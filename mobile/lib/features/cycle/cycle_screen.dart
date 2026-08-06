@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:miles/core/feature_flags.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
@@ -409,17 +410,20 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           label: const Text('Send a care note'),
         ),
       ),
-      const SizedBox(height: 10),
       // SECRET — reached only via _partnerView() (male partner). The female
       // partner sees _femaleTracker(), so this button is invisible to her.
-      SizedBox(
-        width: double.infinity,
-        child: GlowButton(
-          label: '💌 Send a note',
-          color: MilesColors.blush,
-          onPressed: _showLoveNote,
+      // Held back from the public launch, see FeatureFlags.pooledLoveNotes.
+      if (FeatureFlags.pooledLoveNotes) ...[
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: GlowButton(
+            label: '💌 Send a note',
+            color: MilesColors.blush,
+            onPressed: _showLoveNote,
+          ),
         ),
-      ),
+      ],
     ];
   }
 
@@ -443,18 +447,65 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     }
   }
 
+  /// The name the pooled notes address her by. Asked once and remembered,
+  /// pre-filled from her profile; returns null if he backs out or leaves it
+  /// blank, which aborts before any note is shown — 155 of the 250 paragraphs
+  /// are written around the name, and a blank one would ship `{name}` verbatim.
+  Future<String?> _ensureRecipientName({bool forceAsk = false}) async {
+    final saved = await LoveNoteRecipient.get();
+    if (!forceAsk && saved != null) return saved;
+    if (!mounted) return null;
+
+    final controller = TextEditingController(
+      text: saved ?? ref.read(sessionProvider).partner?.displayName ?? '',
+    );
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: const Text('Who is this for?',
+            style: TextStyle(color: MilesColors.cream50)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          style: const TextStyle(color: MilesColors.cream50),
+          decoration: const InputDecoration(hintText: 'Her name'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (entered == null || entered.isEmpty) return null;
+    await LoveNoteRecipient.set(entered);
+    return entered;
+  }
+
   /// Secret love-note sender. Lives ONLY inside _partnerView() (the male
   /// partner's view), so the female partner — who sees _femaleTracker() — never
-  /// sees it. Pulls a never-repeating paragraph from the pool, lets him edit it,
-  /// then sends it to chat as a plain text message. She just receives a normal
-  /// message with no idea a pool or this feature exists.
+  /// sees it. Pulls a never-repeating paragraph from the pool, fills in her
+  /// name, lets him edit it, then sends it to chat as a plain text message. She
+  /// just receives a normal message with no idea a pool or this feature exists.
   Future<void> _showLoveNote() async {
-    final note = await LoveNotesTracker.getNextNote();
+    final name = await _ensureRecipientName();
+    if (name == null) return;
+    final template = await LoveNotesTracker.getNextNote();
     if (!mounted) return;
     await LoveNotePreviewSheet.show(
       context,
-      note: note,
+      template: template,
+      recipientName: name,
       onRegenerate: _showLoveNote,
+      // Re-prompts in place: the sheet stays open and re-renders the same
+      // paragraph, so backing out costs neither the note nor his edits.
+      onChangeName: () => _ensureRecipientName(forceAsk: true),
       onSend: (text) async {
         final cid = _coupleId;
         if (cid == null) return;
