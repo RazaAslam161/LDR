@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/auth/widgets/labeled_field.dart';
 
@@ -112,7 +113,7 @@ class _WelcomePageState extends ConsumerState<WelcomePage> {
     } catch (e) {
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = friendlyAuthError(e);
       });
     }
   }

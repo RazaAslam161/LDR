@@ -11,6 +11,7 @@ import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 
 /// Deep-link/share format for an invite.
@@ -60,7 +61,7 @@ class _CouplePageState extends ConsumerState<CouplePage> {
     } catch (e) {
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = friendlyAuthError(e);
       });
     }
   }
