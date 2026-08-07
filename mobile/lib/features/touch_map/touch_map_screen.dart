@@ -46,6 +46,12 @@ class _PendingCameraIcon {
 
 class _ActiveReactionGif {
   final String mediaUrl;
+
+  /// WHOSE body it landed on — same contract as [_ActiveTouch.owner], so the
+  /// reaction renders over that person on BOTH phones. Without it a reaction
+  /// followed the viewer instead of its target and appeared over the wrong
+  /// partner on the receiving device.
+  final String owner;
   final double x;
   final double y;
   final String id;
@@ -59,6 +65,7 @@ class _ActiveReactionGif {
 
   const _ActiveReactionGif({
     required this.mediaUrl,
+    required this.owner,
     required this.x,
     required this.y,
     required this.id,
@@ -260,9 +267,13 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       orElse: () => ReactionGesture.unknown,
     );
     final mirror = payload['mirror'] as bool? ?? false;
-    if (mediaUrl != null && x != null && y != null) {
+    // Older builds broadcast no owner. They could only react to the partner's
+    // body, so on this device that target is me.
+    final owner = payload['owner']?.toString() ?? _myUid;
+    if (mediaUrl != null && x != null && y != null && owner != null) {
       _addReaction(
         mediaUrl: mediaUrl,
+        owner: owner,
         x: x,
         y: y,
         id: id,
@@ -273,7 +284,9 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     }
   }
 
-  Future<void> _startReactionCapture(double x, double y) async {
+  /// [owner] is whose body the reaction was placed on — carried all the way to
+  /// the broadcast so it lands on the same person on both phones.
+  Future<void> _startReactionCapture(String owner, double x, double y) async {
     // Choice: capture a fresh reaction (camera) or pick an existing photo.
     final source = await _showMediaSourceSheet();
     if (source == null || !mounted) return;
@@ -290,6 +303,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
     await _processCapturedReaction(
       file: captured.file,
+      owner: owner,
       isPhoto: captured.isPhoto,
       mirror: captured.mirror,
       x: x,
@@ -303,6 +317,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   /// camera and gallery paths feed it.
   Future<void> _processCapturedReaction({
     required File file,
+    required String owner,
     required bool isPhoto,
     required double x,
     required double y,
@@ -382,6 +397,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     final reactionId = const Uuid().v4();
     _addReaction(
       mediaUrl: mediaUrl,
+      owner: owner,
       x: x,
       y: y,
       id: reactionId,
@@ -394,6 +410,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       event: 'reaction_gif',
       payload: {
         'from': _myUid,
+        'owner': owner,
         'media_url': mediaUrl,
         'x': x,
         'y': y,
@@ -591,6 +608,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   void _addReaction({
     required String mediaUrl,
+    required String owner,
     required double x,
     required double y,
     required String id,
@@ -600,6 +618,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   }) {
     final r = _ActiveReactionGif(
       mediaUrl: mediaUrl,
+      owner: owner,
       x: x,
       y: y,
       id: id,
@@ -1352,7 +1371,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           _cameraIconTimer?.cancel();
                           final pos = _pendingCamera!;
                           setState(() => _pendingCamera = null);
-                          await _startReactionCapture(pos.x, pos.y);
+                          await _startReactionCapture(owner, pos.x, pos.y);
                         },
                         child: TweenAnimationBuilder<double>(
                           tween: Tween(begin: 0.0, end: 1.0),
@@ -1384,8 +1403,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         ),
                       ),
                     ),
-                  if (!isMe)
-                    ..._reactions.map((r) => _ReactionGifWidget(
+                  // Owner-scoped like the glows and neon above, so a reaction
+                  // renders over the SAME body on both phones.
+                  ..._reactions.where((r) => r.owner == owner).map(
+                      (r) => _ReactionGifWidget(
                           reaction: r,
                           containerWidth: w,
                           containerHeight: h,
