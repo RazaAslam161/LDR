@@ -28,6 +28,7 @@ import 'package:miles/features/closer/pick_for_us/pick_for_us_screen.dart';
 import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
+import 'package:miles/features/disguise/disguise_picker_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/games_screen.dart';
@@ -128,6 +129,12 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/settings',
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: '/app/disguise',
+        builder: (context, state) => DisguisePickerScreen(
+          isOnboarding: state.uri.queryParameters['onboarding'] == '1',
+        ),
       ),
       GoRoute(
         path: '/app/rapid-camera',

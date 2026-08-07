@@ -67,10 +67,9 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme" />
 
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            <!-- MAIN/LAUNCHER deliberately lives on the aliases below, not here.
+                 An activity plus its aliases would each show their own launcher
+                 entry, which is the opposite of a disguise. -->
 
             <!-- Pairing deep link: tethered://join?code=ABCDEF -->
             <intent-filter>
@@ -80,6 +79,66 @@
                 <data android:scheme="tethered" android:host="join" />
             </intent-filter>
         </activity>
+
+        <!-- ── Launcher disguises ────────────────────────────────────────────
+             One alias per identity the user can choose; MainActivity.kt enables
+             exactly one at a time over the `miles/disguise` channel. The label
+             and icon a launcher shows come from HERE, not from Dart, so
+             lib/features/disguise/disguise_profile.dart must be kept in step.
+
+             EXACTLY ONE may ship with android:enabled="true". News is it, so an
+             upgrade keeps the identity the app was installed with. -->
+        <activity-alias
+            android:name=".AliasNews"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="News"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasCalculator"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Calculator"
+            android:icon="@drawable/ic_disguise_calculator">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasNotes"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Notes"
+            android:icon="@drawable/ic_disguise_notes">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasWeather"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Weather"
+            android:icon="@drawable/ic_disguise_weather">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <meta-data
             android:name="flutterEmbedding"

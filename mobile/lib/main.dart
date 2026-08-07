@@ -29,7 +29,7 @@ import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/features/call/call_pill.dart';
-import 'package:miles/features/fake_news/fake_news_screen.dart';
+import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,18 +59,26 @@ Future<void> main() async {
         '${MilesConfig.supabaseUrlKey} and ${MilesConfig.supabaseAnonKeyKey}.');
   }
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Independent of each other — three serial round-trips became one wait.
+  // loadSetupFlag must still land before the first lifecycle event, or a
+  // restart would hand the first-run cover exemption back to an already-set-up
+  // device; awaiting the group preserves that.
+  await Future.wait([
+    Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
+    SupabaseService.init(),
+    MilesApp.loadSetupFlag(),
+  ]);
   // Must be registered before runApp; runs in its own isolate when a push
-  // arrives while the app is backgrounded or terminated.
+  // arrives while the app is backgrounded or terminated. Needs Firebase ready.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   TzHelper.ensureInit();
-  await SupabaseService.init();
-  // Must land before the first lifecycle event, or a restart would hand the
-  // first-run cover exemption back to an already-set-up device.
-  await MilesApp.loadSetupFlag();
   initRealtimeAutoResume(); // rejoin channels whenever the socket (re)connects
-  await AdService.init();
-  await FcmService.init();
+  // Off the critical path: nothing paints an ad or reads a push before the
+  // News cover, the biometric gate and the intro video are all behind us, and
+  // AppShell drains the pending reach/call notifiers in its post-frame
+  // callback. Awaiting these cost the first frame ~a dozen platform crossings.
+  unawaited(AdService.init());
+  unawaited(FcmService.init());
   // Lets the call's background foreground-service talk to the UI isolate.
   FlutterForegroundTask.initCommunicationPort();
   debugPrint('STARTUP OK → booting app');
@@ -353,7 +361,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // nothing with Tethered's Emberlight dark theme.
         if (!isReal) {
           return MaterialApp(
-            title: 'News',
+            // Empty on purpose: Flutter then leaves the Android task
+            // description alone and recents falls back to the enabled
+            // <activity-alias> label — which IS the disguise the user chose.
+            // Hardcoding "News" here would announce the old identity in the
+            // task switcher no matter which icon they picked.
+            title: '',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
               brightness: Brightness.light,
@@ -364,7 +377,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
               ),
               useMaterial3: true,
             ),
-            home: FakeNewsScreen(
+            home: DisguiseCoverHost(
               onAuthenticated: () => MilesApp.showRealApp.value = true,
             ),
           );
@@ -380,8 +393,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
           sessionProvider.select((s) => s.loading && s.profile == null),
         );
         return MaterialApp.router(
-          // Keep the disguised name in the task switcher too.
-          title: 'News',
+          // Empty so the task switcher shows the chosen alias label. This one
+          // matters most: it is the REAL app's task description, and a
+          // hardcoded name here leaks straight into recents.
+          title: '',
           debugShowCheckedModeBanner: false,
           theme: milesDarkTheme(),
           routerConfig: router,
@@ -397,20 +412,28 @@ class _MilesAppState extends ConsumerState<MilesApp>
               else
                 child ?? const SizedBox.shrink(),
               // Return-to-call pill while a call is minimised.
-              const CallPill(),
+              // These three animate independently of the routed screen, so each
+              // gets its own layer — a pulsing badge must not repaint the page
+              // beneath it. (Does NOT help the glass panels: a BackdropFilter
+              // samples through repaint boundaries.)
+              const RepaintBoundary(child: CallPill()),
               // "Partner is here" — floats top-center on every screen, shown
               // only when the partner is on the same screen (real-time sync).
-              const SafeArea(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: PartnerHereBadge(),
+              const RepaintBoundary(
+                child: SafeArea(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: PartnerHereBadge(),
+                  ),
                 ),
               ),
               // Biometric lock sits on top of everything.
-              ValueListenableBuilder<bool>(
-                valueListenable: AppLock.locked,
-                builder: (context, locked, _) =>
-                    locked ? const LockScreen() : const SizedBox.shrink(),
+              RepaintBoundary(
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: AppLock.locked,
+                  builder: (context, locked, _) =>
+                      locked ? const LockScreen() : const SizedBox.shrink(),
+                ),
               ),
               // Stealth quick-cover: invisible top-right tap zone + scrim,
               // present on every screen inside the real app.

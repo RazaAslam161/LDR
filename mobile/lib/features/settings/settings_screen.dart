@@ -435,6 +435,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
             const SizedBox(height: 28),
 
+            // ── Disguise ─────────────────────────────────────────
+            const _SectionHeader(label: 'Disguise'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('How this app looks',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: const Text(
+                  'Change the icon and name shown on your phone',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: () => context.push('/app/disguise'),
+            ),
+
+            const SizedBox(height: 28),
+
             // ── Location ─────────────────────────────────────────
             const _SectionHeader(label: 'Location sharing'),
             ListTile(

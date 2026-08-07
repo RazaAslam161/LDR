@@ -18,6 +18,7 @@ import 'package:miles/features/closer/closer_screen.dart';
 import 'package:miles/features/home/home_screen.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
+import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -97,6 +98,16 @@ class _AppShellState extends ConsumerState<AppShell>
     ref.read(sessionProvider.notifier).reconnectPresence();
   }
 
+  /// Shows the disguise picker the first time only. Deliberately after pairing
+  /// rather than at sign-up: before there is a partner there is nothing on the
+  /// phone worth disguising, and an icon-change prompt during onboarding reads
+  /// as suspicious rather than protective.
+  Future<void> _offerDisguiseOnce() async {
+    if (await DisguiseService.hasChosen()) return;
+    if (!mounted) return;
+    await context.push('/app/disguise?onboarding=1');
+  }
+
   void _onReady() {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
@@ -108,6 +119,9 @@ class _AppShellState extends ConsumerState<AppShell>
     final partnerName =
         ref.read(sessionProvider).partner?.displayName ?? 'your partner';
     FsiPermission.promptIfNeeded(context, partnerName);
+    // Offer the launcher disguise once, after pairing — the point at which the
+    // app has something worth hiding. Skipped forever once answered either way.
+    _offerDisguiseOnce();
     // A push may have been tapped before the listener attached.
     _onPendingReach();
     _onPendingCall();

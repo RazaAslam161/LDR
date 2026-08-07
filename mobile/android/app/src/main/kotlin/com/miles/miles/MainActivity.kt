@@ -2,7 +2,9 @@ package com.miles.miles
 
 import android.app.Activity
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -59,6 +61,70 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                     "isSecure" -> result.success(secureFlagSet)
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Launcher disguise: exactly one <activity-alias> is enabled at a time,
+        // and its manifest label + icon are what the launcher shows. This is the
+        // only supported way to change an app's icon/name at runtime.
+        //
+        // Order matters and is not cosmetic: we ENABLE the new alias before
+        // DISABLING any other. Doing it the other way round leaves a window
+        // where no launcher component is enabled, and if the process is killed
+        // in that window the app is gone from the launcher with no way back.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/disguise")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setAlias" -> {
+                        val target = call.argument<String>("aliasId")
+                        val all = call.argument<List<String>>("all")
+                        if (target.isNullOrBlank() || all.isNullOrEmpty()) {
+                            result.error("bad_args", "aliasId and all are required", null)
+                            return@setMethodCallHandler
+                        }
+                        // Refuse anything not in the declared set — enabling a
+                        // component that does not exist throws, and disabling
+                        // everything else would strand the user.
+                        if (!all.contains(target)) {
+                            result.error("unknown_alias", "$target is not a declared alias", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val pm = packageManager
+                            fun component(id: String) =
+                                ComponentName(packageName, "$packageName.Alias$id")
+
+                            // 1. Enable the new identity first.
+                            pm.setComponentEnabledSetting(
+                                component(target),
+                                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                                PackageManager.DONT_KILL_APP
+                            )
+                            // 2. Only then retire the others.
+                            all.filter { it != target }.forEach { id ->
+                                pm.setComponentEnabledSetting(
+                                    component(id),
+                                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                    PackageManager.DONT_KILL_APP
+                                )
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            // Leave whatever was enabled enabled. A failed swap
+                            // must not cost the user their launcher entry.
+                            result.error("switch_failed", e.message, null)
+                        }
+                    }
+                    "currentAlias" -> {
+                        val all = call.argument<List<String>>("all") ?: emptyList()
+                        val active = all.firstOrNull { id ->
+                            packageManager.getComponentEnabledSetting(
+                                ComponentName(packageName, "$packageName.Alias$id")
+                            ) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        }
+                        result.success(active)
+                    }
                     else -> result.notImplemented()
                 }
             }
