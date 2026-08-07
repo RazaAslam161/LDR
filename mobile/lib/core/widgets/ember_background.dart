@@ -8,6 +8,12 @@ import 'package:miles/core/theme.dart';
 /// slow — it sits behind content and never competes with it.
 ///
 /// Usage: EmberBackground(child: YourScreen())
+///
+/// Nesting is free: `main.dart` mounts one app-wide, and a screen that wraps
+/// itself in another gets a pass-through instead of a second painter. The inner
+/// instance's opaque [MilesColors.night] fill hid the outer one completely, so
+/// twelve screens were paying for a full-screen repaint every vsync that nobody
+/// could see — on top of the root one that was still running underneath.
 class EmberBackground extends StatefulWidget {
   const EmberBackground({
     super.key,
@@ -24,13 +30,39 @@ class EmberBackground extends StatefulWidget {
   State<EmberBackground> createState() => _EmberBackgroundState();
 }
 
+/// Marks that an ancestor is already painting the backdrop.
+class _EmberBackgroundScope extends InheritedWidget {
+  const _EmberBackgroundScope({required super.child});
+
+  @override
+  bool updateShouldNotify(_EmberBackgroundScope oldWidget) => false;
+}
+
 class _EmberBackgroundState extends State<EmberBackground>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(seconds: 36))
-        ..repeat();
+  /// Null while nested — a pass-through must not run a ticker.
+  AnimationController? _c;
   late final List<_Ember> _embers;
   late final List<_Star> _stars;
+  bool _nested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Read (don't depend on) the marker: it never changes value, only presence.
+    final nested =
+        context.getInheritedWidgetOfExactType<_EmberBackgroundScope>() != null;
+    if (nested) {
+      _c?.dispose();
+      _c = null;
+    } else {
+      _c ??= AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 36),
+      )..repeat();
+    }
+    _nested = nested;
+  }
 
   @override
   void initState() {
@@ -63,27 +95,36 @@ class _EmberBackgroundState extends State<EmberBackground>
 
   @override
   void dispose() {
-    _c.dispose();
+    _c?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const DecoratedBox(decoration: BoxDecoration(color: MilesColors.night)),
-        RepaintBoundary(
-          child: AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) => CustomPaint(
-              painter: _EmberPainter(t: _c.value, embers: _embers, stars: _stars),
-              size: Size.infinite,
+    final controller = _c;
+    // An ancestor already paints it — anything we drew here would be hidden
+    // behind our own opaque fill anyway.
+    if (_nested || controller == null) return widget.child;
+
+    return _EmberBackgroundScope(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          const DecoratedBox(
+              decoration: BoxDecoration(color: MilesColors.night)),
+          RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: controller,
+              builder: (context, _) => CustomPaint(
+                painter: _EmberPainter(
+                    t: controller.value, embers: _embers, stars: _stars),
+                size: Size.infinite,
+              ),
             ),
           ),
-        ),
-        widget.child,
-      ],
+          widget.child,
+        ],
+      ),
     );
   }
 }
@@ -120,6 +161,14 @@ class _EmberPainter extends CustomPainter {
   final List<_Ember> embers;
   final List<_Star> stars;
 
+  // Reused across every frame and every mounted instance. Painting is
+  // synchronous on one thread, so mutating these in place is safe — and it
+  // drops ~49 Paint allocations per frame per instance to zero.
+  static final Paint _glowPaint = Paint();
+  static final Paint _starPaint = Paint();
+  static final Paint _emberPaint = Paint()
+    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
@@ -131,7 +180,7 @@ class _EmberPainter extends CustomPainter {
         h * (0.32 + 0.02 * math.cos(t * 2 * math.pi)));
     canvas.drawRect(
       rect,
-      Paint()
+      _glowPaint
         ..shader = RadialGradient(
           colors: const [Color(0xFF3A1622), Color(0xFF1C0A10), MilesColors.nightDeep],
           stops: const [0.0, 0.55, 1.0],
@@ -146,7 +195,7 @@ class _EmberPainter extends CustomPainter {
       canvas.drawCircle(
         Offset(w * s.x, h * s.y),
         s.size,
-        Paint()
+        _starPaint
           ..color = (s.violet ? MilesColors.star : MilesColors.starlight)
               .withValues(alpha: (s.base * tw).clamp(0.0, 1.0)),
       );
@@ -158,10 +207,8 @@ class _EmberPainter extends CustomPainter {
       final y = h * prog;
       final x = w * (e.x + e.sway * math.sin((t * 4 + e.phase) * 2 * math.pi));
       final fade = (math.sin(prog * math.pi)).clamp(0.0, 1.0); // dim at top/bottom
-      final paint = Paint()
-        ..color = MilesColors.emberSoft.withValues(alpha: 0.5 * fade)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-      canvas.drawCircle(Offset(x, y), e.size, paint);
+      _emberPaint.color = MilesColors.emberSoft.withValues(alpha: 0.5 * fade);
+      canvas.drawCircle(Offset(x, y), e.size, _emberPaint);
     }
   }
 

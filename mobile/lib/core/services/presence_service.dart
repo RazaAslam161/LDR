@@ -374,6 +374,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   String? _coupleId;
   bool _subscribing = false;
   Timer? _poll;
+  Timer? _refetchDebounce;
 
   /// Binds to a (now-resolved) couple: fetch the partner row, subscribe to the
   /// presence channel, and start the liveness poll. Called reactively when the
@@ -415,9 +416,17 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
         channelName: 'presence:$id',
         table: 'presence',
         coupleId: id,
-        onChange: (_) async {
-          final p = await PresenceService.fetchPartner(id);
-          if (mounted) state = p;
+        onChange: (_) {
+          // The partner's client re-stamps presence every ~5s while their chat
+          // is open, and every one of those writes used to trigger a full
+          // SELECT here. Only the newest value matters, so coalesce bursts —
+          // still authoritative, just not once per keystroke-era write.
+          _refetchDebounce?.cancel();
+          _refetchDebounce =
+              Timer(const Duration(milliseconds: 800), () async {
+            final p = await PresenceService.fetchPartner(id);
+            if (mounted) state = p;
+          });
         },
       );
       // Pull current presence on (re)connect so we don't sit on a stale value.
@@ -431,6 +440,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   @override
   void dispose() {
     _poll?.cancel();
+    _refetchDebounce?.cancel();
     realtimeResumed.removeListener(_subscribe);
     final c = _channel;
     if (c != null) SupabaseService.client.removeChannel(c);

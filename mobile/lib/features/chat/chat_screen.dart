@@ -1032,13 +1032,6 @@ class _ChatSubtitle extends StatelessWidget {
     );
   }
 
-  static String _ago(DateTime d) {
-    final diff = DateTime.now().difference(d);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return DateFormat('MMM d').format(d);
-  }
 }
 
 class _Dot extends StatelessWidget {
@@ -1304,7 +1297,23 @@ class _BurstAnimationState extends State<_BurstAnimation>
       child: IgnorePointer(
         child: AnimatedBuilder(
           animation: _c,
-          builder: (context, _) {
+          // The payload never changes over the animation — only its opacity,
+          // offset and scale do. Passing it as `child` builds it once instead
+          // of reconstructing an Image.network on every frame for ~5s.
+          child: widget.gifUrl != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.network(
+                    widget.gifUrl!,
+                    width: 160,
+                    height: 160,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              : (widget.mood != null
+                  ? AnimatedMood(mood: widget.mood!, size: 92)
+                  : const SizedBox.shrink()),
+          builder: (context, child) {
             final v = _c.value;
             final isGif = widget.gifUrl != null;
             // GIFs: fade in fast, HOLD on screen while the GIF plays, fade out
@@ -1335,19 +1344,7 @@ class _BurstAnimationState extends State<_BurstAnimation>
                         ),
                       ],
                     ),
-                    child: widget.gifUrl != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(18),
-                            child: Image.network(
-                              widget.gifUrl!,
-                              width: 160,
-                              height: 160,
-                              fit: BoxFit.cover,
-                            ),
-                          )
-                        : (widget.mood != null
-                            ? AnimatedMood(mood: widget.mood!, size: 92)
-                            : const SizedBox.shrink()),
+                    child: child,
                   ),
                 ),
               ),

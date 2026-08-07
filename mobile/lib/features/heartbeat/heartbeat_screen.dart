@@ -23,7 +23,7 @@ class HeartbeatScreen extends ConsumerStatefulWidget {
 }
 
 class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   CameraController? _cam;
   bool _measuring = false;
   bool _busy = false;
@@ -43,6 +43,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _myPulse = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 220));
     _partnerPulse = AnimationController(
@@ -62,12 +63,26 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     reportActiveTab(ref);
     _stopCamera();
     _channel?.dispose();
     _myPulse.dispose();
     _partnerPulse.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Backgrounding with the reader running left the camera open AND the torch
+    // lit behind the News cover — battery burn and a lit flash on a disguised
+    // app. Same guard the touch map already uses.
+    if (_measuring &&
+        (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.detached)) {
+      _stop();
+    }
   }
 
   Future<void> _start() async {

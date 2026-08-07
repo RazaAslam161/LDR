@@ -18,9 +18,18 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
   String? _error;
   bool _loading = true;
 
+  bool _loadedOnce = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Load once, not on every dependency change — a keyboard show/hide or a
+    // rotation was refetching the whole list and flashing the spinner. Still
+    // driven from here rather than initState so a couple that resolves after
+    // the first frame still gets picked up.
+    if (_loadedOnce) return;
+    if (ref.read(sessionProvider).couple == null) return;
+    _loadedOnce = true;
     _load();
   }
 

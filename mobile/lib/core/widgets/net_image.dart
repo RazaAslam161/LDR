@@ -22,14 +22,25 @@ class NetImage extends StatelessWidget {
   final Widget? error;
 
   @override
-  Widget build(BuildContext context) => CachedNetworkImage(
-        imageUrl: url,
-        fit: fit,
-        width: width,
-        height: height,
-        fadeInDuration: const Duration(milliseconds: 150),
-        placeholder: (_, __) => const ColoredBox(color: MilesColors.surface2),
-        errorWidget: (_, __, ___) =>
-            error ?? const ColoredBox(color: MilesColors.surface2),
-      );
+  Widget build(BuildContext context) {
+    // Decode at display size, not source size. `width`/`height` are layout-only
+    // — without these a 2400px upload is decoded at full resolution into a 40px
+    // avatar, which is what fills the image cache and forces re-decodes on the
+    // raster thread while scrolling. Only hinted when the caller gave a bound.
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final w = width;
+    final h = height;
+    return CachedNetworkImage(
+      imageUrl: url,
+      fit: fit,
+      width: w,
+      height: h,
+      memCacheWidth: (w != null && w.isFinite) ? (w * dpr).round() : null,
+      memCacheHeight: (h != null && h.isFinite) ? (h * dpr).round() : null,
+      fadeInDuration: const Duration(milliseconds: 150),
+      placeholder: (_, __) => const ColoredBox(color: MilesColors.surface2),
+      errorWidget: (_, __, ___) =>
+          error ?? const ColoredBox(color: MilesColors.surface2),
+    );
+  }
 }

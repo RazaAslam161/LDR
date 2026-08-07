@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:miles/core/models.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
@@ -89,7 +90,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _refreshMyCoords() async {
     try {
       final pos = await Geolocator.getLastKnownPosition();
-      if (pos != null && mounted) {
+      // A stationary phone returns the identical fix every 15s; rebuilding the
+      // whole Home list (map polyline included) for it is pure waste.
+      if (pos != null &&
+          mounted &&
+          (pos.latitude != _myLat || pos.longitude != _myLon)) {
         setState(() {
           _myLat = pos.latitude;
           _myLon = pos.longitude;
@@ -220,7 +225,7 @@ class _PartnerStatusCard extends StatelessWidget {
     required this.onShareSnap,
   });
 
-  final dynamic partner; // Profile
+  final Profile partner;
   final Presence? presence;
   final bool uploading;
   final VoidCallback onShareSnap;
@@ -229,7 +234,7 @@ class _PartnerStatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final mood = moodByKey(presence?.currentMood);
     final theirTime =
-        DateFormat('h:mm a').format(TzHelper.nowIn(partner.timezone as String));
+        DateFormat('h:mm a').format(TzHelper.nowIn(partner.timezone));
     final online = presence?.isOnline ?? false;
     final mode = presence?.locationSharingMode ?? 'off';
     final locationText = (mode != 'off' && presence?.locationLabel != null)
@@ -248,7 +253,7 @@ class _PartnerStatusCard extends StatelessWidget {
                 period: const Duration(seconds: 5),
                 child: _Avatar(
                     photoUrl: presence?.checkinPhotoUrl,
-                    name: partner.displayName as String),
+                    name: partner.displayName),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -258,7 +263,7 @@ class _PartnerStatusCard extends StatelessWidget {
                     Row(
                       children: [
                         Flexible(
-                          child: Text(partner.displayName as String,
+                          child: Text(partner.displayName,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.headlineSmall),
                         ),
