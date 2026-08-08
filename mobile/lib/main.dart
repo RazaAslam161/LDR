@@ -74,7 +74,7 @@ Future<void> main() async {
   TzHelper.ensureInit();
   initRealtimeAutoResume(); // rejoin channels whenever the socket (re)connects
   // Off the critical path: nothing paints an ad or reads a push before the
-  // News cover, the biometric gate and the intro video are all behind us, and
+  // News cover, the biometric gate and the splash are all behind us, and
   // AppShell drains the pending reach/call notifiers in its post-frame
   // callback. Awaiting these cost the first frame ~a dozen platform crossings.
   unawaited(AdService.init());
@@ -89,10 +89,10 @@ Future<void> main() async {
 class MilesApp extends ConsumerStatefulWidget {
   const MilesApp({super.key});
 
-  /// Whether the real Tethered app is shown (true) or the fake News cover
+  /// Whether the real Miles app is shown (true) or the disguise cover
   /// (false). Reset to false on every background so returning always requires
   /// re-authentication; only FakeNewsScreen sets it true after the biometric +
-  /// intro-video reveal. Static so the cover screen and the lifecycle handler
+  /// splash. Static so the cover screen and the lifecycle handler
   /// share one source of truth.
   static final ValueNotifier<bool> showRealApp = ValueNotifier<bool>(false);
 
@@ -212,7 +212,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // SECURITY (cover layer): drop back to the News screen the instant the app
     // leaves the foreground, so returning ALWAYS requires re-authentication.
     // NEVER set it true here — only the entry flow does, after biometric +
-    // intro video. This must run before the AppLock/presence logic below.
+    // splash. This must run before the AppLock/presence logic below.
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
@@ -367,8 +367,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
       builder: (context, isReal, _) {
         // Cover layer: a convincing "News" app shown on cold start and the
         // instant the app backgrounds. Only a secret trigger + biometric pass +
-        // the intro video swaps in the real app. Its clean light theme shares
-        // nothing with Tethered's Emberlight dark theme.
+        // the splash swaps in the real app. Its clean light theme shares
+        // nothing with Miles' Emberlight dark theme.
         if (!isReal) {
           return MaterialApp(
             // Empty on purpose: Flutter then leaves the Android task
@@ -458,7 +458,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
 /// Branded "session warming up" veil shown for the 1–3s between authentication
 /// and the first profile/couple load — replaces the white blank that used to
 /// flash while MaterialApp.router + the session providers initialised. Sits over
-/// the always-present [EmberBackground], so it reads as the Tethered candlelight,
+/// the always-present [EmberBackground], so it reads as the Miles candlelight,
 /// not a broken screen.
 class _SessionLoading extends StatelessWidget {
   const _SessionLoading();

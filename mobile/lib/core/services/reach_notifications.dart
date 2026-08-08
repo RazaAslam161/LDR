@@ -79,6 +79,14 @@ const String kCallChannelId = 'call_channel';
 const String kCallChannelName = 'Voice';
 const String kCallChannelDesc = 'Incoming voice notifications';
 
+/// The foreground-service channel for a call that is already running. Lives
+/// here rather than beside its only caller so the disguise guard test in
+/// test/unit/disguise_notification_test.dart sees it — it was hardcoded in
+/// call_foreground.dart and shipped the real app name straight into Android's
+/// notification settings, under the disguised launcher label.
+const String kCallServiceChannelName = 'Ongoing call';
+const String kCallServiceChannelDesc = 'Shown while a call is in progress.';
+
 Int64List callVibrationPattern() =>
     Int64List.fromList(<int>[0, 800, 600, 800, 600, 800]);
 

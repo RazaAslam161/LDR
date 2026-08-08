@@ -1,4 +1,5 @@
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:miles/core/services/reach_notifications.dart';
 
 /// Keeps a call's audio alive when the app is backgrounded or the screen is off,
 /// via an Android foreground service (microphone type) with an ongoing
@@ -33,8 +34,8 @@ class CallForegroundService {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'call_service',
-        channelName: 'Ongoing call',
-        channelDescription: 'Shown while a Miles call is running.',
+        channelName: kCallServiceChannelName,
+        channelDescription: kCallServiceChannelDesc,
         onlyAlertOnce: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(

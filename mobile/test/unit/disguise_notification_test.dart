@@ -130,6 +130,10 @@ void main() {
       'reach': [kReachChannelName, kReachChannelDesc],
       'call': [kCallChannelName, kCallChannelDesc],
       'care': [kCareChannelName, kCareChannelDesc],
+      // The call foreground service. Its strings used to live inline in
+      // call_foreground.dart, out of this test's sight, and shipped the real
+      // app name into Android's notification settings.
+      'call_service': [kCallServiceChannelName, kCallServiceChannelDesc],
     };
 
     test('no channel name or description reveals the app', () {

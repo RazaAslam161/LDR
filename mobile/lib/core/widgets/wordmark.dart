@@ -30,6 +30,11 @@ class Wordmark extends StatelessWidget {
       child: Text(
         'Miles',
         textAlign: TextAlign.center,
+        // One line, always. Left to soft-wrap it broke mid-word under squeeze
+        // and grew the header vertically instead of giving ground.
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
         style: GoogleFonts.fraunces(
           fontSize: size,
           fontStyle: FontStyle.italic,

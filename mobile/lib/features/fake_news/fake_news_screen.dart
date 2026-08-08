@@ -8,7 +8,7 @@ import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-// Clean Google-News-style light palette — intentionally NOTHING like Tethered.
+// Clean Google-News-style light palette — intentionally NOTHING like Miles.
 const _bg = Color(0xFFFFFFFF);
 const _surface = Color(0xFFF2F2F2);
 const _textPrimary = Color(0xFF202124);
@@ -19,7 +19,7 @@ const _divider = Color(0xFFE0E0E0);
 /// A convincing fake "News" reader shown on cold start. Three hidden triggers
 /// (5 quick logo taps, the secret search word, a 2.5s long-press on the Local
 /// nav item) run the biometric gate; on success [onAuthenticated] swaps the
-/// whole app over to the real Tethered experience. Everything else behaves like
+/// whole app over to the real Miles experience. Everything else behaves like
 /// a real news app (live RSS, external article links, pull-to-refresh).
 class FakeNewsScreen extends StatefulWidget {
   const FakeNewsScreen({super.key, required this.onAuthenticated});
@@ -44,8 +44,8 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
   Timer? _localHoldTimer;
   bool _localTriggered = false;
 
-  // Re-entrancy guard: only one entry flow (auth → video → reveal) at a time,
-  // so two triggers firing close together can't stack a second intro video or
+  // Re-entrancy guard: only one entry flow (auth → splash → reveal) at a time,
+  // so two triggers firing close together can't stack a second splash or
   // double-fire onAuthenticated.
   bool _entering = false;
 
@@ -147,7 +147,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       if (!passed) return; // wrong biometric/PIN → stay on news, no error
       if (!mounted) return;
 
-      // Cinematic reveal: play the intro video over the news screen, then hand
+      // Cinematic reveal: fade the wordmark up over the news screen, then hand
       // control to the real app once it finishes (or the user taps).
       await Navigator.of(context).push(
         PageRouteBuilder<void>(
@@ -478,7 +478,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
   }
 }
 
-/// Recreated "G + colored news lines" logo — reads as a news app, not Tethered.
+/// Recreated "G + colored news lines" logo — reads as a news app, not Miles.
 class _NewsLogo extends StatelessWidget {
   const _NewsLogo();
 

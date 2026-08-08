@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Full-screen-intent permission (Android 14 / API 34+).
 ///
 /// On API < 34 it's implicitly granted. From 34, the user must allow it in
-/// system settings — Tethered does NOT auto-qualify (it's not a calling/alarm
+/// system settings — Miles does NOT auto-qualify (it's not a calling/alarm
 /// app), so we *request* it and always degrade gracefully to a heads-up
 /// notification when it's denied.
 class FsiPermission {

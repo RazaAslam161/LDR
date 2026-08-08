@@ -87,7 +87,11 @@ class AppLock {
   static Future<bool> authenticate() async {
     try {
       final ok = await _auth.authenticate(
-        localizedReason: 'Unlock Miles',
+        // Deliberately nameless. This prompt is drawn by the system on top of
+        // whatever cover is showing — News, Calculator, Notes, Weather — and
+        // naming the app here hands the whole disguise away at the one moment
+        // someone is most likely to be watching over a shoulder.
+        localizedReason: "Verify it's you",
         options: const AuthenticationOptions(
           biometricOnly:
               false, // allow device PIN/passcode as a system fallback

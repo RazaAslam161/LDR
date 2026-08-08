@@ -5,7 +5,7 @@ import 'package:miles/core/theme.dart';
 import 'package:miles/features/call/call_controller.dart';
 
 /// A floating "tap to return to call" pill shown over the whole app while a
-/// call is running but minimised — so you can keep using Tethered during a call.
+/// call is running but minimised — so you can keep using Miles during a call.
 class CallPill extends ConsumerWidget {
   const CallPill({super.key});
 

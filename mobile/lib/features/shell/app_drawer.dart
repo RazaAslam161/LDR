@@ -50,7 +50,7 @@ class AppDrawer extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Wordmark(size: 24),
+                      const Flexible(child: Wordmark(size: 24)),
                     ],
                   ),
                   const SizedBox(height: 40),

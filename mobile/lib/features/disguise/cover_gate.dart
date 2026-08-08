@@ -14,14 +14,14 @@ import 'package:miles/main.dart';
 ///     when the user has never set one up, so a fresh install is not locked out
 ///     of its own app.
 ///  3. **The intro reveal** — the cinematic hand-off. Also a deliberate beat of
-///     delay: a shoulder-surfer sees a video, not the app.
+///     delay: a shoulder-surfer sees a brand splash, not the app.
 ///
 /// Failure is silent by design. A wrong biometric returns to the cover with no
 /// error, no toast, no ripple — someone who tripped the trigger by accident
 /// learns nothing, and someone probing gets no signal they were close.
 mixin CoverGate<T extends StatefulWidget> on State<T> {
   /// One entry flow at a time: two triggers firing together must not stack a
-  /// second intro video or double-fire the reveal.
+  /// second splash or double-fire the reveal.
   bool _entering = false;
 
   /// Called once the user is through all three gates.
