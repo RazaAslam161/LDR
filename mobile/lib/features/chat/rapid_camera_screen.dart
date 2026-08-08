@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
@@ -132,35 +131,57 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   }
 
   Future<void> _initController(CameraDescription camera) async {
-    // ultraHigh (≈2160p / 4K, ~8MP) for real-camera sharpness. The `camera`
-    // plugin ties preview res to capture res, so this is the highest safe step
-    // for a smooth preview; true sensor-max capture needs Phase 2 (camerawesome
-    // separates preview/capture). No imageFormatGroup: we only takePicture().
-    final c = CameraController(
-      camera,
-      ResolutionPreset.ultraHigh,
-      // Only enable audio if mic was granted — enableAudio:true with a denied
-      // mic can fail camera init on some devices.
-      enableAudio: _micGranted,
-    );
+    // veryHigh (~1080p, 2.07MP), not ultraHigh (2160p, 8.3MP).
+    //
+    // The plugin drives preview, capture AND the analysis stream off one
+    // resolution, so 4K was being paid for four times over: the ISP encode, the
+    // file write, the read back, the isolate copy, the decode, the re-encode
+    // and the upload all scale with it. A chat photo is looked at in a 220dp
+    // bubble. Dropping to 1080p is a 4x cut on every one of those at once, and
+    // veryHigh is supported on far more hardware than ultraHigh.
+    CameraController make(ResolutionPreset preset) => CameraController(
+          camera,
+          preset,
+          // Only enable audio if mic was granted — enableAudio:true with a
+          // denied mic can fail camera init on some devices.
+          enableAudio: _micGranted,
+        );
+
+    // Ladder, not a cliff: an unsupported preset used to land the user on
+    // "Camera unavailable" with no way back. Same shape as TouchMap's.
+    var c = make(ResolutionPreset.veryHigh);
     _controller = c;
     try {
       // Hard timeout so a stalled platform init can never hang the UI forever.
       await c.initialize().timeout(const Duration(seconds: 12));
-      if (!mounted) {
+    } catch (e) {
+      debugPrint('[camera] veryHigh failed ($e) — retrying at high');
+      try {
         await c.dispose();
+      } catch (_) {}
+      c = make(ResolutionPreset.high);
+      _controller = c;
+      try {
+        await c.initialize().timeout(const Duration(seconds: 12));
+      } catch (e2) {
+        debugPrint('[camera] init failed: $e2');
+        if (mounted) setState(() => _denied = true);
         return;
       }
-      try {
-        await c.setFlashMode(FlashMode.off); // flash is applied at capture time
-      } catch (_) {
-        // some devices reject setFlashMode on the front camera — not fatal
-      }
-      setState(() => _ready = true);
-    } catch (e) {
-      debugPrint('[camera] init failed: $e');
-      if (mounted) setState(() => _denied = true);
     }
+    if (!mounted) {
+      await c.dispose();
+      return;
+    }
+    // Not awaited: the controller is already off, flash is applied at capture
+    // time, and this was a platform round trip on the open path to reach a
+    // state we are already in. Some devices reject it on the front camera.
+    unawaited(c.setFlashMode(FlashMode.off).catchError((_) {}));
+    // The preset is advisory — the plugin silently negotiates the closest
+    // supported size and initialize() does not throw. Log what we actually got,
+    // because it is the number every downstream cost scales with.
+    debugPrint('[camera] preview=${c.value.previewSize}');
+    setState(() => _ready = true);
   }
 
   void _retryBoot() {
@@ -259,11 +280,8 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
           } catch (_) {}
         }
         xfile = await c.takePicture();
-        if (ledFlash) {
-          try {
-            await c.setFlashMode(FlashMode.off);
-          } catch (_) {}
-        }
+        // Not awaited — nothing downstream depends on the torch being off yet.
+        if (ledFlash) unawaited(c.setFlashMode(FlashMode.off).catchError((_) {}));
       }
       if (!mounted) return;
       // PEAK QUALITY: an unfiltered, un-mirrored shot is sent EXACTLY as the
@@ -297,7 +315,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       final dir = await getTemporaryDirectory();
       final file =
           File('${dir.path}/snap_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await file.writeAsBytes(out, flush: true);
+      await file.writeAsBytes(out);
       if (!mounted) return;
       setState(() {
         _capturedFile = file;
@@ -635,7 +653,6 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
         return _FilterChip(
           filter: f,
           selected: selected,
-          recommended: f.id == 'freesia',
           onTap: () => setState(() => _selectedFilter = f),
         );
       },
@@ -802,13 +819,11 @@ class _FilterChip extends StatelessWidget {
   const _FilterChip({
     required this.filter,
     required this.selected,
-    required this.recommended,
     required this.onTap,
   });
 
   final CameraFilter filter;
   final bool selected;
-  final bool recommended;
   final VoidCallback onTap;
 
   @override
@@ -828,14 +843,6 @@ class _FilterChip extends StatelessWidget {
               color: selected ? MilesColors.ember : Colors.transparent,
               width: 3,
             ),
-            boxShadow: recommended
-                ? [
-                    BoxShadow(
-                      color: MilesColors.ember.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                    ),
-                  ]
-                : null,
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,

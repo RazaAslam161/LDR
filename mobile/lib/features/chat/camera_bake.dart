@@ -27,10 +27,16 @@ class BakeRequest {
   final double grainIntensity;
   final bool mirror; // flip horizontally (front camera, to match the preview)
 
-  // Quality: keep near-native — only downscale if wider than this, encode at
-  // q95. High cap so an ultraHigh (≈2160px) capture is NOT shrunk.
-  static const int maxWidth = 2560;
-  static const int jpegQuality = 95;
+  // Capture is 1080p, so this cap is never hit and copyResize never runs —
+  // which is the point. It stays as a backstop for a device that negotiates
+  // something larger, and it is deliberately NOT 2560: the old cap sat above
+  // the old 4K capture, so every filtered shot took a resize it did not need.
+  static const int maxWidth = 1920;
+
+  // 88, not 95. The difference is invisible in a 220dp bubble and it is most of
+  // the upload. Nothing here is an archival master — the sensor's own JPEG is
+  // shipped untouched whenever it can be.
+  static const int jpegQuality = 88;
 }
 
 /// compute() entry point. Maximises quality:
@@ -58,7 +64,14 @@ Uint8List bakeSnap(BakeRequest req) {
 
     // Only downscale if larger than the cap (never upscale — keep native res).
     if (image.width > BakeRequest.maxWidth) {
-      image = img.copyResize(image, width: BakeRequest.maxWidth);
+      // Explicitly averaged. copyResize defaults to Interpolation.nearest,
+      // which throws away every third column with no filtering — visible
+      // aliasing on hair, fabric and text, under a comment promising quality.
+      image = img.copyResize(
+        image,
+        width: BakeRequest.maxWidth,
+        interpolation: img.Interpolation.average,
+      );
     }
 
     if (!isNone) {

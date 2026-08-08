@@ -53,7 +53,7 @@ const List<CameraFilter> kCameraFilters = [
     ],
   ),
 
-  // ── 1. FREESIA 🌸 (DEFAULT) ──────────────────────────────────────────────
+  // ── 1. FREESIA 🌸 ──────────────────────────────────────────────
   // Recreates the Snapchat "Freesia" lens look: soft warm rosy-mauve cast,
   // lifted blacks (faded film), reduced contrast, partial desaturation + grain.
   //
