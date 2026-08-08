@@ -115,7 +115,9 @@ class PartnerHereBadge extends ConsumerWidget {
     );
 
     return IgnorePointer(
-      ignoring: !isHere,
+      // Always ignoring: the badge is purely informational and floats over the
+      // AppBar, so while it was visible it swallowed taps meant for the call
+      // and video buttons underneath it.
       child: AnimatedSlide(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
@@ -123,37 +125,50 @@ class PartnerHereBadge extends ConsumerWidget {
         child: AnimatedOpacity(
           duration: const Duration(milliseconds: 300),
           opacity: isHere ? 1.0 : 0.0,
-          child: Container(
-            margin: const EdgeInsets.only(top: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: MilesColors.sage.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(99),
-              border: Border.all(
-                color: MilesColors.sage.withValues(alpha: 0.5),
-                width: 0.8,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: MilesColors.night.withValues(alpha: 0.4),
-                  blurRadius: 12,
+          // Material ancestor, not decoration. This badge is mounted in the
+          // root Stack in main.dart — outside any Scaffold — and Text with no
+          // Material above it falls back to the debug style, which is what put
+          // a yellow underline under "<name> is here" on every screen.
+          child: Material(
+            type: MaterialType.transparency,
+            child: Container(
+              // Clear of the AppBar: at top: 8 the pill sat on top of the
+              // title and the call buttons.
+              margin: const EdgeInsets.only(top: kToolbarHeight + 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: MilesColors.sage.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(
+                  color: MilesColors.sage.withValues(alpha: 0.5),
+                  width: 0.8,
                 ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const _PulsingDot(),
-                const SizedBox(width: 6),
-                Text(
-                  '$partnerName is here',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: MilesColors.sage,
-                    fontWeight: FontWeight.w500,
+                boxShadow: [
+                  BoxShadow(
+                    color: MilesColors.night.withValues(alpha: 0.4),
+                    blurRadius: 12,
                   ),
-                ),
-              ],
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const _PulsingDot(),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$partnerName is here',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: MilesColors.sage,
+                      fontWeight: FontWeight.w500,
+                      // Belt and braces alongside the Material above: this text
+                      // renders outside any Scaffold, and the fallback style is
+                      // underlined.
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
