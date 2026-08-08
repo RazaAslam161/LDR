@@ -50,6 +50,43 @@ class BakeRequest {
 ///   only downscaling if wider than [BakeRequest.maxWidth].
 /// On any decode/processing failure (e.g. OOM on a huge image) it falls back to
 /// the raw bytes, so a capture is never lost — just unprocessed.
+/// Flips an image left-to-right by reversing each row of the pixel buffer.
+///
+/// img.flipHorizontal does the same thing through getPixel/setPixel, which
+/// allocates a Pixel object per access — for a 1080p frame that is roughly two
+/// million allocations for a selfie, and it is the one step that runs even when
+/// no filter is selected. This walks the bytes instead and allocates nothing.
+///
+/// Falls back to the package implementation for any layout it does not own
+/// (palette images, 16-bit, anything not a plain uint8 buffer).
+///
+/// Public only so a test can flip a known image twice and assert it is byte
+/// identical — a stride or channel-count slip here silently swizzles colour.
+img.Image mirrorInPlace(img.Image image) {
+  final data = image.data;
+  if (data is! img.ImageDataUint8) return img.flipHorizontal(image);
+
+  final bytes = data.data;
+  final channels = data.numChannels;
+  final stride = data.rowStride;
+  final width = image.width;
+  final swap = List<int>.filled(channels, 0);
+
+  for (var y = 0; y < image.height; y++) {
+    final row = y * stride;
+    for (var xl = 0, xr = width - 1; xl < xr; xl++, xr--) {
+      final l = row + xl * channels;
+      final r = row + xr * channels;
+      for (var c = 0; c < channels; c++) {
+        swap[c] = bytes[l + c];
+        bytes[l + c] = bytes[r + c];
+        bytes[r + c] = swap[c];
+      }
+    }
+  }
+  return image;
+}
+
 Uint8List bakeSnap(BakeRequest req) {
   final bytes = File(req.path).readAsBytesSync();
   final isNone = req.filterId == 'none';
@@ -64,7 +101,7 @@ Uint8List bakeSnap(BakeRequest req) {
     // Mirror to match the front-camera selfie (preview shows true orientation;
     // the saved photo is flipped so it reads the way the user expects).
     if (req.mirror) {
-      image = img.flipHorizontal(image);
+      mirrorInPlace(image);
     }
 
     // Only downscale if larger than the cap (never upscale — keep native res).

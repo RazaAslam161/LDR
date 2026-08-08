@@ -103,4 +103,82 @@ void main() {
     expect(BakeRequest.maxWidth, lessThanOrEqualTo(1920));
     expect(BakeRequest.jpegQuality, lessThan(95));
   });
+  group('mirrorInPlace', () {
+    img.Image known(int w, int h, int channels) {
+      final im = img.Image(width: w, height: h, numChannels: channels);
+      var v = 0;
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          v = (v + 37) % 251;
+          if (channels == 4) {
+            im.setPixelRgba(x, y, v, (v + 11) % 256, (v + 71) % 256, (v + 133) % 256);
+          } else {
+            im.setPixelRgb(x, y, v, (v + 11) % 256, (v + 71) % 256);
+          }
+        }
+      }
+      return im;
+    }
+
+    // Alpha VARIES per pixel on purpose: with a constant alpha a mirror that
+    // ignores the 4th channel still round-trips, and the bug hides.
+    for (final channels in [3, 4]) {
+      // Odd widths matter: the middle column has no partner and must be left
+      // exactly alone rather than swapped with itself half-way.
+      for (final w in [1, 4, 5, 64, 65]) {
+        test('flipping $w px x $channels channels twice is identity', () {
+          final original = known(w, 3, channels);
+          final copy = img.Image.from(original);
+
+          mirrorInPlace(copy);
+          mirrorInPlace(copy);
+
+          for (var y = 0; y < original.height; y++) {
+            for (var x = 0; x < w; x++) {
+              final a = original.getPixel(x, y);
+              final b = copy.getPixel(x, y);
+              expect([b.r, b.g, b.b, b.a], [a.r, a.g, a.b, a.a],
+                  reason: 'pixel ($x,$y) came back changed');
+            }
+          }
+        });
+      }
+    }
+
+    // A SINGLE flip, checking every channel. The double-flip tests above cannot
+    // catch a channel the mirror ignores: a channel that never moves is still
+    // in the right place after two flips.
+    for (final channels in [3, 4]) {
+      test('a single flip reverses every channel ($channels-channel)', () {
+        final im = known(6, 2, channels);
+        List<List<num>> row(img.Image i) => [
+              for (var x = 0; x < 6; x++)
+                [
+                  i.getPixel(x, 0).r,
+                  i.getPixel(x, 0).g,
+                  i.getPixel(x, 0).b,
+                  i.getPixel(x, 0).a,
+                ],
+            ];
+        final before = row(im);
+        mirrorInPlace(im);
+        expect(row(im), before.reversed.toList());
+      });
+    }
+
+    test('it does not move pixels between rows', () {
+      // The bug a stride mistake produces: colours smearing diagonally.
+      final im = known(5, 4, 3);
+      final rowSums = [
+        for (var y = 0; y < 4; y++)
+          List.generate(5, (x) => im.getPixel(x, y).r).reduce((a, b) => a + b),
+      ];
+      mirrorInPlace(im);
+      for (var y = 0; y < 4; y++) {
+        final sum =
+            List.generate(5, (x) => im.getPixel(x, y).r).reduce((a, b) => a + b);
+        expect(sum, rowSums[y], reason: 'row $y changed content');
+      }
+    });
+  });
 }
