@@ -24,6 +24,7 @@ import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/chat_theme.dart';
 import 'package:miles/features/chat/chat_theme_controller.dart';
 import 'package:miles/features/chat/chat_theme_picker.dart';
@@ -191,7 +192,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final f =
           File('${dir.path}/gif_${DateTime.now().millisecondsSinceEpoch}.gif');
       await f.writeAsBytes(res.bodyBytes);
-      await _sendImageFast(cid, f);
+      _sendImageFast(cid, f);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -202,38 +203,60 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   /// Send an image with INSTANT feedback: the local file shows as a bubble
-  /// immediately (status=sending), then uploads in the background. The DB echo
-  /// carries the same id, so it dedupes; we just flip the status to sent.
-  Future<void> _sendImageFast(String coupleId, File f) async {
-    final id = _uuid.v4();
-    final replyId = _takeReplyId();
+  /// immediately (status=sending), then uploads in the background.
+  ///
+  /// The upload itself belongs to [ChatSendQueue], not to this screen — the
+  /// camera can start one with the chat unmounted, and a send must not die with
+  /// whatever widget happened to begin it. [_adoptPending] renders whatever the
+  /// queue is holding, including sends this screen never saw start.
+  void _sendImageFast(String coupleId, File f) {
+    ChatSendQueue.instance
+        .enqueueImage(coupleId, f, replyToId: _takeReplyId());
+    _adoptPending();
+  }
+
+  /// Mirror the queue's pending sends into the message list.
+  ///
+  /// Called on mount and whenever the queue changes, so a photo taken from the
+  /// shell's camera tab is already a bubble by the time the user reaches the
+  /// chat — and a failure becomes a retryable bubble instead of vanishing.
+  void _adoptPending() {
     final myUid = SupabaseService.currentUserId;
-    if (myUid != null) {
+    final coupleId = _coupleId;
+    if (myUid == null || coupleId == null || !mounted) return;
+
+    for (final s in ChatSendQueue.instance.pending) {
+      if (s.coupleId != coupleId) continue;
+      final i = _messages.indexWhere((m) => m.id == s.id);
+      if (i >= 0) {
+        if (_messages[i].sendStatus != s.status) {
+          setState(() =>
+              _messages[i] = _messages[i].copyWith(sendStatus: s.status));
+        }
+        continue;
+      }
       _onIncoming(Message(
-        id: id,
+        id: s.id,
         senderId: myUid,
         createdAt: DateTime.now(),
-        kind: 'image',
-        localPath: f.path,
-        sendStatus: SendStatus.sending,
-        replyToId: replyId,
+        kind: s.kind,
+        localPath: s.file.path,
+        sendStatus: s.status,
+        replyToId: s.replyToId,
       ));
     }
-    try {
-      final path =
-          await ChatRepository.sendImage(coupleId, f, id: id, replyToId: replyId);
-      _updateStatus(id, SendStatus.sent);
-      // Fast-path the photo to the partner's open chat (deduped by id on echo).
-      if (path != null && myUid != null) {
-        ChatBroadcastService.broadcastImage(
-          id: id,
-          senderId: myUid,
-          imagePath: path,
-          replyToId: replyId,
-        );
+
+    // Anything the queue has finished with is either reconciled by the DB echo
+    // or gone; flip a lingering 'sending' bubble so it can't spin forever.
+    final live = {for (final s in ChatSendQueue.instance.pending) s.id};
+    for (var i = 0; i < _messages.length; i++) {
+      final m = _messages[i];
+      if (m.localPath != null &&
+          m.sendStatus == SendStatus.sending &&
+          !live.contains(m.id)) {
+        setState(() =>
+            _messages[i] = _messages[i].copyWith(sendStatus: SendStatus.sent));
       }
-    } catch (_) {
-      _updateStatus(id, SendStatus.failed);
     }
   }
 
@@ -276,6 +299,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     realtimeResumed.addListener(_subscribe); // rejoin on any socket reconnect
+    // Sends can start anywhere — the shell's camera tab opens with this screen
+    // unmounted — so the chat follows the queue rather than owning it.
+    ChatSendQueue.instance.addListener(_adoptPending);
     _scroll.addListener(_onScroll);
     _init();
   }
@@ -363,6 +389,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // first-run is fine
     }
     await _subscribe(); // single, idempotent channel-subscribe path
+    // Photos taken from the shell's camera tab were already uploading before
+    // this screen existed — show them now rather than when they land.
+    _adoptPending();
     PresenceService.setOnline(couple.id, online: true);
     PresenceService.setTypingInChat(couple.id, inChat: true);
     // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
@@ -744,6 +773,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     realtimeResumed.removeListener(_subscribe);
+    ChatSendQueue.instance.removeListener(_adoptPending);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
     _readTimer?.cancel();
@@ -973,7 +1003,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       replyingTo: _replyingTo,
                       onCancelReply: _cancelReply,
                       onSendText: (t) => _sendTextFast(couple.id, t),
-                      onSendImage: (f) => _sendImageFast(couple.id, f),
+                      onSendImage: (f) async => _sendImageFast(couple.id, f),
                       onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
                           replyToId: _takeReplyId()),
                       onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
@@ -1395,12 +1425,40 @@ class _Content extends StatelessWidget {
                       ),
                     ),
                   ),
+                // Tappable, not decorative. This used to be a bare icon with
+                // no gesture and the surrounding onTap null (no url yet), so a
+                // photo that failed to upload was silently, permanently gone.
                 if (m.sendStatus == SendStatus.failed)
-                  const Positioned(
-                    right: 6,
-                    bottom: 6,
-                    child: Icon(Icons.error_outline,
-                        color: Color(0xFFE0564B), size: 20),
+                  Positioned(
+                    right: 4,
+                    bottom: 4,
+                    child: GestureDetector(
+                      onTap: () => ChatSendQueue.instance.retry(m.id),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xCC1A0E12),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: const Color(0xFFE0564B), width: 1),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.refresh_rounded,
+                                color: Color(0xFFE0564B), size: 16),
+                            SizedBox(width: 5),
+                            Text('Retry',
+                                style: TextStyle(
+                                    color: Color(0xFFE0564B),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 // Save-to-gallery — only once uploaded (url available).
                 if (url != null && m.sendStatus == SendStatus.sent)

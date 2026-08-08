@@ -17,10 +17,8 @@ import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/chat/camera_bake.dart';
 import 'package:miles/features/chat/camera_filter_painter.dart';
 import 'package:miles/features/chat/camera_filters.dart';
-import 'package:miles/features/chat/chat_broadcast_service.dart';
-import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 
 enum _CamState { preview, recording, captured, sending }
@@ -279,7 +277,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
         setState(() => _screenFlash = true);
         await _boostBrightness();
         // let the white screen actually light the face + exposure settle
-        await Future.delayed(const Duration(milliseconds: 400));
+        await Future<void>.delayed(const Duration(milliseconds: 400));
         xfile = await c.takePicture();
         await _restoreBrightness();
         if (mounted) setState(() => _screenFlash = false);
@@ -502,37 +500,20 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       return;
     }
 
-    setState(() => _state = _CamState.sending);
-    try {
-      if (_capturedIsVideo) {
-        // Video → private couple_intimate bucket + kind:'video'. The partner's
-        // chat renders it from the postgres echo (no image fast-path broadcast).
-        await ChatRepository.sendVideo(widget.coupleId, file);
-      } else {
-        final sendId = const Uuid().v4();
-        final path =
-            await ChatRepository.sendImage(widget.coupleId, file, id: sendId);
-        if (path != null) {
-          // Fast-path: piggyback on the chat's live channel if it's open.
-          ChatBroadcastService.broadcastImage(
-            id: sendId,
-            senderId: widget.myUid,
-            imagePath: path,
-          );
-        }
-      }
-      widget.onSent?.call();
-      if (mounted) Navigator.pop(context);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _state = _CamState.captured);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text("Couldn't send — tap to retry"),
-          action: SnackBarAction(label: 'Retry', onPressed: _send),
-        ),
-      );
+    // Hand it to the queue and leave. The upload is not something the user
+    // should be made to watch: on a slow connection the old code parked them
+    // behind a full-screen veil for as long as the network took, and a failure
+    // lost the photo outright. The queue owns it from here, so it survives this
+    // screen closing — and the chat shows the bubble immediately either way.
+    if (_capturedIsVideo) {
+      // Video → private couple_intimate bucket + kind:'video'. The partner's
+      // chat renders it from the postgres echo (no image fast-path broadcast).
+      ChatSendQueue.instance.enqueueVideo(widget.coupleId, file);
+    } else {
+      ChatSendQueue.instance.enqueueImage(widget.coupleId, file);
     }
+    widget.onSent?.call();
+    Navigator.pop(context);
   }
 
   // ── build ─────────────────────────────────────────────────────────────────
