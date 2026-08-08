@@ -15,6 +15,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
@@ -157,14 +158,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Flexible, because the trailing controls are fixed-width and
-                  // a long title at a large text scale would overflow the row
-                  // outright rather than ellipsing.
-                  Flexible(
-                    child: Text('Tethered',
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.headlineLarge),
-                  ),
+                  // Flexible, because the trailing controls are fixed-width
+                  // and the mark at a large text scale would otherwise overflow
+                  // the row outright.
+                  const Flexible(child: Wordmark(size: 30)),
                   Row(
                     children: [
                       // Home has no AppBar, but it IS a joinable tab — without
@@ -209,19 +206,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     coupleId: couple.id,
                     partnerName: partner.displayName,
                   ),
-                ),
-                const SizedBox(height: 36),
-                _QuickActions(
-                  onMessages: () =>
-                      ref.read(shellTabProvider.notifier).state = 1,
-                  onCamera: () {
-                    final couple = ref.read(currentCoupleProvider);
-                    if (couple == null) return;
-                    context.push('/app/rapid-camera', extra: {
-                      'coupleId': couple.id,
-                      'myUid': SupabaseService.currentUserId ?? '',
-                    });
-                  },
                 ),
               ],
             ],
@@ -400,51 +384,6 @@ class _InfoRow extends StatelessWidget {
           child: Text(text,
               style: const TextStyle(color: MilesColors.cream50, fontSize: 13)),
         ),
-      ],
-    );
-  }
-}
-
-class _QuickActions extends StatelessWidget {
-  const _QuickActions({required this.onMessages, required this.onCamera});
-  final VoidCallback onMessages;
-  final VoidCallback onCamera;
-
-  @override
-  Widget build(BuildContext context) {
-    final actions = [
-      (Icons.chat_bubble_outline, 'Messages', onMessages),
-      (Icons.lock_clock, 'Capsule', () => context.push('/app/capsule')),
-      (Icons.camera_alt_outlined, 'Camera', onCamera), // centre tile
-      (Icons.touch_app_outlined, 'Touch', () => context.push('/app/touch')),
-      (Icons.lock_outline, 'Vault', () => context.push('/app/vault')),
-    ];
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        for (final a in actions)
-          GestureDetector(
-            onTap: a.$3,
-            child: Column(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: MilesColors.surface1,
-                    border: Border.all(
-                        color: MilesColors.gilt.withValues(alpha: 0.15)),
-                  ),
-                  child: Icon(a.$1, color: MilesColors.emberSoft),
-                ),
-                const SizedBox(height: 6),
-                Text(a.$2,
-                    style: const TextStyle(
-                        color: MilesColors.taupe, fontSize: 11)),
-              ],
-            ),
-          ),
       ],
     );
   }

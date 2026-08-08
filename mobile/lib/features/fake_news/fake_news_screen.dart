@@ -4,7 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/features/fake_news/rss_service.dart';
-import 'package:miles/features/intro/intro_video_screen.dart';
+import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -152,8 +152,8 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       await Navigator.of(context).push(
         PageRouteBuilder<void>(
           opaque: true,
-          transitionDuration: const Duration(milliseconds: 600),
-          pageBuilder: (_, __, ___) => IntroVideoScreen(
+          transitionDuration: const Duration(milliseconds: 300),
+          pageBuilder: (_, __, ___) => IntroSplashScreen(
             onComplete: () => Navigator.of(context).pop(),
           ),
           transitionsBuilder: (_, anim, __, child) =>

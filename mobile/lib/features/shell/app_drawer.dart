@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 
 /// Side drawer — partner presence, sign-out, future settings.
 /// Frosted glass so the candle-glow background reads through.
@@ -49,10 +50,7 @@ class AppDrawer extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        'Tethered',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
+                      const Wordmark(size: 24),
                     ],
                   ),
                   const SizedBox(height: 40),

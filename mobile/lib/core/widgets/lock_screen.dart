@@ -91,7 +91,7 @@ class _LockScreenState extends State<LockScreen> {
                     const Icon(Icons.lock_rounded,
                         color: MilesColors.ember, size: 52),
                     const SizedBox(height: 14),
-                    const Text('Tethered is locked',
+                    const Text('Miles is locked',
                         style: TextStyle(
                             color: MilesColors.cream50,
                             fontSize: 19,

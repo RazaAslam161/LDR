@@ -98,4 +98,3 @@ flutter:
   assets:
     - .env
     - assets/emoji/
-    - assets/videos/intro.mp4

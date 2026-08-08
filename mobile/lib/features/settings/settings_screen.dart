@@ -436,18 +436,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
             // ── Language ─────────────────────────────────────────
             const _SectionHeader(label: 'Language'),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Content language',
-                  style: TextStyle(color: MilesColors.cream50)),
-              subtitle: Text(
-                ref.watch(contentLanguageProvider) == ContentLanguage.english
-                    ? 'Game prompts and dares are written in English'
-                    : 'Game prompts and dares are written in Roman Urdu',
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
-              ),
-              trailing: const LanguageToggle(padding: EdgeInsets.zero),
+            // A plain Row rather than a ListTile: the label takes what is left
+            // after the switch, which is the only arrangement where a wide
+            // control cannot squeeze the text into a one-letter column.
+            InkWell(
               onTap: () => ref.read(contentLanguageProvider.notifier).toggle(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Content language',
+                              style: TextStyle(color: MilesColors.cream50)),
+                          const SizedBox(height: 2),
+                          Text(
+                            ref.watch(contentLanguageProvider) ==
+                                    ContentLanguage.english
+                                ? 'Games and dares in English'
+                                : 'Games and dares in Roman Urdu',
+                            style: const TextStyle(
+                                color: MilesColors.taupe, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const LanguageToggle(padding: EdgeInsets.zero),
+                  ],
+                ),
+              ),
             ),
 
             const SizedBox(height: 28),
@@ -535,7 +555,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: const Text('Biometric app lock',
                   style: TextStyle(color: MilesColors.cream50)),
               subtitle: const Text(
-                  'Require fingerprint / face / PIN to open Tethered',
+                  'Require fingerprint / face / PIN to open Miles',
                   style: TextStyle(fontSize: 12, color: MilesColors.taupe)),
             ),
 
@@ -595,7 +615,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
             const SizedBox(height: 40),
             const Center(
-              child: Text('Tethered · v0.1.0',
+              child: Text('Miles · v0.1.0',
                   style: TextStyle(fontSize: 11, color: MilesColors.faint)),
             ),
           ],

@@ -87,7 +87,7 @@ class AppLock {
   static Future<bool> authenticate() async {
     try {
       final ok = await _auth.authenticate(
-        localizedReason: 'Unlock Tethered',
+        localizedReason: 'Unlock Miles',
         options: const AuthenticationOptions(
           biometricOnly:
               false, // allow device PIN/passcode as a system fallback

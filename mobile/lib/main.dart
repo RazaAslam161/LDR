@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/config.dart';
 import 'package:miles/core/providers.dart';
@@ -27,6 +26,7 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
@@ -469,14 +469,7 @@ class _SessionLoading extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            'Tethered',
-            style: GoogleFonts.fraunces(
-              fontSize: 32,
-              fontStyle: FontStyle.italic,
-              color: MilesColors.cream50,
-            ),
-          ),
+          const Wordmark(size: 32),
           const SizedBox(height: 24),
           const SizedBox(
             width: 24,

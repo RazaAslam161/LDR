@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/features/intro/intro_video_screen.dart';
+import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
 
 /// The way in, from behind any disguise.
@@ -44,8 +44,8 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
       await Navigator.of(context).push(
         PageRouteBuilder<void>(
           opaque: true,
-          transitionDuration: const Duration(milliseconds: 600),
-          pageBuilder: (_, __, ___) => IntroVideoScreen(
+          transitionDuration: const Duration(milliseconds: 300),
+          pageBuilder: (_, __, ___) => IntroSplashScreen(
             onComplete: () => Navigator.of(context).pop(),
           ),
           transitionsBuilder: (_, anim, __, child) =>

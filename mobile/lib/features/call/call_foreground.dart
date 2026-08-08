@@ -34,7 +34,7 @@ class CallForegroundService {
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'call_service',
         channelName: 'Ongoing call',
-        channelDescription: 'Shown while a Tethered call is running.',
+        channelDescription: 'Shown while a Miles call is running.',
         onlyAlertOnce: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
