@@ -9,6 +9,9 @@ import 'package:miles/core/screen_presence.dart';
 /// Presence drives what one partner believes the other is doing. A wrong value
 /// is worse than no value, so these pin the mapping that decides it.
 void main() {
+  // The observer asks SchedulerBinding which phase it is in before writing.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('screenNameForPath', () {
     test('names the screen from the deepest path segment', () {
       expect(screenNameForPath('/app/touch'), 'Touch');
@@ -174,6 +177,34 @@ void main() {
       obs.didPush(page(null), null);
       obs.didPop(page(null), page('/app/touch'));
       expect(c.read(myScreenProvider), 'Touch');
+    });
+
+    test('an unnamed page opened from a TAB stops claiming the tab', () {
+      // The case that actually happens: you are on the Home tab and open the
+      // 3D map, which is a bare MaterialPageRoute. Going on saying "Home" put
+      // the partner's avatar on the map glowing "here with you".
+      final (obs, c) = build();
+      obs.didPush(page('/app'), null); // the shell → the selected tab
+      expect(c.read(myScreenProvider), 'Home');
+      obs.didPush(page(null), null);
+      expect(c.read(myScreenProvider), isNull);
+    });
+
+    test('popping back onto the tab shell restores the tab', () {
+      // Otherwise presence stays blank for the rest of the session — the tab
+      // shell has no name of its own, so nothing would republish it.
+      final (obs, c) = build();
+      obs.didPush(page('/app'), null);
+      obs.didPush(page(null), null);
+      obs.didPop(page(null), page('/app'));
+      expect(c.read(myScreenProvider), 'Home');
+    });
+
+    test('the shell reports whichever tab is selected', () {
+      final (obs, c) = build();
+      c.read(shellTabProvider.notifier).state = 1;
+      obs.didPush(page('/app'), null);
+      expect(c.read(myScreenProvider), 'Chat');
     });
   });
 }

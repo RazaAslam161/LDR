@@ -9,7 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/providers.dart';
-import 'package:miles/core/screen_presence.dart';
+import 'package:miles/core/router.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -243,11 +243,11 @@ class PartnerHereBadge extends ConsumerWidget {
       ref.read(shellTabProvider.notifier).state = tab;
       // Already inside the shell? Selecting the tab is the whole journey.
       if (here != '/app') context.go('/app');
-      // AppShell only reports on a TAP, and '/app' is not a route the observer
-      // names — so without this the user has moved and nobody has been told.
-      // Their partner would keep seeing the old tab, and this very badge would
-      // keep offering to take them somewhere they already are.
-      reportActiveTab(ref);
+      // A tab change is a setState, not a navigation, so the observer cannot
+      // see it. Without this the user has moved and nobody has been told: their
+      // partner keeps seeing the old tab, and this badge keeps offering a trip
+      // they have already taken.
+      presenceRouteObserver?.publishActiveTab();
       return;
     }
     if (route != null) context.push(route);

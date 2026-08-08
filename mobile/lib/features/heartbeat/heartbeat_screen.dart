@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -53,7 +52,6 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
     final session = ref.read(sessionProvider);
     _coupleId = session.couple?.id;
     _myUid = session.profile?.id;
-    reportScreen(ref, 'Heartbeat');
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(() => SupabaseService.client
           .channel('heartbeat:${_coupleId!}')
@@ -65,7 +63,6 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    reportActiveTab(ref);
     _stopCamera();
     _channel?.dispose();
     _myPulse.dispose();

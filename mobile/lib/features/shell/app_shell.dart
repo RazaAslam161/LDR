@@ -5,7 +5,7 @@ import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
-import 'package:miles/core/screen_presence.dart';
+import 'package:miles/core/router.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
@@ -125,8 +125,9 @@ class _AppShellState extends ConsumerState<AppShell>
     // A push may have been tapped before the listener attached.
     _onPendingReach();
     _onPendingCall();
-    // Let the partner see which screen we're on.
-    reportActiveTab(ref);
+    // The shell mounts on '/app', which the observer answers from the selected
+    // tab — but that happens before this state exists on a cold start.
+    presenceRouteObserver?.publishActiveTab();
   }
 
   void _onReach(ReachEvent e) {
@@ -242,7 +243,9 @@ class _AppShellState extends ConsumerState<AppShell>
               return;
             }
             ref.read(shellTabProvider.notifier).state = i;
-            reportScreen(ref, kTabScreens[i.clamp(0, kTabScreens.length - 1)]);
+            // A tab change is a setState, not a navigation, so nothing else
+            // can tell the partner the user has moved rooms.
+            presenceRouteObserver?.publishActiveTab();
           },
           destinations: [
             const NavigationDestination(

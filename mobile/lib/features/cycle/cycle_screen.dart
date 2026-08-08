@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/feature_flags.dart';
 import 'package:miles/core/realtime_resume.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -55,7 +54,6 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     _myUid = s.profile?.id;
     _partnerUid = s.partner?.id;
     _isFemale = s.profile?.isFemale ?? false;
-    reportScreen(ref, 'Cycle');
     _load();
     _subscribe();
     realtimeResumed.addListener(_subscribe); // re-arm after background/resume
@@ -80,7 +78,6 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
   @override
   void dispose() {
     realtimeResumed.removeListener(_subscribe);
-    reportActiveTab(ref);
     _channel?.unsubscribe();
     super.dispose();
   }

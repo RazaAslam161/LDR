@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -33,7 +32,6 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
     final session = ref.read(sessionProvider);
     _coupleId = session.couple?.id;
     _myUid = session.profile?.id;
-    reportScreen(ref, 'Reasons');
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(
           () => ReasonsRepository.subscribe(_coupleId!, _load));
@@ -43,7 +41,6 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
 
   @override
   void dispose() {
-    reportActiveTab(ref);
     _channel?.dispose();
     _input.dispose();
     _scroll.dispose();

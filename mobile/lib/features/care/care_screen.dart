@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -49,7 +48,6 @@ class _CareScreenState extends ConsumerState<CareScreen> {
     final session = ref.read(sessionProvider);
     _coupleId = session.couple?.id;
     _myUid = session.profile?.id;
-    reportScreen(ref, 'Care');
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(
           () => CareRepository.subscribe(_coupleId!, _load));
@@ -59,7 +57,6 @@ class _CareScreenState extends ConsumerState<CareScreen> {
 
   @override
   void dispose() {
-    reportActiveTab(ref);
     _channel?.dispose();
     super.dispose();
   }

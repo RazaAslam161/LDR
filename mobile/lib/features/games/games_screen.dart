@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/content_language.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
@@ -22,12 +21,10 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
   @override
   void initState() {
     super.initState();
-    reportScreen(ref, 'Games');
   }
 
   @override
   void dispose() {
-    reportActiveTab(ref);
     super.dispose();
   }
 

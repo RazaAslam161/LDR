@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -69,13 +68,11 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
         .channel('together:${couple.id}')
         .onBroadcast(event: 'moment', callback: _onMoment)
         .subscribe());
-    reportScreen(ref, 'Together');
     _load();
   }
 
   @override
   void dispose() {
-    reportActiveTab(ref);
     _channel?.dispose();
     super.dispose();
   }

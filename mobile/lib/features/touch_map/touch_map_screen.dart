@@ -16,7 +16,6 @@ import 'package:miles/main.dart' show MilesApp;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/save_media_service.dart';
@@ -705,7 +704,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (couple == null) return;
     _coupleId = couple.id;
     _subscribe();
-    reportScreen(ref, 'Touch');
     _loadPhotos();
   }
 
@@ -729,7 +727,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _heatTimer?.cancel();
     _neonTimer?.cancel();
     _cameraIconTimer?.cancel();
-    reportActiveTab(ref);
     _channel?.dispose();
     super.dispose();
   }

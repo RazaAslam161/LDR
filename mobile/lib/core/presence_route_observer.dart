@@ -1,10 +1,12 @@
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 
-/// Publishes "which screen am I on" on every navigation, automatically.
+/// Publishes "which screen am I on" — the single place that answers it.
 ///
 /// Presence used to be reported by hand from each screen's initState, and only
 /// 13 of 44 routes ever did it. Walking into any of the other 31 left the
@@ -16,14 +18,16 @@ import 'package:miles/core/widgets/partner_here_badge.dart';
 /// hold for every route including ones nobody has written yet. Hooking the
 /// navigator makes correctness the default: a new screen reports because it
 /// exists, not because someone remembered.
+///
+/// The bottom-nav tabs are the one move the navigator cannot see — switching
+/// tabs is a setState, not a route — so [publishActiveTab] exists for AppShell.
+/// Everything else comes through here, and nothing else writes the value: two
+/// publishers with two ideas of what was last said is how this went wrong the
+/// first time.
 class PresenceRouteObserver extends NavigatorObserver {
   PresenceRouteObserver(this._ref);
 
   final Ref _ref;
-
-  /// The last value published, so a rebuild that lands on the same screen does
-  /// not re-hit the network.
-  String? _last;
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
@@ -50,24 +54,57 @@ class PresenceRouteObserver extends NavigatorObserver {
 
     final path = route?.settings.name;
     if (path == null) {
-      // A page pushed without a name — eleven places still use a bare
+      // A page pushed without a name — a dozen places still use a bare
       // MaterialPageRoute. We genuinely do not know what room this is, and
-      // going on claiming the previous one is exactly the lie this class
-      // exists to stop. "Somewhere" is honest; "still in the chat" is not.
-      _publish(null);
+      // going on claiming the previous one is exactly the lie this class exists
+      // to stop. "Somewhere" is honest; "still in the chat" is not.
+      publish(null);
+      return;
+    }
+
+    // The tab shell is not a room; the selected tab is. Landing back on it —
+    // popping out of a pushed screen, or out of an unnamed one — has to restore
+    // the tab, or presence stays blank until the user taps the nav bar.
+    if (path == '/app') {
+      publishActiveTab();
       return;
     }
 
     final name = screenNameForPath(path);
-    // A named route that is deliberately not a place (auth, the tab shell, the
-    // capture camera) leaves the current value alone — nobody has moved rooms.
+    // A named route that is deliberately not a place (auth, the capture camera)
+    // leaves the current value alone — nobody has moved rooms.
     if (name == null) return;
-    _publish(name);
+    publish(name);
   }
 
-  void _publish(String? name) {
-    if (name == _last) return;
-    _last = name;
+  /// Publish the bottom-nav tab the user is on. The navigator cannot see a tab
+  /// change, so AppShell calls this directly.
+  void publishActiveTab() {
+    final i = _ref.read(shellTabProvider).clamp(0, kTabScreens.length - 1);
+    publish(kTabScreens[i]);
+  }
+
+  /// Publish [name] as the room this user is in, or null for "somewhere".
+  void publish(String? name) {
+    // The provider is the record of what was last said — not a private field.
+    // A field drifts the moment anything else sets the value, which is exactly
+    // what used to leave a tab unpublishable after a pop.
+    if (name == _ref.read(myScreenProvider)) return;
+
+    // Navigator observers fire while the tree is being built, and Riverpod
+    // refuses a write during that phase. Deferring only when we really are
+    // mid-frame keeps the common path synchronous.
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _write(name));
+    } else {
+      _write(name);
+    }
+  }
+
+  void _write(String? name) {
+    if (name == _ref.read(myScreenProvider)) return;
 
     // Our own value first: it is what this device's badge compares against, and
     // it should not wait on the couple row to finish loading.
@@ -84,8 +121,10 @@ class PresenceRouteObserver extends NavigatorObserver {
 
   /// Clears the published screen — used when the app leaves the foreground, so
   /// a backgrounded user never reads as sitting in a room they have left.
+  ///
+  /// Writes straight through rather than deferring: this runs from a lifecycle
+  /// callback, and on `detached` there may be no further frame to defer to.
   void clear() {
-    _last = null;
     _ref.read(myScreenProvider.notifier).state = null;
 
     final couple = _ref.read(currentCoupleProvider);
@@ -120,7 +159,7 @@ const Map<String, String> kJoinableRoutes = {
 };
 
 /// Tab screens live inside the shell, so joining one means selecting its tab
-/// rather than pushing a route. Index matches `kTabScreens`.
+/// rather than pushing a route. Index matches [kTabScreens].
 const Map<String, int> kJoinableTabs = {
   'Home': 0,
   'Chat': 1,
@@ -157,12 +196,11 @@ String? screenNameForPath(String path) {
     '/couple',
     '/role-setup',
     '/app/rapid-camera', // a capture action, not somewhere you linger
+    // The tab shell. WHICH tab is not derivable from the path, so
+    // PresenceRouteObserver answers that one from the selected index.
+    '/app',
   };
   if (notAPlace.contains(path)) return null;
-
-  // '/app' is the tab shell; which TAB you are on is reported by AppShell,
-  // which knows the selected index. Reporting "App" here would overwrite it.
-  if (path == '/app') return null;
 
   final segments =
       path.split('/').where((s) => s.isNotEmpty && s != 'app').toList();

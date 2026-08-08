@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/content_language.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -49,7 +48,6 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     _coupleId = s.couple?.id;
     _myUid = s.profile?.id;
     _partnerUid = s.partner?.id;
-    reportScreen(ref, 'TruthOrDare');
 
     _subscribe();
   }
@@ -72,7 +70,6 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
 
   @override
   void dispose() {
-    reportActiveTab(ref);
     _syncTimer?.cancel();
     _channel?.dispose();
     super.dispose();
@@ -99,18 +96,18 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     // in the spicy pool because someone tapped Spicy would put a different
     // question on each phone.
     final lang = ref.read(contentLanguageProvider);
-    final mine = card == null
+    final ours = card == null
         ? null
-        : localiseTD(lang, card.type, card.tier, card.text, card.index);
-    if (mine != null) {
-      markTDSeen(lang, mine); // keep the no-repeat shared across phones
-    }
+        : localiseTD(lang, card.type, card.tier, card.index);
+    // Only retire what actually came from OUR pool. An older build sends no
+    // index; then their sentence is shown as-is but never filed here.
+    if (ours != null) markTDSeen(lang, ours);
     setState(() {
       _started = true;
       _turn = payload['turn'] as String?;
       _round = (payload['round'] as int?) ?? _round;
       _tier = tier;
-      _card = mine;
+      _card = ours ?? card;
     });
   }
 
@@ -179,7 +176,12 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     ref.listen<ContentLanguage>(contentLanguageProvider, (_, lang) {
       final c = _card;
       if (c == null) return;
-      setState(() => _card = localiseTD(lang, c.type, c.tier, c.text, c.index));
+      final swapped = localiseTD(lang, c.type, c.tier, c.index);
+      if (swapped == null) return;
+      // Retire it in the new bag too, or the very next draw can deal back the
+      // card that is already on screen.
+      markTDSeen(lang, swapped);
+      setState(() => _card = swapped);
     });
 
     return Scaffold(

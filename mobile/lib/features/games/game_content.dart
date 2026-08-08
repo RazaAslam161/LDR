@@ -321,20 +321,17 @@ Future<TDCard> drawTD(ContentLanguage lang, TDType type, TDTier tier) async {
   return TDCard(type, tier, text, pool.indexOf(text));
 }
 
-/// Render the card the partner drew, in *this* phone's language.
+/// The card at [index], in *this* phone's language — or null when we cannot
+/// place it.
 ///
-/// Falls back to their text when the index is missing or out of range — an
-/// older build on the other phone sends no index, and showing their words is
-/// far better than showing nothing.
-TDCard localiseTD(
-  ContentLanguage lang,
-  TDType type,
-  TDTier tier,
-  String text,
-  int index,
-) {
+/// Null rather than a fallback so the caller has to decide what to do about it.
+/// The two decisions differ: what to SHOW falls back to the partner's words
+/// (their sentence beats a blank card), but what to mark seen must not, or a
+/// foreign-language string permanently occupies a slot in a bag it can never be
+/// dealt from.
+TDCard? localiseTD(ContentLanguage lang, TDType type, TDTier tier, int index) {
   final pool = _poolFor(lang, type, tier);
-  if (index < 0 || index >= pool.length) return TDCard(type, tier, text, index);
+  if (index < 0 || index >= pool.length) return null;
   return TDCard(type, tier, pool[index], index);
 }
 

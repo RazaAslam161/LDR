@@ -67,40 +67,27 @@ void main() {
       final mine = truthPool(ContentLanguage.english, TDTier.cute);
       const at = 7;
 
-      final card = localiseTD(
-        ContentLanguage.english,
-        TDType.truth,
-        TDTier.cute,
-        theirs[at],
-        at,
-      );
-      expect(card.text, mine[at]);
-      expect(card.index, at);
+      final card =
+          localiseTD(ContentLanguage.english, TDType.truth, TDTier.cute, at);
+      expect(card?.text, mine[at]);
+      expect(card?.index, at);
+      expect(theirs[at], isNot(mine[at])); // the two really are different pools
     });
 
-    test('falls back to their words when there is no index', () {
-      // An older build on the other phone sends no index. Showing what they
-      // drew beats showing nothing.
-      final theirs = darePool(ContentLanguage.romanUrdu, TDTier.flirty);
-      final card = localiseTD(
-        ContentLanguage.english,
-        TDType.dare,
-        TDTier.flirty,
-        theirs.first,
-        -1,
+    test('returns null when there is no index', () {
+      // An older build on the other phone sends none. The caller shows their
+      // words but must not file them in our bag.
+      expect(
+        localiseTD(ContentLanguage.english, TDType.dare, TDTier.flirty, -1),
+        isNull,
       );
-      expect(card.text, theirs.first);
     });
 
-    test('falls back when the index is past the end of our pool', () {
-      final card = localiseTD(
-        ContentLanguage.english,
-        TDType.truth,
-        TDTier.spicy,
-        'their card',
-        999999,
+    test('returns null when the index is past the end of our pool', () {
+      expect(
+        localiseTD(ContentLanguage.english, TDType.truth, TDTier.spicy, 999999),
+        isNull,
       );
-      expect(card.text, 'their card');
     });
   });
 
@@ -129,19 +116,18 @@ void main() {
       // showing. Indexing into the NEW tier's pool would put a different
       // question on each phone — and flirty/spicy are the same length, so it
       // would happen every single time.
-      final drawn = truthPool(ContentLanguage.romanUrdu, TDTier.flirty);
       const at = 42;
 
       final byOwnTier = localiseTD(
         ContentLanguage.english,
         TDType.truth,
         TDTier.flirty, // the card's tier, not whatever chip is now selected
-        drawn[at],
         at,
       );
-      expect(byOwnTier.text, truthPool(ContentLanguage.english, TDTier.flirty)[at]);
       expect(
-        byOwnTier.text,
+          byOwnTier?.text, truthPool(ContentLanguage.english, TDTier.flirty)[at]);
+      expect(
+        byOwnTier?.text,
         isNot(truthPool(ContentLanguage.english, TDTier.spicy)[at]),
         reason: 'the two tiers must be distinguishable for this test to mean '
             'anything',

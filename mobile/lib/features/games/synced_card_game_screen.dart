@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/content_language.dart';
 import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -78,7 +77,6 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     final s = ref.read(sessionProvider);
     _coupleId = s.couple?.id;
     _myUid = s.profile?.id;
-    reportScreen(ref, widget.deck.key);
     final cid = _coupleId;
     if (cid != null) {
       _sub = ManagedSubscription.start(() => SupabaseService.client
@@ -95,7 +93,6 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
 
   @override
   void dispose() {
-    reportActiveTab(ref);
     _syncTimer?.cancel();
     _sub?.dispose();
     super.dispose();

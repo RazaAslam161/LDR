@@ -157,8 +157,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Tethered',
-                      style: Theme.of(context).textTheme.headlineLarge),
+                  // Flexible, because the trailing controls are fixed-width and
+                  // a long title at a large text scale would overflow the row
+                  // outright rather than ellipsing.
+                  Flexible(
+                    child: Text('Tethered',
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineLarge),
+                  ),
                   Row(
                     children: [
                       // Home has no AppBar, but it IS a joinable tab — without
