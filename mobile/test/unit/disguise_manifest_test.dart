@@ -71,6 +71,65 @@ void main() {
         isFalse);
   });
 
+  test('every launcher icon the manifest names actually exists', () {
+    // A missing icon resource is a build failure at best and an app with no
+    // visible icon at worst, and neither shows up in `flutter analyze`.
+    final refs = RegExp(r'android:icon="@(mipmap|drawable)/([a-z0-9_]+)"')
+        .allMatches(manifest);
+    expect(refs, isNotEmpty);
+    for (final m in refs) {
+      final kind = m.group(1)!;
+      final name = m.group(2)!;
+      final dir = Directory('android/app/src/main/res');
+      final found = dir
+          .listSync()
+          .whereType<Directory>()
+          .where((d) => d.path.split(RegExp(r'[\\/]')).last.startsWith(kind))
+          .any((d) => d
+              .listSync()
+              .whereType<File>()
+              .any((f) => f.uri.pathSegments.last.split('.').first == name));
+      expect(found, isTrue, reason: '@$kind/$name is referenced but missing');
+    }
+  });
+
+  test('adaptive icons have a pre-API-26 fallback', () {
+    // minSdk is 23, and mipmap-anydpi-v26 is only consulted from API 26. Below
+    // that Android needs the same name in a non-anydpi bucket — either a
+    // density folder (how the stock ic_launcher does it, as PNGs) or the
+    // density-agnostic mipmap/ (how the disguise icons do it, as vectors).
+    final res = Directory('android/app/src/main/res');
+    final fallbackDirs = res
+        .listSync()
+        .whereType<Directory>()
+        .where((d) {
+          final n = d.path.split(RegExp(r'[\\/]')).last;
+          return n.startsWith('mipmap') && n != 'mipmap-anydpi-v26';
+        })
+        .toList();
+
+    // Only icons the manifest actually references. Unused leftovers in res/
+    // (ic_launcher_round, which nothing points at) are not a shipping risk.
+    final referenced = RegExp(r'android:icon="@mipmap/([a-z0-9_]+)"')
+        .allMatches(manifest)
+        .map((m) => m.group(1)!)
+        .toSet();
+
+    for (final f in Directory('${res.path}/mipmap-anydpi-v26')
+        .listSync()
+        .whereType<File>()
+        .where((f) =>
+            referenced.contains(f.uri.pathSegments.last.split('.').first))) {
+      final base = f.uri.pathSegments.last.split('.').first;
+      final found = fallbackDirs.any((d) => d
+          .listSync()
+          .whereType<File>()
+          .any((c) => c.uri.pathSegments.last.split('.').first == base));
+      expect(found, isTrue,
+          reason: '$base has no pre-API-26 fallback in any mipmap bucket');
+    }
+  });
+
   test('each offered disguise declares a launcher label and icon', () {
     for (final d in kDisguises) {
       final block = aliasBlock(d.aliasId).firstMatch(manifest)!.group(0)!;

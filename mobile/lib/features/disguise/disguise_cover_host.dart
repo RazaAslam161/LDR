@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:miles/features/disguise/covers/calculator_cover.dart';
+import 'package:miles/features/disguise/covers/notes_cover.dart';
+import 'package:miles/features/disguise/covers/weather_cover.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/fake_news/fake_news_screen.dart';
@@ -44,12 +46,11 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost> {
     return switch (profile.cover) {
       DisguiseCover.calculator =>
         CalculatorCover(onAuthenticated: widget.onAuthenticated),
-      // notes/weather are unreachable today — kDisguises does not offer them
-      // until they have covers of their own. The news reader is the safe
-      // fallback if one is ever selected before its cover lands.
-      DisguiseCover.news ||
-      DisguiseCover.notes ||
+      DisguiseCover.notes =>
+        NotesCover(onAuthenticated: widget.onAuthenticated),
       DisguiseCover.weather =>
+        WeatherCover(onAuthenticated: widget.onAuthenticated),
+      DisguiseCover.news =>
         FakeNewsScreen(onAuthenticated: widget.onAuthenticated),
     };
   }

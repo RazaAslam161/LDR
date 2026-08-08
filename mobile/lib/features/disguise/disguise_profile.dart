@@ -75,10 +75,22 @@ const List<DisguiseProfile> kDisguises = [
     tint: Color(0xFF5F6368),
     cover: DisguiseCover.calculator,
   ),
-  // Notes and Weather are NOT offered yet, on purpose. Their manifest aliases
-  // and launcher icons exist, but neither has a cover screen — and a Notes icon
-  // that opens a news reader is a louder tell than no disguise at all. They
-  // ship the moment DisguiseCover.notes / .weather have real covers.
+  DisguiseProfile(
+    aliasId: 'Notes',
+    label: 'Notes',
+    blurb: 'A notepad that really keeps notes.',
+    icon: Icons.sticky_note_2_outlined,
+    tint: Color(0xFFF4B400),
+    cover: DisguiseCover.notes,
+  ),
+  DisguiseProfile(
+    aliasId: 'Weather',
+    label: 'Weather',
+    blurb: 'A local forecast, stable through the day.',
+    icon: Icons.wb_sunny_outlined,
+    tint: Color(0xFF4285F4),
+    cover: DisguiseCover.weather,
+  ),
 ];
 
 /// The identity a fresh install starts with — matches the one alias the

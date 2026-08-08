@@ -8,7 +8,9 @@ import 'package:miles/features/disguise/cover_gate.dart';
 /// presses a button is worse than none — it advertises that there is something
 /// to hide. Arithmetic, the display, and the key feel are all real.
 ///
-/// The hidden trigger is an **equals long-press (1.5s) on an empty display**.
+/// The hidden trigger is a **long-press on `=` while the display reads `0` with
+/// no pending operation** — a normal ~500ms InkWell long-press, not a timed
+/// hold.
 /// Chosen deliberately: pressing `=` with nothing entered is something no real
 /// user does by accident, it leaves no visible affordance, and it cannot be
 /// stumbled into while genuinely using the calculator.

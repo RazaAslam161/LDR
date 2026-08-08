@@ -6,7 +6,12 @@ void main() {
     test('every offered disguise has a cover that exists', () {
       // A launcher icon whose cover does not match is a louder tell than no
       // disguise at all, so the catalog may only offer covers that are built.
-      const built = {DisguiseCover.news, DisguiseCover.calculator};
+      const built = {
+        DisguiseCover.news,
+        DisguiseCover.calculator,
+        DisguiseCover.notes,
+        DisguiseCover.weather,
+      };
       for (final d in kDisguises) {
         expect(built.contains(d.cover), isTrue,
             reason: '${d.label} is offered but ${d.cover} has no cover screen');

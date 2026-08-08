@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Sheet with a folded corner: the universal note-taking silhouette -->
+    <path android:fillColor="#FFFBBC04" android:pathData="M32,24h30l14,14v46a4,4 0 0 1 -4,4h-40a4,4 0 0 1 -4,-4v-56a4,4 0 0 1 4,-4z"/>
+    <path android:fillColor="#FFF29900" android:pathData="M62,24l14,14h-14z"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M39,48h30v5h-30zM39,58h30v5h-30zM39,68h19v5h-19z"/>
+</vector>

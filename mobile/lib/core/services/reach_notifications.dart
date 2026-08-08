@@ -3,12 +3,23 @@ import 'dart:typed_data';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:miles/features/disguise/disguise_notification.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Channel names and descriptions are listed in Android's own notification
+// settings, under whatever app the launcher says this is. They must therefore
+// be plausible for EVERY disguise, not just the real app — "Reach Alerts /
+// When your partner reaches for you" announced the entire product to anyone who
+// opened the settings of what looked like a calculator.
+//
+// Kept deliberately generic and channel IDs kept stable: a channel's name is
+// fixed once created, so disguise-specific names would need the channels
+// deleted and rebuilt on every switch, and any notification posted in that
+// window would be lost.
 const String kReachChannelId = 'reach_channel';
-const String kReachChannelName = 'Reach Alerts';
-const String kReachChannelDesc = 'When your partner reaches for you';
+const String kReachChannelName = 'Alerts';
+const String kReachChannelDesc = 'Time-sensitive alerts';
 
 /// The distinctive Reach buzz (also used by the in-app overlay).
 Int64List reachVibrationPattern() =>
@@ -36,6 +47,8 @@ Future<void> showReachNotification({
   required String reachId,
   required bool fullScreen,
 }) async {
+  // Wear this device's disguise, not the sender's and not a hardcoded one.
+  final style = await currentNotificationStyle();
   final android = AndroidNotificationDetails(
     kReachChannelId,
     kReachChannelName,
@@ -47,15 +60,15 @@ Future<void> showReachNotification({
     enableVibration: true,
     vibrationPattern: reachVibrationPattern(),
     fullScreenIntent: fullScreen,
-    icon: '@mipmap/ic_launcher',
-    ticker: 'News update',
+    icon: style.smallIcon,
+    ticker: style.ticker,
     // Privacy: hidden entirely on the lock screen; no preview anywhere.
     visibility: NotificationVisibility.secret,
   );
   await plugin.show(
     id: reachId.hashCode & 0x7fffffff,
-    title: 'News update',
-    body: 'Tap to open',
+    title: style.title,
+    body: style.body,
     notificationDetails: NotificationDetails(android: android),
     payload: '$reachId|$fromName',
   );
@@ -63,8 +76,8 @@ Future<void> showReachNotification({
 
 // ── Incoming calls ───────────────────────────────────────────────────────────
 const String kCallChannelId = 'call_channel';
-const String kCallChannelName = 'Incoming Calls';
-const String kCallChannelDesc = 'Ringing when your partner calls you';
+const String kCallChannelName = 'Voice';
+const String kCallChannelDesc = 'Incoming voice notifications';
 
 Int64List callVibrationPattern() =>
     Int64List.fromList(<int>[0, 800, 600, 800, 600, 800]);
@@ -89,6 +102,7 @@ Future<void> showCallNotification({
   required bool video,
   required bool fullScreen,
 }) async {
+  final style = await currentNotificationStyle();
   final android = AndroidNotificationDetails(
     kCallChannelId,
     kCallChannelName,
@@ -101,14 +115,14 @@ Future<void> showCallNotification({
     playSound: true,
     enableVibration: true,
     vibrationPattern: callVibrationPattern(),
-    icon: '@mipmap/ic_launcher',
-    ticker: 'News update',
+    icon: style.smallIcon,
+    ticker: style.ticker,
     visibility: NotificationVisibility.secret,
   );
   await plugin.show(
     id: callId.hashCode & 0x7fffffff,
-    title: 'News update',
-    body: 'Tap to open',
+    title: style.title,
+    body: style.body,
     notificationDetails: NotificationDetails(android: android),
     payload: 'call|$callId|$fromName|${video ? 1 : 0}',
   );
@@ -116,8 +130,8 @@ Future<void> showCallNotification({
 
 // ── Care Nudges ──────────────────────────────────────────────────────────────
 const String kCareChannelId = 'care_channel';
-const String kCareChannelName = 'Care Reminders';
-const String kCareChannelDesc = 'Gentle reminders from your partner';
+const String kCareChannelName = 'Reminders';
+const String kCareChannelDesc = 'Scheduled reminders';
 
 AndroidNotificationChannel buildCareChannel() =>
     const AndroidNotificationChannel(
@@ -134,21 +148,24 @@ Future<void> showCareNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String nudgeId,
 }) async {
-  const android = AndroidNotificationDetails(
+  // The reported bug lived here: a care reminder sent to a partner running the
+  // Calculator disguise arrived as a "News update".
+  final style = await currentNotificationStyle();
+  final android = AndroidNotificationDetails(
     kCareChannelId,
     kCareChannelName,
     channelDescription: kCareChannelDesc,
     importance: Importance.high,
     priority: Priority.high,
-    icon: '@mipmap/ic_launcher',
-    ticker: 'News update',
+    icon: style.smallIcon,
+    ticker: style.ticker,
     visibility: NotificationVisibility.secret,
   );
   await plugin.show(
     id: nudgeId.hashCode & 0x7fffffff,
-    title: 'News update',
-    body: 'Tap to open',
-    notificationDetails: const NotificationDetails(android: android),
+    title: style.title,
+    body: style.body,
+    notificationDetails: NotificationDetails(android: android),
     payload: 'care|$nudgeId',
   );
 }
@@ -163,6 +180,9 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
   final plugin = FlutterLocalNotificationsPlugin();
   await plugin.initialize(
+    // Init-time DEFAULT only — every notification we post overrides this with
+    // the active disguise's icon. Anything that forgets to would show the News
+    // icon on a Calculator phone, so pass style.smallIcon when adding one.
     settings: const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     ),
