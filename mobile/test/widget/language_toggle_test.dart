@@ -31,6 +31,35 @@ void main() {
     expect(find.text('UR'), findsOneWidget);
   });
 
+  testWidgets('stays its own size in a slot that offers it the whole row',
+      (tester) async {
+    // It ships in a ListTile's trailing, where the constraints are bounded.
+    // An unsized Align inside took every pixel offered, so on device the pill
+    // spanned the entire row and crushed the label beside it to one letter per
+    // line.
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(
+            body: ListTile(
+              title: const Text('Content language'),
+              subtitle: const Text('Game prompts and dares are in English'),
+              trailing: const LanguageToggle(padding: EdgeInsets.zero),
+              onTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final width = tester.getSize(find.byType(LanguageToggle)).width;
+    expect(width, lessThan(100), reason: 'the pill swallowed the row');
+    // And the row's own text still gets a sane share of the width.
+    expect(tester.getSize(find.text('Content language')).width,
+        greaterThan(100));
+  });
+
   testWidgets('starts in English', (tester) async {
     final container = await pump(tester);
     expect(container.read(contentLanguageProvider), ContentLanguage.english);

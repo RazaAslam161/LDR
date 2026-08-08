@@ -5,6 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/content_language.dart';
 import 'package:miles/core/theme.dart';
 
+/// One half of the pill: the sliding thumb, and the slot each label sits in.
+const double _slotWidth = 32;
+const double _slotHeight = 26;
+
 /// The compact EN / UR switch that sits in the AppBar of every screen whose
 /// writing is bilingual.
 ///
@@ -13,7 +17,10 @@ import 'package:miles/core/theme.dart';
 /// switch to. Both options are always visible, the live one is filled, and the
 /// thumb slides — so the control explains itself without a word of chrome.
 class LanguageToggle extends ConsumerWidget {
-  const LanguageToggle({super.key, this.padding = const EdgeInsets.only(right: 6)});
+  const LanguageToggle({
+    super.key,
+    this.padding = const EdgeInsets.only(right: 6),
+  });
 
   final EdgeInsets padding;
 
@@ -34,7 +41,6 @@ class LanguageToggle extends ConsumerWidget {
             ref.read(contentLanguageProvider.notifier).toggle();
           },
           child: Container(
-            height: 30,
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
               color: MilesColors.cream50.withValues(alpha: 0.08),
@@ -43,49 +49,57 @@ class LanguageToggle extends ConsumerWidget {
                 color: MilesColors.cream50.withValues(alpha: 0.16),
               ),
             ),
-            child: Stack(
-              children: [
-                AnimatedAlign(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  alignment: index == 0
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
-                  child: Container(
-                    width: 32,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      color: MilesColors.blush.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(13),
+            // Sized, not intrinsic. An Align with no widthFactor takes every
+            // pixel it is offered, and in a bounded slot — a ListTile's
+            // trailing, say — the pill stretched the full width of the row and
+            // squeezed the text beside it down to one letter per line.
+            child: SizedBox(
+              width: values.length * _slotWidth,
+              height: _slotHeight,
+              child: Stack(
+                children: [
+                  AnimatedAlign(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    alignment:
+                        index == 0 ? Alignment.centerLeft : Alignment.centerRight,
+                    child: Container(
+                      width: _slotWidth,
+                      height: _slotHeight,
+                      decoration: BoxDecoration(
+                        color: MilesColors.blush.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
                     ),
                   ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final v in values)
-                      SizedBox(
-                        width: 32,
-                        height: 26,
-                        child: Center(
-                          child: AnimatedDefaultTextStyle(
-                            duration: const Duration(milliseconds: 220),
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight:
-                                  v == lang ? FontWeight.w700 : FontWeight.w500,
-                              color: MilesColors.cream50.withValues(
-                                alpha: v == lang ? 1 : 0.5,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final v in values)
+                        SizedBox(
+                          width: _slotWidth,
+                          height: _slotHeight,
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 220),
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: v == lang
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: MilesColors.cream50.withValues(
+                                  alpha: v == lang ? 1 : 0.5,
+                                ),
+                                decoration: TextDecoration.none,
                               ),
-                              decoration: TextDecoration.none,
+                              child: Text(v.short),
                             ),
-                            child: Text(v.short),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
