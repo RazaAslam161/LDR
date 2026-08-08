@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
@@ -6,7 +7,7 @@ import 'package:image/image.dart' as img;
 /// object can be sent to a [compute] isolate.
 class BakeRequest {
   BakeRequest({
-    required this.bytes,
+    required this.path,
     required this.filterId,
     required this.matrix,
     required this.blurSigma,
@@ -17,7 +18,10 @@ class BakeRequest {
     this.mirror = false,
   });
 
-  final Uint8List bytes;
+  /// The camera's own file. compute() is Isolate.run — a Uint8List argument is
+  /// COPIED, not transferred, so passing bytes meant reading megabytes on the
+  /// UI isolate and then cloning them. The isolate opens the file itself.
+  final String path;
   final String filterId;
   final List<double> matrix; // same 4×5 matrix used by the live preview
   final double blurSigma;
@@ -47,14 +51,15 @@ class BakeRequest {
 /// On any decode/processing failure (e.g. OOM on a huge image) it falls back to
 /// the raw bytes, so a capture is never lost — just unprocessed.
 Uint8List bakeSnap(BakeRequest req) {
+  final bytes = File(req.path).readAsBytesSync();
   final isNone = req.filterId == 'none';
 
   // Fast path: nothing to do → ship the original sensor JPEG with no quality loss.
-  if (isNone && !req.mirror) return req.bytes;
+  if (isNone && !req.mirror) return bytes;
 
   try {
-    var image = img.decodeImage(req.bytes);
-    if (image == null) return req.bytes;
+    var image = img.decodeImage(bytes);
+    if (image == null) return bytes;
 
     // Mirror to match the front-camera selfie (preview shows true orientation;
     // the saved photo is flipped so it reads the way the user expects).
@@ -90,7 +95,7 @@ Uint8List bakeSnap(BakeRequest req) {
 
     return img.encodeJpg(image, quality: BakeRequest.jpegQuality);
   } catch (_) {
-    return req.bytes; // never drop a capture — ship the raw photo on failure
+    return bytes; // never drop a capture — ship the raw photo on failure
   }
 }
 

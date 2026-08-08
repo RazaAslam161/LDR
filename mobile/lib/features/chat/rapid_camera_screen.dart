@@ -69,6 +69,16 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
 
   _CamState _state = _CamState.preview;
   File? _capturedFile;
+
+  /// The bake in flight, if any. _send awaits it so a filtered shot is never
+  /// sent as the raw frame just because the user was quick.
+  Future<File?>? _bake;
+
+  /// While a bake is running, the review screen shows the RAW frame with this
+  /// filter applied live — the same widget the viewfinder uses. Without it the
+  /// photo would visibly change colour under the user when the bake lands.
+  CameraFilter? _bakedPreview;
+  bool _bakeMirror = false;
   bool _annotating = false;
 
   // ── video recording (hold-to-record) ──
@@ -284,24 +294,66 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
         if (ledFlash) unawaited(c.setFlashMode(FlashMode.off).catchError((_) {}));
       }
       if (!mounted) return;
+      final raw = File(xfile.path);
+
+      // Show the shot IMMEDIATELY. takePicture has already written a complete,
+      // viewable JPEG — waiting for the bake before putting anything on screen
+      // is what made the shutter feel slow, and it showed a black veil while it
+      // waited. Perceived latency is now the shutter round trip alone, however
+      // long the bake takes.
+      //
       // PEAK QUALITY: an unfiltered, un-mirrored shot is sent EXACTLY as the
-      // camera produced it — no decode/resize/re-encode, zero generation loss
-      // (true device quality). Only filtered/mirrored shots are re-processed.
-      if (_selectedFilter.id == 'none' && !mirror) {
-        setState(() {
-          _capturedFile = File(xfile.path);
-          _capturedIsVideo = false;
-          _state = _CamState.captured;
-        });
-        return;
-      }
-      setState(() => _state = _CamState.captured); // processing veil
-      final bytes = await xfile.readAsBytes();
+      // camera produced it — no decode/re-encode, zero generation loss. Only
+      // filtered/mirrored shots are re-processed, behind the review screen.
+      final needsBake = _selectedFilter.id != 'none' || mirror;
+      setState(() {
+        _capturedFile = raw;
+        _capturedIsVideo = false;
+        _state = _CamState.captured;
+        _bakedPreview = needsBake ? _selectedFilter : null;
+        _bakeMirror = mirror;
+      });
+      if (!needsBake) return;
+
       final f = _selectedFilter;
+      // Kept as a field so _send can await a bake that is still running instead
+      // of shipping the unbaked frame the user is looking at.
+      final bake = _bake = _runBake(xfile.path, f, mirror);
+      final file = await bake;
+      if (!mounted || _bake != bake) return; // retaken or superseded
+      setState(() {
+        _capturedFile = file ?? raw;
+        _bakedPreview = null;
+        _bake = null;
+      });
+      if (file != null) {
+        // The sensor JPEG is now dead weight — a few MB per shot that nothing
+        // else ever deleted.
+        unawaited(raw.delete().catchError((_) => raw));
+      }
+    } catch (_) {
+      await _restoreBrightness();
+      if (mounted) {
+        setState(() {
+          _screenFlash = false;
+          _state = _CamState.preview;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not take that photo.')),
+        );
+      }
+    }
+  }
+
+  /// Runs the filter/mirror bake off-isolate and writes the result. Returns
+  /// null if it fails — the caller then keeps the sensor frame, which is a
+  /// worse photo than intended but never a lost one.
+  Future<File?> _runBake(String path, CameraFilter f, bool mirror) async {
+    try {
       final out = await compute(
         bakeSnap,
         BakeRequest(
-          bytes: bytes,
+          path: path,
           filterId: f.id,
           matrix: f.colorMatrix,
           blurSigma: f.blurSigma,
@@ -316,23 +368,10 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       final file =
           File('${dir.path}/snap_${DateTime.now().millisecondsSinceEpoch}.jpg');
       await file.writeAsBytes(out);
-      if (!mounted) return;
-      setState(() {
-        _capturedFile = file;
-        _capturedIsVideo = false;
-        _state = _CamState.captured;
-      });
-    } catch (_) {
-      await _restoreBrightness();
-      if (mounted) {
-        setState(() {
-          _screenFlash = false;
-          _state = _CamState.preview;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not take that photo.')),
-        );
-      }
+      return file;
+    } catch (e) {
+      debugPrint('[camera] bake failed: $e');
+      return null;
     }
   }
 
@@ -428,6 +467,9 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   }
 
   Future<void> _retake() async {
+    // Drop any bake still running — its result is for a photo being thrown away.
+    _bake = null;
+    _bakedPreview = null;
     final f = _capturedFile;
     _capturedFile = null;
     _capturedIsVideo = false;
@@ -442,6 +484,14 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
 
   // ── send ──────────────────────────────────────────────────────────────────
   Future<void> _send() async {
+    // A bake may still be running: the user can reach Send before it lands.
+    // Wait for it rather than sending the unfiltered frame they are looking at.
+    final pending = _bake;
+    if (pending != null) {
+      setState(() => _state = _CamState.sending);
+      await pending;
+      if (!mounted) return;
+    }
     final file = _capturedFile;
     if (file == null) return;
 
@@ -684,6 +734,12 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     return _AnnotateHost(
       key: ValueKey(file.path),
       imageFile: file,
+      // Until the bake lands we are showing the RAW sensor frame, so it is
+      // dressed in the same filter stack the viewfinder used. The baked file
+      // then swaps in underneath looking identical, instead of the photo
+      // visibly changing colour a second after the shutter.
+      previewFilter: _bakedPreview,
+      previewMirror: _bakeMirror,
       annotating: _annotating,
       onAnnotateStart: () => setState(() => _annotating = true),
       onAnnotateDone: (newFile) {
@@ -1064,9 +1120,17 @@ class _AnnotateHost extends StatefulWidget {
     required this.onSend,
     required this.sending,
     required this.sendLabel,
+    this.previewFilter,
+    this.previewMirror = false,
   });
 
   final File imageFile;
+
+  /// Set while a bake is still running: [imageFile] is then the RAW sensor
+  /// frame, and this dresses it in the filter the viewfinder was showing so the
+  /// baked file can swap in underneath without the photo changing colour.
+  final CameraFilter? previewFilter;
+  final bool previewMirror;
   final bool annotating;
   final VoidCallback onAnnotateStart;
   final ValueChanged<File?> onAnnotateDone;
@@ -1081,6 +1145,27 @@ class _AnnotateHost extends StatefulWidget {
 }
 
 class _AnnotateHostState extends State<_AnnotateHost> {
+  /// The photo under the annotation layer.
+  ///
+  /// cacheWidth: decode at display size. Without it a full-resolution photo is
+  /// decoded into a screen-sized box on every capture, which is why even the
+  /// no-op fast path had a visible hitch.
+  Widget _reviewImage(BuildContext context) {
+    Widget image = Image.file(
+      widget.imageFile,
+      fit: BoxFit.cover,
+      cacheWidth: (MediaQuery.sizeOf(context).width *
+              MediaQuery.devicePixelRatioOf(context))
+          .round(),
+    );
+    final f = widget.previewFilter;
+    if (f == null) return image;
+    if (widget.previewMirror) {
+      image = Transform.scale(scaleX: -1, child: image);
+    }
+    return FilterPreviewLayer(filter: f, child: image);
+  }
+
   static const _emojis = [
     '💕', '💞', '💗', '💋', '🫂', '✨', //
     '🌙', '🔥', '💌', '😈', '🥺', '🤍',
@@ -1134,7 +1219,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Image.file(widget.imageFile, fit: BoxFit.cover),
+              _reviewImage(context),
               // strokes
               Positioned.fill(
                 child: IgnorePointer(
