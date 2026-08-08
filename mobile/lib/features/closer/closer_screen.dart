@@ -154,7 +154,10 @@ class _ModestModeOn extends StatelessWidget {
           ),
           const SizedBox(height: 32),
           OutlinedButton(
-            onPressed: () => context.go('/app/settings'),
+            // push, not go: '/app/settings' is a top-level route, so go()
+            // collapses the stack and leaves the Settings back arrow with
+            // nothing to pop — it threw, and system back left the app.
+            onPressed: () => context.push('/app/settings'),
             child: const Text('Open Settings'),
           ),
         ],

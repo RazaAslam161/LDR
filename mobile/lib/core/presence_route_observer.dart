@@ -43,9 +43,17 @@ class PresenceRouteObserver extends NavigatorObserver {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
       _report(previousRoute);
 
+  /// Deliberately silent. `previousRoute` here is the route BELOW the one being
+  /// removed, which is only where the user now is when the removed route was on
+  /// top. `pushReplacement` removes a route with a survivor beneath it, and
+  /// reporting that survivor announced the capsule LIST while the user was
+  /// reading a capsule — and offered their partner a join that landed there.
+  ///
+  /// Every removal in this app arrives after the push that caused it, so the
+  /// destination has already been reported by the time we get here. Nothing is
+  /// lost by staying quiet.
   @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _report(previousRoute);
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {}
 
   void _report(Route<dynamic>? route) {
     // Nothing underneath. Not "an unknown room" — no room at all, which is what
@@ -98,6 +106,9 @@ class PresenceRouteObserver extends NavigatorObserver {
     final phase = SchedulerBinding.instance.schedulerPhase;
     if (phase != SchedulerPhase.persistentCallbacks &&
         phase != SchedulerPhase.midFrameMicrotasks) {
+      // Writing now supersedes anything a flush is still holding, or that
+      // stale value would land afterwards and undo this.
+      _pending = name;
       _write(name);
       return;
     }
@@ -137,18 +148,28 @@ class PresenceRouteObserver extends NavigatorObserver {
     _ref.read(partnerScreenProvider.notifier).announce(name);
   }
 
+  /// The room we were in when the app went to the background, kept so
+  /// [restore] can put the user back in it.
+  String? _cleared;
+
   /// Clears the published screen — used when the app leaves the foreground, so
   /// a backgrounded user never reads as sitting in a room they have left.
-  ///
-  /// Writes straight through rather than deferring: this runs from a lifecycle
-  /// callback, and on `detached` there may be no further frame to defer to.
   void clear() {
-    _ref.read(myScreenProvider.notifier).state = null;
+    _cleared = _ref.read(myScreenProvider);
+    _write(null);
+  }
 
-    final couple = _ref.read(currentCoupleProvider);
-    if (couple == null) return;
-    PresenceService.setScreen(couple.id, null);
-    _ref.read(partnerScreenProvider.notifier).announce(null);
+  /// Puts the user back in the room they were in before the app was
+  /// backgrounded.
+  ///
+  /// Without this, coming back leaves them invisible until they happen to
+  /// navigate — and since attaching a photo or opening the camera pauses the
+  /// app, that is most of a session. Worse than invisible, actually: their own
+  /// badge would offer to take them to the room they are already standing in.
+  void restore() {
+    final room = _cleared;
+    _cleared = null;
+    if (room != null) publish(room);
   }
 }
 

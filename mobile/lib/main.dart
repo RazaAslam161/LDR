@@ -292,6 +292,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // so it doesn't flicker offline.
     if (state == AppLifecycleState.resumed) {
       _startHeartbeat();
+      // Walk back into the room we left. `paused` fires for the photo picker
+      // and the camera as well as a real app switch, so without this a user
+      // attaching one picture goes invisible for the rest of the session.
+      presenceRouteObserver?.restore();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _stopHeartbeat();

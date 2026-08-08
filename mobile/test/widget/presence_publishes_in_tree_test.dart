@@ -13,6 +13,7 @@ import 'package:miles/core/widgets/partner_here_badge.dart';
 void main() {
   late ProviderContainer container;
   late GoRouter router;
+  late PresenceRouteObserver observer;
 
   Widget app() {
     container = ProviderContainer(
@@ -22,9 +23,16 @@ void main() {
 
     router = GoRouter(
       initialLocation: '/app',
-      observers: [PresenceRouteObserver(_ContainerRef(container))],
+      observers: [observer = PresenceRouteObserver(_ContainerRef(container))],
       routes: [
-        for (final path in ['/app', '/app/touch', '/app/settings'])
+        for (final path in [
+          '/app',
+          '/app/touch',
+          '/app/settings',
+          '/app/capsule',
+          '/app/capsule/new',
+          '/app/capsule/view',
+        ])
           GoRoute(
             path: path,
             builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
@@ -64,6 +72,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(container.read(myScreenProvider), 'Settings');
+  });
+
+  testWidgets('pushReplacement reports where the user landed', (tester) async {
+    // It removes a route with a survivor underneath, and that survivor is NOT
+    // where the user is. Reporting it announced the capsule list while they
+    // were reading a capsule — and offered their partner a join that would
+    // land on the wrong page.
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    router.push('/app/capsule');
+    await tester.pumpAndSettle();
+    router.push('/app/capsule/new');
+    await tester.pumpAndSettle();
+    expect(container.read(myScreenProvider), 'New');
+
+    router.pushReplacement('/app/capsule/view');
+    await tester.pumpAndSettle();
+    expect(container.read(myScreenProvider), 'View');
+  });
+
+  testWidgets('coming back from the background restores the room',
+      (tester) async {
+    // `paused` fires for the photo picker and the camera too, so a user who
+    // attaches one picture would otherwise go invisible for the rest of the
+    // session — and their own badge would offer to take them to the room they
+    // are standing in.
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    router.push('/app/touch');
+    await tester.pumpAndSettle();
+    expect(container.read(myScreenProvider), 'Touch');
+
+    observer.clear();
+    expect(container.read(myScreenProvider), isNull);
+
+    observer.restore();
+    await tester.pump();
+    expect(container.read(myScreenProvider), 'Touch');
   });
 
   testWidgets('popping back republishes the tab underneath', (tester) async {
