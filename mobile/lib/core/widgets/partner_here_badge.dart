@@ -219,11 +219,17 @@ class PartnerHereBadge extends ConsumerWidget {
     String? route,
     int? tab,
   }) {
+    final here = GoRouter.of(context).state.uri.path;
+    // Asked to go where we already are. Reachable in the moment before our own
+    // screen has been published, and pushing would stack a second copy of the
+    // page on top of itself.
+    if (route == here) return;
+
     HapticFeedback.selectionClick();
     if (tab != null) {
       ref.read(shellTabProvider.notifier).state = tab;
       // Already inside the shell? Selecting the tab is the whole journey.
-      if (GoRouter.of(context).state.uri.path != '/app') context.go('/app');
+      if (here != '/app') context.go('/app');
       return;
     }
     if (route != null) context.push(route);
