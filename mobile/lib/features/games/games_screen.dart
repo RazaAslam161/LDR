@@ -5,6 +5,7 @@ import 'package:miles/core/content_language.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 
@@ -82,7 +83,7 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
             onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
-        actions: const [LanguageToggle()],
+        actions: const [PartnerHereAction(), LanguageToggle()],
       ),
       body: EmberBackground(
         child: SafeArea(

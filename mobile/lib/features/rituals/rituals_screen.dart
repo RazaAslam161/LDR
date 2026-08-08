@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/rituals/create_ritual_screen.dart';
 import 'package:miles/features/rituals/ritual_repository.dart';
 
@@ -105,6 +106,7 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Rituals'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

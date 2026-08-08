@@ -10,6 +10,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
@@ -172,7 +173,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
-        actions: const [LanguageToggle()],
+        actions: const [PartnerHereAction(), LanguageToggle()],
       ),
       body: EmberBackground(
         child: SafeArea(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
 /// Entry screen for the intimacy module ("Closer").
@@ -81,6 +82,7 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Closer'),
         leading: Builder(
           builder: (ctx) => IconButton(

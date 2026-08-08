@@ -9,6 +9,7 @@ import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/heartbeat/ppg_detector.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 
@@ -209,6 +210,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
       backgroundColor: MilesColors.night,
       drawer: const AppDrawer(),
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Feel My Heartbeat'),
         leading: Builder(
           builder: (ctx) => IconButton(

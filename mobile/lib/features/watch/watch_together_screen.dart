@@ -8,6 +8,7 @@ import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
@@ -159,6 +160,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       backgroundColor: MilesColors.night,
       drawer: const AppDrawer(),
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Watch Together'),
         leading: Builder(
           builder: (ctx) => IconButton(

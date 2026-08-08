@@ -7,6 +7,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 
@@ -161,6 +162,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
           ),
         ),
         actions: [
+          const PartnerHereAction(),
           IconButton(
             tooltip: 'Choose my avatar',
             icon: const Icon(Icons.face_retouching_natural,

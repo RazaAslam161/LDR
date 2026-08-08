@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 
 /// The Sky Bridge — shows you, at a glance, what the sky looks like right now
 /// in your partner's world vs. yours. No timezone math, just colour.
@@ -35,6 +36,7 @@ class _SkyBridgeScreenState extends ConsumerState<SkyBridgeScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Sky Bridge'),
         leading: Builder(
           builder: (ctx) => IconButton(

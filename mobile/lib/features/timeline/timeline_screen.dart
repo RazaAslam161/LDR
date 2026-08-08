@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/timeline/timeline_repository.dart';
 
 class TimelineScreen extends ConsumerStatefulWidget {
@@ -77,6 +78,7 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Timeline'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

@@ -6,6 +6,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:vibration/vibration.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 
 /// Reach — feel them through the phone.
 ///
@@ -98,6 +99,7 @@ class _ReachScreenState extends ConsumerState<ReachScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Reach'),
         leading: Builder(
           builder: (ctx) => IconButton(

@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -29,6 +30,7 @@ class IntimacyScreen extends ConsumerWidget {
         ),
         title: const Text('In the Mood'),
         actions: [
+          const PartnerHereAction(),
           IconButton(
             tooltip: 'Comfort & consent',
             icon: const Icon(Icons.tune, color: MilesColors.gilt),

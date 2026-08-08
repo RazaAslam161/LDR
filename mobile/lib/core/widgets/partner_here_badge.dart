@@ -173,8 +173,10 @@ class PartnerHereBadge extends ConsumerWidget {
     // another room wastes the most useful signal the app has.
     final visible = isHere || canJoin;
 
-    // Sized so it occupies no space at all when hidden — it must never push a
-    // layout around as it comes and goes.
+    // Scaled away rather than unmounted, so it keeps its 44dp of the AppBar
+    // whether or not anyone is there. Reserving the space costs a small gap on
+    // a screen nobody is sharing; giving it up would shove the title sideways
+    // every time a partner walks in or out, on every screen in the app.
     return AnimatedScale(
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutBack,

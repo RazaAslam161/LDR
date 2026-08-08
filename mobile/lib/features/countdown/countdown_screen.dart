@@ -6,6 +6,7 @@ import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/countdown/widgets/set_visit_sheet.dart';
 
@@ -97,6 +98,7 @@ class _CountdownScreenState extends ConsumerState<CountdownScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         title: const Text('Your countdown'),
         leading: Builder(
           builder: (ctx) => IconButton(

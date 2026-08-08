@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// Full-screen realistic **3D map** of the partner's location — FREE, no API key:
@@ -41,6 +42,7 @@ class _Map3DScreenState extends State<Map3DScreen> {
     return Scaffold(
       backgroundColor: MilesColors.night,
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         backgroundColor: MilesColors.night,
         title: Text('${widget.name} · 3D',
             style: const TextStyle(color: MilesColors.cream50)),

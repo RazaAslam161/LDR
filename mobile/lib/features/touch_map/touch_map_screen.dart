@@ -24,6 +24,7 @@ import 'package:miles/core/services/touch_haptics.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/features/chat/chat_repository.dart';
@@ -936,6 +937,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           ),
         ),
         actions: [
+          const PartnerHereAction(),
           GestureDetector(
             onTap: () => setState(() {
               _reactionModeActive = !_reactionModeActive;

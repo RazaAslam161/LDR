@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 
 /// The shelf of time capsules — sealed boxes the couple fills over months,
@@ -63,6 +64,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
+        actions: const [PartnerHereAction()],
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
