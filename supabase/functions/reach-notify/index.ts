@@ -93,11 +93,21 @@ async function getAccessToken(): Promise<string> {
 Deno.serve(async (req) => {
   try {
     const payload = await req.json();
-    // DB webhook delivers { type, table, record, old_record, schema }.
+    // Our triggers deliver { kind, record }. Bare rows (an older reach trigger
+    // that posted to_jsonb(new) directly) still work and default to "reach".
+    const kind: "reach" | "care" | "call" =
+      payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
-    const fromUser: string | undefined = row?.from_user;
     const coupleId: string | undefined = row?.couple_id;
-    const reachId: string = row?.id ?? "";
+
+    // Calls name the two sides explicitly (caller_id/callee_id); reach and care
+    // use from_user and the recipient is simply the other member of the couple.
+    const fromUser: string | undefined =
+      kind === "call" ? row?.caller_id : row?.from_user;
+    const explicitRecipient: string | undefined =
+      kind === "call" ? row?.callee_id : undefined;
+    const rowId: string = row?.id ?? "";
+
     if (!fromUser || !coupleId) {
       return new Response(JSON.stringify({ error: "bad payload" }), { status: 400 });
     }
@@ -120,13 +130,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Recipient = the OTHER member of this couple.
-    const { data: recipients } = await admin
-      .from("profiles")
-      .select("id, fcm_token")
-      .eq("couple_id", coupleId)
-      .neq("id", fromUser)
-      .limit(1);
+    // Recipient: the explicit callee for a call, otherwise the OTHER member of
+    // the couple.
+    const recipientQuery = admin.from("profiles").select("id, fcm_token");
+    const { data: recipients } = explicitRecipient
+      ? await recipientQuery.eq("id", explicitRecipient).limit(1)
+      : await recipientQuery.eq("couple_id", coupleId).neq("id", fromUser).limit(1);
     const recipient = recipients?.[0];
     if (!recipient?.fcm_token) {
       return new Response(JSON.stringify({ skipped: "no recipient token" }), { status: 200 });
@@ -143,12 +152,18 @@ Deno.serve(async (req) => {
     const message = {
       message: {
         token: recipient.fcm_token,
-        // DATA-only: our Android background handler builds the FSI notification.
+        // DATA-only: the Android background handler builds the notification (and
+        // wears this device's disguise). The keys per kind match exactly what
+        // fcm_service.dart / firebaseMessagingBackgroundHandler read.
         data: {
-          type: "reach",
+          type: kind,
           from_name: fromName,
           couple_id: coupleId,
-          reach_id: reachId,
+          ...(kind === "reach" ? { reach_id: rowId } : {}),
+          ...(kind === "care" ? { nudge_id: rowId } : {}),
+          ...(kind === "call"
+            ? { call_id: rowId, video: String(row?.video === true) }
+            : {}),
         },
         android: { priority: "high", ttl: "30s" },
         apns: {
