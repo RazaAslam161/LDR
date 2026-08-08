@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/content_language.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
@@ -86,16 +88,23 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     final card = cardJson is Map
         ? TDCard.fromJson(cardJson.cast<String, dynamic>())
         : null;
-    if (card != null) {
-      markTDSeen(card); // keep the no-repeat shared across phones
+    final tier = TDTier.values
+        .firstWhere((t) => t.name == payload['tier'], orElse: () => _tier);
+    // Their card, our language. The index is what travels; the words are looked
+    // up locally, so a couple reading different languages still plays one game.
+    final lang = ref.read(contentLanguageProvider);
+    final mine = card == null
+        ? null
+        : localiseTD(lang, card.type, tier, card.text, card.index);
+    if (mine != null) {
+      markTDSeen(lang, mine); // keep the no-repeat shared across phones
     }
     setState(() {
       _started = true;
       _turn = payload['turn'] as String?;
       _round = (payload['round'] as int?) ?? _round;
-      _tier = TDTier.values
-          .firstWhere((t) => t.name == payload['tier'], orElse: () => _tier);
-      _card = card;
+      _tier = tier;
+      _card = mine;
     });
   }
 
@@ -126,7 +135,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
 
   Future<void> _pick(TDType type) async {
     if (!_myTurn || _card != null) return;
-    final card = await drawTD(type, _tier);
+    final card = await drawTD(ref.read(contentLanguageProvider), type, _tier);
     if (!mounted) return;
     setState(() => _card = card);
     _broadcast();
@@ -135,7 +144,8 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
   Future<void> _redraw() async {
     final c = _card;
     if (!_myTurn || c == null) return;
-    final card = await drawTD(c.type, _tier);
+    final card =
+        await drawTD(ref.read(contentLanguageProvider), c.type, _tier);
     if (!mounted) return;
     setState(() => _card = card);
     _broadcast();
@@ -155,6 +165,17 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
   Widget build(BuildContext context) {
     final partnerName =
         ref.watch(sessionProvider).partner?.displayName ?? 'Partner';
+    final w = _Words(ref.watch(contentLanguageProvider));
+
+    // Switching language re-renders the card on screen rather than drawing a
+    // new one — the same question, in the other tongue. Redrawing would lose
+    // the turn mid-round.
+    ref.listen<ContentLanguage>(contentLanguageProvider, (_, lang) {
+      final c = _card;
+      if (c == null) return;
+      setState(() => _card = localiseTD(lang, c.type, c.tier, c.text, c.index));
+    });
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -163,6 +184,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
+        actions: const [LanguageToggle()],
       ),
       body: EmberBackground(
         child: SafeArea(
@@ -172,7 +194,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
               children: [
                 _tierChips(),
                 const SizedBox(height: 16),
-                Expanded(child: _body(partnerName)),
+                Expanded(child: _body(partnerName, w)),
                 if (_started)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
@@ -216,18 +238,16 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     );
   }
 
-  Widget _body(String partnerName) {
-    if (!_started) return _startView();
+  Widget _body(String partnerName, _Words w) {
+    if (!_started) return _startView(w);
     final card = _card;
     if (card == null) {
-      return _myTurn
-          ? _pickView()
-          : _waitView('$partnerName apni baari soch raha/rahi hai…');
+      return _myTurn ? _pickView(w) : _waitView(w.thinking(partnerName));
     }
-    return _cardView(card, partnerName);
+    return _cardView(card, partnerName, w);
   }
 
-  Widget _startView() {
+  Widget _startView(_Words w) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -240,14 +260,12 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                   fontSize: 22,
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
-              'Baari baari Truth ya Dare chuno — dono ke phone par ek hi card '
-              'dikhega. Upar se mood (Cute / Flirty / Spicy) chuno aur shuru karo. '
-              'Dare mein photo/voice "jitna comfortable ho" — koi zabardasti nahi. 💛',
+              w.howItWorks,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                   color: MilesColors.taupe, fontSize: 13.5, height: 1.5),
             ),
           ),
@@ -259,30 +277,30 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
             ),
             onPressed: _start,
             icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('Shuru karein'),
+            label: Text(w.start),
           ),
         ],
       ),
     );
   }
 
-  Widget _pickView() {
+  Widget _pickView(_Words w) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Tumhari baari! 💫',
-              style: TextStyle(
+          Text(w.yourTurn,
+              style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 20,
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
-          const Text('Kya chunoge?',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+          Text(w.whatWillItBe,
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
           const SizedBox(height: 28),
           _bigChoice(
             label: 'Truth',
-            sub: 'Sach bolna hai',
+            sub: w.truthSub,
             icon: Icons.psychology_alt_outlined,
             color: MilesColors.sage,
             onTap: () => _pick(TDType.truth),
@@ -290,7 +308,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
           const SizedBox(height: 16),
           _bigChoice(
             label: 'Dare',
-            sub: 'Himmat dikhao',
+            sub: w.dareSub,
             icon: Icons.local_fire_department_outlined,
             color: MilesColors.ember,
             onTap: () => _pick(TDType.dare),
@@ -358,7 +376,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     );
   }
 
-  Widget _cardView(TDCard card, String partnerName) {
+  Widget _cardView(TDCard card, String partnerName, _Words w) {
     final isTruth = card.type == TDType.truth;
     final accent = isTruth ? MilesColors.sage : MilesColors.ember;
     final typeLabel = isTruth ? 'TRUTH' : 'DARE';
@@ -422,21 +440,21 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
               ),
               onPressed: _next,
               icon: const Icon(Icons.check_rounded),
-              label: Text('Ho gaya — ab $partnerName ki baari'),
+              label: Text(w.doneNext(partnerName)),
             ),
           ),
           TextButton.icon(
             onPressed: _redraw,
             icon: const Icon(Icons.casino_outlined,
                 color: MilesColors.taupe, size: 18),
-            label: const Text('Yeh nahi — naya card do',
-                style: TextStyle(color: MilesColors.taupe)),
+            label: Text(w.newCard,
+                style: const TextStyle(color: MilesColors.taupe)),
           ),
         ] else
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              '$partnerName ko yeh $typeLabel mila — unke karne ka intezaar… 👀',
+              w.waitingOn(partnerName, typeLabel),
               textAlign: TextAlign.center,
               style: const TextStyle(color: MilesColors.taupe, fontSize: 13),
             ),
@@ -444,4 +462,42 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
       ],
     );
   }
+}
+
+/// The screen's own words, in both languages.
+///
+/// Kept beside the widget rather than in a global string bundle: a dozen lines
+/// used in one file do not need an indirection layer, and having them here
+/// means the writing and the layout are read together.
+class _Words {
+  const _Words(this.lang);
+
+  final ContentLanguage lang;
+  bool get _en => lang == ContentLanguage.english;
+
+  String get start => _en ? 'Start' : 'Shuru karein';
+  String get howItWorks => _en
+      ? 'Take turns picking Truth or Dare — the same card shows on both '
+          'phones. Set the mood up top (Cute / Flirty / Spicy) and begin. '
+          'Photo and voice dares always say "only as far as you are '
+          'comfortable" — nothing is ever forced. 💛'
+      : 'Baari baari Truth ya Dare chuno — dono ke phone par ek hi card '
+          'dikhega. Upar se mood (Cute / Flirty / Spicy) chuno aur shuru karo. '
+          'Dare mein photo/voice "jitna comfortable ho" — koi zabardasti '
+          'nahi. 💛';
+  String get yourTurn => _en ? 'Your turn! 💫' : 'Tumhari baari! 💫';
+  String get whatWillItBe => _en ? 'What will it be?' : 'Kya chunoge?';
+  String get truthSub => _en ? 'Tell the truth' : 'Sach bolna hai';
+  String get dareSub => _en ? 'Show some nerve' : 'Himmat dikhao';
+  String get newCard =>
+      _en ? 'Not this one — deal another' : 'Yeh nahi — naya card do';
+
+  String thinking(String name) => _en
+      ? '$name is thinking about their turn…'
+      : '$name apni baari soch raha/rahi hai…';
+  String doneNext(String name) =>
+      _en ? 'Done — $name is up' : 'Ho gaya — ab $name ki baari';
+  String waitingOn(String name, String typeLabel) => _en
+      ? '$name drew this $typeLabel — waiting on them… 👀'
+      : '$name ko yeh $typeLabel mila — unke karne ka intezaar… 👀';
 }

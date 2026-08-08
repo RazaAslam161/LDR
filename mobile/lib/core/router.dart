@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/theme.dart';
 import 'package:miles/features/auth/couple_page.dart';
 import 'package:miles/features/auth/role_setup_screen.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
@@ -30,7 +30,6 @@ import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/disguise/disguise_picker_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
-import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/games_screen.dart';
 import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
@@ -48,10 +47,16 @@ import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
 import 'package:miles/features/watch/watch_together_screen.dart';
 
+/// The live observer, so app lifecycle changes can clear the published screen.
+late PresenceRouteObserver presenceRouteObserver;
+
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {
   return GoRouter(
     refreshListenable: _SessionListenable(ref),
+    // Presence is published from here rather than from each screen, so every
+    // route reports — including the 31 that never did, and any added later.
+    observers: [presenceRouteObserver = PresenceRouteObserver(ref)],
     redirect: (context, state) {
       final session = ref.read(sessionProvider);
       final path = state.uri.path;
@@ -215,26 +220,13 @@ GoRouter buildRouter(Ref ref) {
       ),
       GoRoute(
         path: '/app/games/would-you-rather',
-        builder: (context, state) => SyncedCardGameScreen(
-          title: 'Would You Rather',
-          subtitle:
-              'Yeh ya woh? Dono ke phone par ek hi sawaal — jawab neeche do.',
-          emoji: '🤔',
-          cards: wyrPool,
-          gameKey: 'wyr',
-          accent: MilesColors.sage,
-        ),
+        builder: (context, state) =>
+            const SyncedCardGameScreen(deck: CardDeck.wouldYouRather),
       ),
       GoRoute(
         path: '/app/games/never-have-i-ever',
-        builder: (context, state) => SyncedCardGameScreen(
-          title: 'Never Have I Ever',
-          subtitle: 'Maine kabhi nahi… sach bolo, jawab neeche likho.',
-          emoji: '🙊',
-          cards: nhiePool,
-          gameKey: 'nhie',
-          accent: MilesColors.blush,
-        ),
+        builder: (context, state) =>
+            const SyncedCardGameScreen(deck: CardDeck.neverHaveIEver),
       ),
       GoRoute(
         path: '/call',

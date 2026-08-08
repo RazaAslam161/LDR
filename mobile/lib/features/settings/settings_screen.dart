@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
+import 'package:miles/core/content_language.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/app_lock.dart';
@@ -18,6 +19,7 @@ import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -431,6 +433,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               trailing:
                   const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeTimezone,
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Language ─────────────────────────────────────────
+            const _SectionHeader(label: 'Language'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Content language',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: Text(
+                ref.watch(contentLanguageProvider) == ContentLanguage.english
+                    ? 'Games, dares and love notes are written in English'
+                    : 'Games, dares and love notes are written in Roman Urdu',
+                style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+              trailing: const LanguageToggle(padding: EdgeInsets.zero),
+              onTap: () => ref.read(contentLanguageProvider.notifier).toggle(),
             ),
 
             const SizedBox(height: 28),

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Resources referenced ONLY from Dart (notification small icons, launcher
+  aliases) are invisible to the resource shrinker. Stripping ic_notif_* is what
+  made every background notification fail with
+  PlatformException(invalid_icon, ...) and post nothing at all.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_notif_*,@drawable/ic_disguise_*,@mipmap/ic_disguise_*"
+    tools:shrinkMode="safe" />

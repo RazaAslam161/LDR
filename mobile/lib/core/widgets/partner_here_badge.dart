@@ -1,6 +1,13 @@
+import 'dart:math' as math;
+
+import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:miles/core/mood.dart';
+import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -19,6 +26,11 @@ final partnerScreenProvider =
     StateNotifierProvider<PartnerScreenNotifier, String?>(
   (ref) => PartnerScreenNotifier(ref),
 );
+
+/// Bumped every time either partner "warms the room" — a shared bloom that both
+/// devices render at the same moment. It is a counter rather than a bool so a
+/// second warmth while the first is still fading re-triggers the animation.
+final roomWarmthProvider = StateProvider<int>((ref) => 0);
 
 class PartnerScreenNotifier extends StateNotifier<String?> {
   PartnerScreenNotifier(this.ref) : super(null) {
@@ -50,13 +62,22 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
 
     _coupleId = couple.id;
     final ch = SupabaseService.client.channel('screen_presence:${couple.id}');
-    ch.onBroadcast(
-      event: 'screen',
-      callback: (payload) {
-        if (payload['from'] == myUid) return; // ignore our own announcements
-        if (mounted) state = payload['screen'] as String?;
-      },
-    ).subscribe();
+    ch
+        .onBroadcast(
+          event: 'screen',
+          callback: (payload) {
+            if (payload['from'] == myUid) return; // ignore our own echo
+            if (mounted) state = payload['screen'] as String?;
+          },
+        )
+        .onBroadcast(
+          event: 'warm',
+          callback: (payload) {
+            if (payload['from'] == myUid) return;
+            if (mounted) ref.read(roomWarmthProvider.notifier).state++;
+          },
+        )
+        .subscribe();
     _channel = ch;
   }
 
@@ -72,6 +93,29 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
       );
     } catch (_) {}
   }
+
+  /// Warm the room: a bloom that lands on BOTH screens at once.
+  ///
+  /// The local bump is unconditional so the sender feels it instantly even on a
+  /// bad connection; the partner gets it over the same channel presence uses.
+  void warm() {
+    final now = DateTime.now();
+    final last = _lastWarm;
+    if (last != null && now.difference(last) < const Duration(milliseconds: 900)) {
+      return; // a held finger should not machine-gun the partner's screen
+    }
+    _lastWarm = now;
+    ref.read(roomWarmthProvider.notifier).state++;
+
+    final myUid = ref.read(currentProfileProvider)?.id;
+    final ch = _channel;
+    if (ch == null || myUid == null) return;
+    try {
+      ch.sendBroadcastMessage(event: 'warm', payload: {'from': myUid});
+    } catch (_) {}
+  }
+
+  DateTime? _lastWarm;
 
   @override
   void dispose() {
@@ -114,60 +158,282 @@ class PartnerHereBadge extends ConsumerWidget {
       partnerProfileProvider.select((p) => p?.displayName ?? 'Partner'),
     );
 
-    return IgnorePointer(
-      // Always ignoring: the badge is purely informational and floats over the
-      // AppBar, so while it was visible it swallowed taps meant for the call
-      // and video buttons underneath it.
-      child: AnimatedSlide(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-        offset: isHere ? Offset.zero : const Offset(0, -2),
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 300),
-          opacity: isHere ? 1.0 : 0.0,
-          // Material ancestor, not decoration. This badge is mounted in the
-          // root Stack in main.dart — outside any Scaffold — and Text with no
-          // Material above it falls back to the debug style, which is what put
-          // a yellow underline under "<name> is here" on every screen.
-          child: Material(
-            type: MaterialType.transparency,
-            child: Container(
-              // Clear of the AppBar: at top: 8 the pill sat on top of the
-              // title and the call buttons.
-              margin: const EdgeInsets.only(top: kToolbarHeight + 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: MilesColors.sage.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(99),
-                border: Border.all(
-                  color: MilesColors.sage.withValues(alpha: 0.5),
-                  width: 0.8,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: MilesColors.night.withValues(alpha: 0.4),
-                    blurRadius: 12,
+    // ── Texture (idea 3): the avatar carries their state, not just presence ──
+    final typing = dbPartner?.isTyping ?? false;
+    final mood = moodByKey(dbPartner?.currentMood);
+
+    // Where tapping would take us. Null when they are somewhere private or
+    // somewhere that is not a place — the avatar is then inert, not broken.
+    final joinRoute = joinableRouteFor(partnerScreen);
+    final joinTab = joinableTabIndex(partnerScreen);
+    final canJoin = !isHere && fresh && (joinRoute != null || joinTab != null);
+
+    // Two distinct states, one widget: WITH you (breathing, warm) or ELSEWHERE
+    // but reachable (dimmer, tappable). Showing nothing when they are simply in
+    // another room wastes the most useful signal the app has.
+    final visible = isHere || canJoin;
+
+    // Sized so it occupies no space at all when hidden — it must never push a
+    // layout around as it comes and goes.
+    return AnimatedScale(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutBack,
+      scale: visible ? 1.0 : 0.0,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: visible ? 1.0 : 0.0,
+        // Material ancestor, not decoration: Text with no Material above it
+        // falls back to Flutter's debug style, which is what underlined the
+        // old version on every screen.
+        child: Material(
+          type: MaterialType.transparency,
+          child: _PresenceAvatar(
+            name: partnerName,
+            isHere: isHere,
+            typing: typing,
+            moodColor: mood?.color,
+            where: partnerScreen,
+            // One affordance, two meanings — both are "reach for them".
+            // Together: warm the room, a bloom they feel on their screen too.
+            // Apart: go to where they are. Inert otherwise, so a tap can never
+            // land somewhere that does not exist.
+            onTap: isHere
+                ? () {
+                    HapticFeedback.mediumImpact();
+                    ref.read(partnerScreenProvider.notifier).warm();
+                  }
+                : canJoin
+                    ? () => _join(context, ref, route: joinRoute, tab: joinTab)
+                    : null,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Go to where they are. Tab screens select their tab; everything else is a
+  /// push, so Back returns the user to where they were.
+  void _join(
+    BuildContext context,
+    WidgetRef ref, {
+    String? route,
+    int? tab,
+  }) {
+    HapticFeedback.selectionClick();
+    if (tab != null) {
+      ref.read(shellTabProvider.notifier).state = tab;
+      // Already inside the shell? Selecting the tab is the whole journey.
+      if (GoRouter.of(context).state.uri.path != '/app') context.go('/app');
+      return;
+    }
+    if (route != null) context.push(route);
+  }
+}
+
+/// Drop-in for an [AppBar.actions] list.
+///
+/// This is where presence belongs: beside the partner's name, in the screen's
+/// own chrome. It previously floated top-centre over every screen — an overlay
+/// that covered titles and buttons, appeared in the middle of whatever the user
+/// was reading, and looked like a system alert rather than a person.
+class PartnerHereAction extends StatelessWidget {
+  const PartnerHereAction({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.only(right: 6),
+        child: Center(child: PartnerHereBadge()),
+      );
+}
+
+/// A small avatar that carries the partner's presence — where they are, what
+/// they are doing, and a way to reach them.
+///
+/// Replaces the old "<name> is here" pill. That pill was a strip of text across
+/// the top of every screen — it read as a system warning, obscured the AppBar,
+/// and shouted a status that only ever needs to be felt. This says more with a
+/// 30dp mark and no text at all, so it never widens, never wraps, and never
+/// competes with the screen's own title:
+///
+/// * **breathing, warm, glowing** — they are on this screen with you
+/// * **dimmer, with a slow orbit** — they are elsewhere; tap to go to them
+/// * **quickened breath** — they are typing
+/// * **their mood's colour** — carried in the gradient and the rings
+/// * **an expanding ripple** — the moment they arrive where you are
+class _PresenceAvatar extends StatefulWidget {
+  const _PresenceAvatar({
+    required this.name,
+    required this.isHere,
+    required this.typing,
+    required this.moodColor,
+    required this.where,
+    this.onTap,
+  });
+
+  final String name;
+  final bool isHere;
+  final bool typing;
+  final Color? moodColor;
+
+  /// The room they are in, for the screen-reader label only.
+  final String? where;
+
+  final VoidCallback? onTap;
+
+  @override
+  State<_PresenceAvatar> createState() => _PresenceAvatarState();
+}
+
+class _PresenceAvatarState extends State<_PresenceAvatar>
+    with TickerProviderStateMixin {
+  /// One looping controller drives the breath, the orbit and the typing pulse.
+  ///
+  /// It repeats WITHOUT reverse so the same value can be read two ways: as a
+  /// monotonic angle for the orbit, and — through a cosine — as a symmetric
+  /// swell for the breath. A reversing controller would make the orbit swing
+  /// back and forth like a broken clock.
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: _period,
+  )..repeat();
+
+  /// Fires once when they arrive on this screen. Separate from the loop because
+  /// it is a one-shot with its own curve, and it must be able to restart
+  /// mid-flight if they step out and back in.
+  late final AnimationController _arrive = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  );
+
+  late final Listenable _repaint = Listenable.merge([_c, _arrive]);
+
+  /// Typing quickens everything — the same tell as someone leaning forward.
+  Duration get _period => Duration(milliseconds: widget.typing ? 1100 : 2600);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isHere) _arrive.forward(from: 0);
+  }
+
+  @override
+  void didUpdateWidget(_PresenceAvatar old) {
+    super.didUpdateWidget(old);
+    if (widget.typing != old.typing) {
+      _c
+        ..duration = _period
+        ..repeat();
+    }
+    if (widget.isHere && !old.isHere) _arrive.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    _arrive.dispose();
+    super.dispose();
+  }
+
+  String get _initial {
+    final n = widget.name.trim();
+    return n.isEmpty ? '·' : n.characters.first.toUpperCase();
+  }
+
+  String get _semantics {
+    if (widget.isHere) return '${widget.name} is on this screen with you';
+    final where = widget.where;
+    return where == null
+        ? '${widget.name} is nearby'
+        : '${widget.name} is in $where. Double tap to join them';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = widget.moodColor ?? MilesColors.blush;
+
+    return Semantics(
+      label: _semantics,
+      button: widget.onTap != null,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        // A 30dp mark is below the 48dp touch minimum, so the gesture box is
+        // padded out around it. Translucent (not opaque) so the surrounding
+        // padding never eats a tap meant for whatever sits beneath.
+        behavior: HitTestBehavior.translucent,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: _repaint,
+              builder: (context, child) {
+                final turn = _c.value * 2 * math.pi;
+                // cos → a symmetric 0→1→0 swell from a non-reversing loop.
+                final breath = (1 - math.cos(turn)) / 2;
+                final here = widget.isHere;
+
+                return CustomPaint(
+                  painter: _AuraPainter(
+                    breath: breath,
+                    turn: turn,
+                    arrive: _arrive.value,
+                    isHere: here,
+                    tint: tint,
                   ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const _PulsingDot(),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$partnerName is here',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: MilesColors.sage,
-                      fontWeight: FontWeight.w500,
-                      // Belt and braces alongside the Material above: this text
-                      // renders outside any Scaffold, and the fallback style is
-                      // underlined.
-                      decoration: TextDecoration.none,
+                  child: Center(
+                    child: Opacity(
+                      // Elsewhere reads as further away, not as an error.
+                      opacity: here ? 1 : 0.66,
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [tint, MilesColors.ember],
+                          ),
+                          border: Border.all(
+                            color: MilesColors.cream50.withValues(
+                              alpha: here ? 0.35 + breath * 0.35 : 0.28,
+                            ),
+                            width: 1.4,
+                          ),
+                          // The glow is the "with you" signal, so it is spent
+                          // only there — a blurred shadow on every avatar on
+                          // every screen is a lot of GPU for nothing.
+                          boxShadow: here
+                              ? [
+                                  BoxShadow(
+                                    color: tint.withValues(
+                                      alpha: 0.25 + breath * 0.3,
+                                    ),
+                                    blurRadius: 8 + breath * 8,
+                                    spreadRadius: breath * 2,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: child,
+                      ),
                     ),
                   ),
-                ],
+                );
+              },
+              // The glyph never changes, so it is built once instead of every
+              // frame.
+              child: Center(
+                child: Text(
+                  _initial,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    height: 1.0,
+                    fontWeight: FontWeight.w600,
+                    color: MilesColors.cream50,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
               ),
             ),
           ),
@@ -177,45 +443,68 @@ class PartnerHereBadge extends ConsumerWidget {
   }
 }
 
-class _PulsingDot extends StatefulWidget {
-  const _PulsingDot();
+/// Everything around the avatar disc: the arrival ripple and the orbit.
+///
+/// Painted rather than composed from widgets because both are pure strokes on
+/// one canvas — nested AnimatedContainers would cost a layout pass every frame
+/// to draw the same two circles.
+class _AuraPainter extends CustomPainter {
+  const _AuraPainter({
+    required this.breath,
+    required this.turn,
+    required this.arrive,
+    required this.isHere,
+    required this.tint,
+  });
+
+  final double breath;
+  final double turn;
+  final double arrive;
+  final bool isHere;
+  final Color tint;
 
   @override
-  State<_PulsingDot> createState() => _PulsingDotState();
-}
+  void paint(Canvas canvas, Size size) {
+    final centre = size.center(Offset.zero);
 
-class _PulsingDotState extends State<_PulsingDot>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1000),
-  )..repeat(reverse: true);
+    // ── Arrival: two staggered rings pushing outward and fading. ──
+    if (arrive > 0 && arrive < 1) {
+      for (var i = 0; i < 2; i++) {
+        final t = (arrive - i * 0.16).clamp(0.0, 1.0);
+        if (t <= 0) continue;
+        final e = Curves.easeOutCubic.transform(t);
+        canvas.drawCircle(
+          centre,
+          15 + e * 7,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.8 * (1 - e)
+            ..color = tint.withValues(alpha: 0.5 * (1 - e)),
+        );
+      }
+    }
 
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
+    // ── Elsewhere: a single arc orbiting the mark. ──
+    if (!isHere) {
+      canvas.drawArc(
+        Rect.fromCircle(center: centre, radius: 18),
+        turn,
+        1.15,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = 1.6
+          ..color = tint.withValues(alpha: 0.28 + breath * 0.22),
+      );
+    }
   }
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) => Container(
-        width: 8,
-        height: 8,
-        decoration: BoxDecoration(
-          color: MilesColors.sage,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: MilesColors.sage.withValues(alpha: 0.3 + _c.value * 0.5),
-              blurRadius: 4 + _c.value * 4,
-              spreadRadius: _c.value * 2,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  bool shouldRepaint(_AuraPainter old) =>
+      old.breath != breath ||
+      old.turn != turn ||
+      old.arrive != arrive ||
+      old.isHere != isHere ||
+      old.tint != tint;
 }

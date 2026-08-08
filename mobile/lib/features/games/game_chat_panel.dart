@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/content_language.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -122,7 +123,10 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
                   onSubmitted: (_) => _send(),
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: 'Apna jawab likho…',
+                    hintText: ref.watch(contentLanguageProvider) ==
+                            ContentLanguage.english
+                        ? 'Type your answer…'
+                        : 'Apna jawab likho…',
                     hintStyle:
                         const TextStyle(color: MilesColors.taupe, fontSize: 13),
                     filled: true,

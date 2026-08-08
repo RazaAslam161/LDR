@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/features/disguise/disguise_notification.dart';
@@ -67,6 +69,48 @@ void main() {
         final s = notificationStyleFor(d);
         expect(s.ticker, s.title);
       }
+    });
+
+    test('every notification icon exists as a real Android resource', () {
+      // This is the bug this test exists for: the icons were renamed and the
+      // Dart still named the old ones. flutter_local_notifications then threw
+      // PlatformException(invalid_icon) inside the FCM background isolate and
+      // posted NOTHING — invisible from Dart, invisible in analyze, and the
+      // user just sees "notifications don't work".
+      for (final cover in DisguiseCover.values) {
+        final style = notificationStyleFor(
+          DisguiseProfile(
+            aliasId: 'X',
+            label: 'X',
+            blurb: '',
+            icon: kDefaultDisguise.icon,
+            tint: kDefaultDisguise.tint,
+            cover: cover,
+          ),
+        );
+        final m = RegExp(r'^@(drawable|mipmap)/(\w+)$').firstMatch(style.smallIcon);
+        expect(m, isNotNull, reason: '${style.smallIcon} is not a resource ref');
+
+        final kind = m!.group(1)!;
+        final name = m.group(2)!;
+        final found = Directory('android/app/src/main/res')
+            .listSync()
+            .whereType<Directory>()
+            .where((d) => d.path.split(RegExp(r'[\\/]')).last.startsWith(kind))
+            .any((d) => d
+                .listSync()
+                .whereType<File>()
+                .any((f) => f.uri.pathSegments.last.split('.').first == name));
+        expect(found, isTrue,
+            reason: '$cover names ${style.smallIcon}, which does not exist');
+      }
+    });
+
+    test('notification icons are protected from the resource shrinker', () {
+      // They are named only from Dart, so the shrinker cannot see them.
+      final keep = File('android/app/src/main/res/raw/keep.xml');
+      expect(keep.existsSync(), isTrue, reason: 'res/raw/keep.xml is missing');
+      expect(keep.readAsStringSync(), contains('ic_notif_'));
     });
 
     test('the icon matches the cover, not the default launcher', () {

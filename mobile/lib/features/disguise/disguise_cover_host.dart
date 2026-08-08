@@ -29,19 +29,30 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost> {
   @override
   void initState() {
     super.initState();
-    DisguiseService.current().then((d) {
+    // reconcile(), not current(): the cover screen is the first thing to run in
+    // the foreground, which makes it the right place to repair a stored
+    // identity that drifted from the alias Android actually enabled — and to
+    // get the preference correct BEFORE the next push has to read it from the
+    // background isolate.
+    DisguiseService.reconcile()
+        // Belt and braces over the timeouts inside reconcile(): whatever
+        // happens, this future MUST complete or the user is stranded on a blank
+        // screen with no way into the app.
+        .timeout(const Duration(seconds: 3))
+        .catchError((_) => kDefaultDisguise)
+        .then((d) {
       if (mounted) setState(() => _profile = d);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final profile = _profile;
-    // Until the choice is read, show nothing rather than guessing — a flash of
-    // the wrong cover would leak which disguise is real.
-    if (profile == null) {
-      return const ColoredBox(color: Colors.white, child: SizedBox.expand());
-    }
+    // Never a blank screen. Reading the identity is a local disk hit that
+    // normally resolves in the first frame or two; if it somehow does not, the
+    // user still gets a working cover instead of an empty rectangle they cannot
+    // escape. Rendering the DEFAULT cover leaks nothing — it is what a fresh
+    // install shows anyway.
+    final profile = _profile ?? kDefaultDisguise;
 
     return switch (profile.cover) {
       DisguiseCover.calculator =>

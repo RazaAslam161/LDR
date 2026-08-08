@@ -26,8 +26,8 @@ import 'package:miles/core/theme.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
+import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/firebase_options.dart';
@@ -300,6 +300,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // Best-effort; the freshness TTL is the real safety net on a hard kill.
       PresenceService.setOnline(couple.id, online: false);
       PresenceService.clearChatPresence(couple.id);
+      // Leave the room as well as the app. Without this the last published
+      // screen stood for up to 45s (the freshness window) after the app was
+      // closed, so a partner could be looking at "she's in the chat with me"
+      // when she had put the phone down. Presence must decay to unknown, never
+      // linger as a confident wrong answer.
+      presenceRouteObserver.clear();
     }
   }
 
@@ -417,16 +423,15 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // beneath it. (Does NOT help the glass panels: a BackdropFilter
               // samples through repaint boundaries.)
               const RepaintBoundary(child: CallPill()),
-              // "Partner is here" — floats top-center on every screen, shown
-              // only when the partner is on the same screen (real-time sync).
-              const RepaintBoundary(
-                child: SafeArea(
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: PartnerHereBadge(),
-                  ),
-                ),
-              ),
+              // Presence used to float here, top-centre over every screen. It
+              // covered titles and buttons, interrupted whatever was being
+              // read, and looked like a system alert instead of a person. It
+              // now lives in each screen's own AppBar next to their name —
+              // see PartnerHereAction.
+              // The shared bloom when one of them warms the room. Root-level
+              // so it reaches the whole screen, above the page and below the
+              // lock.
+              const Positioned.fill(child: WarmthOverlay()),
               // Biometric lock sits on top of everything.
               RepaintBoundary(
                 child: ValueListenableBuilder<bool>(

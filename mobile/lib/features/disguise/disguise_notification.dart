@@ -20,8 +20,14 @@ class DisguiseNotificationStyle {
   final String title;
   final String body;
 
-  /// Android small-icon resource. Must match the launcher icon of the active
-  /// alias, or the shade shows one app's icon under another app's name.
+  /// Android small-icon resource, from `drawable/` — Android masks it to its
+  /// alpha channel, so these are white silhouettes, not the colour launcher
+  /// icons. Every value here must exist as a real resource: a name that does
+  /// not resolve makes the plugin throw
+  /// `PlatformException(invalid_icon, ...)` and post nothing at all, which is
+  /// silent in the background isolate. `res/raw/keep.xml` stops the resource
+  /// shrinker from removing them, since a name held only in a Dart string is
+  /// invisible to it.
   final String smallIcon;
 
   /// The ticker (spoken by accessibility services, and shown on older Android).
@@ -41,17 +47,17 @@ DisguiseNotificationStyle notificationStyleFor(DisguiseProfile profile) {
     DisguiseCover.calculator => const DisguiseNotificationStyle(
         title: 'Calculator',
         body: 'Tap to open',
-        smallIcon: '@drawable/ic_disguise_calculator',
+        smallIcon: '@drawable/ic_notif_calculator',
       ),
     DisguiseCover.notes => const DisguiseNotificationStyle(
         title: 'Notes',
         body: 'You have a reminder',
-        smallIcon: '@drawable/ic_disguise_notes',
+        smallIcon: '@drawable/ic_notif_notes',
       ),
     DisguiseCover.weather => const DisguiseNotificationStyle(
         title: 'Weather',
         body: 'Forecast updated',
-        smallIcon: '@drawable/ic_disguise_weather',
+        smallIcon: '@drawable/ic_notif_weather',
       ),
   };
 }

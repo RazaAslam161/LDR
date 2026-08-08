@@ -34,8 +34,14 @@ class DisguiseService {
   /// because Android cannot tell us which alias is enabled without a query per
   /// component, and the two are kept in lockstep by [apply].
   static Future<DisguiseProfile> current() async {
-    final prefs = await SharedPreferences.getInstance();
-    return disguiseForAlias(prefs.getString(_prefsKey));
+    try {
+      final prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(seconds: 2));
+      return disguiseForAlias(prefs.getString(_prefsKey));
+    } catch (_) {
+      // Disk contention on a slow device must not hold up the first frame.
+      return kDefaultDisguise;
+    }
   }
 
   static Future<bool> hasChosen() async =>
@@ -52,23 +58,69 @@ class DisguiseService {
   /// identity is left intact and nothing is persisted, so a half-applied state
   /// is not possible.
   static Future<bool> apply(DisguiseProfile profile) async {
+    final prefs = await SharedPreferences.getInstance();
+    final previous = prefs.getString(_prefsKey);
+
+    // Persist FIRST. Enabling a launcher component is precisely what makes
+    // Android force-stop us, so a write queued after the channel call can be
+    // lost — leaving the launcher showing one identity while the cover and the
+    // notifications still wear the old one. Losing the write is recoverable
+    // (reconcile() repairs it); losing the switch is not.
+    await prefs.setString(_prefsKey, profile.aliasId);
+    await prefs.setBool(_chosenKey, true);
+
     try {
       final ok = await _channel.invokeMethod<bool>('setAlias', {
         'aliasId': profile.aliasId,
         'all': kDisguises.map((d) => d.aliasId).toList(),
       });
-      if (ok != true) return false;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsKey, profile.aliasId);
-      await prefs.setBool(_chosenKey, true);
-      return true;
+      if (ok == true) return true;
     } on PlatformException catch (e) {
       debugPrint('Disguise switch failed: ${e.code} — ${e.message}');
-      return false;
     } on MissingPluginException {
       // Non-Android host (tests, desktop): the identity is a no-op there.
-      return false;
     }
+
+    // The switch did not happen — put the stored identity back so it keeps
+    // matching the alias that is actually enabled.
+    if (previous == null) {
+      await prefs.remove(_prefsKey);
+    } else {
+      await prefs.setString(_prefsKey, previous);
+    }
+    return false;
+  }
+
+  /// Repairs a stored identity that has drifted from the alias Android is
+  /// actually running, then returns the truth.
+  ///
+  /// The enabled `<activity-alias>` is the real identity — it is what the
+  /// launcher shows — so it wins over the preference. Called on startup from
+  /// the foreground, where the platform channel exists; the FCM background
+  /// isolate has its own engine without our channels, which is why the
+  /// preference has to be right by then rather than queried on demand.
+  static Future<DisguiseProfile> reconcile() async {
+    try {
+      // Hard timeout: this runs on the cold-start path, and a platform channel
+      // that never answers would leave the user staring at a blank screen with
+      // no way forward. A stale identity is survivable; an app that never
+      // starts is not.
+      final alias = await _channel.invokeMethod<String>('currentAlias', {
+        'all': kDisguises.map((d) => d.aliasId).toList(),
+      }).timeout(const Duration(seconds: 2));
+      if (alias != null && alias.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getString(_prefsKey) != alias) {
+          debugPrint('Disguise drift: stored '
+              '${prefs.getString(_prefsKey)}, actually $alias — repairing.');
+          await prefs.setString(_prefsKey, alias);
+        }
+        return disguiseForAlias(alias);
+      }
+    } catch (_) {
+      // Non-Android host, or the query failed — fall back to what we stored.
+    }
+    return current();
   }
 }
 

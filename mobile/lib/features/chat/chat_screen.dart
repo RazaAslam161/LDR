@@ -17,6 +17,7 @@ import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
 import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/features/call/call_controller.dart';
@@ -807,6 +808,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           ],
         ),
         actions: [
+          // Presence sits beside their name, where it means something, instead
+          // of floating over the middle of the conversation.
+          const PartnerHereAction(),
           if (couple != null)
             IconButton(
               tooltip: 'Voice call',
@@ -957,11 +961,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   );
                                 }),
                     ),
-                    if (presence?.isActivelyInChat ?? false)
-                      _PartnerHere(
-                        name: partnerName,
-                        avatarUrl: session.partner?.avatarUrl,
-                      ),
+                    // The "<name> is here" strip used to live here. Removed: it
+                    // duplicated the global presence avatar, and it read from
+                    // `isActivelyInChat` (chat_last_read within 20s) rather than
+                    // the live screen, so it kept claiming they were in the chat
+                    // for up to 20 seconds after they had walked away. One
+                    // signal, one source — see PartnerHereBadge.
                     ChatInputBar(
                       coupleId: couple.id,
                       onChanged: _onTyping,
@@ -1169,83 +1174,6 @@ class _StatusTick extends StatelessWidget {
     }
   }
 }
-
-/// Snapchat-style "partner is in the chat right now" — a small avatar with a
-/// green presence dot, shown just above the input while they're viewing.
-class _PartnerHere extends StatelessWidget {
-  const _PartnerHere({required this.name, required this.avatarUrl});
-  final String? name;
-  final String? avatarUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final initial =
-        (name != null && name!.isNotEmpty) ? name![0].toUpperCase() : '♥';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
-      child: GlassPanel(
-        elevated: true,
-        blur: MilesColors.blurSm,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        radius: 16,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: MilesColors.surface2,
-                    border: Border.all(
-                        color: MilesColors.sage.withValues(alpha: 0.6),
-                        width: 1.5),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: avatarUrl == null
-                      ? Center(
-                          child: Text(initial,
-                              style: const TextStyle(
-                                  color: MilesColors.cream50, fontSize: 10)))
-                      : NetImage(avatarUrl!,
-                          fit: BoxFit.cover,
-                          error: Center(
-                              child: Text(initial,
-                                  style: const TextStyle(
-                                      color: MilesColors.cream50,
-                                      fontSize: 10)))),
-                ),
-                Positioned(
-                  right: -1,
-                  bottom: -1,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: MilesColors.sage,
-                      border: Border.all(color: MilesColors.night, width: 1.5),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 7),
-            Text('${name ?? 'They'} is here',
-                style: const TextStyle(
-                    color: MilesColors.sage,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ActiveBurst {
   _ActiveBurst(this.id, {this.mood, this.gifUrl});
   final int id;
