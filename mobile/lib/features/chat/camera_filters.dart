@@ -33,9 +33,27 @@ class CameraFilter {
   final double grainIntensity; // 0.0 .. 1.0
 }
 
-/// The ordered filter strip. Index 0 (Freesia) is the default.
+/// The ordered filter strip. Index 0 (Original) is the default.
 const List<CameraFilter> kCameraFilters = [
-  // ── 0. FREESIA 🌸 (DEFAULT) ──────────────────────────────────────────────
+  // ── 0. ORIGINAL (DEFAULT) — identity, no effect ──────────────────────────
+  // First in the strip and selected on open, which is what every camera people
+  // already know does. It is also the only setting that reaches the capture
+  // fast path: with no filter and no mirror the sensor's own JPEG is sent
+  // untouched, so there is nothing to decode, nothing to re-encode, and no
+  // generation loss.
+  CameraFilter(
+    id: 'none',
+    label: 'Original',
+    icon: '⚪',
+    colorMatrix: [
+      1, 0, 0, 0, 0, //
+      0, 1, 0, 0, 0, //
+      0, 0, 1, 0, 0, //
+      0, 0, 0, 1, 0, //
+    ],
+  ),
+
+  // ── 1. FREESIA 🌸 (DEFAULT) ──────────────────────────────────────────────
   // Recreates the Snapchat "Freesia" lens look: soft warm rosy-mauve cast,
   // lifted blacks (faded film), reduced contrast, partial desaturation + grain.
   //
@@ -63,19 +81,6 @@ const List<CameraFilter> kCameraFilters = [
     ],
     hasGrain: true,
     grainIntensity: 0.18,
-  ),
-
-  // ── 1. NONE (Original) — identity, no effect ─────────────────────────────
-  CameraFilter(
-    id: 'none',
-    label: 'Original',
-    icon: '⚪',
-    colorMatrix: [
-      1, 0, 0, 0, 0, //
-      0, 1, 0, 0, 0, //
-      0, 0, 1, 0, 0, //
-      0, 0, 0, 1, 0, //
-    ],
   ),
 
   // ── 2. NOIR 🖤 — true B&W, deep contrast ─────────────────────────────────

@@ -62,8 +62,11 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       false; // Snapchat-style toggle: LED (back) / screen flash (front)
   bool _screenFlash = false; // white full-screen overlay during a front capture
 
+  /// Opens on Original. A filter is a thing the user chooses, not something
+  /// they have to notice and undo — and it is the only selection that lets a
+  /// capture skip decode/re-encode entirely.
   CameraFilter _selectedFilter =
-      kCameraFilters.firstWhere((f) => f.id == 'freesia');
+      kCameraFilters.firstWhere((f) => f.id == 'none');
 
   _CamState _state = _CamState.preview;
   File? _capturedFile;
