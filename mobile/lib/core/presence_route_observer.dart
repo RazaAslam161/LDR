@@ -48,13 +48,19 @@ class PresenceRouteObserver extends NavigatorObserver {
       _report(previousRoute);
 
   void _report(Route<dynamic>? route) {
+    // Nothing underneath. Not "an unknown room" — no room at all, which is what
+    // didRemove reports when the bottom of the stack goes. A go() to a sibling
+    // route pushes the new page and THEN removes the old bottom, so publishing
+    // here would blank out the room we just arrived in.
+    if (route == null) return;
+
     // Dialogs, sheets and menus sit on top of a room rather than being one.
     // Only full pages change where somebody is.
-    if (route != null && route is! PageRoute) return;
+    if (route is! PageRoute) return;
 
-    final path = route?.settings.name;
+    final path = route.settings.name;
     if (path == null) {
-      // A page pushed without a name — a dozen places still use a bare
+      // A page pushed without a name — eleven places still use a bare
       // MaterialPageRoute. We genuinely do not know what room this is, and
       // going on claiming the previous one is exactly the lie this class exists
       // to stop. "Somewhere" is honest; "still in the chat" is not.
@@ -86,24 +92,36 @@ class PresenceRouteObserver extends NavigatorObserver {
 
   /// Publish [name] as the room this user is in, or null for "somewhere".
   void publish(String? name) {
-    // The provider is the record of what was last said — not a private field.
-    // A field drifts the moment anything else sets the value, which is exactly
-    // what used to leave a tab unpublishable after a pop.
-    if (name == _ref.read(myScreenProvider)) return;
-
     // Navigator observers fire while the tree is being built, and Riverpod
     // refuses a write during that phase. Deferring only when we really are
     // mid-frame keeps the common path synchronous.
     final phase = SchedulerBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.persistentCallbacks ||
-        phase == SchedulerPhase.midFrameMicrotasks) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _write(name));
-    } else {
+    if (phase != SchedulerPhase.persistentCallbacks &&
+        phase != SchedulerPhase.midFrameMicrotasks) {
       _write(name);
+      return;
     }
+
+    // One frame can produce several of these — a go() pushes and removes, a
+    // redirect replaces. Keep only the last and write it once, so the order
+    // they arrived in cannot matter and a stale read cannot swallow one.
+    _pending = name;
+    if (_flushScheduled) return;
+    _flushScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushScheduled = false;
+      _write(_pending);
+    });
   }
 
+  /// The room this frame ended on, waiting to be written.
+  String? _pending;
+  bool _flushScheduled = false;
+
   void _write(String? name) {
+    // The provider is the record of what was last said — not a durable private
+    // field. A field drifts the moment anything else sets the value, which is
+    // exactly what used to leave a tab unpublishable after a pop.
     if (name == _ref.read(myScreenProvider)) return;
 
     // Our own value first: it is what this device's badge compares against, and

@@ -16,7 +16,8 @@ import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// The screen the LOCAL user is currently on. Set by [reportScreen]; drives the
+/// The screen the LOCAL user is currently on, and the record of what was last
+/// published about it. Written only by `PresenceRouteObserver`; drives the
 /// "partner is here" comparison.
 final myScreenProvider = StateProvider<String?>((ref) => null);
 

@@ -18,16 +18,6 @@ class GamesScreen extends ConsumerStatefulWidget {
 }
 
 class _GamesScreenState extends ConsumerState<GamesScreen> {
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
-
   static List<_Game> _gamesIn(ContentLanguage lang) {
     final en = lang == ContentLanguage.english;
     return [

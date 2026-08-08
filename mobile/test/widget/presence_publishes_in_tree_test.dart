@@ -24,7 +24,7 @@ void main() {
       initialLocation: '/app',
       observers: [PresenceRouteObserver(_ContainerRef(container))],
       routes: [
-        for (final path in ['/app', '/app/touch'])
+        for (final path in ['/app', '/app/touch', '/app/settings'])
           GoRoute(
             path: path,
             builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
@@ -49,6 +49,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull); // no "modified during build"
     expect(container.read(myScreenProvider), 'Touch');
+  });
+
+  testWidgets('go() to a sibling route lands in the new room', (tester) async {
+    // go() pushes the new page and THEN removes the old bottom of the stack.
+    // The removal reports a null route, which means "nothing underneath" — not
+    // "an unknown room". Treating the two the same blanked out the room the
+    // user had just walked into, and it stayed blank the whole time they were
+    // there.
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    router.go('/app/settings');
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(container.read(myScreenProvider), 'Settings');
   });
 
   testWidgets('popping back republishes the tab underneath', (tester) async {

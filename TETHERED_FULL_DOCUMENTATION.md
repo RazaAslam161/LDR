@@ -126,7 +126,7 @@ The realtime layer is built to survive Android doze, network drops, and backgrou
 - `PresenceService` is all `_upsert`-based (`user_id` + `couple_id` + `updated_at`), wrapped so presence is best-effort and never surfaces an error. Setters include `setOnline`, `setTyping`, `setTypingInChat`, `setChatLastRead`, `setMood`, `setScreen`, `setBodyPhoto`, `setAvatarEmoji`, `setSharingMode`, `setLocation`, `setLiveLocation`, `clearLiveLocation`, `setCheckinPhoto`. Reads: `fetchPartner` (filter `couple_id` + `neq user_id`) and `fetchMine`. RLS allows updating only your own row and reading your partner's.
 - `PartnerPresenceNotifier` / `partnerPresenceProvider` (`StateNotifierProvider.autoDispose`) subscribe to the `presence:<coupleId>` couple-table channel via `RealtimeService` and re-fetch on any change; it registers on `realtimeResumed` so it rejoins + re-pulls current presence after a reconnect (avoiding a stale false-offline).
 - App-lifecycle presence: `MilesApp.didChangeAppLifecycleState` calls `PresenceService.setOnline(couple.id, online: resumed)` on every lifecycle change.
-- `lib/core/screen_presence.dart` — `kTabScreens` (Home / Chat / Reunion / Sky / Breath / Closer) plus `reportScreen` / `reportActiveTab` helpers that push the active section name to the partner via `PresenceService.setScreen`.
+- `lib/core/screen_presence.dart` — just `kTabScreens` (Home / Chat / Camera / Breath / Closer). The screen a user is in is published by `lib/core/presence_route_observer.dart`, a `NavigatorObserver` that sees every route; it is the only writer of `myScreenProvider`, and it pushes the name to the partner via `PresenceService.setScreen` plus a broadcast. Tab switches are a setState rather than a navigation, so `AppShell` calls `publishActiveTab()` for those.
 
 ### Biometric app-lock
 
@@ -632,7 +632,7 @@ There are two distinct mechanisms in `lib/features/reach/`:
 - **Table:** `care_nudges` (`couple_id`, `from_user`, `kind`, `message`, `created_at`, `acknowledged_at`). 
 - `send` inserts; `acknowledge(id)` stamps `acknowledged_at`; `list(coupleId)` pulls the latest 50 ordered by `created_at desc`. 
 - **Realtime channel:** `care_nudges:<coupleId>` (all events, filtered by `couple_id`) re-runs `_load`.
-- `CareScreen` reports its screen to presence via `reportScreen(ref, 'Care')` / `reportActiveTab` (`core/screen_presence.dart`).
+- `CareScreen` needs no presence code of its own: `PresenceRouteObserver` derives `Care` from `/app/care`.
 
 ### Cycle tracker (gender-gated)
 
@@ -701,7 +701,7 @@ This section documents the couple-facing "things to do together" surface of Teth
 
 **Game chat panel.** `GameChatPanel` is an in-game **live answer strip** embedded under every game. Channel `gchat:<gameKey>:<coupleId>`, event `msg` (`{from, name, text}`). It is **ephemeral** — messages live only in memory (`_msgs`), are not persisted, and are explicitly described as in-game banter, not saved chat.
 
-**Resume handling.** TD and the synced card screens add `realtimeResumed.addListener(_subscribe)` (from `core/realtime_resume.dart`) so the channel is torn down and re-subscribed after the app returns from background; the post-subscribe `sync` ping then re-pulls current state. All games also call `reportScreen(ref, …)` / `reportActiveTab(ref)` (`core/screen_presence.dart`) for presence.
+**Resume handling.** TD and the synced card screens add `realtimeResumed.addListener(_subscribe)` (from `core/realtime_resume.dart`) so the channel is torn down and re-subscribed after the app returns from background; the post-subscribe `sync` ping then re-pulls current state. Presence needs no code in the games: `PresenceRouteObserver` derives the room from the route.
 
 **DB/security.** Games persist nothing server-side — all content is bundled client constants, all sync is transient broadcast, and the bag is local SharedPreferences. No tables, buckets, or RLS involved.
 
