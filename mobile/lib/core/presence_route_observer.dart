@@ -44,17 +44,41 @@ class PresenceRouteObserver extends NavigatorObserver {
       _report(previousRoute);
 
   void _report(Route<dynamic>? route) {
-    final name = screenNameForRoute(route);
-    if (name == null || name == _last) return;
+    // Dialogs, sheets and menus sit on top of a room rather than being one.
+    // Only full pages change where somebody is.
+    if (route != null && route is! PageRoute) return;
+
+    final path = route?.settings.name;
+    if (path == null) {
+      // A page pushed without a name — eleven places still use a bare
+      // MaterialPageRoute. We genuinely do not know what room this is, and
+      // going on claiming the previous one is exactly the lie this class
+      // exists to stop. "Somewhere" is honest; "still in the chat" is not.
+      _publish(null);
+      return;
+    }
+
+    final name = screenNameForPath(path);
+    // A named route that is deliberately not a place (auth, the tab shell, the
+    // capture camera) leaves the current value alone — nobody has moved rooms.
+    if (name == null) return;
+    _publish(name);
+  }
+
+  void _publish(String? name) {
+    if (name == _last) return;
     _last = name;
 
+    // Our own value first: it is what this device's badge compares against, and
+    // it should not wait on the couple row to finish loading.
+    _ref.read(myScreenProvider.notifier).state = name;
+
     final couple = _ref.read(currentCoupleProvider);
-    if (couple == null) return;
+    if (couple == null) return; // nobody to tell yet
 
     // Durable value for a partner who opens the app later...
     PresenceService.setScreen(couple.id, name);
     // ...and the instant broadcast for one who is already looking.
-    _ref.read(myScreenProvider.notifier).state = name;
     _ref.read(partnerScreenProvider.notifier).announce(name);
   }
 
@@ -62,25 +86,13 @@ class PresenceRouteObserver extends NavigatorObserver {
   /// a backgrounded user never reads as sitting in a room they have left.
   void clear() {
     _last = null;
+    _ref.read(myScreenProvider.notifier).state = null;
+
     final couple = _ref.read(currentCoupleProvider);
     if (couple == null) return;
     PresenceService.setScreen(couple.id, null);
-    _ref.read(myScreenProvider.notifier).state = null;
     _ref.read(partnerScreenProvider.notifier).announce(null);
   }
-}
-
-/// Human-facing name for a route, derived from its path.
-///
-/// Derived rather than hand-maintained: a per-route table is exactly the thing
-/// that goes stale when someone adds a screen, which is how this broke.
-/// Returns null for routes that are not a "place" the partner should see —
-/// auth, the shell container itself, and the camera (a capture action, not a
-/// room).
-String? screenNameForRoute(Route<dynamic>? route) {
-  final path = route?.settings.name;
-  if (path == null || path.isEmpty) return null;
-  return screenNameForPath(path);
 }
 
 /// Where to send someone who taps "join them".
@@ -129,7 +141,13 @@ String? joinableRouteFor(String? screenName) =>
 int? joinableTabIndex(String? screenName) =>
     screenName == null ? null : kJoinableTabs[screenName];
 
-/// Split out from [screenNameForRoute] so it can be tested without a Route.
+/// Human-facing name for a route, derived from its path.
+///
+/// Derived rather than hand-maintained: a per-route table is exactly the thing
+/// that goes stale when someone adds a screen, which is how this broke.
+/// Returns null for routes that are not a "place" the partner should see —
+/// auth, the shell container itself, and the camera (a capture action, not a
+/// room).
 String? screenNameForPath(String path) {
   const notAPlace = {
     '/',

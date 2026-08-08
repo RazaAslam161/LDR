@@ -1,5 +1,9 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/presence_route_observer.dart';
+import 'package:miles/core/providers.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/screen_presence.dart';
 
 /// Presence drives what one partner believes the other is doing. A wrong value
@@ -115,4 +119,73 @@ void main() {
       });
     });
   });
+
+  group('what the observer treats as a move', () {
+    /// The observer talks to Supabase through providers; with a null couple it
+    /// publishes nothing, so the local value is what we can watch.
+    (PresenceRouteObserver, ProviderContainer) build() {
+      // Null couple: _publish still sets the local value but never reaches
+      // Supabase, which is not running here.
+      final c = ProviderContainer(
+        overrides: [currentCoupleProvider.overrideWithValue(null)],
+      );
+      addTearDown(c.dispose);
+      return (PresenceRouteObserver(_ContainerRef(c)), c);
+    }
+
+    Route<dynamic> page(String? name) => MaterialPageRoute<void>(
+          settings: RouteSettings(name: name),
+          builder: (_) => const SizedBox.shrink(),
+        );
+
+    test('a named page publishes its room', () {
+      final (obs, c) = build();
+      obs.didPush(page('/app/touch'), null);
+      expect(c.read(myScreenProvider), 'Touch');
+    });
+
+    test('an UNNAMED page says "somewhere", not the last room', () {
+      // Eleven places still push a bare MaterialPageRoute. Leaving the previous
+      // screen published is how the app ends up insisting she is still in the
+      // chat while she is looking at a map.
+      final (obs, c) = build();
+      obs.didPush(page('/app/touch'), null);
+      obs.didPush(page(null), null);
+      expect(c.read(myScreenProvider), isNull);
+    });
+
+    test('a dialog or sheet is not a move', () {
+      // They sit on top of a room rather than being one — vanishing from Touch
+      // because a confirm dialog opened would be a lie in the other direction.
+      final (obs, c) = build();
+      obs.didPush(page('/app/touch'), null);
+      obs.didPush(
+        RawDialogRoute<void>(
+          pageBuilder: (_, __, ___) => const SizedBox.shrink(),
+        ),
+        null,
+      );
+      expect(c.read(myScreenProvider), 'Touch');
+    });
+
+    test('popping back republishes the room underneath', () {
+      final (obs, c) = build();
+      obs.didPush(page('/app/touch'), null);
+      obs.didPush(page(null), null);
+      obs.didPop(page(null), page('/app/touch'));
+      expect(c.read(myScreenProvider), 'Touch');
+    });
+  });
+}
+
+/// PresenceRouteObserver only ever `read`s providers, which a container does.
+class _ContainerRef implements Ref {
+  _ContainerRef(this._c);
+  final ProviderContainer _c;
+
+  @override
+  T read<T>(ProviderListenable<T> provider) => _c.read(provider);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -96,15 +97,20 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
 
   /// Warm the room: a bloom that lands on BOTH screens at once.
   ///
-  /// The local bump is unconditional so the sender feels it instantly even on a
-  /// bad connection; the partner gets it over the same channel presence uses.
+  /// The local bump does not wait on the network, so the sender feels it even
+  /// on a bad connection; the partner gets it over the same channel presence
+  /// uses.
   void warm() {
     final now = DateTime.now();
     final last = _lastWarm;
-    if (last != null && now.difference(last) < const Duration(milliseconds: 900)) {
-      return; // a held finger should not machine-gun the partner's screen
+    if (last != null &&
+        now.difference(last) < const Duration(milliseconds: 900)) {
+      // A held finger should not machine-gun the partner's screen. Silent on
+      // both ends — a haptic with no bloom reads as a broken button.
+      return;
     }
     _lastWarm = now;
+    HapticFeedback.mediumImpact();
     ref.read(roomWarmthProvider.notifier).state++;
 
     final myUid = ref.read(currentProfileProvider)?.id;
@@ -130,11 +136,17 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
   }
 }
 
-/// A floating "Partner is here" badge — shown whenever the partner is on the
-/// SAME screen as you AND their presence is fresh (active within 45s). Placed
-/// ONCE, globally (see main.dart), so it works on every screen automatically:
-/// every screen already reports its name via reportScreen, which now also
-/// tracks [myScreenProvider] and broadcasts to [partnerScreenProvider].
+/// The partner's presence, as one small mark.
+///
+/// Lives in the AppBar of every room the two of them can share (see
+/// [PartnerHereAction]). It shows in two cases, and stays silent otherwise:
+///
+///   * they are on THIS screen, and their presence is fresh (active within 45s)
+///   * they are on another screen you are allowed to follow them into
+///
+/// Silence covers the rest — a stale heartbeat, or a room that is theirs alone.
+/// It is deliberately easier for this widget to say nothing than to say
+/// something wrong about where a real person is.
 class PartnerHereBadge extends ConsumerWidget {
   const PartnerHereBadge({super.key});
 
@@ -148,11 +160,8 @@ class PartnerHereBadge extends ConsumerWidget {
     final partnerScreen = broadcastScreen ?? dbPartner?.currentScreen;
     final fresh = dbPartner?.isTrulyOnline ?? false; // 45s freshness window
 
-    final isHere = myScreen != null &&
-        myScreen != 'away' &&
-        myScreen != 'Camera' && // a push action, not a shared screen
-        partnerScreen == myScreen &&
-        fresh;
+    final isHere =
+        myScreen != null && myScreen != 'away' && partnerScreen == myScreen && fresh;
 
     final partnerName = ref.watch(
       partnerProfileProvider.select((p) => p?.displayName ?? 'Partner'),
@@ -195,15 +204,17 @@ class PartnerHereBadge extends ConsumerWidget {
             typing: typing,
             moodColor: mood?.color,
             where: partnerScreen,
+            // The loop is stopped while nothing is shown. Twenty-odd screens
+            // now mount this, and a permanent 60fps rebuild on each of them —
+            // for a partner who is usually offline — is exactly the kind of
+            // invisible work the last perf pass went hunting for.
+            active: visible,
             // One affordance, two meanings — both are "reach for them".
             // Together: warm the room, a bloom they feel on their screen too.
             // Apart: go to where they are. Inert otherwise, so a tap can never
             // land somewhere that does not exist.
             onTap: isHere
-                ? () {
-                    HapticFeedback.mediumImpact();
-                    ref.read(partnerScreenProvider.notifier).warm();
-                  }
+                ? () => ref.read(partnerScreenProvider.notifier).warm()
                 : canJoin
                     ? () => _join(context, ref, route: joinRoute, tab: joinTab)
                     : null,
@@ -232,6 +243,11 @@ class PartnerHereBadge extends ConsumerWidget {
       ref.read(shellTabProvider.notifier).state = tab;
       // Already inside the shell? Selecting the tab is the whole journey.
       if (here != '/app') context.go('/app');
+      // AppShell only reports on a TAP, and '/app' is not a route the observer
+      // names — so without this the user has moved and nobody has been told.
+      // Their partner would keep seeing the old tab, and this very badge would
+      // keep offering to take them somewhere they already are.
+      reportActiveTab(ref);
       return;
     }
     if (route != null) context.push(route);
@@ -275,11 +291,15 @@ class _PresenceAvatar extends StatefulWidget {
     required this.typing,
     required this.moodColor,
     required this.where,
+    required this.active,
     this.onTap,
   });
 
   final String name;
   final bool isHere;
+
+  /// Whether anything is on screen. False stops the loop entirely.
+  final bool active;
   final bool typing;
   final Color? moodColor;
 
@@ -303,7 +323,7 @@ class _PresenceAvatarState extends State<_PresenceAvatar>
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: _period,
-  )..repeat();
+  );
 
   /// Fires once when they arrive on this screen. Separate from the loop because
   /// it is a one-shot with its own curve, and it must be able to restart
@@ -321,16 +341,18 @@ class _PresenceAvatarState extends State<_PresenceAvatar>
   @override
   void initState() {
     super.initState();
+    if (widget.active) _c.repeat();
     if (widget.isHere) _arrive.forward(from: 0);
   }
 
   @override
   void didUpdateWidget(_PresenceAvatar old) {
     super.didUpdateWidget(old);
-    if (widget.typing != old.typing) {
-      _c
-        ..duration = _period
-        ..repeat();
+    if (widget.typing != old.typing) _c.duration = _period;
+    if (widget.active != old.active || widget.typing != old.typing) {
+      // repeat() resumes from the current value, so changing speed mid-breath
+      // does not snap the ring.
+      widget.active ? _c.repeat() : _c.stop();
     }
     if (widget.isHere && !old.isHere) _arrive.forward(from: 0);
   }

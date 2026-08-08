@@ -305,7 +305,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // closed, so a partner could be looking at "she's in the chat with me"
       // when she had put the phone down. Presence must decay to unknown, never
       // linger as a confident wrong answer.
-      presenceRouteObserver.clear();
+      presenceRouteObserver?.clear();
     }
   }
 

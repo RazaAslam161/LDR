@@ -112,9 +112,12 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     final lang = ref.read(contentLanguageProvider);
     // Their index, our words. Older builds send no index — then their text is
     // all we have, and showing it beats showing nothing.
-    final resolved = _cardAt(lang, index is int ? index : -1) ??
-        payload['text']?.toString();
-    if (resolved != null) NoRepeatBag.markSeen(_bagKey(lang), resolved);
+    final ours = _cardAt(lang, index is int ? index : -1);
+    final resolved = ours ?? payload['text']?.toString();
+    // Only mark what actually came from OUR pool. On the fallback path the text
+    // is in their language, and filing it here would permanently occupy a slot
+    // in our bag with a string we can never deal.
+    if (ours != null) NoRepeatBag.markSeen(_bagKey(lang), ours);
     setState(() {
       _started = true;
       _card = resolved;
@@ -162,7 +165,11 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     // new one — the same question, in the other tongue.
     ref.listen<ContentLanguage>(contentLanguageProvider, (_, next) {
       final same = _cardAt(next, _cardIndex);
-      if (same != null) setState(() => _card = same);
+      if (same == null) return;
+      // Retire it in the new bag too, or the next draw can immediately deal the
+      // card that is already on screen.
+      NoRepeatBag.markSeen(_bagKey(next), same);
+      setState(() => _card = same);
     });
 
     return Scaffold(

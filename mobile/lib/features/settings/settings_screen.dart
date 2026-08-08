@@ -445,8 +445,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   style: TextStyle(color: MilesColors.cream50)),
               subtitle: Text(
                 ref.watch(contentLanguageProvider) == ContentLanguage.english
-                    ? 'Games, dares and love notes are written in English'
-                    : 'Games, dares and love notes are written in Roman Urdu',
+                    ? 'Game prompts and dares are written in English'
+                    : 'Game prompts and dares are written in Roman Urdu',
                 style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
               ),
               trailing: const LanguageToggle(padding: EdgeInsets.zero),

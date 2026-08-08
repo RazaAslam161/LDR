@@ -121,4 +121,31 @@ void main() {
       expect(back?.index, -1);
     });
   });
+
+  group('a card is looked up by its OWN tier', () {
+    test('a tier change while a card is up does not swap the question', () {
+      // Truth-or-Dare broadcasts the game's current tier and the card as two
+      // separate fields, and either partner can change the heat while a card is
+      // showing. Indexing into the NEW tier's pool would put a different
+      // question on each phone — and flirty/spicy are the same length, so it
+      // would happen every single time.
+      final drawn = truthPool(ContentLanguage.romanUrdu, TDTier.flirty);
+      const at = 42;
+
+      final byOwnTier = localiseTD(
+        ContentLanguage.english,
+        TDType.truth,
+        TDTier.flirty, // the card's tier, not whatever chip is now selected
+        drawn[at],
+        at,
+      );
+      expect(byOwnTier.text, truthPool(ContentLanguage.english, TDTier.flirty)[at]);
+      expect(
+        byOwnTier.text,
+        isNot(truthPool(ContentLanguage.english, TDTier.spicy)[at]),
+        reason: 'the two tiers must be distinguishable for this test to mean '
+            'anything',
+      );
+    });
+  });
 }

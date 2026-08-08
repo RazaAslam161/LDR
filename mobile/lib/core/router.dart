@@ -48,7 +48,11 @@ import 'package:miles/features/vault/vault_gate_screen.dart';
 import 'package:miles/features/watch/watch_together_screen.dart';
 
 /// The live observer, so app lifecycle changes can clear the published screen.
-late PresenceRouteObserver presenceRouteObserver;
+///
+/// Null until the router is first built — which does not happen at all while
+/// the disguise cover is up, and the lifecycle handler runs from the very first
+/// frame. Backgrounding from the cover must not throw.
+PresenceRouteObserver? presenceRouteObserver;
 
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {

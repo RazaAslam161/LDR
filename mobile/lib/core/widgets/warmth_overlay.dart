@@ -33,8 +33,7 @@ class _WarmthOverlayState extends ConsumerState<WarmthOverlay>
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<int>(roomWarmthProvider, (prev, next) {
-      if (next == 0) return;
+    ref.listen<int>(roomWarmthProvider, (_, __) {
       HapticFeedback.lightImpact();
       _c.forward(from: 0); // from: 0 so a second warmth restarts, not stacks
     });

@@ -93,10 +93,15 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
         .firstWhere((t) => t.name == payload['tier'], orElse: () => _tier);
     // Their card, our language. The index is what travels; the words are looked
     // up locally, so a couple reading different languages still plays one game.
+    //
+    // Indexed by the card's OWN tier, never the game's current one: either
+    // partner can change the heat while a card is up, and looking index 42 up
+    // in the spicy pool because someone tapped Spicy would put a different
+    // question on each phone.
     final lang = ref.read(contentLanguageProvider);
     final mine = card == null
         ? null
-        : localiseTD(lang, card.type, tier, card.text, card.index);
+        : localiseTD(lang, card.type, card.tier, card.text, card.index);
     if (mine != null) {
       markTDSeen(lang, mine); // keep the no-repeat shared across phones
     }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -11,6 +12,14 @@ import 'package:miles/core/widgets/partner_here_badge.dart';
 /// offering to follow them somewhere private — is not a cosmetic bug, so the
 /// states this widget can be in are pinned here.
 void main() {
+  Profile me() => Profile(
+        id: 'me',
+        displayName: 'Ali',
+        timezone: 'UTC',
+        presenceStatus: PresenceStatus.awake,
+        createdAt: DateTime.utc(2026),
+      );
+
   Profile partner() => Profile(
         id: 'p1',
         displayName: 'Rida',
@@ -28,12 +37,28 @@ void main() {
             ),
       );
 
+  /// The live router, so a tap can be checked against where it landed.
+  late GoRouter router;
+
   Future<void> pump(
     WidgetTester tester, {
     required String? myScreen,
     required String? theirScreen,
     bool fresh = true,
+    String at = '/app/care',
   }) async {
+    router = GoRouter(
+      initialLocation: at,
+      routes: [
+        for (final path in ['/app', '/app/touch', '/app/care'])
+          GoRoute(
+            path: path,
+            builder: (_, __) =>
+                const Scaffold(body: Center(child: PartnerHereBadge())),
+          ),
+      ],
+    );
+    addTearDown(router.dispose);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -41,6 +66,7 @@ void main() {
           // Supabase entirely without one, which is exactly what a test wants.
           currentCoupleProvider.overrideWithValue(null),
           partnerProfileProvider.overrideWithValue(partner()),
+          currentProfileProvider.overrideWithValue(me()),
           partnerPresenceProvider.overrideWith(
             (ref) => _StubPresence(
               ref,
@@ -51,12 +77,18 @@ void main() {
               .overrideWith((ref) => _StubScreen(ref, theirScreen)),
           myScreenProvider.overrideWith((ref) => myScreen),
         ],
-        child: const MaterialApp(
-          home: Scaffold(body: Center(child: PartnerHereBadge())),
-        ),
+        child: MaterialApp.router(routerConfig: router),
       ),
     );
     await tester.pump(const Duration(milliseconds: 300));
+  }
+
+  /// Where the router actually is, after everything has been pumped.
+  Future<String> settleTo(WidgetTester tester) async {
+    // The avatar breathes forever, so pumpAndSettle would never return.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    return router.state.uri.path;
   }
 
   /// The badge collapses to nothing rather than unmounting, so "not shown"
@@ -118,6 +150,30 @@ void main() {
       );
       expect(gesture.onTap, isNotNull, reason: '$mine -> $theirs should tap');
     }
+  });
+
+  testWidgets('tapping goes to the room they are in', (tester) async {
+    await pump(tester, myScreen: 'Care', theirScreen: 'Touch');
+    await tester.tap(find.byType(PartnerHereBadge));
+    expect(await settleTo(tester), '/app/touch');
+  });
+
+  testWidgets('tapping does nothing when we are already in that room',
+      (tester) async {
+    // Reachable in the window before our own screen has been published, and a
+    // push would stack a second copy of the page on top of itself.
+    await pump(tester, myScreen: null, theirScreen: 'Touch', at: '/app/touch');
+    await tester.tap(find.byType(PartnerHereBadge));
+    expect(await settleTo(tester), '/app/touch');
+    expect(find.byType(PartnerHereBadge), findsOneWidget); // not stacked twice
+  });
+
+  testWidgets('tapping while together navigates nowhere', (tester) async {
+    // Together, the tap warms the room. Going somewhere would be the one thing
+    // neither of them asked for.
+    await pump(tester, myScreen: 'Touch', theirScreen: 'Touch', at: '/app/care');
+    await tester.tap(find.byType(PartnerHereBadge));
+    expect(await settleTo(tester), '/app/care');
   });
 }
 

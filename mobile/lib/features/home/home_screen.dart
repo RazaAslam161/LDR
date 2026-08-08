@@ -14,6 +14,7 @@ import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
@@ -158,12 +159,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 children: [
                   Text('Tethered',
                       style: Theme.of(context).textTheme.headlineLarge),
-                  Builder(
-                    builder: (ctx) => IconButton(
-                      icon: const Icon(Icons.menu, color: MilesColors.gilt),
-                      onPressed: () =>
-                          rootScaffoldKey.currentState?.openDrawer(),
-                    ),
+                  Row(
+                    children: [
+                      // Home has no AppBar, but it IS a joinable tab — without
+                      // this the one screen a partner is most often on is the
+                      // one where they cannot be seen.
+                      const PartnerHereAction(),
+                      Builder(
+                        builder: (ctx) => IconButton(
+                          icon: const Icon(Icons.menu, color: MilesColors.gilt),
+                          onPressed: () =>
+                              rootScaffoldKey.currentState?.openDrawer(),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

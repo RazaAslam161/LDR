@@ -34,3 +34,9 @@ next-env.d.ts
 # built APK artifacts (large binaries — never commit; install from disk)
 *.apk
 Tethered*.apk
+
+# Supabase CLI scratch state (project ref + org id, machine-local)
+supabase/.temp/
+
+# Ad-hoc screenshots dropped at the repo root while debugging
+/repro.png
