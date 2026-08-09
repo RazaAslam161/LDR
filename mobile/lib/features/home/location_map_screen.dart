@@ -8,7 +8,6 @@
 // Stale data shown in grey — never with a live green pulse.
 
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -325,83 +324,80 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
             child: ClipRRect(
               borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24)),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                child: Container(
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    16,
-                    20,
-                    MediaQuery.of(context).padding.bottom + 16,
+              child: Container(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  20,
+                  MediaQuery.of(context).padding.bottom + 16,
+                ),
+                decoration: BoxDecoration(
+                  color: MilesColors.surface1,
+                  border: Border(
+                    top: BorderSide(
+                        color: MilesColors.gilt, width: 0.8),
                   ),
-                  decoration: BoxDecoration(
-                    color: MilesColors.surfaceGlass,
-                    border: Border(
-                      top: BorderSide(
-                          color: MilesColors.gilt, width: 0.8),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _ActionButton(
-                              icon: '🧭',
-                              label: 'Navigate',
-                              enabled: partnerPoint != null,
-                              onTap: () async {
-                                final uri = Uri.parse(
-                                    'google.navigation:q=${partnerPoint!.latitude},${partnerPoint.longitude}');
-                                if (await canLaunchUrl(uri)) {
-                                  await launchUrl(uri);
-                                } else {
-                                  await launchUrl(Uri.parse(
-                                      'https://maps.google.com/?q=${partnerPoint.latitude},${partnerPoint.longitude}'));
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _ActionButton(
-                              icon: '⏱',
-                              label: 'Send ETA',
-                              enabled: partnerPoint != null && myPoint != null,
-                              onTap: () async {
-                                final dist =
-                                    _distanceText(partnerPoint, myPoint);
-                                await ChatRepository.sendText(
-                                  widget.coupleId,
-                                  "I'm $dist away, heading your way 💕",
-                                );
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text('Sent your ETA 💌')),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (partner == null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Ask ${widget.partnerName} to share location',
-                            style: const TextStyle(
-                              color: MilesColors.faint,
-                              fontSize: 12,
-                              fontFamily: 'Inter',
-                            ),
-                            textAlign: TextAlign.center,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ActionButton(
+                            icon: '🧭',
+                            label: 'Navigate',
+                            enabled: partnerPoint != null,
+                            onTap: () async {
+                              final uri = Uri.parse(
+                                  'google.navigation:q=${partnerPoint!.latitude},${partnerPoint.longitude}');
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri);
+                              } else {
+                                await launchUrl(Uri.parse(
+                                    'https://maps.google.com/?q=${partnerPoint.latitude},${partnerPoint.longitude}'));
+                              }
+                            },
                           ),
                         ),
-                    ],
-                  ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _ActionButton(
+                            icon: '⏱',
+                            label: 'Send ETA',
+                            enabled: partnerPoint != null && myPoint != null,
+                            onTap: () async {
+                              final dist =
+                                  _distanceText(partnerPoint, myPoint);
+                              await ChatRepository.sendText(
+                                widget.coupleId,
+                                "I'm $dist away, heading your way 💕",
+                              );
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Sent your ETA 💌')),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (partner == null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Ask ${widget.partnerName} to share location',
+                          style: const TextStyle(
+                            color: MilesColors.faint,
+                            fontSize: 12,
+                            fontFamily: 'Inter',
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -427,20 +423,17 @@ class _ChromeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipOval(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Material(
-          color: MilesColors.surfaceGlass,
-          shape: const CircleBorder(
-            side: BorderSide(color: MilesColors.gilt, width: 0.8),
-          ),
-          child: InkWell(
-            onTap: onTap,
-            child: SizedBox(
-              width: 40,
-              height: 40,
-              child: Icon(icon, color: iconColor, size: 18),
-            ),
+      child: Material(
+        color: MilesColors.surface1,
+        shape: const CircleBorder(
+          side: BorderSide(color: MilesColors.gilt, width: 0.8),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, color: iconColor, size: 18),
           ),
         ),
       ),
@@ -465,48 +458,45 @@ class _PartnerInfoPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: MilesColors.surfaceGlass,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: MilesColors.gilt, width: 0.8),
-          ),
-          child: Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      color: MilesColors.cream50,
-                      fontSize: 13,
-                      fontStyle: FontStyle.italic,
-                      fontFamily: 'Fraunces',
-                    ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: MilesColors.surface1,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: MilesColors.gilt, width: 0.8),
+        ),
+        child: Row(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: MilesColors.cream50,
+                    fontSize: 13,
+                    fontStyle: FontStyle.italic,
+                    fontFamily: 'Fraunces',
                   ),
-                  Text(
-                    isSharing
-                        ? (label ?? 'Live location')
-                        : "$name isn't sharing right now",
-                    style: const TextStyle(
-                      color: MilesColors.taupe,
-                      fontSize: 11,
-                      fontFamily: 'Inter',
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  isSharing
+                      ? (label ?? 'Live location')
+                      : "$name isn't sharing right now",
+                  style: const TextStyle(
+                    color: MilesColors.taupe,
+                    fontSize: 11,
+                    fontFamily: 'Inter',
                   ),
-                ],
-              ),
-              const Spacer(),
-              _FreshnessChip(updatedAt: updatedAt),
-            ],
-          ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+            const Spacer(),
+            _FreshnessChip(updatedAt: updatedAt),
+          ],
         ),
       ),
     );
@@ -587,44 +577,41 @@ class _DistanceChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: MilesColors.surfaceGlass,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: MilesColors.gilt, width: 0.8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedBuilder(
-                animation: pulse,
-                builder: (_, __) {
-                  final opacity = 0.6 + 0.4 * pulse.value;
-                  return Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: MilesColors.ember.withValues(alpha: opacity),
-                      shape: BoxShape.circle,
-                    ),
-                  );
-                },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: MilesColors.surface1,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: MilesColors.gilt, width: 0.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: pulse,
+              builder: (_, __) {
+                final opacity = 0.6 + 0.4 * pulse.value;
+                return Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: MilesColors.ember.withValues(alpha: opacity),
+                    shape: BoxShape.circle,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: const TextStyle(
+                color: MilesColors.cream50,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                fontFamily: 'Inter',
               ),
-              const SizedBox(width: 6),
-              Text(
-                text,
-                style: const TextStyle(
-                  color: MilesColors.cream50,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  fontFamily: 'Inter',
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -654,32 +641,29 @@ class _ActionButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: MilesColors.surfaceGlass,
-                  borderRadius: BorderRadius.circular(14),
-                  border:
-                      Border.all(color: MilesColors.gilt, width: 0.8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(icon, style: const TextStyle(fontSize: 16)),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        color: MilesColors.cream50,
-                        fontSize: 12,
-                        fontFamily: 'Inter',
-                      ),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: MilesColors.surface1,
+                borderRadius: BorderRadius.circular(14),
+                border:
+                    Border.all(color: MilesColors.gilt, width: 0.8),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(icon, style: const TextStyle(fontSize: 16)),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: MilesColors.cream50,
+                      fontSize: 12,
+                      fontFamily: 'Inter',
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

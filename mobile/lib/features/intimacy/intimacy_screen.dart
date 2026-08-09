@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/intimacy/intimacy_controller.dart';
 import 'package:miles/features/intimacy/intimacy_repository.dart';
@@ -70,7 +70,7 @@ class _OptIn extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 28),
-        GlassPanel(
+        SurfacePanel(
           glow: MilesColors.blush,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,7 +179,7 @@ class _MoodTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: GlassPanel(
+      child: SurfacePanel(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         child: Row(
           children: [
@@ -300,7 +300,7 @@ class _MutualMoment extends StatelessWidget {
                 .animate()
                 .fadeIn(delay: 300.ms, duration: 800.ms),
             const SizedBox(height: 14),
-            GlassPanel(
+            SurfacePanel(
               glow: MilesColors.blush,
               child: Column(
                 children: [

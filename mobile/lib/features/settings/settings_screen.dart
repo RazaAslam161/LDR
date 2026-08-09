@@ -16,7 +16,7 @@ import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
@@ -631,7 +631,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             // ── Partner ──────────────────────────────────────────
             const _SectionHeader(label: 'Partner'),
             if (partner != null) ...[
-              GlassPanel(
+              SurfacePanel(
                 child: Row(
                   children: [
                     const Text('💞', style: TextStyle(fontSize: 24)),

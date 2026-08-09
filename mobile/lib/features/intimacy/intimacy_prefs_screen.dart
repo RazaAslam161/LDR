@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/intimacy/intimacy_controller.dart';
 
 /// Comfort & consent — every control is one tap, nothing guilt-trips, and the
@@ -35,7 +35,7 @@ class IntimacyPrefsScreen extends ConsumerWidget {
               style: TextStyle(color: MilesColors.taupe, height: 1.6),
             ),
             const SizedBox(height: 24),
-            GlassPanel(
+            SurfacePanel(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Column(
                 children: [

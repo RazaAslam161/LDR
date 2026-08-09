@@ -1,6 +1,6 @@
+import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -12,7 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:miles/main.dart' show MilesApp;
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/chat/camera_bake.dart';
 import 'package:miles/features/chat/camera_filter_painter.dart';
@@ -716,45 +716,42 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   Widget _bottomPanel() {
     final recording = _state == _CamState.recording;
     return ClipRect(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          color: MilesColors.surfaceGlass,
-          padding: const EdgeInsets.only(top: 12, bottom: 24),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  height: 72,
-                  child: recording
-                      ? const Center(
-                          child: Text(
-                            'Recording… release to stop',
-                            style: TextStyle(
-                                color: MilesColors.cream100, fontSize: 12),
-                          ),
-                        )
-                      : _filterStrip(),
-                ),
-                const SizedBox(height: 14),
-                _CaptureButton(
-                  recording: recording,
-                  onTap: _capture,
-                  onLongPressStart: _startRecording,
-                  onLongPressEnd: _stopRecording,
-                ),
-                if (!recording)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Tap for photo · hold for video',
-                      style: TextStyle(color: MilesColors.taupe, fontSize: 11),
-                    ),
+      child: Container(
+        color: MilesColors.surface1,
+        padding: const EdgeInsets.only(top: 12, bottom: 24),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 72,
+                child: recording
+                    ? const Center(
+                        child: Text(
+                          'Recording… release to stop',
+                          style: TextStyle(
+                              color: MilesColors.cream100, fontSize: 12),
+                        ),
+                      )
+                    : _filterStrip(),
+              ),
+              const SizedBox(height: 14),
+              _CaptureButton(
+                recording: recording,
+                onTap: _capture,
+                onLongPressStart: _startRecording,
+                onLongPressEnd: _stopRecording,
+              ),
+              if (!recording)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Tap for photo · hold for video',
+                    style: TextStyle(color: MilesColors.taupe, fontSize: 11),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
@@ -852,7 +849,7 @@ class _CameraUnavailable extends StatelessWidget {
         Center(
           child: Padding(
             padding: const EdgeInsets.all(28),
-            child: GlassPanel(
+            child: SurfacePanel(
               glow: MilesColors.ember,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1454,14 +1451,11 @@ class _GlassBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRect(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          width: double.infinity,
-          color: MilesColors.surfaceGlass,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: SafeArea(top: false, child: child),
-        ),
+      child: Container(
+        width: double.infinity,
+        color: MilesColors.surface1,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: SafeArea(top: false, child: child),
       ),
     );
   }

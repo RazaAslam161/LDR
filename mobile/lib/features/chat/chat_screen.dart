@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:chewie/chewie.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,7 +17,7 @@ import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
@@ -72,6 +73,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// Messages picked for a bulk action. Empty means not in selection mode —
   /// there is no separate flag to fall out of sync with the set itself.
+  /// Bumped every 5s so time-decayed read receipts refresh without rebuilding
+  /// the screen around them.
+  final _receiptTick = ValueNotifier<int>(0);
+
   final _selection = ChatSelection();
   bool get _selecting => _selection.isActive;
   bool _subscribing = false; // re-entrancy guard for _subscribe
@@ -401,7 +406,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _readTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
       PresenceService.setChatLastRead(couple.id);
-      setState(() {}); // refresh time-based receipts + "is here" indicator
+      // A tick, not a rebuild. isTrulyOnline is freshness-gated, so a receipt
+      // really can decay with nothing else changing — but a bare setState here
+      // rebuilt the entire screen every 5 seconds: the full-screen background
+      // image, the app bar, the input bar, and a re-filter of up to 300
+      // messages, all to repaint a few 10px ticks. Only the ticks listen now.
+      _receiptTick.value++;
     });
     if (mounted) setState(() => _loading = false);
     // reverse:true already pins the view to the newest message — no scroll needed.
@@ -815,6 +825,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     realtimeResumed.removeListener(_subscribe);
+    _receiptTick.dispose();
     ChatSendQueue.instance.removeListener(_adoptPending);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
@@ -1083,8 +1094,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                         ? 'you'
                                                         : (partnerName ??
                                                             'your partner'),
+                                                    tick: _receiptTick,
                                                     status: m.isMine(uid)
-                                                        ? _statusFor(m, presence)
+                                                        ? () => _statusFor(
+                                                            m, presence)
                                                         : null,
                                                   ),
                                                 ));
@@ -1213,6 +1226,7 @@ class _Bubble extends StatelessWidget {
     required this.player,
     required this.theme,
     required this.senderName,
+    required this.tick,
     this.repliedTo,
     this.status,
   });
@@ -1224,7 +1238,14 @@ class _Bubble extends StatelessWidget {
   final ChatTheme theme;
   final String senderName;
   final Message? repliedTo;
-  final _MsgStatus? status;
+
+  /// Evaluated lazily on every tick, because a receipt decays with the clock:
+  /// isTrulyOnline is freshness-gated, so the same message yields a different
+  /// status as time passes with no other state change.
+  final _MsgStatus Function()? status;
+
+  /// Bumped every 5s. Only the tick listens.
+  final ValueListenable<int> tick;
 
   @override
   Widget build(BuildContext context) {
@@ -1301,7 +1322,12 @@ class _Bubble extends StatelessWidget {
               ),
               if (mine && status != null) ...[
                 const SizedBox(width: 4),
-                _StatusTick(status: status!),
+                // Rebuilt by the 5s notifier alone, so a decaying receipt
+                // costs one small widget instead of the whole conversation.
+                ValueListenableBuilder<int>(
+                  valueListenable: tick,
+                  builder: (_, __, ___) => _StatusTick(status: status!()),
+                ),
               ],
             ],
           ),
@@ -1591,8 +1617,7 @@ class _Content extends StatelessWidget {
                   Positioned(
                     bottom: 6,
                     right: 6,
-                    child: GlassPanel(
-                      blur: 8,
+                    child: SurfacePanel(
                       radius: 12,
                       color: MilesColors.glass,
                       padding: const EdgeInsets.all(4),
@@ -1882,8 +1907,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
           Positioned(
             bottom: 6,
             right: 6,
-            child: GlassPanel(
-              blur: 8,
+            child: SurfacePanel(
               radius: 12,
               color: MilesColors.glass,
               padding: const EdgeInsets.all(4),

@@ -11,7 +11,7 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
@@ -241,7 +241,7 @@ class _AppShellState extends ConsumerState<AppShell>
           if (showAd) const BannerAdSlot(),
         ],
       ),
-      bottomNavigationBar: GlassNavBar(
+      bottomNavigationBar: SurfaceNavBar(
         child: NavigationBar(
           backgroundColor: Colors.transparent,
           selectedIndex: selected,

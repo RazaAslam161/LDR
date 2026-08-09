@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -182,71 +181,68 @@ class _ChatInputBarState extends State<ChatInputBar> {
       context: context,
       builder: (_) => ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            color: MilesColors.glassStrong,
-            child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading:
-                  const Icon(Icons.gif_box_outlined, color: MilesColors.blush),
-              title: const Text('GIF',
-                  style: TextStyle(color: MilesColors.cream50)),
-              subtitle: const Text('Search & send an animated GIF',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 11.5)),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onPickGif();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined,
-                  color: MilesColors.cream50),
-              title: const Text('Camera',
-                  style: TextStyle(color: MilesColors.cream50)),
-              onTap: () {
-                Navigator.pop(context);
-                _openRapidCamera();
-              },
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.photo_outlined, color: MilesColors.cream50),
-              title: const Text('Gallery',
-                  style: TextStyle(color: MilesColors.cream50)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickFromGallery();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam_outlined,
-                  color: MilesColors.emberSoft),
-              title: const Text('Record video',
-                  style: TextStyle(color: MilesColors.cream50)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickAndSendVideo(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_library_outlined,
-                  color: MilesColors.emberSoft),
-              title: const Text('Video from gallery',
-                  style: TextStyle(color: MilesColors.cream50)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickAndSendVideo(ImageSource.gallery);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+        child: Container(
+          color: MilesColors.surface1,
+          child: SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading:
+                const Icon(Icons.gif_box_outlined, color: MilesColors.blush),
+            title: const Text('GIF',
+                style: TextStyle(color: MilesColors.cream50)),
+            subtitle: const Text('Search & send an animated GIF',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 11.5)),
+            onTap: () {
+              Navigator.pop(context);
+              widget.onPickGif();
+            },
           ),
+          ListTile(
+            leading: const Icon(Icons.camera_alt_outlined,
+                color: MilesColors.cream50),
+            title: const Text('Camera',
+                style: TextStyle(color: MilesColors.cream50)),
+            onTap: () {
+              Navigator.pop(context);
+              _openRapidCamera();
+            },
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.photo_outlined, color: MilesColors.cream50),
+            title: const Text('Gallery',
+                style: TextStyle(color: MilesColors.cream50)),
+            onTap: () {
+              Navigator.pop(context);
+              _pickFromGallery();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.videocam_outlined,
+                color: MilesColors.emberSoft),
+            title: const Text('Record video',
+                style: TextStyle(color: MilesColors.cream50)),
+            onTap: () {
+              Navigator.pop(context);
+              _pickAndSendVideo(ImageSource.camera);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.video_library_outlined,
+                color: MilesColors.emberSoft),
+            title: const Text('Video from gallery',
+                style: TextStyle(color: MilesColors.cream50)),
+            onTap: () {
+              Navigator.pop(context);
+              _pickAndSendVideo(ImageSource.gallery);
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
         ),
       ),
     );
@@ -338,7 +334,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           height: 48,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: MilesColors.glassStrong,
+                            color: MilesColors.surface1,
                             borderRadius: BorderRadius.circular(24),
                           ),
                           alignment: Alignment.centerLeft,
@@ -380,7 +376,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 color:
                                     MilesColors.cream50.withValues(alpha: 0.4)),
                             filled: true,
-                            fillColor: MilesColors.glassSubtle,
+                            fillColor: MilesColors.surface1,
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 12),
                             border: OutlineInputBorder(
@@ -455,46 +451,43 @@ class _ReplyBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
-      decoration: BoxDecoration(
-        color: MilesColors.glassStrong,
-        borderRadius: BorderRadius.circular(12),
-        border: const Border(
-          left: BorderSide(color: MilesColors.blush, width: 3),
-        ),
+      child: Container(
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+    decoration: BoxDecoration(
+      color: MilesColors.surface1,
+      borderRadius: BorderRadius.circular(12),
+      border: const Border(
+        left: BorderSide(color: MilesColors.blush, width: 3),
       ),
-      child: Row(
-        children: [
-          const Icon(Icons.reply, size: 16, color: MilesColors.blush),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Replying to',
-                    style: TextStyle(color: MilesColors.blush, fontSize: 11)),
-                Text(
-                  message.previewText(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style:
-                      const TextStyle(color: MilesColors.cream50, fontSize: 13),
-                ),
-              ],
-            ),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.reply, size: 16, color: MilesColors.blush),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Replying to',
+                  style: TextStyle(color: MilesColors.blush, fontSize: 11)),
+              Text(
+                message.previewText(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    const TextStyle(color: MilesColors.cream50, fontSize: 13),
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 18, color: MilesColors.taupe),
-            onPressed: onCancel,
-          ),
-        ],
-      ),
         ),
+        IconButton(
+          icon: const Icon(Icons.close, size: 18, color: MilesColors.taupe),
+          onPressed: onCancel,
+        ),
+      ],
+    ),
       ),
     );
   }

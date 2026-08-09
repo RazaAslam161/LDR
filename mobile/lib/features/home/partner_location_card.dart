@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/map_3d_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -148,7 +148,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   Widget build(BuildContext context) {
     final p = widget.partner;
     if (p == null || !p.isSharingLive) {
-      return GlassPanel(
+      return SurfacePanel(
         child: Row(
           children: [
             const Icon(Icons.location_off_outlined,
@@ -171,7 +171,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
         : null;
     final dist = _distanceText();
 
-    return GlassPanel(
+    return SurfacePanel(
       padding: EdgeInsets.zero,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),

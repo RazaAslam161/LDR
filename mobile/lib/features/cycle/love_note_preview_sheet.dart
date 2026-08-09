@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
 
@@ -108,8 +108,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return GlassPanel(
-      blur: MilesColors.blurLg,
+    return SurfacePanel(
       radius: 24,
       child: SafeArea(
         top: false,
@@ -174,8 +173,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
               const SizedBox(height: 16),
 
               // Editable text area
-              GlassPanel(
-                blur: MilesColors.blurSm,
+              SurfacePanel(
                 radius: 12,
                 color: MilesColors.glassSubtle,
                 padding: const EdgeInsets.all(12),

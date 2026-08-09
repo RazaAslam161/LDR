@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show compute;
@@ -24,7 +23,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -430,8 +429,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     return showModalBottomSheet<String?>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => GlassPanel(
-        blur: MilesColors.blurLg,
+      builder: (sheetCtx) => SurfacePanel(
         radius: 24,
         padding: EdgeInsets.zero,
         child: SafeArea(
@@ -1172,6 +1170,13 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       child: photoUrl != null
                           ? Image.network(photoUrl,
                               fit: BoxFit.cover,
+                              // Decode to the box it is painted into. Without
+                              // this a full-resolution phone photo is decoded
+                              // and held at source size for a half-screen card
+                              // — tens of MB of bitmap, and a slow first paint.
+                              cacheWidth: (w *
+                                      MediaQuery.devicePixelRatioOf(context))
+                                  .round(),
                               errorBuilder: (_, __, ___) =>
                                   CustomPaint(painter: _SilhouettePainter()))
                           : CustomPaint(painter: _SilhouettePainter()),
@@ -1180,10 +1185,16 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   // Neon hot-lines on THIS body — glowing trails that fade.
                   Positioned.fill(
                     child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _NeonPainter(
-                          _neon.where((p) => p.owner == owner).toList(),
-                          DateTime.now().millisecondsSinceEpoch,
+                      // Without this boundary the neon's 55ms repaint dirties
+                      // the whole Stack, so the photo underneath is
+                      // re-rasterised ~18x a second for a trail that never
+                      // touches it.
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: _NeonPainter(
+                            _neon.where((p) => p.owner == owner).toList(),
+                            DateTime.now().millisecondsSinceEpoch,
+                          ),
                         ),
                       ),
                     ),
@@ -1198,7 +1209,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 3),
                         decoration: BoxDecoration(
-                          color: MilesColors.night.withValues(alpha: 0.55),
+                          color: MilesColors.surface1,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(isMe ? '$name (you)' : name,
@@ -1219,7 +1230,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         decoration: BoxDecoration(
                           color: adjusting
                               ? MilesColors.ember
-                              : MilesColors.night.withValues(alpha: 0.55),
+                              : MilesColors.surface1,
                           shape: BoxShape.circle,
                         ),
                         child: Icon(adjusting ? Icons.check : Icons.crop_free,
@@ -1240,7 +1251,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           child: Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: MilesColors.night.withValues(alpha: 0.55),
+                              color: MilesColors.surface1,
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color: MilesColors.gilt.withValues(alpha: 0.5),
@@ -1270,7 +1281,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(7),
                           decoration: BoxDecoration(
-                            color: MilesColors.night.withValues(alpha: 0.55),
+                            color: MilesColors.surface1,
                             shape: BoxShape.circle,
                           ),
                           child: _uploadingPhoto
@@ -1296,7 +1307,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(7),
                           decoration: BoxDecoration(
-                            color: MilesColors.night.withValues(alpha: 0.55),
+                            color: MilesColors.surface1,
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.delete_outline,
@@ -1313,7 +1324,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
-                          color: MilesColors.night.withValues(alpha: 0.55),
+                          color: MilesColors.surface1,
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: SaveMediaButton(
@@ -1571,6 +1582,18 @@ class _NeonPainter extends CustomPainter {
   static const _life = 1300; // ms
   static const _neon = Color(0xFFFF4D8D);
 
+  // Hoisted and mutated in place. These were built fresh per segment per
+  // frame: with a long trail that is hundreds of Paint allocations ~18x a
+  // second, and MaskFilter.blur is not cheap to construct. Same pattern as
+  // _EmberPainter in ember_background.dart.
+  static final Paint _glowPaint = Paint()
+    ..strokeWidth = 14
+    ..strokeCap = StrokeCap.round
+    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+  static final Paint _corePaint = Paint()
+    ..strokeWidth = 3.5
+    ..strokeCap = StrokeCap.round;
+
   @override
   void paint(Canvas c, Size s) {
     for (var i = 1; i < points.length; i++) {
@@ -1581,22 +1604,13 @@ class _NeonPainter extends CustomPainter {
       final op = (1 - age / _life).clamp(0.0, 1.0);
       final p1 = Offset(a.x * s.width, a.y * s.height);
       final p2 = Offset(b.x * s.width, b.y * s.height);
+      c.drawLine(p1, p2, _glowPaint..color = _neon.withValues(alpha: 0.35 * op));
       c.drawLine(
           p1,
           p2,
-          Paint()
-            ..color = _neon.withValues(alpha: 0.35 * op)
-            ..strokeWidth = 14
-            ..strokeCap = StrokeCap.round
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
-      c.drawLine(
-          p1,
-          p2,
-          Paint()
+          _corePaint
             ..color =
-                Color.lerp(_neon, Colors.white, 0.4)!.withValues(alpha: op)
-            ..strokeWidth = 3.5
-            ..strokeCap = StrokeCap.round);
+                Color.lerp(_neon, Colors.white, 0.4)!.withValues(alpha: op));
     }
   }
 
@@ -1790,7 +1804,7 @@ class _SourceOption extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: GlassPanel(
+      child: SurfacePanel(
         elevated: true,
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
         child: Column(
@@ -2120,7 +2134,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
         Center(
           child: Padding(
             padding: const EdgeInsets.all(28),
-            child: GlassPanel(
+            child: SurfacePanel(
               glow: MilesColors.ember,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2233,7 +2247,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
   Widget _modePill() {
     return GestureDetector(
       onTap: () => setState(() => _isVideoMode = !_isVideoMode),
-      child: GlassPill(
+      child: SurfacePill(
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2258,43 +2272,40 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
 
   Widget _bottomBar() {
     return ClipRect(
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          width: double.infinity,
-          color: MilesColors.surfaceGlass,
-          padding: const EdgeInsets.only(top: 16, bottom: 24),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_recording)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      '0:${_countdown.toString().padLeft(2, '0')}',
-                      style: GoogleFonts.inter(
-                        color: MilesColors.cream50,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
+      child: Container(
+        width: double.infinity,
+        color: MilesColors.surface1,
+        padding: const EdgeInsets.only(top: 16, bottom: 24),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_recording)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    '0:${_countdown.toString().padLeft(2, '0')}',
+                    style: GoogleFonts.inter(
+                      color: MilesColors.cream50,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                _captureButton(),
-                if (!_recording)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      _isVideoMode ? 'Tap to record · 5s' : 'Tap for photo',
-                      style: const TextStyle(
-                        color: MilesColors.taupe,
-                        fontSize: 11,
-                      ),
+                ),
+              _captureButton(),
+              if (!_recording)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _isVideoMode ? 'Tap to record · 5s' : 'Tap for photo',
+                    style: const TextStyle(
+                      color: MilesColors.taupe,
+                      fontSize: 11,
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),

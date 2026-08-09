@@ -4,7 +4,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 
 /// One-time screen after pairing: each partner sets their OWN gender. Gates the
 /// cycle feature. The router sends paired users here while gender_set == false.
@@ -104,7 +104,7 @@ class _RoleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: busy ? null : onTap,
-      child: GlassPanel(
+      child: SurfacePanel(
         child: Row(
           children: [
             Container(

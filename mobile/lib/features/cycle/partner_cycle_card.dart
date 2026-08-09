@@ -5,7 +5,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -95,7 +95,7 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
       padding: const EdgeInsets.only(top: 16),
       child: GestureDetector(
         onTap: () => context.push('/app/cycle'),
-        child: GlassPanel(
+        child: SurfacePanel(
           child: Row(
             children: [
               Text(_onPeriod ? '🩸' : '💛',

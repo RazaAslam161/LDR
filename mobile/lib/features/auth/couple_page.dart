@@ -9,7 +9,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/features/auth/auth_errors.dart';
@@ -213,7 +213,7 @@ class _ConnectView extends StatelessWidget {
           ),
           const SizedBox(height: 32),
 
-          GlassPanel(
+          SurfacePanel(
             glow: MilesColors.blush,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -316,7 +316,7 @@ class _InviteReveal extends StatelessWidget {
             style: TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           const SizedBox(height: 32),
-          GlassPanel(
+          SurfacePanel(
             glow: MilesColors.blush,
             padding: const EdgeInsets.all(28),
             child: Column(

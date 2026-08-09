@@ -23,7 +23,7 @@ import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/glass_panel.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
@@ -242,7 +242,7 @@ class _PartnerStatusCard extends StatelessWidget {
         ? presence!.locationLabel!
         : 'Location sharing off';
 
-    return GlassPanel(
+    return SurfacePanel(
       glow: MilesColors.blush,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
