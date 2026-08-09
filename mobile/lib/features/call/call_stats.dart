@@ -93,113 +93,78 @@ class CallStatsMonitor {
     try {
       final reports = await pc.getStats();
 
-      var s = const CallStats();
-      var sentBytes = 0, recvBytes = 0;
-      double now = 0;
-      final codecNames = <String, String>{};
+      // Index first. The stats graph is relational — a candidate pair points at
+      // its candidates by id, an rtp stream points at its codec by id — and
+      // resolving those links is the whole difference between reading the
+      // SELECTED network path and reading whichever report happened to come
+      // last.
+      final byId = {for (final r in reports) r.id: r};
 
-      // Codec ids resolve to names in a separate report type.
-      for (final r in reports) {
-        if (r.type == 'codec') {
-          final mime = r.values['mimeType']?.toString() ?? '';
-          if (mime.startsWith('video/')) codecNames[r.id] = mime.split('/').last;
-        }
-      }
+      StatsReport? outVideo, inVideo, selectedPair;
 
       for (final r in reports) {
         final v = r.values;
         final kind = (v['kind'] ?? v['mediaType'])?.toString();
-        now = r.timestamp;
-
-        if (r.type == 'outbound-rtp' && kind == 'video') {
-          s = CallStats(
-            sendWidth: _int(v['frameWidth']),
-            sendHeight: _int(v['frameHeight']),
-            sendFps: _double(v['framesPerSecond']),
-            recvWidth: s.recvWidth,
-            recvHeight: s.recvHeight,
-            recvFps: s.recvFps,
-            recvKbps: s.recvKbps,
-            sendKbps: s.sendKbps,
-            limitation: v['qualityLimitationReason']?.toString() ?? '',
-            rttMs: s.rttMs,
-            packetsLost: s.packetsLost,
-            relayed: s.relayed,
-            codec: codecNames[v['codecId']?.toString()] ?? s.codec,
-          );
-          sentBytes = _int(v['bytesSent']);
-        } else if (r.type == 'inbound-rtp' && kind == 'video') {
-          s = CallStats(
-            sendWidth: s.sendWidth,
-            sendHeight: s.sendHeight,
-            sendFps: s.sendFps,
-            sendKbps: s.sendKbps,
-            recvWidth: _int(v['frameWidth']),
-            recvHeight: _int(v['frameHeight']),
-            recvFps: _double(v['framesPerSecond']),
-            recvKbps: s.recvKbps,
-            limitation: s.limitation,
-            rttMs: s.rttMs,
-            packetsLost: _int(v['packetsLost']),
-            relayed: s.relayed,
-            codec: s.codec,
-          );
-          recvBytes = _int(v['bytesReceived']);
-        } else if (r.type == 'candidate-pair' &&
-            (v['state'] == 'succeeded' || v['nominated'] == true)) {
-          s = CallStats(
-            sendWidth: s.sendWidth,
-            sendHeight: s.sendHeight,
-            sendFps: s.sendFps,
-            sendKbps: s.sendKbps,
-            recvWidth: s.recvWidth,
-            recvHeight: s.recvHeight,
-            recvFps: s.recvFps,
-            recvKbps: s.recvKbps,
-            limitation: s.limitation,
-            rttMs: (_double(v['currentRoundTripTime']) * 1000).round(),
-            packetsLost: s.packetsLost,
-            relayed: s.relayed,
-            codec: s.codec,
-          );
-        } else if (r.type == 'local-candidate' && v['candidateType'] == 'relay') {
-          s = CallStats(
-            sendWidth: s.sendWidth,
-            sendHeight: s.sendHeight,
-            sendFps: s.sendFps,
-            sendKbps: s.sendKbps,
-            recvWidth: s.recvWidth,
-            recvHeight: s.recvHeight,
-            recvFps: s.recvFps,
-            recvKbps: s.recvKbps,
-            limitation: s.limitation,
-            rttMs: s.rttMs,
-            packetsLost: s.packetsLost,
-            relayed: true,
-            codec: s.codec,
-          );
+        switch (r.type) {
+          case 'outbound-rtp':
+            if (kind == 'video') outVideo = r;
+          case 'inbound-rtp':
+            if (kind == 'video') inVideo = r;
+          case 'transport':
+            // The transport names the pair actually carrying media. This is the
+            // authoritative answer; scanning pairs for 'succeeded' is not,
+            // because several pairs succeed and only one is used.
+            final id = v['selectedCandidatePairId']?.toString();
+            if (id != null && byId[id] != null) selectedPair = byId[id];
         }
       }
 
-      // Bytes are cumulative; turn two readings into a rate.
-      final dt = _lastAt == 0 ? 0.0 : (now - _lastAt) / 1000.0;
-      if (dt > 0) {
-        s = CallStats(
-          sendWidth: s.sendWidth,
-          sendHeight: s.sendHeight,
-          sendFps: s.sendFps,
-          sendKbps: (((sentBytes - _lastSentBytes) * 8) / dt / 1000).round(),
-          recvWidth: s.recvWidth,
-          recvHeight: s.recvHeight,
-          recvFps: s.recvFps,
-          recvKbps: (((recvBytes - _lastRecvBytes) * 8) / dt / 1000).round(),
-          limitation: s.limitation,
-          rttMs: s.rttMs,
-          packetsLost: s.packetsLost,
-          relayed: s.relayed,
-          codec: s.codec,
-        );
+      // Fallback for stacks that do not populate transport.selectedCandidatePairId.
+      selectedPair ??= reports
+          .where((r) => r.type == 'candidate-pair' && r.values['nominated'] == true)
+          .where((r) => r.values['state'] == 'succeeded')
+          .firstOrNull;
+
+      // Relay is a property of the SELECTED local candidate, not of whether any
+      // relay candidate was gathered. TURN is always configured here, so relay
+      // candidates always exist — reading them directly reported RELAY on every
+      // call, including pure peer-to-peer ones.
+      var relayed = false;
+      if (selectedPair != null) {
+        final localId = selectedPair.values['localCandidateId']?.toString();
+        final local = localId == null ? null : byId[localId];
+        relayed = local?.values['candidateType'] == 'relay';
       }
+
+      final codecId = outVideo?.values['codecId']?.toString();
+      final mime = codecId == null
+          ? null
+          : byId[codecId]?.values['mimeType']?.toString();
+
+      final now = (outVideo ?? inVideo ?? selectedPair)?.timestamp ?? 0;
+      final sentBytes = _int(outVideo?.values['bytesSent']);
+      final recvBytes = _int(inVideo?.values['bytesReceived']);
+      final dt = _lastAt == 0 ? 0.0 : (now - _lastAt) / 1000.0;
+      int rate(int nowBytes, int thenBytes) =>
+          dt <= 0 ? 0 : (((nowBytes - thenBytes) * 8) / dt / 1000).round();
+
+      final s = CallStats(
+        sendWidth: _int(outVideo?.values['frameWidth']),
+        sendHeight: _int(outVideo?.values['frameHeight']),
+        sendFps: _double(outVideo?.values['framesPerSecond']),
+        sendKbps: rate(sentBytes, _lastSentBytes),
+        recvWidth: _int(inVideo?.values['frameWidth']),
+        recvHeight: _int(inVideo?.values['frameHeight']),
+        recvFps: _double(inVideo?.values['framesPerSecond']),
+        recvKbps: rate(recvBytes, _lastRecvBytes),
+        limitation: outVideo?.values['qualityLimitationReason']?.toString() ?? '',
+        rttMs:
+            (_double(selectedPair?.values['currentRoundTripTime']) * 1000).round(),
+        packetsLost: _int(inVideo?.values['packetsLost']),
+        relayed: relayed,
+        codec: mime == null ? '' : mime.split('/').last,
+      );
+
       _lastSentBytes = sentBytes;
       _lastRecvBytes = recvBytes;
       _lastAt = now;

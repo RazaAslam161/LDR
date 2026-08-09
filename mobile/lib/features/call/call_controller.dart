@@ -404,21 +404,27 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // No degradationPreference, no maxFramerate, no codec preference here — on
-  // purpose, and after getting it wrong.
+  // Nothing is set on the encoder here, and the reason is NOT the one an
+  // earlier version of this comment gave. Correcting it, because a wrong
+  // comment here sends the next reader away from the only knob that matters.
   //
-  // MAINTAIN_FRAMERATE holds fps by THROWING RESOLUTION AWAY, which is exactly
-  // the blur and the low pixel count it produced. Preferring H264 pushed every
-  // device onto whatever AVC encoder it happens to ship, which is not reliably
-  // the better one. Both were chosen from reasoning about a fleet I cannot
-  // measure, and both made real calls worse on the two phones I can.
+  // That version blamed degradationPreference = MAINTAIN_FRAMERATE for the
+  // blur. Setting it was almost certainly a NO-OP: libwebrtc already uses
+  // MAINTAIN_FRAMERATE by default for camera content. Which means this app is
+  // trading resolution for framerate on every call right now, and removing the
+  // line did not stop it. The honest suspect for that regression is the other
+  // half of the change — promoting H264, which took every H264 entry from the
+  // device's capabilities, profiles and packetization modes included, and let
+  // whichever one libwebrtc listed first win.
   //
-  // libwebrtc's own bandwidth estimation and CPU-overuse detector already do
-  // this per frame, per device, per network, and they RECOVER when conditions
-  // improve — which a fixed preference cannot. For "any phone, any
-  // connectivity" that adaptation is the feature, not something to override.
-  // Anything set here again should come from getStats on real calls, not from
-  // a plan.
+  // The one worth knowing before touching this again: forceSWCodecList defaults
+  // to ["VP9"] (MethodCallHandlerImpl.java:417-419), so if VP9 wins negotiation
+  // BOTH phones encode and decode it in software. The stats overlay reports the
+  // negotiated codec; if it says vp9, that is the first thing to fix, and the
+  // fix is to DEMOTE VP9 rather than to promote anything.
+  //
+  // Nothing changes here until a real call says which of cpu / bandwidth / none
+  // is limiting it. That is what call_stats.dart is for.
 
   Future<void> _createPc() async {
     final pc = await createPeerConnection(await _iceConfig());
