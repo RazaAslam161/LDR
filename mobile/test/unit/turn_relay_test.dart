@@ -23,13 +23,26 @@ void main() {
   }
 
   group('a missing relay cannot pass as success', () {
-    test('an error body is not read as a server list', () {
-      // The edge function reports missing secrets, a rejected Cloudflare token
-      // and its own exceptions as {"error": ...} with a non-200. Reading only
-      // 'iceServers' turned every one of those into "no relay, no complaint".
+    test('a non-2xx from the function is caught with its status and body', () {
+      // functions_client THROWS for anything outside 2xx
+      // (functions_client.dart:183-190), so the failure body arrives as
+      // FunctionException.details — never as res.data. An earlier version of
+      // this test pinned a `data['error']` read that could never execute, which
+      // is worse than no test: it made dead code look load-bearing.
       final body = fn('_turnServers()');
-      expect(body, contains("data['error']"),
-          reason: 'the function reports failures in the body, not by throwing');
+      expect(body, contains('on FunctionException catch'),
+          reason: 'turn_not_configured and cloudflare_error arrive by throw');
+      expect(body, contains('e.status'));
+      expect(body, contains('e.details'));
+    });
+
+    test('a failed fetch backs off instead of costing every call', () {
+      // The fetch sits in front of _createPc, so with a broken function the
+      // user waits the whole timeout before the offer is even sent — on every
+      // single attempt.
+      expect(src, contains('_turnFailedAt'));
+      final body = fn('_turnServers()');
+      expect(body, contains('Duration(seconds: 60)'));
     });
 
     test('a response with no turn: entry is rejected', () {
@@ -42,7 +55,7 @@ void main() {
 
     test('every failure path records a reason', () {
       final body = fn('_turnServers()');
-      for (final path in ['timeout', 'server:', 'bad response shape']) {
+      for (final path in ['timeout', 'HTTP \${e.status}', 'bad response shape']) {
         expect(body, contains(path), reason: 'unlabelled failure: $path');
       }
       expect(src, contains('static String? turnError'),
@@ -74,5 +87,43 @@ void main() {
     final helper = fn('static bool _isRelay');
     expect(helper, contains("turn:"));
     expect(helper, contains("turns:"));
+  });
+
+  group('the diagnostics work on the calls that fail', () {
+    test('sampling starts when the connection is created, not when it connects',
+        () {
+      // Started on Connected, the monitor only ever ran on calls that
+      // SUCCEEDED — which are exactly the calls that never needed a relay. The
+      // NO-RELAY banner was invisible in the one situation it exists for.
+      final pc = fn('Future<void> _createPc()');
+      expect(pc, contains('_statsMonitor.start(pc)'));
+      final connected = src.substring(src.indexOf('onConnectionState'));
+      expect(connected.substring(0, 600).contains('_statsMonitor.start'), isFalse,
+          reason: 'starting it here makes it useless for failed calls');
+    });
+
+    test('accepting a call does not claim it is connected', () {
+      // Set on local SDP alone, the callee showed "connected" over a black
+      // screen while the caller still showed "Calling..." — two people, two
+      // irreconcilable stories, neither describing the real failure.
+      final accept = fn('Future<void> accept()');
+      expect(accept.contains('_setState(CallState.connected)'), isFalse,
+          reason: 'only onConnectionState may declare a call connected');
+    });
+
+    test('the callee gets a timeout too', () {
+      // Its only exit was the caller hanging up. If that broadcast never
+      // arrived, the wakelock and foreground service outlived a call that did
+      // not exist.
+      final accept = fn('Future<void> accept()');
+      expect(accept, contains('_startConnectTimeout()'));
+    });
+
+    test('candidate types are logged', () {
+      // ' typ host|srflx|relay' is the only line that answers whether TURN
+      // actually allocated.
+      expect(src, contains('local candidate typ='));
+      expect(src, contains('onIceGatheringState'));
+    });
   });
 }

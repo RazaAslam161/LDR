@@ -139,6 +139,10 @@ class CallController extends ChangeNotifier {
   static List<Map<String, dynamic>> _cachedTurn = [];
   static DateTime? _turnFetchedAt;
 
+  /// When the last fetch failed, so a broken relay does not cost every call the
+  /// full timeout.
+  static DateTime? _turnFailedAt;
+
   /// Short-lived Cloudflare TURN ICE servers, minted by the `turn-credentials`
   /// edge function (the Cloudflare API token stays server-side, never in the
   /// app). Cached ~12h (the creds live 24h). Best-effort: on any failure we
@@ -151,6 +155,11 @@ class CallController extends ChangeNotifier {
         DateTime.now().difference(at) < const Duration(hours: 12)) {
       return _cachedTurn;
     }
+    final failedAt = _turnFailedAt;
+    if (failedAt != null &&
+        DateTime.now().difference(failedAt) < const Duration(seconds: 60)) {
+      return _cachedTurn; // recently failed — do not make the user wait again
+    }
     try {
       final res = await SupabaseService.client.functions
           .invoke('turn-credentials')
@@ -159,17 +168,6 @@ class CallController extends ChangeNotifier {
           .timeout(const Duration(seconds: 15));
 
       final data = res.data;
-      // The function reports its own failures as a JSON body with an 'error'
-      // key and a non-200 status. Reading only 'iceServers' turned every one of
-      // those — secrets missing, Cloudflare rejecting the token, the function
-      // not deployed — into a silent empty list.
-      if (data is Map && data['error'] != null) {
-        turnError = 'server: ${data['error']}';
-        debugPrint('[turn] edge function returned ${data['error']} '
-            '(status ${res.status})');
-        return _cachedTurn;
-      }
-
       final raw = data is Map ? data['iceServers'] : null;
       if (raw is! List) {
         turnError = 'bad response shape';
@@ -201,6 +199,13 @@ class CallController extends ChangeNotifier {
       turnError = null;
       debugPrint('[turn] ok — $relays relay server(s)');
       return parsed;
+    } on FunctionException catch (e) {
+      // Anything non-2xx lands here — functions_client throws rather than
+      // returning (functions_client.dart:183-190), so the failure body arrives
+      // as `details`, not as res.data. This is where 'turn_not_configured'
+      // (secrets missing) and 'cloudflare_error' (bad token) actually surface.
+      turnError = 'HTTP ${e.status}: ${e.details}';
+      debugPrint('[turn] edge function failed — $turnError');
     } on TimeoutException {
       turnError = 'timeout';
       debugPrint('[turn] credential fetch timed out');
@@ -208,6 +213,10 @@ class CallController extends ChangeNotifier {
       turnError = '$e';
       debugPrint('[turn] credential fetch failed: $e');
     }
+    // Back off after a failure. Without this, a broken function makes EVERY
+    // call wait the full timeout before the offer is even sent — the fetch sits
+    // in front of _createPc, so the user pays for it on every attempt.
+    _turnFailedAt = DateTime.now();
     return _cachedTurn;
   }
 
@@ -348,7 +357,16 @@ class CallController extends ChangeNotifier {
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
       _send('answer', {'sdp': answer.sdp, 'type': answer.type});
-      _setState(CallState.connected);
+      // NOT connected — nothing has been negotiated with the network yet. Set
+      // here, the callee showed "connected" over a black screen for 35s while
+      // the caller still showed "Calling…", so the two people had two
+      // irreconcilable stories and neither described the real failure.
+      // onConnectionState is the only authority for connected.
+      _setState(CallState.calling);
+      // The callee had no timeout at all: its only exit was the caller's
+      // hangup broadcast, and if that never arrived the wakelock and the
+      // foreground service outlived a call that did not exist.
+      _startConnectTimeout();
       _pendingOffer = null;
       await CallForegroundService.start(peerName ?? 'Partner');
     } catch (_) {
@@ -488,10 +506,24 @@ class CallController extends ChangeNotifier {
   Future<void> _createPc() async {
     final pc = await createPeerConnection(await _iceConfig());
     _pc = pc;
+    // Start sampling NOW, not when the call connects. Started on Connected, the
+    // monitor only ever ran on calls that succeeded — which are exactly the
+    // calls that never needed a relay. The NO-RELAY banner was invisible in the
+    // one situation it exists for.
+    _statsMonitor.noRelay = !relayAvailable;
+    _statsMonitor.start(pc);
     for (final track in _localStream!.getTracks()) {
       await pc.addTrack(track, _localStream!);
     }
+    pc.onIceGatheringState =
+        (g) => debugPrint('[ice] gathering ${g.name}');
+    pc.onIceConnectionState =
+        (i) => debugPrint('[ice] connection ${i.name}');
     pc.onIceCandidate = (c) {
+      // ' typ host|srflx|relay' — the only line that says whether TURN actually
+      // allocated. Without a relay candidate here, two carrier NATs cannot pair.
+      final t = RegExp(r'typ (\w+)').firstMatch(c.candidate ?? '')?.group(1);
+      debugPrint('[ice] local candidate typ=${t ?? '?'}');
       _localCandidates
           .add(c); // keep so we can re-send if the callee was closed
       _send('ice', {
@@ -515,8 +547,6 @@ class CallController extends ChangeNotifier {
       debugPrint('[call] pcstate ${s.name}');
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
-        _statsMonitor.noRelay = !relayAvailable;
-        _statsMonitor.start(pc);
         _setState(CallState.connected);
       } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {

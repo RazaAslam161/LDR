@@ -66,7 +66,7 @@ class CallScreen extends ConsumerWidget {
               valueListenable: _showStats,
               builder: (context, show, _) {
                 final st = call.stats;
-                if (!show || st == null) return const SizedBox.shrink();
+                if (!show) return const SizedBox.shrink();
                 return Positioned(
                   top: MediaQuery.paddingOf(context).top + 8,
                   left: 8,
@@ -80,7 +80,7 @@ class CallScreen extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        st.line,
+                        st?.line ?? 'waiting for first sample…',
                         style: const TextStyle(
                           color: Color(0xFF7CFF9B),
                           fontSize: 10,
@@ -93,6 +93,39 @@ class CallScreen extends ConsumerWidget {
                 );
               },
             ),
+
+            // Said out loud, because the person who needs to know is usually in
+            // another country with no cable and no logcat. Without a relay,
+            // two people on different networks cannot connect at all — and
+            // every symptom of that reads as "the call just didn't work".
+            if (!CallController.relayAvailable && (calling || ringing))
+              Positioned(
+                top: MediaQuery.paddingOf(context).top + 44,
+                left: 16,
+                right: 16,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC5A1A14),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFE0564B)),
+                    ),
+                    child: const Text(
+                      'Calling may fail — no relay server available. '
+                      'This usually means calls only work when both of you are '
+                      'on the same wifi.',
+                      style: TextStyle(
+                        color: Color(0xFFFFD9D4),
+                        fontSize: 11,
+                        height: 1.35,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
             // Voice centerpiece (or pre-connect state): avatar + name + status.
             if (!video || !connected)
