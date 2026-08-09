@@ -63,6 +63,34 @@ create trigger trg_guard_couple_id
   before update of couple_id on public.profiles
   for each row execute function public.guard_couple_id();
 
+-- ── 4. Same defect, same class: capsules.unlocked_at and vault_pin.pin_hash ─
+-- Both were also written as bare column-level revokes against a table-level
+-- grant, so a sealed capsule could still unseal itself and the 4-digit PIN
+-- hash (10,000 candidates — an instant offline break) was still SELECTable.
+do $$
+declare cols text;
+begin
+  if to_regclass('public.capsules') is not null then
+    select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+      into cols
+      from information_schema.columns
+     where table_schema = 'public' and table_name = 'capsules'
+       and column_name <> 'unlocked_at';
+    execute 'revoke update on public.capsules from authenticated, anon';
+    execute format('grant update (%s) on public.capsules to authenticated', cols);
+  end if;
+
+  if to_regclass('public.vault_pin') is not null then
+    select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+      into cols
+      from information_schema.columns
+     where table_schema = 'public' and table_name = 'vault_pin'
+       and column_name <> 'pin_hash';
+    execute 'revoke select on public.vault_pin from authenticated, anon';
+    execute format('grant select (%s) on public.vault_pin to authenticated', cols);
+  end if;
+end $$;
+
 -- ── 3. Prove it ───────────────────────────────────────────────────────────
 -- Both must report false / OK. has_column_privilege is the honest check:
 -- it accounts for table-level grants, which is exactly what the first attempt
@@ -72,4 +100,12 @@ select 'authenticated can write couple_id' as check,
          as still_writable
 union all
 select 'authenticated can write display_name (must stay true)',
-       has_column_privilege('authenticated', 'public.profiles', 'display_name', 'UPDATE');
+       has_column_privilege('authenticated', 'public.profiles', 'display_name', 'UPDATE')
+union all
+select 'authenticated can write capsules.unlocked_at',
+       case when to_regclass('public.capsules') is null then false
+            else has_column_privilege('authenticated', 'public.capsules', 'unlocked_at', 'UPDATE') end
+union all
+select 'authenticated can read vault_pin.pin_hash',
+       case when to_regclass('public.vault_pin') is null then false
+            else has_column_privilege('authenticated', 'public.vault_pin', 'pin_hash', 'SELECT') end;
