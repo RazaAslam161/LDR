@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/features/call/call_foreground.dart';
@@ -34,6 +35,8 @@ class CallController extends ChangeNotifier {
   bool micOn = true;
   bool camOn = true;
   bool isVideo = true; // false = voice-only call
+  bool speakerOn = true; // video starts on the speaker, voice at the ear
+  bool frontCamera = true; // drives the local preview mirror
   bool minimized = false; // call screen dismissed but call still running
   String? peerName; // who's calling / being called
 
@@ -226,9 +229,12 @@ class CallController extends ChangeNotifier {
     _setState(CallState.calling);
     try {
       await _openMedia(video: video);
+      await _routeAudio();
       await _createPc();
+      await _preferHardwareCodecs();
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
+      await _applySendParameters();
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
       _insertInvite(offer.sdp ?? '', video); // durable → FCM rings a closed app
       await CallForegroundService.start(peerName ?? 'Partner');
@@ -269,12 +275,18 @@ class CallController extends ChangeNotifier {
     camOn = _pendingVideo;
     try {
       await _openMedia(video: isVideo);
+      await _routeAudio();
       await _createPc();
       await _pc!.setRemoteDescription(_pendingOffer!);
       _remoteSet = true;
       await _flushPending();
+      // After setRemoteDescription, not before: these are the transceivers that
+      // actually produce the answer, and the only point where the intersection
+      // with the caller's offer is known.
+      await _preferHardwareCodecs();
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
+      await _applySendParameters();
       _send('answer', {'sdp': answer.sdp, 'type': answer.type});
       _setState(CallState.connected);
       _pendingOffer = null;
@@ -310,7 +322,45 @@ class CallController extends ChangeNotifier {
 
   Future<void> switchCamera() async {
     final track = _localStream?.getVideoTracks().firstOrNull;
-    if (track != null) await Helper.switchCamera(track);
+    if (track == null) return;
+    if (await Helper.switchCamera(track)) {
+      frontCamera = !frontCamera;
+      notifyListeners();
+    }
+  }
+
+  /// Route the call audio. Video calls belong on the speaker — the phone is
+  /// held away from the face — and a voice call belongs at the ear.
+  ///
+  /// Called after the media is open, because the route is picked from the
+  /// devices the audio manager can see at that moment.
+  Future<void> _routeAudio() async {
+    speakerOn = isVideo;
+    try {
+      if (isVideo) {
+        // Prefer a headset if one is connected — a video call on the speaker
+        // with earbuds in is not what anybody wants.
+        await Helper.setSpeakerphoneOnButPreferBluetooth();
+      } else {
+        await Helper.setSpeakerphoneOn(false);
+      }
+    } catch (e) {
+      debugPrint('[call] audio route failed: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Speaker on/off. Turning it OFF re-scans and falls back to bluetooth, then
+  /// a wired headset, then the earpiece — so this is the recovery path for a
+  /// headset connected after the call started, which nothing else notices.
+  Future<void> setSpeaker(bool on) async {
+    speakerOn = on;
+    notifyListeners();
+    try {
+      await Helper.setSpeakerphoneOn(on);
+    } catch (e) {
+      debugPrint('[call] speaker toggle failed: $e');
+    }
   }
 
   /// Hide/show the call screen without ending the call (background pill).
@@ -323,11 +373,103 @@ class CallController extends ChangeNotifier {
   // ── Internals ───────────────────────────────────────────────────────────────
   Future<void> _openMedia({bool video = true}) async {
     _localStream = await navigator.mediaDevices.getUserMedia({
+      // Left as-is deliberately. The Android implementation already enables
+      // echo cancellation, noise suppression and auto gain; spelling them out
+      // as constraints risks a device rejecting the whole request.
       'audio': true,
-      'video': video ? {'facingMode': 'user'} : false,
+      // Flat ints, not an 'ideal' map: the plugin reads these with
+      // getConstrainInt, which does not look inside an 'ideal' wrapper, so a
+      // wrapped value is silently ignored and the capture falls back to a
+      // default. 720p30 for everyone — no device tiering here, because capture
+      // resolution CANNOT be changed once the track is open, while libwebrtc's
+      // own overuse detector adapts downward per-frame and recovers. Guessing
+      // a phone's class up front only takes away the ability to do better.
+      'video': video
+          ? {
+              'facingMode': 'user',
+              'width': 1280,
+              'height': 720,
+              'frameRate': 30,
+            }
+          : false,
     });
     localRenderer.srcObject = _localStream;
     notifyListeners();
+  }
+
+  /// Tell the encoder what to sacrifice when the network tightens.
+  ///
+  /// VIDEO SENDER ONLY, on purpose. RTCRtpParameters.fromMap turns a null
+  /// degradationPreference into BALANCED rather than leaving it null, and
+  /// toMap always emits it — so calling setParameters on the AUDIO sender to
+  /// "leave it alone" would in fact write a degradation preference onto an
+  /// audio track that never had one.
+  ///
+  /// No maxBitrate. Two people on wifi run a clean 720p30 at 2.5-3 Mbps today,
+  /// and a ceiling is a permanent cost paid to solve a congestion problem that
+  /// bandwidth estimation already solves — and that the encoder could recover
+  /// from on its own once the network does.
+  Future<void> _applySendParameters() async {
+    final pc = _pc;
+    if (pc == null || !isVideo) return;
+    try {
+      for (final sender in await pc.senders) {
+        if (sender.track?.kind != 'video') continue;
+        final params = sender.parameters;
+        final encodings = params.encodings;
+        if (encodings == null || encodings.isEmpty) continue;
+        encodings.first.maxFramerate = 30;
+        // Two people talking are mostly motion. A soft 480p at 30fps reads as
+        // a live person; a sharp 720p at 12fps reads as a broken connection.
+        params.degradationPreference =
+            RTCDegradationPreference.MAINTAIN_FRAMERATE;
+        final ok = await sender.setParameters(params);
+        debugPrint('[call] sender params applied=$ok');
+      }
+    } catch (e) {
+      debugPrint('[call] sender params failed: $e');
+    }
+  }
+
+  /// Ask for a hardware codec first.
+  ///
+  /// Every Android MediaCodec stack in practice has an AVC encoder; VP8
+  /// hardware encode is not universal, and this plugin's encoder chain has no
+  /// software fallback — a negotiated codec the device cannot encode means no
+  /// video at all, on a call where audio works fine.
+  ///
+  /// A REORDER, never a filter: nothing is removed and nothing is added, only
+  /// demoted, so if the peer somehow has nothing but VP9 the negotiation still
+  /// succeeds. Built from this device's own capabilities.
+  ///
+  /// setCodecPreferences reports nothing back — the native side calls
+  /// result.success(null) unconditionally — so the only evidence it worked is
+  /// the m-line order of the SDP we go on to create. That is what the log line
+  /// after createOffer/createAnswer is for.
+  Future<void> _preferHardwareCodecs() async {
+    final pc = _pc;
+    if (pc == null || !isVideo) return;
+    try {
+      final caps = await getRtpSenderCapabilities('video');
+      final codecs = caps.codecs;
+      if (codecs == null || codecs.isEmpty) return;
+
+      bool named(RTCRtpCodecCapability c, String name) =>
+          c.mimeType.toLowerCase() == 'video/$name';
+
+      final h264 = codecs.where((c) => named(c, 'h264')).toList();
+      final vp8 = codecs.where((c) => named(c, 'vp8')).toList();
+      if (h264.isEmpty && vp8.isEmpty) return; // nothing to promote
+      final rest =
+          codecs.where((c) => !named(c, 'h264') && !named(c, 'vp8')).toList();
+
+      for (final t in await pc.getTransceivers()) {
+        if (t.sender.track?.kind != 'video') continue;
+        await t.setCodecPreferences([...h264, ...vp8, ...rest]);
+      }
+    } catch (e) {
+      debugPrint('[call] codec preference failed: $e');
+    }
   }
 
   Future<void> _createPc() async {
@@ -352,6 +494,12 @@ class CallController extends ChangeNotifier {
       }
     };
     pc.onConnectionState = (s) {
+      // Only the CURRENT connection may drive state. Tearing down disposes the
+      // peer connection, which fires Closed on this very handler — so without
+      // an identity check _teardown re-enters itself, and a connection that
+      // died a moment ago can end the call that has already replaced it.
+      if (!identical(pc, _pc)) return;
+      debugPrint('[call] pcstate ${s.name}');
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
         _setState(CallState.connected);
@@ -445,7 +593,11 @@ class CallController extends ChangeNotifier {
       await _localStream?.dispose();
     } catch (_) {}
     try {
-      await _pc?.close();
+      // dispose(), not close(): the native close() clears the stream maps but
+      // leaves the peerConnection field set, so AudioSwitchManager.stop() never
+      // runs and the next call starts on a dirty audio session. dispose() calls
+      // close() itself, so this is not skipping anything.
+      await _pc?.dispose();
     } catch (_) {}
     _pc = null;
     _localStream = null;
@@ -457,6 +609,8 @@ class CallController extends ChangeNotifier {
     micOn = true;
     camOn = true;
     isVideo = true;
+    speakerOn = true;
+    frontCamera = true;
     minimized = false;
     localRenderer.srcObject = null;
     remoteRenderer.srcObject = null;
@@ -467,8 +621,25 @@ class CallController extends ChangeNotifier {
     });
   }
 
+  /// Keep the display awake while a call is up.
+  ///
+  /// Driven from the state machine rather than the screen, because the call
+  /// survives the screen being minimised to the pill — and the phone going to
+  /// sleep mid-sentence is a quality problem even though it is not a media one.
+  Future<void> _setAwake(bool on) async {
+    try {
+      await WakelockPlus.toggle(enable: on);
+    } catch (e) {
+      debugPrint('[call] wakelock failed: $e');
+    }
+  }
+
   void _setState(CallState s) {
     state = s;
+    final live = s == CallState.calling ||
+        s == CallState.ringing ||
+        s == CallState.connected;
+    unawaited(_setAwake(live));
     notifyListeners();
   }
 

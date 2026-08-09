@@ -96,7 +96,9 @@ class CallScreen extends ConsumerWidget {
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: RTCVideoView(call.localRenderer,
-                      mirror: true,
+                      // Follows the actual camera. Pinned to true, the back
+                      // camera showed the world reversed.
+                      mirror: call.frontCamera,
                       objectFit:
                           RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
                 ),
@@ -148,6 +150,17 @@ class CallScreen extends ConsumerWidget {
                               bg: MilesColors.surface2,
                               label: 'Mute',
                               onTap: call.toggleMic),
+                          // Also the only way back to a headset connected
+                          // after the call started — turning the speaker off
+                          // re-scans and prefers bluetooth, then wired, then
+                          // the earpiece.
+                          _RoundBtn(
+                              icon: call.speakerOn
+                                  ? Icons.volume_up
+                                  : Icons.phone_in_talk,
+                              bg: MilesColors.surface2,
+                              label: 'Speaker',
+                              onTap: () => call.setSpeaker(!call.speakerOn)),
                           if (video) ...[
                             _RoundBtn(
                                 icon: call.camOn

@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Keep a voice/video call alive when the app is backgrounded -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- A video call runs the camera from a foreground service. Without the
+         matching type Android 14+ refuses to start it, and the call dies. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <!-- Microphone for Time Capsule voice memos + chat voice notes + video calls -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- WebRTC video calling: audio routing + network state -->
@@ -23,6 +26,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
+    <!-- Needed on Android 12+ to see a bluetooth headset at all, which is what
+         call audio routing picks between. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Camera for photo + video capture -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Gallery access for sharing photos + videos (private app, not Play-bound) -->
@@ -178,7 +184,7 @@
              Warning: do not change the service name. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="location|microphone"
+            android:foregroundServiceType="location|microphone|camera"
             android:exported="false"
             android:stopWithTask="true" />
     </application>
