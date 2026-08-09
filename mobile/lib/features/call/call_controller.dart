@@ -345,11 +345,11 @@ class CallController extends ChangeNotifier {
 
   void _onSignal(Map<String, dynamic> payload) {
     if (payload['from'] == _myUid) return; // ignore our own echo
-    final type = payload['type']?.toString();
+    final kind = payload['kind']?.toString();
     final data = payload['data'];
     final map =
         data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
-    switch (type) {
+    switch (kind) {
       case 'offer':
         if (state != CallState.idle) return; // busy
         _pendingOffer = RTCSessionDescription(
@@ -403,10 +403,18 @@ class CallController extends ChangeNotifier {
     _pendingRemote.clear();
   }
 
-  void _send(String type, Map<String, dynamic> data) {
+  /// Put a signal on the wire.
+  ///
+  /// The kind goes under 'kind', NOT 'type'. realtime_client's send() mutates
+  /// the payload map it is handed — `payload['type'] = type.toType()` at
+  /// realtime_channel.dart:628 — so a key called 'type' is overwritten with the
+  /// literal string 'broadcast' before it ever leaves the device. It also
+  /// injects 'event'. Both names belong to the transport; using either for our
+  /// own data silently destroys it.
+  void _send(String kind, Map<String, dynamic> data) {
     _chan?.sendBroadcastMessage(
       event: 'signal',
-      payload: {'from': _myUid, 'type': type, 'data': data},
+      payload: {'from': _myUid, 'kind': kind, 'data': data},
     );
   }
 

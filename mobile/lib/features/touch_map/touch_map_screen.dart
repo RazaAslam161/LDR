@@ -872,7 +872,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       'target': owner,
       'x': x,
       'y': y,
-      'type': _type,
+      // 'effect', not 'type' — realtime_client overwrites a payload key called
+      // 'type' with 'broadcast' before sending, so every partner has been
+      // seeing the fallback effect rather than the one that was chosen.
+      'effect': _type,
     });
     // REACTION MODE ONLY — camera icon appears at touch point on partner's body.
     if (_reactionModeActive && owner == _partnerUid) {
@@ -889,7 +892,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     final target = payload['target']?.toString();
     final x = (payload['x'] as num?)?.toDouble();
     final y = (payload['y'] as num?)?.toDouble();
-    final type = payload['type']?.toString() ?? 'glow';
+    final type = payload['effect']?.toString() ?? 'glow';
     if (target == null || x == null || y == null) return;
     _spawn(target, x, y, type);
     _bumpHeat();
