@@ -20,17 +20,17 @@ revoke execute on function public.notify_reach()              from public, anon,
 
 -- pg_net out of public. Its callable functions live in the net.* schema
 -- regardless, so the FCM triggers (net.http_post) are unaffected; this only
--- moves where the extension object itself is registered. Older pg_net
--- versions are not relocatable — for those, drop and recreate (the net
--- schema and its functions are rebuilt; only queued-but-unsent http requests
--- are lost, which for push notifications is nothing).
+-- moves where the extension object itself is registered.
+--
+-- Deliberately NOT wrapped in a drop/recreate fallback. Some pg_net builds
+-- are not relocatable, and dropping the extension takes the net schema with
+-- it — every push notification in the app rides on net.http_post. A raised
+-- notice is the right outcome there; losing push to satisfy a linter is not.
 create schema if not exists extensions;
 do $$
 begin
-  begin
-    alter extension pg_net set schema extensions;
-  exception when others then
-    drop extension if exists pg_net;
-    create extension pg_net with schema extensions;
-  end;
+  alter extension pg_net set schema extensions;
+exception when others then
+  raise notice 'pg_net not relocatable (%). Left in public — push still works.',
+    sqlerrm;
 end $$;
