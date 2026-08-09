@@ -126,4 +126,33 @@ void main() {
       expect(src, contains('onIceGatheringState'));
     });
   });
+
+  group('a slow network cannot leave a user without a relay', () {
+    test('credentials survive a restart', () {
+      // Credentials live 24h. Without persisting them, every cold start depends
+      // on a fresh round trip finishing before the first call — and on a slow
+      // mobile network that is exactly when it does not. The user is then
+      // STUN-only and cannot reach anyone on another network.
+      expect(src, contains('loadCachedTurn'));
+      expect(src, contains('_persistTurn'));
+      final load = fn('static Future<void> loadCachedTurn()');
+      expect(load, contains('_isRelay'),
+          reason: 'a cached entry with no relay is not worth restoring');
+      expect(load, contains('Duration(hours: 20)'),
+          reason: 'must expire before the 24h credential TTL does');
+    });
+
+    test('the cache is warmed before the first call', () {
+      final init = fn('Future<void> init()');
+      expect(init, contains('await loadCachedTurn()'),
+          reason: 'restoring after the network fetch would defeat the point');
+    });
+
+    test('the fetch timeout is long enough for mobile data', () {
+      // 8s was not: an edge function cold start on a slow connection exceeds it,
+      // and the failure was silent.
+      final body = fn('_turnServers()');
+      expect(body, contains('Duration(seconds: 15)'));
+    });
+  });
 }

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:miles/features/call/call_stats.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:miles/core/session_provider.dart';
@@ -148,6 +150,52 @@ class CallController extends ChangeNotifier {
   /// app). Cached ~12h (the creds live 24h). Best-effort: on any failure we
   /// return whatever is cached (possibly nothing) and the call still connects on
   /// permissive networks via STUN.
+  static const _turnCacheKey = 'turn_ice_servers';
+  static const _turnCacheAtKey = 'turn_ice_servers_at';
+
+  /// Load the last known-good relay from disk.
+  ///
+  /// Credentials live 24h, so the previous fetch is almost always still valid.
+  /// Without this, every cold start depends on a fresh network round trip
+  /// completing before the first call — and on a slow mobile network that is
+  /// exactly when it does not. A user whose fetch times out was left with no
+  /// relay at all and no way to know.
+  static Future<void> loadCachedTurn() async {
+    if (_cachedTurn.isNotEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_turnCacheKey);
+      final at = prefs.getInt(_turnCacheAtKey);
+      if (raw == null || at == null) return;
+      final age = DateTime.now().millisecondsSinceEpoch - at;
+      // Minted with a 24h TTL; refuse anything close to the edge.
+      if (age > const Duration(hours: 20).inMilliseconds) return;
+      final list = (jsonDecode(raw) as List)
+          .whereType<Map<String, dynamic>>()
+          .map(Map<String, dynamic>.from)
+          .toList();
+      if (list.any(_isRelay)) {
+        _cachedTurn = list;
+        _turnFetchedAt =
+            DateTime.fromMillisecondsSinceEpoch(at);
+        debugPrint('[turn] restored ${list.length} server(s) from disk');
+      }
+    } catch (e) {
+      debugPrint('[turn] cache restore failed: $e');
+    }
+  }
+
+  static Future<void> _persistTurn(List<Map<String, dynamic>> servers) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_turnCacheKey, jsonEncode(servers));
+      await prefs.setInt(
+          _turnCacheAtKey, DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {
+      // A cache that fails to save is not worth failing a call over.
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> _turnServers() async {
     final at = _turnFetchedAt;
     if (at != null &&
@@ -197,6 +245,7 @@ class CallController extends ChangeNotifier {
       _cachedTurn = parsed;
       _turnFetchedAt = DateTime.now();
       turnError = null;
+      unawaited(_persistTurn(parsed));
       debugPrint('[turn] ok — $relays relay server(s)');
       return parsed;
     } on FunctionException catch (e) {
@@ -283,8 +332,10 @@ class CallController extends ChangeNotifier {
     if (couple == null) return;
     _coupleId = couple.id;
     await _subscribeChannel();
-    unawaited(
-        _turnServers()); // pre-warm TURN creds so the first call is instant
+    // Disk first so a call placed seconds after launch already has a relay,
+    // then refresh in the background.
+    await loadCachedTurn();
+    unawaited(_turnServers());
   }
 
   // ── Outgoing ──────────────────────────────────────────────────────────────
