@@ -65,10 +65,17 @@ android {
                 logger.warn("=========================================================")
                 signingConfigs.getByName("debug")
             }
+            // R8 (minify + resource shrink) is OFF for the directly-shared
+            // universal APK: it can strip reflection/JNI paths in WebRTC and
+            // ML Kit that only fail on a real device, and that cannot be
+            // verified from a build machine. proguard-rules.pro is written and
+            // ready; enable this once the build has been tapped through on a
+            // phone (calls + touch-map especially).
             isMinifyEnabled = false
             isShrinkResources = false
         }
     }
+    // One universal APK, every ABI, so it installs on every Android device.
 }
 
 kotlin {
