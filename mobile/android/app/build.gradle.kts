@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
@@ -6,6 +8,14 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Release signing lives outside the repo. android/.gitignore already covers
+// key.properties and *.keystore, so the signing material never reaches git.
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
 
 android {
     namespace = "com.miles.miles"
@@ -29,9 +39,34 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // The debug keystore's password is the literally-documented string
+            // "android" on every machine on earth. Play rejects APKs signed
+            // with it, and anything signed with it can be re-signed by anyone.
+            // Falling back is only tolerable because it is impossible to miss.
+            signingConfig = if (hasReleaseKey) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn("=========================================================")
+                logger.warn(" NO android/key.properties - signing release with DEBUG.")
+                logger.warn(" This APK CANNOT be uploaded to Google Play. Sideload only.")
+                logger.warn("=========================================================")
+                signingConfigs.getByName("debug")
+            }
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

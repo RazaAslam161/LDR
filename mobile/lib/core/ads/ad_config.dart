@@ -24,7 +24,14 @@ class AdConfig {
   static const bool useTestAds = true;
 
   /// Master switch. A future "remove ads" paid upgrade flips this to false.
-  static bool adsEnabled = true;
+  ///
+  /// OFF for the first public release. With [useTestAds] still true, every
+  /// impression a real user generated would be a Google test ad: no revenue,
+  /// and serving test ads in production is against AdMob policy. Leaving the
+  /// SDK live also pulls the AD_ID permission, which has to be declared on
+  /// the Play Data Safety form. Flip both back on together, once the real
+  /// unit IDs below are filled in.
+  static bool adsEnabled = false;
 
   // ── Google official TEST unit IDs ──────────────────────────────────
   static const String _testBannerAndroid =

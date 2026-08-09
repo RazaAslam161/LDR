@@ -145,6 +145,14 @@ class SupabaseRepository {
     return Couple.fromJson(_singleRow(res));
   }
 
+  /// Permanently deletes the signed-in account and everything keyed to it.
+  ///
+  /// Server-side and irreversible: the RPC deletes the auth user, which
+  /// cascades through profiles to every couple-scoped row, and clears the
+  /// couple's storage objects once nobody is left in it.
+  static Future<void> deleteMyAccount() =>
+      _c.rpc<dynamic>('delete_my_account');
+
   static Future<void> joinCouple(String code) async {
     // `join_couple_by_code` validates the code, enforces the 2-member cap, and
     // links the profile server-side. We translate its raised errors to the

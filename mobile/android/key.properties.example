@@ -1,0 +1,13 @@
+# Copy to android/key.properties and fill in. NEVER commit the real file —
+# android/.gitignore already excludes key.properties and *.keystore.
+#
+# Create the keystore first (you choose the passwords; keep them safe — losing
+# this file means you can never publish an update to this app again):
+#
+#   keytool -genkey -v -keystore miles-release.jks -storetype JKS \
+#     -keyalg RSA -keysize 4096 -validity 10000 -alias miles
+#
+storeFile=../miles-release.jks
+storePassword=
+keyAlias=miles
+keyPassword=

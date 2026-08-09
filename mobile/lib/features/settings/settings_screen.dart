@@ -336,6 +336,73 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  /// Play requires an in-app path to delete the account, and requires that it
+  /// really deletes rather than deactivates. Typing DELETE is deliberate
+  /// friction: this is irreversible and takes the partner's shared history
+  /// with it once nobody is left in the couple.
+  Future<void> _deleteAccount() async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.transparent,
+        title: const Text('Delete your account?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This permanently deletes your account, your messages, your '
+              'photos and videos, and everything in your vault. If your '
+              'partner has already left, their copy goes too. '
+              'This cannot be undone.',
+              style: TextStyle(color: MilesColors.taupe, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                labelText: 'Type DELETE to confirm',
+              ),
+              onChanged: (_) => (ctx as Element).markNeedsBuild(),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB83A57)),
+            onPressed: controller.text.trim().toUpperCase() == 'DELETE'
+                ? () => Navigator.pop(ctx, true)
+                : null,
+            child: const Text('Delete forever'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (confirmed != true) return;
+
+    setState(() => _busy = true);
+    try {
+      await FcmService.clearToken();
+      await SupabaseRepository.deleteMyAccount();
+      await ref.read(sessionProvider.notifier).signOut();
+      if (mounted) context.go('/signin');
+    } catch (_) {
+      // The account still exists, so say so — a silent failure here reads as
+      // "deleted" and the user walks away believing their data is gone.
+      _toast('Could not delete your account. Please try again.');
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _signOut() async {
     // Drop this device's push token while still authenticated.
     await FcmService.clearToken();
@@ -611,6 +678,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: const Text('Sign out',
                   style: TextStyle(color: MilesColors.ember)),
               onTap: _signOut,
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading:
+                  const Icon(Icons.delete_forever, color: Color(0xFFB83A57)),
+              title: const Text('Delete account',
+                  style: TextStyle(color: Color(0xFFB83A57))),
+              subtitle: const Text('Permanently erases your data',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              onTap: _busy ? null : _deleteAccount,
             ),
 
             const SizedBox(height: 40),
