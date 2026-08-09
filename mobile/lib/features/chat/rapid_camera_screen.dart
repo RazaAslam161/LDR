@@ -65,6 +65,21 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   CameraFilter _selectedFilter =
       kCameraFilters.firstWhere((f) => f.id == 'none');
 
+  // Zoom. The bounds come from the device, not from a guess — a phone with no
+  // telephoto reports max == min and pinching is then a no-op rather than a
+  // stretched, soft digital crop.
+  double _minZoom = 1, _maxZoom = 1, _zoom = 1;
+
+  /// Zoom at the moment the pinch began, so the gesture is relative.
+  double _zoomAtGestureStart = 1;
+
+  /// setZoomLevel is a platform round trip. A pinch emits scale updates every
+  /// frame, and firing one call per update floods the channel and makes the
+  /// preview stutter — the opposite of what zoom is for. One in flight at a
+  /// time; the newest value wins.
+  bool _zoomInFlight = false;
+  double? _pendingZoom;
+
   _CamState _state = _CamState.preview;
   File? _capturedFile;
 
@@ -189,6 +204,13 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     // supported size and initialize() does not throw. Log what we actually got,
     // because it is the number every downstream cost scales with.
     debugPrint('[camera] preview=${c.value.previewSize}');
+    try {
+      _minZoom = await c.getMinZoomLevel();
+      _maxZoom = await c.getMaxZoomLevel();
+    } catch (_) {
+      _minZoom = _maxZoom = 1; // device would not say — treat as fixed
+    }
+    _zoom = _minZoom;
     setState(() => _ready = true);
   }
 
@@ -243,6 +265,8 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     await _controller?.dispose();
     _controller = null;
     _cameraIndex = (_cameraIndex + 1) % _cameras.length;
+    _zoom = 1;
+    _pendingZoom = null;
     await _initController(_cameras[_cameraIndex]); // filter is preserved
   }
 
@@ -535,6 +559,39 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     );
   }
 
+  void _onZoomStart(ScaleStartDetails _) => _zoomAtGestureStart = _zoom;
+
+  void _onZoomUpdate(ScaleUpdateDetails d) {
+    if (_maxZoom <= _minZoom) return; // fixed lens — nothing to do
+    final next =
+        (_zoomAtGestureStart * d.scale).clamp(_minZoom, _maxZoom).toDouble();
+    if ((next - _zoom).abs() < 0.01) return;
+    setState(() => _zoom = next);
+    _applyZoom(next);
+  }
+
+  /// Coalescing apply: at most one platform call in flight, and whatever the
+  /// finger reached while it was busy is applied next. Dropping the
+  /// intermediate values is the point — they are already stale.
+  Future<void> _applyZoom(double value) async {
+    if (_zoomInFlight) {
+      _pendingZoom = value;
+      return;
+    }
+    _zoomInFlight = true;
+    try {
+      await _controller?.setZoomLevel(value);
+    } catch (_) {
+      // Some devices reject a level mid-switch; the next update recovers.
+    }
+    _zoomInFlight = false;
+    final queued = _pendingZoom;
+    if (queued != null) {
+      _pendingZoom = null;
+      unawaited(_applyZoom(queued));
+    }
+  }
+
   // ── preview state ─────────────────────────────────────────────────────────
   Widget _buildPreview() {
     final c = _controller;
@@ -561,7 +618,39 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     return Stack(
       fit: StackFit.expand,
       children: [
-        viewfinder,
+        // Pinch anywhere on the frame. behavior: translucent so the controls
+        // stacked above still receive their own taps.
+        GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onScaleStart: _onZoomStart,
+          onScaleUpdate: _onZoomUpdate,
+          child: viewfinder,
+        ),
+
+        // Only while it differs from 1x — a permanent badge is clutter.
+        if (_zoom > _minZoom + 0.01)
+          Positioned(
+            bottom: 150,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('${_zoom.toStringAsFixed(1)}x',
+                      style: const TextStyle(
+                          color: MilesColors.cream50,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ),
 
         // 2. top bar (hidden while recording)
         if (_state != _CamState.recording)

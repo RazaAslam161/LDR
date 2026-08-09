@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -332,16 +333,26 @@ class PresenceService {
         isAppActivity: true,
       );
 
+  /// The partner's presence row.
+  ///
+  /// Takes the freshest matching row rather than insisting there is exactly
+  /// one. maybeSingle() ERRORS when more than one row comes back, and a couple
+  /// can end up with a stray third row — an earlier member, a re-pair, a
+  /// half-finished leave. That threw inside _bind, which had no catch, so the
+  /// realtime subscribe below it never ran either: that user saw no presence at
+  /// all while their partner saw everything, because the failure depends on
+  /// which rows happen to exist on each side.
   static Future<Presence?> fetchPartner(String coupleId) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
-    final res = await _c
+    final rows = await _c
         .from('presence')
         .select()
         .eq('couple_id', coupleId)
         .neq('user_id', uid)
-        .maybeSingle();
-    return res == null ? null : Presence.fromJson(res);
+        .order('updated_at', ascending: false)
+        .limit(1);
+    return rows.isEmpty ? null : Presence.fromJson(rows.first);
   }
 
   static Future<Presence?> fetchMine(String coupleId) async {
@@ -385,8 +396,15 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   /// couple becomes available — never with a null id.
   Future<void> _bind(String coupleId) async {
     _coupleId = coupleId;
-    final p = await PresenceService.fetchPartner(coupleId);
-    if (mounted) state = p;
+    try {
+      final p = await PresenceService.fetchPartner(coupleId);
+      if (mounted) state = p;
+    } catch (e) {
+      // The initial read is a convenience; realtime is the actual mechanism.
+      // Letting a failed fetch skip _subscribe() is what turned one bad row
+      // into "she can never see where I am", permanently, on one side only.
+      debugPrint('[presence] initial partner fetch failed: $e');
+    }
     await _subscribe();
     // Re-evaluate liveness even when no presence event fires (e.g. a hard-killed
     // partner writes nothing): refetch a fresh row so the freshness-gated getters
