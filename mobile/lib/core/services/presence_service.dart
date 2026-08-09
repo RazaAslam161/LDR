@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_service.dart';
+import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -125,7 +126,12 @@ class Presence {
   bool get isTrulyOnline {
     final ts = appLastActiveAt;
     if (ts == null) return false;
-    return DateTime.now().toUtc().difference(ts).inSeconds <= 45;
+    // ServerClock, not DateTime.now(). app_last_active_at is stamped by the
+    // SERVER now, so comparing it to this device's clock reintroduced exactly
+    // the error the trigger removed — and directionally: a reader whose clock
+    // runs slow sees their partner as permanently offline while looking online
+    // to them.
+    return ServerClock.now().difference(ts).inSeconds <= 45;
   }
 
   /// HONEST online for every reader (Home, drawer, chat) — same as
@@ -172,21 +178,38 @@ class PresenceService {
   }) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
-    final now = DateTime.now().toUtc().toIso8601String();
+    // Sent as a marker only. A BEFORE trigger replaces both with now(), so the
+    // value here is never trusted — what matters is WHETHER the column is
+    // present, which is how the server knows this write counts as activity.
+    final now = DateTime.now().toUtc();
+    final marker = now.toIso8601String();
     try {
       // couple_id is ALWAYS written (never conditional) so that if a row
       // somehow holds a stale couple_id, the very next presence write — any
       // heartbeat, typing, mood, location ping — self-heals it. onConflict is
       // pinned to the user_id primary key so the upsert updates in place.
-      await _c.from('presence').upsert({
+      final rows = await _c.from('presence').upsert({
         'user_id': uid,
         'couple_id': coupleId,
-        'updated_at': now,
-        if (isAppActivity) 'app_last_active_at': now,
+        'updated_at': marker,
+        if (isAppActivity) 'app_last_active_at': marker,
         ...patch,
-      }, onConflict: 'user_id');
-    } catch (_) {
-      // presence is best-effort; never surface an error to the user
+      }, onConflict: 'user_id').select('updated_at');
+
+      // The row comes back carrying the timestamp the SERVER just wrote, so
+      // the 30s heartbeat doubles as a clock sync with no extra round trip.
+      final serverTs = (rows is List && rows.isNotEmpty)
+          ? rows.first['updated_at']
+          : null;
+      if (serverTs is String) {
+        final parsed = DateTime.tryParse(serverTs);
+        if (parsed != null) ServerClock.observe(parsed, sentAt: now);
+      }
+    } catch (e) {
+      // presence is best-effort; never surface an error to the user — but a
+      // silent write failure here means no online status and no partner
+      // screen, which is worth a line in the log.
+      debugPrint('[presence] upsert failed: $e');
     }
   }
 
