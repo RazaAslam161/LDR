@@ -98,7 +98,9 @@ class CallScreen extends ConsumerWidget {
             // another country with no cable and no logcat. Without a relay,
             // two people on different networks cannot connect at all — and
             // every symptom of that reads as "the call just didn't work".
-            if (!CallController.relayAvailable && (calling || ringing))
+            // relayKnown is tri-state: null means "not fetched yet", which
+            // is not the same as "no relay" and must not accuse the network.
+            if (CallController.relayKnown == false && (calling || ringing))
               Positioned(
                 top: MediaQuery.paddingOf(context).top + 44,
                 left: 16,

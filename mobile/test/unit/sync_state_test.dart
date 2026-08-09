@@ -49,14 +49,22 @@ void main() {
           reason: 'coupling these is what forced the watermark to move back');
     });
 
-    test('seen is a pure watermark comparison', () {
-      // Requiring isActivelyInChat meant a message was only "seen" while she
-      // was still looking at it — which is not what seen means.
+    test('seen involves no clock at all', () {
+      // This test used to REQUIRE chatLastRead here, pinning the defect as if
+      // it were the fix. chat_last_read is stamped by the READER'S PHONE and
+      // was compared against created_at, stamped by POSTGRES — two clocks, one
+      // inequality, one second of slop. A reader 40s slow left messages on a
+      // black tick long after reading them; a reader running fast marked
+      // messages seen that were never on screen. Receipts are server-assigned
+      // integers now, so no device clock participates.
       final fn = chat.substring(chat.indexOf('_MsgStatus _statusFor'));
       final body = codeOnly(fn.substring(0, fn.indexOf('\n  }')));
       expect(body.contains('isActivelyInChat'), isFalse,
           reason: 'whether a message was read cannot depend on who is online');
-      expect(body, contains('chatLastRead'));
+      expect(body.contains('chatLastRead'), isFalse,
+          reason: "comparing two devices' clocks is the bug, not the fix");
+      expect(body, contains('readSeq'));
+      expect(body, contains('deliveredSeq'));
     });
   });
 

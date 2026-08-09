@@ -95,15 +95,20 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     // Our triggers deliver { kind, record }. Bare rows (an older reach trigger
     // that posted to_jsonb(new) directly) still work and default to "reach".
-    const kind: "reach" | "care" | "call" =
+    const kind: "reach" | "care" | "call" | "message" =
       payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
 
     // Calls name the two sides explicitly (caller_id/callee_id); reach and care
     // use from_user and the recipient is simply the other member of the couple.
-    const fromUser: string | undefined =
-      kind === "call" ? row?.caller_id : row?.from_user;
+    // Messages name their author sender_id; calls name both sides explicitly;
+    // reach/care use from_user and the recipient is the other couple member.
+    const fromUser: string | undefined = kind === "call"
+      ? row?.caller_id
+      : kind === "message"
+      ? row?.sender_id
+      : row?.from_user;
     const explicitRecipient: string | undefined =
       kind === "call" ? row?.callee_id : undefined;
     const rowId: string = row?.id ?? "";
@@ -164,8 +169,15 @@ Deno.serve(async (req) => {
           ...(kind === "call"
             ? { call_id: rowId, video: String(row?.video === true) }
             : {}),
+          ...(kind === "message" ? { message_id: rowId } : {}),
         },
-        android: { priority: "high", ttl: "30s" },
+        // A call is worthless if it arrives late, but a MESSAGE must survive a
+        // doze window or an offline stretch — a 30s TTL made FCM discard it
+        // rather than queue it, so a backgrounded partner simply never got it.
+        android: {
+          priority: "high",
+          ttl: kind === "message" ? "86400s" : "30s",
+        },
         apns: {
           headers: { "apns-priority": "10" },
           payload: { aps: { sound: "default", "content-available": 1 } },

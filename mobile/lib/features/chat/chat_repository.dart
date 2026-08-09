@@ -36,7 +36,15 @@ class Message {
     this.deletedBy = const [],
     this.localPath,
     this.sendStatus = SendStatus.sent,
+    this.seq = 0,
   });
+
+  /// Server-assigned monotonic order. Receipts compare THIS, never a clock:
+  /// created_at is stamped by Postgres while the old read watermark was
+  /// stamped by the reader's phone, so "seen" was a comparison between two
+  /// different clocks and was wrong for anyone whose device time drifted.
+  /// 0 means "not yet on the server" (an optimistic local message).
+  final int seq;
 
   /// Transient: the local file rendered instantly while it uploads (optimistic
   /// media). Never comes from the DB.
@@ -47,6 +55,7 @@ class Message {
         id: id,
         senderId: senderId,
         createdAt: createdAt,
+        seq: seq,
         body: body,
         imagePath: imagePath,
         voicePath: voicePath,
@@ -88,6 +97,7 @@ class Message {
         replyToId: JsonUtils.parseStringOrNull(j['reply_to_id']),
         kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
+        seq: JsonUtils.parseInt(j['seq']),
         deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
         deletedBy: j['deleted_by'] is List
             ? (j['deleted_by'] as List).map((e) => e.toString()).toList()
@@ -152,6 +162,33 @@ class ChatRepository {
   ChatRepository._();
 
   static SupabaseClient get _c => SupabaseService.client;
+
+  /// Everything the couple has sent after [afterSeq], oldest-first.
+  ///
+  /// postgres_changes and broadcast are both live-only: their cursor is "the
+  /// moment I joined this topic". Socket drops at T0, partner sends at T1,
+  /// socket reopens at T2 — the T1 insert was emitted into a socket that no
+  /// longer existed and is never re-emitted. Without this the message is
+  /// absent from the list, the screen and _ids: permanently invisible until
+  /// the app is killed and relaunched.
+  static Future<List<Message>> fetchSince(String coupleId, int afterSeq) async {
+    final res = await _c
+        .from('messages')
+        .select()
+        .eq('couple_id', coupleId)
+        .gt('seq', afterSeq)
+        .order('seq', ascending: true)
+        .limit(500);
+    final out = <Message>[];
+    for (final row in (res as List)) {
+      try {
+        out.add(Message.fromJson(JsonUtils.asMap(row)));
+      } catch (_) {
+        // Skip a malformed row rather than aborting the whole catch-up.
+      }
+    }
+    return out;
+  }
 
   /// Messages newest-first (descending by server `created_at`). Pairs with a
   /// `reverse: true` ListView so the newest message sits at the bottom.

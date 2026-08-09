@@ -59,11 +59,35 @@ Deno.serve(async (req: Request) => {
     if (!cf.ok) {
       return json({ error: "cloudflare_error", status: cf.status, body: text }, 502);
     }
-    // Pass Cloudflare's { iceServers: [...] } straight through.
-    return new Response(text, {
-      status: 200,
-      headers: { ...cors, "Content-Type": "application/json" },
-    });
+
+    // NORMALISE THE SHAPE HERE. This is the two-month calling bug.
+    //
+    // Cloudflare's generate-ice-servers returns `iceServers` as a single
+    // OBJECT ({urls:[...], username, credential}), not an array. This function
+    // used to pass the body straight through on the assumption it was an
+    // array, and the client rejected anything that was not a List — so
+    // _cachedTurn stayed empty forever, no relay candidate ever entered a peer
+    // connection, and every call between two different networks failed while
+    // two phones on one wifi worked perfectly on host candidates.
+    //
+    // The contract the client depends on is guaranteed server-side now, and
+    // both shapes are accepted so this keeps working if Cloudflare changes it.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return json({ error: "cloudflare_bad_json", body: text.slice(0, 500) }, 502);
+    }
+    const rawServers = (parsed as { iceServers?: unknown })?.iceServers;
+    const iceServers = Array.isArray(rawServers)
+      ? rawServers
+      : rawServers && typeof rawServers === "object"
+      ? [rawServers]
+      : [];
+    if (iceServers.length === 0) {
+      return json({ error: "cloudflare_no_ice_servers", body: text.slice(0, 500) }, 502);
+    }
+    return json({ iceServers });
   } catch (e) {
     return json({ error: "exception", detail: String(e) }, 500);
   }

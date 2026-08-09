@@ -64,8 +64,13 @@ void main() {
   });
 
   group('the app knows whether it can relay', () {
-    test('the ice config records relay availability', () {
-      expect(src, contains('relayAvailable = servers.any(_isRelay)'));
+    test('relay availability is derived from the cache, not a side effect', () {
+      // It used to be a static assigned only inside _iceConfig, so the callee
+      // — which rings before it ever builds a peer connection — read false
+      // unconditionally and showed a "no relay" banner on a healthy device.
+      expect(src, contains('static bool get relayAvailable'));
+      expect(src, contains('static bool? get relayKnown'),
+          reason: '"not fetched yet" is not the same as "no relay"');
     });
 
     test('placing a call without a relay is logged as a warning', () {
@@ -170,15 +175,38 @@ void main() {
       }
     });
 
-    test('an explicit call outranks the failure backoff', () {
-      // The backoff exists to stop background refreshes hammering a broken
-      // function. Applied to a user pressing Call with no relay at all, it
-      // would guarantee a call that cannot connect.
-      final ensure = fn('static Future<void> _ensureRelay()');
-      expect(ensure, contains('_turnFailedAt = null'));
-      final body = fn('_turnServers()');
-      expect(body, contains('_cachedTurn.isNotEmpty &&'),
-          reason: 'the backoff must only short-circuit when a relay is cached');
+    test('the relay fetch cannot sit unbounded in front of a call', () {
+      // This test used to REQUIRE a `_cachedTurn.isNotEmpty &&` guard on the
+      // backoff, pinning the defect as if it were the fix: that guard disabled
+      // the backoff in exactly the case it existed for — nothing cached and
+      // the function failing — so a cold cache retried 15s at a time, three
+      // times, before the offer was even sent. 45s against the peer's own 35s
+      // timeout: the call could not connect, by arithmetic.
+      // Sliced by hand: fn() cuts at the first '\n  }', which here matches the
+      // '})' closing _ensureRelay's own multi-line parameter list.
+      final at = src.indexOf('static Future<void> _ensureRelay(');
+      expect(at, greaterThan(-1));
+      // Anchor past 'async {': _ensureRelay's parameter list is multi-line, so
+      // both fn() and a naive '{' scan stop at the '})' that closes it.
+      final bodyStart = src.indexOf('async {', at);
+      final ensure = src.substring(at, src.indexOf('\n  }', bodyStart));
+      expect(ensure, contains('Duration budget'));
+      expect(ensure, contains('.timeout(budget)'),
+          reason: 'the budget has to be enforced, not merely declared');
+      expect(ensure, contains('TimeoutException'),
+          reason: 'and exceeding it must proceed, not abort the call');
+
+      // And the peer-connection path must never touch the network at all.
+      // Comments stripped first: the comment explaining that this USED to
+      // await _turnServers() otherwise fails the assertion about what the code
+      // now does — a correct fix reported as a regression.
+      final ice = fn('static Future<Map<String, dynamic>> _iceConfig()')
+          .split('\n')
+          .where((l) => !l.trimLeft().startsWith('//'))
+          .join('\n');
+      expect(ice.contains('await _turnServers()'), isFalse,
+          reason: 'building the connection must not block on a fetch');
+      expect(ice, contains('_cachedTurn'));
     });
   });
 }

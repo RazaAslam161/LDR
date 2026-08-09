@@ -26,6 +26,7 @@ import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/selectable_message.dart';
@@ -77,6 +78,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// the screen around them.
   final _receiptTick = ValueNotifier<int>(0);
 
+  /// The partner's delivery/read position. Live via realtime, so the sender's
+  /// tick updates the moment they ack.
+  ChatReceipt? _partnerReceipt;
+  RealtimeChannel? _receiptChannel;
+
   final _selection = ChatSelection();
   bool get _selecting => _selection.isActive;
   bool _subscribing = false; // re-entrancy guard for _subscribe
@@ -85,7 +91,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// IDs of my messages that have reached 'seen'. Seen is permanent — once a
   /// message is in here it never downgrades back to delivered, even after the
   /// partner leaves the chat / goes offline (WhatsApp semantics). Only grows.
-  final Set<String> _seenMessageIds = {};
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
   static const _uuid = Uuid();
@@ -320,6 +325,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (s == AppLifecycleState.resumed && _coupleId != null) {
       PresenceService.setOnline(_coupleId!, online: true);
       PresenceService.setChatLastRead(_coupleId!);
+      // Android freezes the process on background, so the socket was dead the
+      // whole time. Anything sent during that window exists only in Postgres.
+      unawaited(_catchUp());
+      unawaited(_refreshPartnerReceipt());
     }
   }
 
@@ -330,6 +339,50 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// acks — so `unsubscribe()` + immediate re-`channel()` created duplicate-topic
   /// channels whose join was rejected, leaving them joined-but-dead (no live
   /// render). removeChannel() awaits the leave first, so the re-join is clean.
+  /// Highest server seq currently on screen. 0 when nothing has landed yet.
+  int get _maxSeq =>
+      _messages.fold<int>(0, (a, m) => m.seq > a ? m.seq : a);
+
+  /// Tell the server we have read up to here. Idempotent and monotonic
+  /// server-side, so a lost or out-of-order ack cannot un-read anything.
+  void _ackRead() {
+    final seq = _maxSeq;
+    if (seq > 0) unawaited(ChatReceiptRepository.ackRead(seq));
+  }
+
+  Future<void> _refreshPartnerReceipt() async {
+    final couple = _coupleId;
+    final partnerId = ref.read(sessionProvider).partner?.id;
+    if (couple == null || partnerId == null) return;
+    final r = await ChatReceiptRepository.fetchPartner(couple, partnerId);
+    if (r != null && mounted) setState(() => _partnerReceipt = r);
+  }
+
+  /// Pull anything that landed while the socket was down.
+  ///
+  /// postgres_changes and broadcast are live-only: their cursor is the moment
+  /// the topic was joined. A message sent during a gap was emitted into a
+  /// socket that no longer existed and is never re-emitted — it was absent
+  /// from the list, the screen and _ids, permanently, until the app was killed
+  /// and relaunched. Rejoining a channel is not enough; the gap has to be read.
+  Future<void> _catchUp() async {
+    final couple = _coupleId;
+    if (couple == null) return;
+    try {
+      final missed = await ChatRepository.fetchSince(couple, _maxSeq);
+      if (!mounted || missed.isEmpty) return;
+      for (final m in missed) {
+        _onIncoming(m, fromDb: true);
+      }
+      // We have now genuinely received them; say so, and if the chat is open
+      // they are also read.
+      unawaited(ChatReceiptRepository.ackDelivered(_maxSeq));
+      _ackRead();
+    } catch (e) {
+      debugPrint('[chat] catch-up failed: $e');
+    }
+  }
+
   Future<void> _subscribe() async {
     final id = _coupleId;
     if (id == null || !mounted || _subscribing) return;
@@ -349,6 +402,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           await client.removeChannel(old2);
         } catch (_) {}
       }
+      final old3 = _receiptChannel;
+      _receiptChannel = null;
+      if (old3 != null) {
+        try {
+          await client.removeChannel(old3);
+        } catch (_) {}
+      }
       if (!mounted) return;
       _channel = ChatRepository.subscribe(
         id,
@@ -365,7 +425,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // Let other screens (e.g. the rapid camera) push the fast-path on THIS
       // live channel instead of creating a duplicate-topic one.
       ChatBroadcastService.active = _moodChannel;
+
+      // The partner's receipt row, live. Without this the sender's tick only
+      // moved when something else happened to rebuild the screen.
+      final partnerId = ref.read(sessionProvider).partner?.id;
+      if (partnerId != null) {
+        _receiptChannel = client
+            .channel('receipts:$id')
+            .onPostgresChanges(
+              event: PostgresChangeEvent.all,
+              schema: 'public',
+              table: 'chat_receipts',
+              filter: PostgresChangeFilter(
+                type: PostgresChangeFilterType.eq,
+                column: 'user_id',
+                value: partnerId,
+              ),
+              callback: (payload) {
+                final row = payload.newRecord;
+                if (row.isEmpty || !mounted) return;
+                setState(() => _partnerReceipt = ChatReceipt.fromJson(row));
+              },
+            )
+            .subscribe();
+      }
+
       PresenceService.setChatLastRead(id);
+      // Rejoining a channel does not replay what it missed while gone.
+      await _catchUp();
+      await _refreshPartnerReceipt();
     } finally {
       _subscribing = false;
     }
@@ -390,7 +478,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _messages.addAll(msgs);
       _sortMessages();
       _ids.addAll(msgs.map((m) => m.id));
-      _seedSeenLatch();
     } catch (_) {
       // first-run is fine
     }
@@ -403,9 +490,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
     // the chat is open (the shell only keeps this screen alive while viewing).
     PresenceService.setChatLastRead(couple.id);
+    await _refreshPartnerReceipt();
+    _ackRead();
     _readTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
       PresenceService.setChatLastRead(couple.id);
+      // Acks are cheap and idempotent (the server takes the max), so a dropped
+      // one self-corrects rather than stranding a tick forever.
+      _ackRead();
       // A tick, not a rebuild. isTrulyOnline is freshness-gated, so a receipt
       // really can decay with nothing else changing — but a bare setState here
       // rebuilt the entire screen every 5 seconds: the full-screen background
@@ -555,54 +647,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // count and make _allSelectedAreMine vacuously true.
         _selection.prune(_ids);
       });
-      _seedSeenLatch();
     } catch (_) {}
   }
 
-  /// Seeds the permanent "seen" latch from history so seen survives a reload /
-  /// reopen: any of MY messages at or before the partner's current chat_last_read
-  /// have definitely been seen. Without this, a reload would briefly recompute
-  /// old seen messages as delivered until the next presence tick.
-  void _seedSeenLatch() {
-    final read = ref.read(partnerPresenceProvider)?.chatLastRead;
-    if (read == null) return;
-    final myUid = SupabaseService.currentUserId;
-    for (final m in _messages) {
-      if (m.isMine(myUid) && !m.createdAt.isAfter(read)) {
-        _seenMessageIds.add(m.id);
-      }
-    }
-  }
-
-  /// Read-receipt status for one of MY messages. Seen is LATCHED: once true it
-  /// stays true forever (never downgrades to delivered when the partner leaves).
   _MsgStatus _statusFor(Message m, Presence? p) {
-    // LATCH: if this message was ever seen, it stays seen.
-    if (_seenMessageIds.contains(m.id)) return _MsgStatus.seen;
-
-    // SEEN is a WATERMARK COMPARISON and nothing else. chat_last_read only ever
-    // moves forward, so "she had read up to here" cannot stop being true.
-    //
-    // This used to also require isActivelyInChat — live presence. The moment
-    // she closed the chat that went false, and every message not already
-    // latched in memory fell back to a black double tick. Whether a message has
-    // been read is durable; whether she is looking right now is not. Mixing
-    // them made the durable fact expire.
-    final seenNow = p?.chatLastRead != null &&
-        p!.chatLastRead!
-            .isAfter(m.createdAt.subtract(const Duration(seconds: 1)));
-    if (seenNow) {
-      _seenMessageIds.add(m.id);
-      return _MsgStatus.seen;
-    }
-
-    // DELIVERED: partner genuinely online right now (freshness-gated), not the
-    // stored is_online bool which never expires on a hard kill.
-    if (p != null && p.isTrulyOnline) return _MsgStatus.delivered;
-
-    // SENT: partner offline or status stale. Safe default.
+    // A message that has not reached the server has no seq and no receipt.
+    if (m.seq <= 0) return _MsgStatus.sent;
+    final r = _partnerReceipt;
+    if (r == null) return _MsgStatus.sent;
+    if (r.readSeq >= m.seq) return _MsgStatus.seen;
+    // DELIVERED is now a real fact the partner's device acked, not a
+    // restatement of "their app is in the foreground".
+    if (r.deliveredSeq >= m.seq) return _MsgStatus.delivered;
     return _MsgStatus.sent;
   }
+
 
   /// Saves an image or video message to the private vault, with brief feedback.
   Future<void> _saveMessageMedia(Message m) async {
@@ -826,6 +885,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     WidgetsBinding.instance.removeObserver(this);
     realtimeResumed.removeListener(_subscribe);
     _receiptTick.dispose();
+    final rc = _receiptChannel;
+    if (rc != null) SupabaseService.client.removeChannel(rc);
     ChatSendQueue.instance.removeListener(_adoptPending);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();

@@ -207,9 +207,12 @@ class CallController extends ChangeNotifier {
     // function. It must NOT apply when someone is placing a call and we have no
     // relay at all — that is a first install whose one fetch happened to fail,
     // and refusing to retry would hand them a call that cannot possibly connect.
+    // The backoff exists to stop a broken function being hammered. It used to
+    // be guarded on `_cachedTurn.isNotEmpty`, which disabled it in exactly the
+    // case it was written for: nothing cached and the function failing. That
+    // turned every call into repeated 15s timeouts.
     final failedAt = _turnFailedAt;
     if (failedAt != null &&
-        _cachedTurn.isNotEmpty &&
         DateTime.now().difference(failedAt) < const Duration(seconds: 60)) {
       return _cachedTurn;
     }
@@ -222,14 +225,25 @@ class CallController extends ChangeNotifier {
 
       final data = res.data;
       final raw = data is Map ? data['iceServers'] : null;
-      if (raw is! List) {
+      // Cloudflare returns iceServers as a single OBJECT, not an array. This
+      // used to demand a List and bail — so the cache stayed empty forever, no
+      // relay ever reached a peer connection, and every call between two
+      // networks failed while two phones on one wifi worked fine on host
+      // candidates. The edge function normalises this now; accepting both
+      // shapes here too means a stale deployed function cannot resurrect it.
+      final List<dynamic> rawList;
+      if (raw is List) {
+        rawList = raw;
+      } else if (raw is Map) {
+        rawList = [raw];
+      } else {
         turnError = 'bad response shape';
         debugPrint('[turn] unexpected response: ${data.runtimeType} $data');
         return _cachedTurn;
       }
 
       final parsed = <Map<String, dynamic>>[];
-      for (final srv in raw) {
+      for (final srv in rawList) {
         if (srv is! Map) continue;
         final m = Map<String, dynamic>.from(srv);
         final urls = m['urls'];
@@ -288,8 +302,22 @@ class CallController extends ChangeNotifier {
   /// an actionable report.
   static String? turnError;
 
+  /// Why the last call attempt failed, for the UI. Null when nothing failed.
+  String? lastError;
+
   /// Whether the last ICE config actually contained a relay.
-  static bool relayAvailable = false;
+  /// Derived from the cache, not from a side effect of building a peer
+  /// connection. It used to be a static assigned only inside _iceConfig, so on
+  /// the callee — which rings before it ever builds one — it read false
+  /// unconditionally and showed a scary "no relay" banner on a perfectly
+  /// healthy device, while the one diagnostic built to distinguish a relay
+  /// problem from everything else reported the wrong answer.
+  static bool get relayAvailable => _cachedTurn.any(_isRelay);
+
+  /// Null until a fetch has been attempted in this process — "unknown" is not
+  /// the same as "no", and the UI should not accuse the network before asking.
+  static bool? get relayKnown =>
+      (_turnFetchedAt == null && _cachedTurn.isEmpty) ? null : relayAvailable;
 
   /// Full WebRTC ICE config: Google/Cloudflare STUN + Cloudflare TURN (which
   /// includes TURN-over-TLS:443 for carrier-NAT / UDP-blocked networks). A static
@@ -301,13 +329,48 @@ class CallController extends ChangeNotifier {
   /// that is exactly the fetch most likely to miss — and a new user's first
   /// impression is a call that cannot connect. Retried once, briefly, because a
   /// person is waiting.
-  static Future<void> _ensureRelay() async {
+  /// One shared fetch. Concurrent callers await the same request instead of
+  /// serialising their own, which is what turned a cold cache into three
+  /// sequential 15s round trips.
+  static Future<List<Map<String, dynamic>>>? _inflightTurn;
+
+  static Future<List<Map<String, dynamic>>> _sharedTurnFetch() {
+    final existing = _inflightTurn;
+    if (existing != null) return existing;
+    final f = _turnServers().whenComplete(() => _inflightTurn = null);
+    _inflightTurn = f;
+    return f;
+  }
+
+  /// Best-effort relay warm-up with a HARD wall-clock budget.
+  ///
+  /// This used to retry unbounded, twice, at 15s each, in front of createOffer
+  /// — 45s before the callee's phone rang, against the caller's own 35s
+  /// timeout. The call was mathematically guaranteed to fail. A call is worth
+  /// waiting ~3s for; past that the offer goes out with whatever is known and
+  /// relay candidates arrive by trickle, which is how ICE is designed to work.
+  static Future<void> _ensureRelay({
+    Duration budget = const Duration(seconds: 3),
+  }) async {
     if (_cachedTurn.any(_isRelay)) return;
-    await _turnServers();
-    if (_cachedTurn.any(_isRelay)) return;
-    debugPrint('[turn] no relay after first attempt — retrying once');
-    _turnFailedAt = null; // an explicit user action outranks the backoff
-    await _turnServers();
+    try {
+      await _sharedTurnFetch().timeout(budget);
+    } on TimeoutException {
+      debugPrint('[turn] relay warm-up exceeded ${budget.inSeconds}s — '
+          'proceeding, candidates can still trickle in');
+    } catch (e) {
+      debugPrint('[turn] relay warm-up failed: $e');
+    }
+  }
+
+  /// Refreshes credentials WITHOUT blocking anything. Called at init and on
+  /// resume so a call never pays for the fetch.
+  static void warmRelay() {
+    if (_cachedTurn.any(_isRelay) && _turnFetchedAt != null) {
+      final age = DateTime.now().difference(_turnFetchedAt!);
+      if (age < const Duration(hours: 12)) return;
+    }
+    unawaited(_sharedTurnFetch().catchError((_) => _cachedTurn));
   }
 
   static Future<Map<String, dynamic>> _iceConfig() async {
@@ -316,7 +379,10 @@ class CallController extends ChangeNotifier {
       {'urls': 'stun:stun1.l.google.com:19302'},
       {'urls': 'stun:stun.cloudflare.com:3478'},
     ];
-    servers.addAll(await _turnServers());
+    // Synchronous read only. This used to await _turnServers(), so building
+    // the peer connection could itself block on a 15s network call, after
+    // _ensureRelay had already been awaited — the third of three round trips.
+    servers.addAll(_cachedTurn);
 
     final host = dotenv.maybeGet('METERED_TURN_HOST') ?? '';
     final user = dotenv.maybeGet('METERED_TURN_USERNAME') ?? '';
@@ -332,7 +398,7 @@ class CallController extends ChangeNotifier {
         },
       ]);
     }
-    relayAvailable = servers.any(_isRelay);
+
     debugPrint('[turn] ice config: ${servers.length} servers, '
         'relay=${relayAvailable ? 'YES' : 'NO'}'
         '${turnError == null ? '' : ' (${turnError})'}');
@@ -354,9 +420,9 @@ class CallController extends ChangeNotifier {
     _coupleId = couple.id;
     await _subscribeChannel();
     // Disk first so a call placed seconds after launch already has a relay,
-    // then refresh in the background.
+    // then refresh in the background. Never awaited on a call path.
     await loadCachedTurn();
-    unawaited(_turnServers());
+    warmRelay();
   }
 
   // ── Outgoing ──────────────────────────────────────────────────────────────
@@ -374,22 +440,30 @@ class CallController extends ChangeNotifier {
       // Before the peer connection exists, so the relay is in its ICE config
       // rather than arriving too late to be used.
       await _ensureRelay();
+      if (!relayAvailable) {
+        // No relay means no candidate pair can succeed unless both people
+        // happen to be on a network that allows a direct path — in practice,
+        // the same wifi. Failing in two seconds with a reason beats 35 seconds
+        // of "Calling…" followed by silence, which is indistinguishable from
+        // the app being broken and is exactly how this was reported.
+        lastError = "Can't reach the calling service. Check your connection "
+            'and try again.';
+        debugPrint('[turn] aborting call: no relay '
+            '(${turnError ?? 'reason unknown'})');
+        _teardown(CallState.ended);
+        return;
+      }
       await _createPc();
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
       _insertInvite(offer.sdp ?? '', video); // durable → FCM rings a closed app
       await CallForegroundService.start(peerName ?? 'Partner');
-      if (!relayAvailable) {
-        // Without a relay this call can only connect if both people happen to
-        // be on networks that allow a direct path — typically the same wifi.
-        // Saying so beats 35 seconds of "Calling…" followed by nothing.
-        debugPrint('[turn] WARNING: placing a call with NO relay available '
-            '(${turnError ?? 'reason unknown'}). Cross-network calls will fail.');
-      }
       _startConnectTimeout();
-    } catch (_) {
+    } catch (e) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
+      debugPrint('[call] startCall failed: $e');
+      lastError = 'Could not start the call.';
       _teardown(CallState.ended);
     }
   }
