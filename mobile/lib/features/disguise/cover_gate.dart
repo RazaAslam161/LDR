@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/app_lock.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
 
@@ -27,8 +28,41 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
   /// Called once the user is through all three gates.
   void onCoverUnlocked();
 
+  @override
+  void initState() {
+    super.initState();
+    // Every cover watches for a call, so none of them has to remember to.
+    pendingCall.addListener(openForPendingCall);
+    // The notification may have been tapped before this cover was built.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => openForPendingCall());
+  }
+
+  @override
+  void dispose() {
+    pendingCall.removeListener(openForPendingCall);
+    super.dispose();
+  }
+
+  /// Open the door for an incoming call, without the hidden trigger.
+  ///
+  /// A closed app woken by a call used to be unanswerable. The cover replaces
+  /// the whole app while showRealApp is false, so the router — and with it the
+  /// call route and the shell that listens for [pendingCall] — does not exist.
+  /// The phone rang, the user opened the app, and saw a news reader with no way
+  /// to reach the call before the caller gave up.
+  ///
+  /// The trigger is skipped, NOT the lock: the user already declared intent by
+  /// tapping a call notification, but nothing about this app is revealed until
+  /// they pass the same biometric as always. A shoulder-surfer sees the cover
+  /// and a nameless system prompt, exactly as before.
+  void openForPendingCall() {
+    if (_entering || pendingCall.value == null) return;
+    runEntryGate(forCall: true);
+  }
+
   /// Runs gates 2 and 3. Call from whatever hidden trigger the cover provides.
-  Future<void> runEntryGate() async {
+  Future<void> runEntryGate({bool forCall = false}) async {
     if (_entering) return;
     _entering = true;
     try {
@@ -41,17 +75,23 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
 
       if (!passed || !mounted) return;
 
-      await Navigator.of(context).push(
-        PageRouteBuilder<void>(
-          opaque: true,
-          transitionDuration: const Duration(milliseconds: 300),
-          pageBuilder: (_, __, ___) => IntroSplashScreen(
-            onComplete: () => Navigator.of(context).pop(),
+      // The splash is a deliberate beat of delay — but not while someone is
+      // ringing. 1.2s of branding against a caller who is counting seconds is
+      // the wrong trade, and the shoulder-surfer argument does not apply when
+      // the user is answering a call they were just notified about.
+      if (!forCall) {
+        await Navigator.of(context).push(
+          PageRouteBuilder<void>(
+            opaque: true,
+            transitionDuration: const Duration(milliseconds: 300),
+            pageBuilder: (_, __, ___) => IntroSplashScreen(
+              onComplete: () => Navigator.of(context).pop(),
+            ),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
           ),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child),
-        ),
-      );
+        );
+      }
 
       if (mounted) onCoverUnlocked();
     } finally {

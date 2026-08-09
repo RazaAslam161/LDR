@@ -116,11 +116,11 @@ class CallController extends ChangeNotifier {
           .maybeSingle();
       final sdp = row?['offer_sdp'] as String?;
       if (sdp == null || sdp.isEmpty || state != CallState.idle) return;
-      isCaller = false;
-      _pendingOffer = RTCSessionDescription(sdp, 'offer');
-      _pendingVideo = (row?['video'] as bool?) ?? fallbackVideo;
-      peerName = fromName;
-      _setState(CallState.ringing);
+      _ring(
+        RTCSessionDescription(sdp, 'offer'),
+        video: (row?['video'] as bool?) ?? fallbackVideo,
+        from: fromName,
+      );
     } catch (_) {}
   }
 
@@ -243,10 +243,29 @@ class CallController extends ChangeNotifier {
   RTCSessionDescription? _pendingOffer;
   bool _pendingVideo = true;
 
+  /// Start ringing. The ONLY place that does, deliberately.
+  ///
+  /// isVideo used to be set at accept() and nowhere else, so while the phone
+  /// was actually ringing it still held whatever the previous call left behind
+  /// — _teardown resets it to true. An audio call therefore announced itself as
+  /// an incoming VIDEO call and only became audio once answered, and after an
+  /// audio call the next video call rang as audio. Two entry points, two
+  /// chances to forget; now there is one.
+  void _ring(
+    RTCSessionDescription offer, {
+    required bool video,
+    required String from,
+  }) {
+    isCaller = false;
+    _pendingOffer = offer;
+    _pendingVideo = video;
+    isVideo = video;
+    peerName = from;
+    _setState(CallState.ringing);
+  }
+
   Future<void> accept() async {
     if (state != CallState.ringing || _pendingOffer == null) return;
-    isCaller = false;
-    isVideo = _pendingVideo;
     camOn = _pendingVideo;
     try {
       await _openMedia(video: isVideo);
@@ -352,11 +371,12 @@ class CallController extends ChangeNotifier {
     switch (kind) {
       case 'offer':
         if (state != CallState.idle) return; // busy
-        _pendingOffer = RTCSessionDescription(
-            map['sdp']?.toString(), map['type']?.toString());
-        _pendingVideo = map['video'] as bool? ?? true;
-        peerName = _ref.read(sessionProvider).partner?.displayName ?? 'Partner';
-        _setState(CallState.ringing);
+        _ring(
+          RTCSessionDescription(
+              map['sdp']?.toString(), map['type']?.toString()),
+          video: map['video'] as bool? ?? true,
+          from: _ref.read(sessionProvider).partner?.displayName ?? 'Partner',
+        );
       case 'answer':
         _applyAnswer(map);
       case 'ice':

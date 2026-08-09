@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/app_lock.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/features/fake_news/rss_service.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
@@ -61,11 +62,24 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
     WidgetsBinding.instance.addObserver(this);
     _resetEntryState();
     _loadNews();
+    // A closed app woken by a call has no router, no shell and no call route —
+    // only this cover. Without letting the call open the door, an incoming call
+    // is invisible and unanswerable. The lock still stands; only the hidden
+    // trigger is skipped, and only because the user tapped a call notification.
+    pendingCall.addListener(_openForPendingCall);
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _openForPendingCall());
+  }
+
+  void _openForPendingCall() {
+    if (_entering || pendingCall.value == null) return;
+    _triggerEntry(forCall: true);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    pendingCall.removeListener(_openForPendingCall);
     _localHoldTimer?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -132,7 +146,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
   }
 
   // ── The single authentication gate ─────────────────────────────────────────
-  Future<void> _triggerEntry() async {
+  Future<void> _triggerEntry({bool forCall = false}) async {
     if (_entering) return; // one entry flow at a time
     _entering = true;
     try {
@@ -148,18 +162,22 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       if (!mounted) return;
 
       // Cinematic reveal: fade the wordmark up over the news screen, then hand
-      // control to the real app once it finishes (or the user taps).
-      await Navigator.of(context).push(
-        PageRouteBuilder<void>(
-          opaque: true,
-          transitionDuration: const Duration(milliseconds: 300),
-          pageBuilder: (_, __, ___) => IntroSplashScreen(
-            onComplete: () => Navigator.of(context).pop(),
+      // control to the real app once it finishes (or the user taps). Skipped
+      // when answering a call — 1.2s of branding against a ringing caller is
+      // the wrong trade.
+      if (!forCall) {
+        await Navigator.of(context).push(
+          PageRouteBuilder<void>(
+            opaque: true,
+            transitionDuration: const Duration(milliseconds: 300),
+            pageBuilder: (_, __, ___) => IntroSplashScreen(
+              onComplete: () => Navigator.of(context).pop(),
+            ),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
           ),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child),
-        ),
-      );
+        );
+      }
 
       if (mounted) widget.onAuthenticated();
     } finally {
