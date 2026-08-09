@@ -126,10 +126,20 @@ class SupabaseRepository {
     });
   }
 
-  /// E2EE removed — Closer no longer gates on key exchange, so this always
-  /// reports a key as "available" and the shared-key derivation is a no-op.
-  static Future<String?> fetchPartnerPublicKey(String partnerId) async =>
-      'plaintext-v1';
+  /// The partner's published X25519 public key, or the legacy placeholder if
+  /// they have not published a real one yet.
+  ///
+  /// Never returns null: every caller treats null as a hard error, and the
+  /// correct behaviour when the partner has no key is to stay in plaintext
+  /// mode (opportunistic encryption), not to break the feature.
+  static Future<String?> fetchPartnerPublicKey(String partnerId) async {
+    final row = await _c
+        .from('partner_keys')
+        .select('public_key')
+        .eq('user_id', partnerId)
+        .maybeSingle();
+    return (row?['public_key'] as String?) ?? CryptoCore.legacyPublicKey;
+  }
 
   // ─── Couple ──────────────────────────────────────────────────
 
