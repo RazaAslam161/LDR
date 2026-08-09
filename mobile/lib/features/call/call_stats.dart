@@ -27,6 +27,7 @@ class CallStats {
     this.packetsLost = 0,
     this.relayed = false,
     this.codec = '',
+    this.noRelay = false,
   });
 
   final int sendWidth, sendHeight, recvWidth, recvHeight;
@@ -47,8 +48,14 @@ class CallStats {
 
   final String codec;
 
+  /// True when no TURN relay was available for this call. Two users behind
+  /// different carrier NATs cannot connect without one, so this is the first
+  /// thing to check when a call works at home and fails between two people.
+  final bool noRelay;
+
   /// One line, short enough for logcat and for an on-screen overlay.
   String get line =>
+      (noRelay ? 'NO-RELAY! ' : '') +
       'tx ${sendWidth}x$sendHeight@${sendFps.toStringAsFixed(0)} ${sendKbps}kbps | '
       'rx ${recvWidth}x$recvHeight@${recvFps.toStringAsFixed(0)} ${recvKbps}kbps | '
       'limit=${limitation.isEmpty ? '?' : limitation} rtt=${rttMs}ms '
@@ -63,6 +70,10 @@ class CallStats {
 /// paid once.
 class CallStatsMonitor {
   CallStatsMonitor(this._onUpdate);
+
+  /// Set by the controller from the ICE config it actually used, so the readout
+  /// can say NO-RELAY before anyone has to work it out from a failed call.
+  bool noRelay = false;
 
   final ValueChanged<CallStats> _onUpdate;
   Timer? _timer;
@@ -163,6 +174,7 @@ class CallStatsMonitor {
         packetsLost: _int(inVideo?.values['packetsLost']),
         relayed: relayed,
         codec: mime == null ? '' : mime.split('/').last,
+        noRelay: noRelay,
       );
 
       _lastSentBytes = sentBytes;

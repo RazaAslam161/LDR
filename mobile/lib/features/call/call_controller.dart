@@ -154,31 +154,79 @@ class CallController extends ChangeNotifier {
     try {
       final res = await SupabaseService.client.functions
           .invoke('turn-credentials')
-          .timeout(const Duration(seconds: 8));
+          // 8s is not enough on a slow mobile network, and this runs while the
+          // user is waiting to place a call.
+          .timeout(const Duration(seconds: 15));
+
       final data = res.data;
-      final raw = data is Map ? data['iceServers'] : null;
-      if (raw is List) {
-        final parsed = <Map<String, dynamic>>[];
-        for (final s in raw) {
-          if (s is! Map) continue;
-          final m = Map<String, dynamic>.from(s);
-          final urls = m['urls'];
-          if (urls is List) {
-            m['urls'] = urls.map((e) => e.toString()).toList();
-          }
-          parsed.add(m);
-        }
-        if (parsed.isNotEmpty) {
-          _cachedTurn = parsed;
-          _turnFetchedAt = DateTime.now();
-          return parsed;
-        }
+      // The function reports its own failures as a JSON body with an 'error'
+      // key and a non-200 status. Reading only 'iceServers' turned every one of
+      // those — secrets missing, Cloudflare rejecting the token, the function
+      // not deployed — into a silent empty list.
+      if (data is Map && data['error'] != null) {
+        turnError = 'server: ${data['error']}';
+        debugPrint('[turn] edge function returned ${data['error']} '
+            '(status ${res.status})');
+        return _cachedTurn;
       }
-    } catch (_) {
-      // best-effort — never block a call on the credential fetch
+
+      final raw = data is Map ? data['iceServers'] : null;
+      if (raw is! List) {
+        turnError = 'bad response shape';
+        debugPrint('[turn] unexpected response: ${data.runtimeType} $data');
+        return _cachedTurn;
+      }
+
+      final parsed = <Map<String, dynamic>>[];
+      for (final srv in raw) {
+        if (srv is! Map) continue;
+        final m = Map<String, dynamic>.from(srv);
+        final urls = m['urls'];
+        if (urls is List) m['urls'] = urls.map((e) => e.toString()).toList();
+        parsed.add(m);
+      }
+      // A response with only STUN entries is NOT a working relay. Counting it
+      // as success is how a misconfigured project looks healthy right up until
+      // two users are on different networks.
+      final relays = parsed.where(_isRelay).length;
+      if (relays == 0) {
+        turnError = 'no relay in response';
+        debugPrint('[turn] response carried ${parsed.length} servers but no '
+            'turn:/turns: entry — relay is NOT available');
+        return _cachedTurn;
+      }
+
+      _cachedTurn = parsed;
+      _turnFetchedAt = DateTime.now();
+      turnError = null;
+      debugPrint('[turn] ok — $relays relay server(s)');
+      return parsed;
+    } on TimeoutException {
+      turnError = 'timeout';
+      debugPrint('[turn] credential fetch timed out');
+    } catch (e) {
+      turnError = '$e';
+      debugPrint('[turn] credential fetch failed: $e');
     }
     return _cachedTurn;
   }
+
+  static bool _isRelay(Map<String, dynamic> server) {
+    final u = server['urls'];
+    final all = u is List ? u.join(' ') : '$u';
+    return all.contains('turn:') || all.contains('turns:');
+  }
+
+  /// Why the last relay fetch failed, or null when relay is available.
+  ///
+  /// Exposed rather than swallowed: without a relay, two users behind different
+  /// carrier NATs simply cannot connect, and every symptom of that looks like
+  /// "the call did not work". This is the difference between that sentence and
+  /// an actionable report.
+  static String? turnError;
+
+  /// Whether the last ICE config actually contained a relay.
+  static bool relayAvailable = false;
 
   /// Full WebRTC ICE config: Google/Cloudflare STUN + Cloudflare TURN (which
   /// includes TURN-over-TLS:443 for carrier-NAT / UDP-blocked networks). A static
@@ -205,6 +253,10 @@ class CallController extends ChangeNotifier {
         },
       ]);
     }
+    relayAvailable = servers.any(_isRelay);
+    debugPrint('[turn] ice config: ${servers.length} servers, '
+        'relay=${relayAvailable ? 'YES' : 'NO'}'
+        '${turnError == null ? '' : ' (${turnError})'}');
     return {'iceServers': servers, 'sdpSemantics': 'unified-plan'};
   }
 
@@ -244,6 +296,13 @@ class CallController extends ChangeNotifier {
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
       _insertInvite(offer.sdp ?? '', video); // durable → FCM rings a closed app
       await CallForegroundService.start(peerName ?? 'Partner');
+      if (!relayAvailable) {
+        // Without a relay this call can only connect if both people happen to
+        // be on networks that allow a direct path — typically the same wifi.
+        // Saying so beats 35 seconds of "Calling…" followed by nothing.
+        debugPrint('[turn] WARNING: placing a call with NO relay available '
+            '(${turnError ?? 'reason unknown'}). Cross-network calls will fail.');
+      }
       _startConnectTimeout();
     } catch (_) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
@@ -456,6 +515,7 @@ class CallController extends ChangeNotifier {
       debugPrint('[call] pcstate ${s.name}');
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
+        _statsMonitor.noRelay = !relayAvailable;
         _statsMonitor.start(pc);
         _setState(CallState.connected);
       } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
