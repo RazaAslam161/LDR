@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -24,7 +25,9 @@ import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/chat/selectable_message.dart';
 import 'package:miles/features/chat/chat_theme.dart';
 import 'package:miles/features/chat/chat_theme_controller.dart';
 import 'package:miles/features/chat/chat_theme_picker.dart';
@@ -66,6 +69,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Local-only "clear conversation" cutoff: messages at or before this are
   /// hidden on THIS device. Never synced — the partner is unaffected.
   DateTime? _clearedBefore;
+
+  /// Messages picked for a bulk action. Empty means not in selection mode —
+  /// there is no separate flag to fall out of sync with the set itself.
+  final _selection = ChatSelection();
+  bool get _selecting => _selection.isActive;
   bool _subscribing = false; // re-entrancy guard for _subscribe
   bool _reloadScheduled = false; // debounce flag for bulk-DELETE realtime events
 
@@ -532,6 +540,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         _ids
           ..clear()
           ..addAll(msgs.map((m) => m.id));
+        // Messages can vanish under an open selection — the partner deletes
+        // one for everyone while it is picked. A stale id would inflate the
+        // count and make _allSelectedAreMine vacuously true.
+        _selection.prune(_ids);
       });
       _seedSeenLatch();
     } catch (_) {}
@@ -580,79 +592,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     // SENT: partner offline or status stale. Safe default.
     return _MsgStatus.sent;
-  }
-
-  Future<void> _showMessageActions(Message m, bool mine) async {
-    if (m.deletedForEveryone) return;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.reply, color: MilesColors.emberSoft),
-              title: const Text('Reply',
-                  style: TextStyle(color: MilesColors.cream50)),
-              onTap: () => Navigator.pop(ctx, 'reply'),
-            ),
-            if (m.kind == 'image' || m.kind == 'video')
-              ListTile(
-                leading: const Icon(Icons.download_rounded,
-                    color: MilesColors.cream50),
-                title: const Text('Save to gallery',
-                    style: TextStyle(
-                        color: MilesColors.cream50, fontFamily: 'Inter')),
-                onTap: () => Navigator.pop(ctx, 'save'),
-              ),
-            ListTile(
-              leading:
-                  const Icon(Icons.visibility_off, color: MilesColors.taupe),
-              title: const Text('Delete for me',
-                  style: TextStyle(color: MilesColors.cream50)),
-              onTap: () => Navigator.pop(ctx, 'me'),
-            ),
-            if (mine)
-              ListTile(
-                leading:
-                    const Icon(Icons.delete_outline, color: Color(0xFFB83A57)),
-                title: const Text('Delete for everyone',
-                    style: TextStyle(color: Color(0xFFB83A57))),
-                onTap: () => Navigator.pop(ctx, 'everyone'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.close, color: MilesColors.faint),
-              title: const Text('Cancel',
-                  style: TextStyle(color: MilesColors.taupe)),
-              onTap: () => Navigator.pop(ctx),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (action == null) return;
-    if (action == 'reply') {
-      _startReply(m);
-      return;
-    }
-    if (action == 'save') {
-      await _saveMessageMedia(m);
-      return;
-    }
-    try {
-      if (action == 'me') {
-        await ChatRepository.deleteForMe(m.id);
-      } else {
-        await ChatRepository.deleteForEveryone(m.id);
-      }
-      await _reload();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not delete that message.')));
-      }
-    }
   }
 
   /// Saves an image or video message to the private vault, with brief feedback.
@@ -705,7 +644,111 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     setState(() {
       _messages.clear();
       _ids.clear();
+      // Nothing left to act on; a surviving selection bar would be a count of
+      // messages that no longer exist.
+      _selection.clear();
     });
+  }
+
+  void _toggleSelected(String id) {
+    final m = _messages.where((m) => m.id == id).firstOrNull;
+    if (m == null) return;
+    setState(() => _selection.toggle(m));
+  }
+
+  void _clearSelection() => setState(_selection.clear);
+
+  /// Reply and Save act on a single message, so they only appear when exactly
+  /// one is picked.
+  Message? get _onlySelected =>
+      _selection.length == 1 ? _selection.resolve(_messages).firstOrNull : null;
+
+  /// Delete everything selected, in one action.
+  ///
+  /// Deleting one message at a time through the long-press sheet was the only
+  /// way to remove anything, which for a handful of photos is a lot of taps for
+  /// something the user has already decided.
+  Future<void> _deleteSelected({required bool everyone}) async {
+    // deleteAll marks itself busy synchronously, so start it first and then
+    // rebuild: the delete button reads busy and goes quiet for the duration
+    // rather than queueing a second pass over the same messages.
+    final pending = _selection.deleteAll(everyone
+        ? ChatRepository.deleteForEveryone
+        : ChatRepository.deleteForMe);
+    setState(() {});
+    final failed = await pending;
+    if (!mounted) return;
+    setState(() {});
+    await _reload();
+    if (failed.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(failed.length == 1
+            ? '1 message could not be deleted — still selected.'
+            : '${failed.length} messages could not be deleted — still '
+                'selected.'),
+      ));
+    }
+  }
+
+  /// The sweep button. With a selection it deletes exactly what is selected;
+  /// with nothing selected it still clears the whole conversation, which is
+  /// what it has always done.
+  Future<void> _clearOrDeleteSelected() async {
+    if (_selecting) {
+      await _confirmDeleteSelected();
+      return;
+    }
+    await _clearConversation();
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    final n = _selection.length;
+    final mineOnly =
+        _selection.allMine(_messages, SupabaseService.currentUserId);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Text(
+                n == 1 ? 'Delete this message?' : 'Delete $n messages?',
+                style: const TextStyle(
+                    color: MilesColors.cream50,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.visibility_off, color: MilesColors.taupe),
+              title: const Text('Delete for me',
+                  style: TextStyle(color: MilesColors.cream50)),
+              onTap: () => Navigator.pop(ctx, 'me'),
+            ),
+            if (mineOnly)
+              ListTile(
+                leading:
+                    const Icon(Icons.delete_outline, color: Color(0xFFB83A57)),
+                title: const Text('Delete for everyone',
+                    style: TextStyle(color: Color(0xFFB83A57))),
+                onTap: () => Navigator.pop(ctx, 'everyone'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.close, color: MilesColors.faint),
+              title: const Text('Cancel',
+                  style: TextStyle(color: MilesColors.taupe)),
+              onTap: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    await _deleteSelected(everyone: choice == 'everyone');
   }
 
   Future<void> _clearConversation() async {
@@ -742,6 +785,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       if (mounted) {
         setState(() {
           _messages.clear();
+          // Nothing survives the clear, so nothing can still be selected.
+          _selection.clear();
           _ids.clear();
         });
       }
@@ -801,218 +846,302 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final themeCtrl = ref.watch(chatThemeProvider);
     final chatTheme = themeCtrl.theme;
     final chatBgUrl = themeCtrl.bgUrl;
+    final one = _onlySelected;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
-          ),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Flexible(
-                  child: Text(partnerName ?? 'Chat',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: MilesColors.cream50,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600)),
-                ),
-                if (partnerMood != null) ...[
-                  const SizedBox(width: 8),
-                  AnimatedMood(mood: partnerMood, size: 20),
-                ],
-              ],
+    return PopScope(
+      // Back gets you out of the selection first. Leaving the chat instead
+      // would make an accidental long-press feel like a trap.
+      canPop: !_selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // The drawer belongs to the shell's Scaffold and parks its own history
+        // entry on this route. Refusing the pop jumps that queue, so put the
+        // drawer back where it was rather than silently eating the press.
+        final shell = rootScaffoldKey.currentState;
+        if (shell != null && shell.isDrawerOpen) {
+          shell.closeDrawer();
+          return;
+        }
+        _clearSelection();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          leading: Builder(
+            builder: (ctx) => IconButton(
+              icon: const Icon(Icons.menu),
+              onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
             ),
-            if (partnerName != null)
-              _ChatSubtitle(presence: presence, partnerTyping: _partnerTyping),
+          ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(partnerName ?? 'Chat',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: MilesColors.cream50,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  if (partnerMood != null) ...[
+                    const SizedBox(width: 8),
+                    AnimatedMood(mood: partnerMood, size: 20),
+                  ],
+                ],
+              ),
+              if (partnerName != null)
+                _ChatSubtitle(presence: presence, partnerTyping: _partnerTyping),
+            ],
+          ),
+          actions: [
+            // Presence sits beside their name, where it means something, instead
+            // of floating over the middle of the conversation.
+            const PartnerHereAction(),
+            if (couple != null)
+              IconButton(
+                tooltip: 'Voice call',
+                icon: const Icon(Icons.call_outlined, color: MilesColors.ember),
+                onPressed: _voiceCall,
+              ),
+            if (couple != null)
+              IconButton(
+                tooltip: 'Video call',
+                icon:
+                    const Icon(Icons.videocam_outlined, color: MilesColors.ember),
+                onPressed: _videoCall,
+              ),
+            if (couple != null)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: MilesColors.gilt),
+                color: MilesColors.surface1,
+                onSelected: (v) {
+                  switch (v) {
+                    case 'mood':
+                      _setMyMood();
+                    case 'gif':
+                      _pickGifBurst();
+                    case 'theme':
+                      showChatThemePicker(context);
+                    case 'clear':
+                      _clearConversation();
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'mood', child: Text('Set your mood')),
+                  PopupMenuItem(value: 'gif', child: Text('Fling a GIF 🎞️')),
+                  PopupMenuItem(value: 'theme', child: Text('Chat theme')),
+                  PopupMenuItem(
+                      value: 'clear', child: Text('Clear conversation')),
+                ],
+              ),
           ],
         ),
-        actions: [
-          // Presence sits beside their name, where it means something, instead
-          // of floating over the middle of the conversation.
-          const PartnerHereAction(),
-          if (couple != null)
-            IconButton(
-              tooltip: 'Voice call',
-              icon: const Icon(Icons.call_outlined, color: MilesColors.ember),
-              onPressed: _voiceCall,
-            ),
-          if (couple != null)
-            IconButton(
-              tooltip: 'Video call',
-              icon:
-                  const Icon(Icons.videocam_outlined, color: MilesColors.ember),
-              onPressed: _videoCall,
-            ),
-          if (couple != null)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: MilesColors.gilt),
-              color: MilesColors.surface1,
-              onSelected: (v) {
-                switch (v) {
-                  case 'mood':
-                    _setMyMood();
-                  case 'gif':
-                    _pickGifBurst();
-                  case 'theme':
-                    showChatThemePicker(context);
-                  case 'clear':
-                    _clearConversation();
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'mood', child: Text('Set your mood')),
-                PopupMenuItem(value: 'gif', child: Text('Fling a GIF 🎞️')),
-                PopupMenuItem(value: 'theme', child: Text('Chat theme')),
-                PopupMenuItem(
-                    value: 'clear', child: Text('Clear conversation')),
-              ],
-            ),
-        ],
-      ),
-      body: couple == null
-          ? const _NotLinked()
-          : Stack(
-              children: [
-                Positioned.fill(
-                    child: _ChatBg(theme: chatTheme, bgUrl: chatBgUrl)),
-                Column(
-                  children: [
-                    Expanded(
-                      child: _loading
-                          ? const Center(child: CircularProgressIndicator())
-                          : _messages.isEmpty
-                              ? const _EmptyChat()
-                              : Builder(builder: (_) {
-                                  final cleared = _clearedBefore;
-                                  final visible = _messages
-                                      .where((m) => !m.isHiddenFor(uid))
-                                      .where((m) =>
-                                          cleared == null ||
-                                          m.createdAt.isAfter(cleared))
-                                      .toList();
-                                  if (visible.isEmpty)
-                                    return const _EmptyChat();
-                                  return Stack(
-                                    children: [
-                                      ListView.builder(
-                                        controller: _scroll,
-                                        reverse: true,
-                                        padding: const EdgeInsets.fromLTRB(
-                                            16, 12, 16, 12),
-                                        itemCount: visible.length,
-                                        itemBuilder: (_, i) {
-                                          final m = visible[i];
-                                          // Descending list: the older neighbour is
-                                          // i+1, so a date header marks the oldest
-                                          // message of each day (top of the group).
-                                          final showTime =
-                                              i == visible.length - 1 ||
-                                                  !DateUtils.isSameDay(
-                                                      visible[i + 1].createdAt,
-                                                      m.createdAt);
-                                          return Dismissible(
-                                              key: ValueKey('rpl-${m.id}'),
-                                              direction:
-                                                  DismissDirection.startToEnd,
-                                              dismissThresholds: const {
-                                                DismissDirection.startToEnd:
-                                                    0.22
-                                              },
-                                              confirmDismiss: (_) async {
-                                                _startReply(m); // slide → reply
-                                                return false; // snap back
-                                              },
-                                              background: const Padding(
-                                                padding:
-                                                    EdgeInsets.only(left: 28),
-                                                child: Align(
-                                                  alignment:
-                                                      Alignment.centerLeft,
-                                                  child: Icon(Icons.reply,
-                                                      color: MilesColors.blush),
-                                                ),
-                                              ),
-                                              child: GestureDetector(
-                                                onLongPress: () =>
-                                                    _showMessageActions(
-                                                        m, m.isMine(uid)),
-                                                child: _Bubble(
-                                                  message: m,
-                                                  mine: m.isMine(uid),
-                                                  showDateHeader: showTime,
-                                                  repliedTo: _byId(m.replyToId),
-                                                  player: _player,
-                                                  theme: chatTheme,
-                                                  senderName: m.isMine(uid)
-                                                      ? 'you'
-                                                      : (partnerName ??
-                                                          'your partner'),
-                                                  status: m.isMine(uid)
-                                                      ? _statusFor(m, presence)
-                                                      : null,
-                                                ),
-                                              ));
+        body: couple == null
+            ? const _NotLinked()
+            : Stack(
+                children: [
+                  Positioned.fill(
+                      child: _ChatBg(theme: chatTheme, bgUrl: chatBgUrl)),
+                  Column(
+                    children: [
+                      // Only while selecting. It says how many, and — more
+                      // importantly — gives an obvious way out, so entering
+                      // selection by accident is not a trap.
+                      if (_selecting)
+                        Material(
+                          color: MilesColors.surface2,
+                          child: SafeArea(
+                            bottom: false,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 6),
+                              child: Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.close,
+                                        color: MilesColors.cream50),
+                                    onPressed: _clearSelection,
+                                  ),
+                                  Text(
+                                    '${_selection.length} selected',
+                                    style: const TextStyle(
+                                        color: MilesColors.cream50,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  const Spacer(),
+                                  if (one != null) ...[
+                                    IconButton(
+                                      tooltip: 'Reply',
+                                      icon: const Icon(Icons.reply,
+                                          color: MilesColors.emberSoft),
+                                      onPressed: () {
+                                        _clearSelection();
+                                        _startReply(one);
+                                      },
+                                    ),
+                                    if (one.kind == 'image' ||
+                                        one.kind == 'video')
+                                      IconButton(
+                                        tooltip: 'Save to gallery',
+                                        icon: const Icon(Icons.download_rounded,
+                                            color: MilesColors.cream50),
+                                        onPressed: () {
+                                          _clearSelection();
+                                          _saveMessageMedia(one);
                                         },
                                       ),
-                                      if (_hasNewMessage)
-                                        Positioned(
-                                          bottom: 12,
-                                          left: 0,
-                                          right: 0,
-                                          child: Center(
-                                            child: _NewMessageChip(
-                                              onTap: () {
-                                                setState(() =>
-                                                    _hasNewMessage = false);
-                                                _scrollToNewest();
-                                              },
+                                  ],
+                                  IconButton(
+                                    tooltip: 'Delete selected',
+                                    icon: const Icon(Icons.delete_outline,
+                                        color: Color(0xFFB83A57)),
+                                    // Quiet while a batch is running: the
+                                    // deletes are sequential and a second tap
+                                    // would sit behind all of them.
+                                    onPressed: _selection.busy
+                                        ? null
+                                        : _confirmDeleteSelected,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      Expanded(
+                        child: _loading
+                            ? const Center(child: CircularProgressIndicator())
+                            : _messages.isEmpty
+                                ? const _EmptyChat()
+                                : Builder(builder: (_) {
+                                    final cleared = _clearedBefore;
+                                    final visible = _messages
+                                        .where((m) => !m.isHiddenFor(uid))
+                                        .where((m) =>
+                                            cleared == null ||
+                                            m.createdAt.isAfter(cleared))
+                                        .toList();
+                                    if (visible.isEmpty)
+                                      return const _EmptyChat();
+                                    return Stack(
+                                      children: [
+                                        ListView.builder(
+                                          controller: _scroll,
+                                          reverse: true,
+                                          padding: const EdgeInsets.fromLTRB(
+                                              16, 12, 16, 12),
+                                          itemCount: visible.length,
+                                          itemBuilder: (_, i) {
+                                            final m = visible[i];
+                                            // Descending list: the older neighbour is
+                                            // i+1, so a date header marks the oldest
+                                            // message of each day (top of the group).
+                                            final showTime =
+                                                i == visible.length - 1 ||
+                                                    !DateUtils.isSameDay(
+                                                        visible[i + 1].createdAt,
+                                                        m.createdAt);
+                                            return Dismissible(
+                                                key: ValueKey('rpl-${m.id}'),
+                                                direction:
+                                                    DismissDirection.startToEnd,
+                                                dismissThresholds: const {
+                                                  DismissDirection.startToEnd:
+                                                      0.22
+                                                },
+                                                confirmDismiss: (_) async {
+                                                  _startReply(m); // slide → reply
+                                                  return false; // snap back
+                                                },
+                                                background: const Padding(
+                                                  padding:
+                                                      EdgeInsets.only(left: 28),
+                                                  child: Align(
+                                                    alignment:
+                                                        Alignment.centerLeft,
+                                                    child: Icon(Icons.reply,
+                                                        color: MilesColors.blush),
+                                                  ),
+                                                ),
+                                                child: SelectableMessage(
+                                                  selecting: _selecting,
+                                                  selected:
+                                                      _selection.contains(m.id),
+                                                  onToggle: () =>
+                                                      _toggleSelected(m.id),
+                                                  child: _Bubble(
+                                                    message: m,
+                                                    mine: m.isMine(uid),
+                                                    showDateHeader: showTime,
+                                                    repliedTo: _byId(m.replyToId),
+                                                    player: _player,
+                                                    theme: chatTheme,
+                                                    senderName: m.isMine(uid)
+                                                        ? 'you'
+                                                        : (partnerName ??
+                                                            'your partner'),
+                                                    status: m.isMine(uid)
+                                                        ? _statusFor(m, presence)
+                                                        : null,
+                                                  ),
+                                                ));
+                                          },
+                                        ),
+                                        if (_hasNewMessage)
+                                          Positioned(
+                                            bottom: 12,
+                                            left: 0,
+                                            right: 0,
+                                            child: Center(
+                                              child: _NewMessageChip(
+                                                onTap: () {
+                                                  setState(() =>
+                                                      _hasNewMessage = false);
+                                                  _scrollToNewest();
+                                                },
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      for (final b in _bursts)
-                                        _BurstAnimation(
-                                          key: ValueKey(b.id),
-                                          mood: b.mood,
-                                          gifUrl: b.gifUrl,
-                                          onDone: () => _removeBurst(b.id),
-                                        ),
-                                    ],
-                                  );
-                                }),
-                    ),
-                    // The "<name> is here" strip used to live here. Removed: it
-                    // duplicated the global presence avatar, and it read from
-                    // `isActivelyInChat` (chat_last_read within 20s) rather than
-                    // the live screen, so it kept claiming they were in the chat
-                    // for up to 20 seconds after they had walked away. One
-                    // signal, one source — see PartnerHereBadge.
-                    ChatInputBar(
-                      coupleId: couple.id,
-                      onChanged: _onTyping,
-                      replyingTo: _replyingTo,
-                      onCancelReply: _cancelReply,
-                      onSendText: (t) => _sendTextFast(couple.id, t),
-                      onSendImage: (f) async => _sendImageFast(couple.id, f),
-                      onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
-                          replyToId: _takeReplyId()),
-                      onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
-                          replyToId: _takeReplyId()),
-                      onFlingGif: _flingGifFile,
-                      onPickGif: _attachGif,
-                      onClearConversation: _clearConversation,
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                                        for (final b in _bursts)
+                                          _BurstAnimation(
+                                            key: ValueKey(b.id),
+                                            mood: b.mood,
+                                            gifUrl: b.gifUrl,
+                                            onDone: () => _removeBurst(b.id),
+                                          ),
+                                      ],
+                                    );
+                                  }),
+                      ),
+                      // The "<name> is here" strip used to live here. Removed: it
+                      // duplicated the global presence avatar, and it read from
+                      // `isActivelyInChat` (chat_last_read within 20s) rather than
+                      // the live screen, so it kept claiming they were in the chat
+                      // for up to 20 seconds after they had walked away. One
+                      // signal, one source — see PartnerHereBadge.
+                      ChatInputBar(
+                        coupleId: couple.id,
+                        onChanged: _onTyping,
+                        replyingTo: _replyingTo,
+                        onCancelReply: _cancelReply,
+                        onSendText: (t) => _sendTextFast(couple.id, t),
+                        onSendImage: (f) async => _sendImageFast(couple.id, f),
+                        onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
+                            replyToId: _takeReplyId()),
+                        onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
+                            replyToId: _takeReplyId()),
+                        onFlingGif: _flingGifFile,
+                        onPickGif: _attachGif,
+                        onClearConversation: _clearOrDeleteSelected,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+      ),
     );
   }
 }
