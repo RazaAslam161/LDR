@@ -136,6 +136,14 @@ class FcmService {
       );
       return;
     }
+    if (type == 'message') {
+      // In the foreground the chat's realtime subscription already delivers
+      // the message, and the catch-up fetch covers a dropped socket — so a
+      // notification here would double up on a conversation the user is
+      // looking at. The push exists for the backgrounded case, handled in the
+      // background isolate.
+      return;
+    }
     if (type != 'reach') return;
     // Foreground: surface the in-app overlay. AppShell de-dupes by reach_id so
     // this and the Supabase realtime listener never double-show.

@@ -67,6 +67,19 @@ class FantasyJarRepository {
         'Partner has not published a key yet. Ask them to open Closer once.',
       );
     }
+    // Refuse to proceed until the partner has a REAL key.
+    //
+    // fetchPartnerPublicKey returns the legacy placeholder rather than null
+    // when the partner has never opened Closer, which silently put every
+    // write into plaintext mode: intimate notes and photos landed in Postgres
+    // as base64 cleartext while the UI promised end-to-end encryption. The
+    // "Waiting for your partner" screen was written for exactly this state
+    // and had become unreachable.
+    if (partnerPub == CryptoCore.legacyPublicKey) {
+      throw Exception(
+        "Partner has not published a key yet. Ask them to open Closer once.",
+      );
+    }
     await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);
   }
 

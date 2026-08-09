@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
@@ -18,6 +19,11 @@ class RoleSetupScreen extends ConsumerStatefulWidget {
 class _RoleSetupScreenState extends ConsumerState<RoleSetupScreen> {
   String? _saving;
 
+  /// A failed save used to be a permanent trap: the router sends every other
+  /// route back to /role-setup while gender_set is false, and this screen had
+  /// no sign-out. One failure and the account was unusable forever.
+  bool _failed = false;
+
   Future<void> _pick(String gender) async {
     if (_saving != null) return;
     setState(() => _saving = gender);
@@ -28,7 +34,10 @@ class _RoleSetupScreenState extends ConsumerState<RoleSetupScreen> {
       await ref.read(sessionProvider.notifier).loadProfile();
     } catch (_) {
       if (mounted) {
-        setState(() => _saving = null);
+        setState(() {
+          _saving = null;
+          _failed = true;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save — try again.')),
         );
@@ -47,6 +56,21 @@ class _RoleSetupScreenState extends ConsumerState<RoleSetupScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                if (_failed) ...[
+                  // The only way out of the redirect loop. Shown only after a
+                  // failure so it never distracts from the happy path.
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: TextButton(
+                      onPressed: () async {
+                        await ref.read(sessionProvider.notifier).signOut();
+                        if (context.mounted) context.go('/signin');
+                      },
+                      child: const Text('Sign out',
+                          style: TextStyle(color: MilesColors.taupe)),
+                    ),
+                  ),
+                ],
                 const Text('A little about you',
                     style: TextStyle(
                         color: MilesColors.cream50,

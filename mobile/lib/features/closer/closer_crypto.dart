@@ -34,7 +34,20 @@ Future<void> ensureSharedKey(SessionState session) async {
     );
   }
 
-  await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);
+  // Refuse to proceed until the partner has a REAL key.
+    //
+    // fetchPartnerPublicKey returns the legacy placeholder rather than null
+    // when the partner has never opened Closer, which silently put every
+    // write into plaintext mode: intimate notes and photos landed in Postgres
+    // as base64 cleartext while the UI promised end-to-end encryption. The
+    // "Waiting for your partner" screen was written for exactly this state
+    // and had become unreachable.
+    if (partnerPub == CryptoCore.legacyPublicKey) {
+      throw Exception(
+        "Your partner hasn't enabled Closer yet. Ask them to open it once.",
+      );
+    }
+    await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);
 }
 
 /// Packs an [EncryptedPayload] as `mac || ciphertext` for tables that store

@@ -138,3 +138,46 @@ begin
 
   return new;
 end $$;
+
+-- ── 5. CRITICAL: /role-setup was a dead end on any fresh deploy ───────────
+-- supabase_repository.dart:320 does
+--   update profiles set gender = ..., gender_set = true
+-- and NEITHER column is created by any file in this repo — they exist in the
+-- owner's project only because they were added by hand in the dashboard. On a
+-- fresh deploy (release project, restore, second environment) a brand-new user
+-- signs up, pairs, lands on /role-setup, taps their gender, gets
+-- "Could not save — try again", and is trapped: router.dart:96-99 redirects
+-- every other route back here and there is no sign-out on the screen. That is
+-- 100% of new users on a clean database.
+alter table public.profiles add column if not exists gender text;
+alter table public.profiles add column if not exists gender_set boolean not null default false;
+
+-- ── 6. Re-grant AFTER every column above exists ───────────────────────────
+-- hardening_couple_id_fix.sql revoked table-level UPDATE on profiles and
+-- re-granted column by column, building the list from information_schema AT
+-- RUN TIME. Any column added later — including the two just added — is
+-- therefore NOT writable, and the role-setup update would fail with
+-- "permission denied" instead of "column not found". Same dead end, different
+-- error. Rebuilding the grant is required whenever profiles gains a column.
+do $$
+declare cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+    into cols
+    from information_schema.columns
+   where table_schema = 'public' and table_name = 'profiles'
+     and column_name <> 'couple_id';
+  execute 'revoke update on public.profiles from authenticated';
+  execute 'revoke update on public.profiles from anon';
+  execute format('grant update (%s) on public.profiles to authenticated', cols);
+end $$;
+
+-- Prove it: gender must be writable, couple_id must not.
+select 'gender writable (must be true)' as check,
+       has_column_privilege('authenticated', 'public.profiles', 'gender', 'UPDATE') as ok
+union all
+select 'gender_set writable (must be true)',
+       has_column_privilege('authenticated', 'public.profiles', 'gender_set', 'UPDATE')
+union all
+select 'couple_id writable (must be FALSE)',
+       has_column_privilege('authenticated', 'public.profiles', 'couple_id', 'UPDATE');

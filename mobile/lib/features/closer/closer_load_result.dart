@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/supabase_repository.dart';
 
 /// A list load that knows what it could not open.
 ///
@@ -25,7 +26,19 @@ class CloserLoadResult<T> {
   /// What to tell the user. Deliberately does not say "corrupt": the usual
   /// cause is a partner who has not opened the updated app yet, which fixes
   /// itself the moment they do.
-  String get unreadableMessage => unreadable == 1
-      ? "1 item couldn't be opened on this device"
-      : "$unreadable items couldn't be opened on this device";
+  String get unreadableMessage {
+    // A reinstall regenerates this device's key, so everything written under
+    // the old one is permanently unreadable here. Saying "couldn't be opened"
+    // would imply it is coming back; it is not.
+    if (SupabaseRepository.keyWasReplaced) {
+      return unreadable == 1
+          ? "1 item was encrypted on your previous install and can't be opened"
+          : "$unreadable items were encrypted on your previous install and "
+              "can't be opened";
+    }
+    return unreadable == 1
+        ? "1 item couldn't be opened — your partner may need to open Closer"
+        : "$unreadable items couldn't be opened — your partner may need to "
+            "open Closer";
+  }
 }

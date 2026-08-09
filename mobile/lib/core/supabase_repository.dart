@@ -115,11 +115,33 @@ class SupabaseRepository {
 
   // ─── Partner key exchange (E2EE) ────────────────────────────
 
+  /// True once this device has published a key that REPLACED a different one
+  /// — i.e. a reinstall or a new phone. Everything encrypted under the old
+  /// shared key is unreadable from here, permanently.
+  static bool keyWasReplaced = false;
+
   /// Publishes the current user's X25519 public key.
+  ///
+  /// The private half lives in the platform keystore and is excluded from
+  /// backup, so a reinstall generates a NEW pair. That is inherent to E2EE
+  /// without key escrow — but it used to happen silently, and the partner's
+  /// history simply rendered as an empty screen with no explanation. Detect
+  /// the replacement so the UI can say what happened.
   static Future<void> publishMyPublicKey() async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) throw StateError('Not signed in');
     final pub = await CryptoCore.getMyPublicKeyB64();
+
+    final existing = await _c
+        .from('partner_keys')
+        .select('public_key')
+        .eq('user_id', uid)
+        .maybeSingle();
+    final prev = existing?['public_key'] as String?;
+    if (prev != null && prev != pub && prev != CryptoCore.legacyPublicKey) {
+      keyWasReplaced = true;
+    }
+
     await _c.from('partner_keys').upsert({
       'user_id': uid,
       'public_key': pub,
@@ -129,9 +151,10 @@ class SupabaseRepository {
   /// The partner's published X25519 public key, or the legacy placeholder if
   /// they have not published a real one yet.
   ///
-  /// Never returns null: every caller treats null as a hard error, and the
-  /// correct behaviour when the partner has no key is to stay in plaintext
-  /// mode (opportunistic encryption), not to break the feature.
+  /// Never returns null. Callers must compare against [CryptoCore.
+  /// legacyPublicKey] and REFUSE to proceed — returning the placeholder used to
+  /// drop Closer into plaintext mode silently, writing intimate notes and
+  /// photos to Postgres as cleartext while the UI promised encryption.
   static Future<String?> fetchPartnerPublicKey(String partnerId) async {
     final row = await _c
         .from('partner_keys')

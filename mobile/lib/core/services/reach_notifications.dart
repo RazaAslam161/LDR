@@ -137,6 +137,10 @@ Future<void> showCallNotification({
 }
 
 // ── Care Nudges ──────────────────────────────────────────────────────────────
+const String kMsgChannelId = 'msg_channel';
+const String kMsgChannelName = 'Messages';
+const String kMsgChannelDesc = 'New messages';
+
 const String kCareChannelId = 'care_channel';
 const String kCareChannelName = 'Reminders';
 const String kCareChannelDesc = 'Scheduled reminders';
@@ -150,6 +154,46 @@ AndroidNotificationChannel buildCareChannel() =>
       playSound: true,
       enableVibration: true,
     );
+
+AndroidNotificationChannel buildMsgChannel() =>
+    const AndroidNotificationChannel(
+      kMsgChannelId,
+      kMsgChannelName,
+      description: kMsgChannelDesc,
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+/// A new chat message arrived while the app was backgrounded or killed.
+///
+/// Carries no sender name and no message text on purpose: the launcher is
+/// disguised, so the notification wears the same cover as every other one.
+/// Whoever picks up the phone sees a generic alert; the content is behind the
+/// app lock.
+Future<void> showMessageNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String messageId,
+}) async {
+  final style = await currentNotificationStyle();
+  final android = AndroidNotificationDetails(
+    kMsgChannelId,
+    kMsgChannelName,
+    channelDescription: kMsgChannelDesc,
+    importance: Importance.high,
+    priority: Priority.high,
+    icon: style.smallIcon,
+    ticker: style.ticker,
+    visibility: NotificationVisibility.secret,
+  );
+  await plugin.show(
+    id: messageId.hashCode & 0x7fffffff,
+    title: style.title,
+    body: style.body,
+    notificationDetails: NotificationDetails(android: android),
+    payload: 'message|$messageId',
+  );
+}
 
 /// A gentle reminder notification ("eat lunch", "take your medicine"…).
 Future<void> showCareNotification({
@@ -183,7 +227,12 @@ Future<void> showCareNotification({
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final type = message.data['type'];
-  if (type != 'reach' && type != 'care' && type != 'call') return;
+  // 'message' was missing here, so message_push.sql's trigger fired, the edge
+  // function sent, FCM delivered — and this isolate returned immediately. The
+  // whole push path existed and did nothing for anyone.
+  if (type != 'reach' && type != 'care' && type != 'call' && type != 'message') {
+    return;
+  }
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final plugin = FlutterLocalNotificationsPlugin();
@@ -208,6 +257,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       callId: (message.data['call_id'] as String?) ?? '',
       video: (message.data['video'] as String?) == 'true',
       fullScreen: fullScreen,
+    );
+    return;
+  }
+
+  if (type == 'message') {
+    await androidPlugin?.createNotificationChannel(buildMsgChannel());
+    await showMessageNotification(
+      plugin: plugin,
+      messageId: (message.data['message_id'] as String?) ?? '',
     );
     return;
   }
