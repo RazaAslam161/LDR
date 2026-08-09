@@ -203,10 +203,15 @@ class CallController extends ChangeNotifier {
         DateTime.now().difference(at) < const Duration(hours: 12)) {
       return _cachedTurn;
     }
+    // The backoff protects background refreshes from hammering a broken
+    // function. It must NOT apply when someone is placing a call and we have no
+    // relay at all — that is a first install whose one fetch happened to fail,
+    // and refusing to retry would hand them a call that cannot possibly connect.
     final failedAt = _turnFailedAt;
     if (failedAt != null &&
+        _cachedTurn.isNotEmpty &&
         DateTime.now().difference(failedAt) < const Duration(seconds: 60)) {
-      return _cachedTurn; // recently failed — do not make the user wait again
+      return _cachedTurn;
     }
     try {
       final res = await SupabaseService.client.functions
@@ -289,6 +294,22 @@ class CallController extends ChangeNotifier {
   /// Full WebRTC ICE config: Google/Cloudflare STUN + Cloudflare TURN (which
   /// includes TURN-over-TLS:443 for carrier-NAT / UDP-blocked networks). A static
   /// TURN from .env (METERED_TURN_*) is appended if present, as a manual override.
+  /// Make sure a relay is available before a call goes out.
+  ///
+  /// A fresh install has nothing cached, so its FIRST call depends entirely on
+  /// one network fetch landing. On mobile data against a cold edge function
+  /// that is exactly the fetch most likely to miss — and a new user's first
+  /// impression is a call that cannot connect. Retried once, briefly, because a
+  /// person is waiting.
+  static Future<void> _ensureRelay() async {
+    if (_cachedTurn.any(_isRelay)) return;
+    await _turnServers();
+    if (_cachedTurn.any(_isRelay)) return;
+    debugPrint('[turn] no relay after first attempt — retrying once');
+    _turnFailedAt = null; // an explicit user action outranks the backoff
+    await _turnServers();
+  }
+
   static Future<Map<String, dynamic>> _iceConfig() async {
     final servers = <Map<String, dynamic>>[
       {'urls': 'stun:stun.l.google.com:19302'},
@@ -350,6 +371,9 @@ class CallController extends ChangeNotifier {
     try {
       await _openMedia(video: video);
       await _routeAudio();
+      // Before the peer connection exists, so the relay is in its ICE config
+      // rather than arriving too late to be used.
+      await _ensureRelay();
       await _createPc();
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
@@ -401,6 +425,7 @@ class CallController extends ChangeNotifier {
     try {
       await _openMedia(video: isVideo);
       await _routeAudio();
+      await _ensureRelay();
       await _createPc();
       await _pc!.setRemoteDescription(_pendingOffer!);
       _remoteSet = true;

@@ -155,4 +155,30 @@ void main() {
       expect(body, contains('Duration(seconds: 15)'));
     });
   });
+
+  group("a brand new user's FIRST call", () {
+    test('both sides ensure a relay before creating the connection', () {
+      // A fresh install has nothing cached, so its first call depends entirely
+      // on one network fetch landing — on mobile data, against a cold edge
+      // function, which is exactly the fetch most likely to miss.
+      for (final f in ['Future<void> startCall(', 'Future<void> accept()']) {
+        final body = fn(f);
+        expect(body, contains('await _ensureRelay()'), reason: '$f');
+        expect(body.indexOf('_ensureRelay'), lessThan(body.indexOf('_createPc')),
+            reason: 'the relay must be in the ICE config, so it has to be '
+                'fetched BEFORE the peer connection is built');
+      }
+    });
+
+    test('an explicit call outranks the failure backoff', () {
+      // The backoff exists to stop background refreshes hammering a broken
+      // function. Applied to a user pressing Call with no relay at all, it
+      // would guarantee a call that cannot connect.
+      final ensure = fn('static Future<void> _ensureRelay()');
+      expect(ensure, contains('_turnFailedAt = null'));
+      final body = fn('_turnServers()');
+      expect(body, contains('_cachedTurn.isNotEmpty &&'),
+          reason: 'the backoff must only short-circuit when a relay is cached');
+    });
+  });
 }
