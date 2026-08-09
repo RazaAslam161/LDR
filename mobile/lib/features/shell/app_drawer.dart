@@ -120,11 +120,11 @@ class AppDrawer extends ConsumerWidget {
                           },
                         ),
                         _DrawerTile(
-                          icon: Icons.touch_app_outlined,
-                          label: 'Touch',
+                          icon: Icons.air_outlined,
+                          label: 'Breath',
                           onTap: () {
                             Navigator.of(context).pop();
-                            context.push('/app/touch');
+                            context.push('/app/breath');
                           },
                         ),
                         _DrawerTile(

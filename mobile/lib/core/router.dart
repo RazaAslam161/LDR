@@ -8,6 +8,7 @@ import 'package:miles/features/auth/role_setup_screen.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
 import 'package:miles/features/auth/sign_up_page.dart';
 import 'package:miles/features/auth/welcome_page.dart';
+import 'package:miles/features/breath/breath_sync_screen.dart';
 import 'package:miles/features/call/call_screen.dart';
 import 'package:miles/features/capsule/capsule_create_screen.dart';
 import 'package:miles/features/chat/rapid_camera_screen.dart';
@@ -185,6 +186,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/vault',
         builder: (context, state) => const VaultGateScreen(),
+      ),
+      GoRoute(
+        path: '/app/breath',
+        builder: (context, state) => const BreathSyncScreen(),
       ),
       GoRoute(
         path: '/app/touch',

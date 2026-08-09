@@ -11,7 +11,7 @@ import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/widgets/glass_panel.dart';
-import 'package:miles/features/breath/breath_sync_screen.dart';
+import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
@@ -43,7 +43,7 @@ class _AppShellState extends ConsumerState<AppShell>
   static const List<Widget> _screens = <Widget>[
     HomeScreen(),
     ChatScreen(),
-    BreathSyncScreen(),
+    TouchMapScreen(),
     CloserScreen(),
   ];
 
@@ -211,7 +211,7 @@ class _AppShellState extends ConsumerState<AppShell>
     final index = ref.watch(shellTabProvider);
 
     final showCloser = isAdult;
-    // Bottom-nav bodies (Home, Chat, Breath, [Closer]). The Camera tab is a
+    // Bottom-nav bodies (Home, Chat, Touch, [Closer]). The Camera tab is a
     // full-screen PUSH inserted at nav index 2 — it has no body, so nav indices
     // map past it.
     final bodies =
@@ -222,7 +222,7 @@ class _AppShellState extends ConsumerState<AppShell>
     final bodyIndex = (selected < cameraTab ? selected : selected - 1)
         .clamp(0, bodies.length - 1);
     final isCloserTab = showCloser && selected == destCount - 1;
-    final showAd = selected == 3 && !isCloserTab; // ads only on the Breath tab
+    final showAd = selected == 3 && !isCloserTab; // ads only on the Touch tab
 
     return Scaffold(
       key: rootScaffoldKey,
@@ -264,9 +264,9 @@ class _AppShellState extends ConsumerState<AppShell>
               label: 'Camera',
             ),
             const NavigationDestination(
-              icon: Icon(Icons.air_outlined),
-              selectedIcon: Icon(Icons.air),
-              label: 'Breath',
+              icon: Icon(Icons.touch_app_outlined),
+              selectedIcon: Icon(Icons.touch_app),
+              label: 'Touch',
             ),
             if (showCloser)
               NavigationDestination(

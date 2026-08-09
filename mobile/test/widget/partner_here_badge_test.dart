@@ -153,18 +153,20 @@ void main() {
   });
 
   testWidgets('tapping goes to the room they are in', (tester) async {
-    await pump(tester, myScreen: 'Care', theirScreen: 'Touch');
+    // A pushed room, not a tab: Touch became a bottom-nav tab, and a tab is
+    // joined by selecting it rather than by pushing a route.
+    await pump(tester, myScreen: 'Touch', theirScreen: 'Care', at: '/app');
     await tester.tap(find.byType(PartnerHereBadge));
-    expect(await settleTo(tester), '/app/touch');
+    expect(await settleTo(tester), '/app/care');
   });
 
   testWidgets('tapping does nothing when we are already in that room',
       (tester) async {
     // Reachable in the window before our own screen has been published, and a
     // push would stack a second copy of the page on top of itself.
-    await pump(tester, myScreen: null, theirScreen: 'Touch', at: '/app/touch');
+    await pump(tester, myScreen: null, theirScreen: 'Care', at: '/app/care');
     await tester.tap(find.byType(PartnerHereBadge));
-    expect(await settleTo(tester), '/app/touch');
+    expect(await settleTo(tester), '/app/care');
     expect(find.byType(PartnerHereBadge), findsOneWidget); // not stacked twice
   });
 

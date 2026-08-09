@@ -260,13 +260,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
-  void _updateStatus(String id, SendStatus status) {
-    if (!mounted) return;
-    final i = _messages.indexWhere((m) => m.id == id);
-    if (i < 0) return;
-    setState(() => _messages[i] = _messages[i].copyWith(sendStatus: status));
-  }
-
   void _startReply(Message m) {
     if (m.deletedForEveryone) return;
     setState(() => _replyingTo = m);

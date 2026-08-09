@@ -12,6 +12,6 @@ const List<String> kTabScreens = [
   'Home',
   'Chat',
   'Camera',
-  'Breath',
+  'Touch',
   'Closer',
 ];

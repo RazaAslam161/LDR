@@ -231,10 +231,8 @@ class CallController extends ChangeNotifier {
       await _openMedia(video: video);
       await _routeAudio();
       await _createPc();
-      await _preferHardwareCodecs();
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
-      await _applySendParameters();
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
       _insertInvite(offer.sdp ?? '', video); // durable → FCM rings a closed app
       await CallForegroundService.start(peerName ?? 'Partner');
@@ -280,13 +278,8 @@ class CallController extends ChangeNotifier {
       await _pc!.setRemoteDescription(_pendingOffer!);
       _remoteSet = true;
       await _flushPending();
-      // After setRemoteDescription, not before: these are the transceivers that
-      // actually produce the answer, and the only point where the intersection
-      // with the caller's offer is known.
-      await _preferHardwareCodecs();
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
-      await _applySendParameters();
       _send('answer', {'sdp': answer.sdp, 'type': answer.type});
       _setState(CallState.connected);
       _pendingOffer = null;
@@ -323,10 +316,12 @@ class CallController extends ChangeNotifier {
   Future<void> switchCamera() async {
     final track = _localStream?.getVideoTracks().firstOrNull;
     if (track == null) return;
-    if (await Helper.switchCamera(track)) {
-      frontCamera = !frontCamera;
-      notifyListeners();
-    }
+    // The native callback reports whether the NEW camera is front-facing
+    // (onCameraSwitchDone(boolean) -> result.success(b)), not whether the
+    // switch succeeded. Treating it as a success flag left the preview
+    // mirrored on the back camera — the exact bug it was meant to fix.
+    frontCamera = await Helper.switchCamera(track);
+    notifyListeners();
   }
 
   /// Route the call audio. Video calls belong on the speaker — the phone is
@@ -377,13 +372,17 @@ class CallController extends ChangeNotifier {
       // echo cancellation, noise suppression and auto gain; spelling them out
       // as constraints risks a device rejecting the whole request.
       'audio': true,
+      // 1280x720x30 — the SAME values GetUserMediaImpl already falls back to
+      // (DEFAULT_WIDTH/HEIGHT/FPS, :91-93), so this changes no behaviour; it
+      // just states the capture rather than inheriting it.
+      //
       // Flat ints, not an 'ideal' map: the plugin reads these with
       // getConstrainInt, which does not look inside an 'ideal' wrapper, so a
-      // wrapped value is silently ignored and the capture falls back to a
-      // default. 720p30 for everyone — no device tiering here, because capture
-      // resolution CANNOT be changed once the track is open, while libwebrtc's
-      // own overuse detector adapts downward per-frame and recovers. Guessing
-      // a phone's class up front only takes away the ability to do better.
+      // wrapped value would be silently ignored.
+      //
+      // No device tiering: capture resolution cannot be changed once the track
+      // is open, so guessing a phone's class up front can only take away the
+      // ability to do better. libwebrtc adapts downward per frame and recovers.
       'video': video
           ? {
               'facingMode': 'user',
@@ -397,80 +396,21 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Tell the encoder what to sacrifice when the network tightens.
-  ///
-  /// VIDEO SENDER ONLY, on purpose. RTCRtpParameters.fromMap turns a null
-  /// degradationPreference into BALANCED rather than leaving it null, and
-  /// toMap always emits it — so calling setParameters on the AUDIO sender to
-  /// "leave it alone" would in fact write a degradation preference onto an
-  /// audio track that never had one.
-  ///
-  /// No maxBitrate. Two people on wifi run a clean 720p30 at 2.5-3 Mbps today,
-  /// and a ceiling is a permanent cost paid to solve a congestion problem that
-  /// bandwidth estimation already solves — and that the encoder could recover
-  /// from on its own once the network does.
-  Future<void> _applySendParameters() async {
-    final pc = _pc;
-    if (pc == null || !isVideo) return;
-    try {
-      for (final sender in await pc.senders) {
-        if (sender.track?.kind != 'video') continue;
-        final params = sender.parameters;
-        final encodings = params.encodings;
-        if (encodings == null || encodings.isEmpty) continue;
-        encodings.first.maxFramerate = 30;
-        // Two people talking are mostly motion. A soft 480p at 30fps reads as
-        // a live person; a sharp 720p at 12fps reads as a broken connection.
-        params.degradationPreference =
-            RTCDegradationPreference.MAINTAIN_FRAMERATE;
-        final ok = await sender.setParameters(params);
-        debugPrint('[call] sender params applied=$ok');
-      }
-    } catch (e) {
-      debugPrint('[call] sender params failed: $e');
-    }
-  }
-
-  /// Ask for a hardware codec first.
-  ///
-  /// Every Android MediaCodec stack in practice has an AVC encoder; VP8
-  /// hardware encode is not universal, and this plugin's encoder chain has no
-  /// software fallback — a negotiated codec the device cannot encode means no
-  /// video at all, on a call where audio works fine.
-  ///
-  /// A REORDER, never a filter: nothing is removed and nothing is added, only
-  /// demoted, so if the peer somehow has nothing but VP9 the negotiation still
-  /// succeeds. Built from this device's own capabilities.
-  ///
-  /// setCodecPreferences reports nothing back — the native side calls
-  /// result.success(null) unconditionally — so the only evidence it worked is
-  /// the m-line order of the SDP we go on to create. That is what the log line
-  /// after createOffer/createAnswer is for.
-  Future<void> _preferHardwareCodecs() async {
-    final pc = _pc;
-    if (pc == null || !isVideo) return;
-    try {
-      final caps = await getRtpSenderCapabilities('video');
-      final codecs = caps.codecs;
-      if (codecs == null || codecs.isEmpty) return;
-
-      bool named(RTCRtpCodecCapability c, String name) =>
-          c.mimeType.toLowerCase() == 'video/$name';
-
-      final h264 = codecs.where((c) => named(c, 'h264')).toList();
-      final vp8 = codecs.where((c) => named(c, 'vp8')).toList();
-      if (h264.isEmpty && vp8.isEmpty) return; // nothing to promote
-      final rest =
-          codecs.where((c) => !named(c, 'h264') && !named(c, 'vp8')).toList();
-
-      for (final t in await pc.getTransceivers()) {
-        if (t.sender.track?.kind != 'video') continue;
-        await t.setCodecPreferences([...h264, ...vp8, ...rest]);
-      }
-    } catch (e) {
-      debugPrint('[call] codec preference failed: $e');
-    }
-  }
+  // No degradationPreference, no maxFramerate, no codec preference here — on
+  // purpose, and after getting it wrong.
+  //
+  // MAINTAIN_FRAMERATE holds fps by THROWING RESOLUTION AWAY, which is exactly
+  // the blur and the low pixel count it produced. Preferring H264 pushed every
+  // device onto whatever AVC encoder it happens to ship, which is not reliably
+  // the better one. Both were chosen from reasoning about a fleet I cannot
+  // measure, and both made real calls worse on the two phones I can.
+  //
+  // libwebrtc's own bandwidth estimation and CPU-overuse detector already do
+  // this per frame, per device, per network, and they RECOVER when conditions
+  // improve — which a fixed preference cannot. For "any phone, any
+  // connectivity" that adaptation is the feature, not something to override.
+  // Anything set here again should come from getStats on real calls, not from
+  // a plan.
 
   Future<void> _createPc() async {
     final pc = await createPeerConnection(await _iceConfig());

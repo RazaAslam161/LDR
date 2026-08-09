@@ -987,17 +987,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
             icon: const Icon(Icons.camera_alt, color: MilesColors.blush),
             onPressed: _quickSnap,
           ),
-          IconButton(
-            tooltip: 'Set my photo',
-            icon: _uploadingPhoto
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.add_a_photo_outlined,
-                    color: MilesColors.emberSoft),
-            onPressed: _uploadingPhoto ? null : _setMyPhoto,
-          ),
         ],
       ),
       body: (_coupleId == null || leftUid == null || rightUid == null)
@@ -1238,6 +1227,65 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       ),
                     ),
                   ),
+                  // Add my photo, on my own card. It used to be an icon in the
+                  // app bar, three widgets away from the empty silhouette it
+                  // filled — so the thing to tap was nowhere near the thing it
+                  // changed. Only on my card: setting the partner's photo is
+                  // not mine to do.
+                  if (isMe && photoUrl == null && !adjusting)
+                    Positioned.fill(
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: _uploadingPhoto ? null : _setMyPhoto,
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: MilesColors.night.withValues(alpha: 0.55),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: MilesColors.gilt.withValues(alpha: 0.5),
+                              ),
+                            ),
+                            child: _uploadingPhoto
+                                ? const SizedBox(
+                                    width: 26,
+                                    height: 26,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: MilesColors.emberSoft),
+                                  )
+                                : const Icon(Icons.add,
+                                    color: MilesColors.emberSoft, size: 26),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Once a photo is set, replacing it lives next to deleting it.
+                  if (isMe && photoUrl != null && !adjusting)
+                    Positioned(
+                      bottom: 6,
+                      left: 6,
+                      child: GestureDetector(
+                        onTap: _uploadingPhoto ? null : _setMyPhoto,
+                        child: Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: MilesColors.night.withValues(alpha: 0.55),
+                            shape: BoxShape.circle,
+                          ),
+                          child: _uploadingPhoto
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: MilesColors.cream50),
+                                )
+                              : const Icon(Icons.add,
+                                  color: MilesColors.cream50, size: 16),
+                        ),
+                      ),
+                    ),
                   // Delete this photo (yours or theirs) — clears both screens.
                   if (photoUrl != null && !adjusting)
                     Positioned(
