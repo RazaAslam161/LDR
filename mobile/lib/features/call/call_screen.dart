@@ -146,6 +146,13 @@ class CallScreen extends ConsumerWidget {
                       // Follows the actual camera. Pinned to true, the back
                       // camera showed the world reversed.
                       mirror: call.frontCamera,
+                      // The preview is a thumbnail, so this is a big DOWNscale
+                      // — 720p into ~120dp. medium adds mipmapping, which is
+                      // what stops a downscale shimmering and looking cheap.
+                      // Deliberately not applied to the remote view: that one
+                      // UPscales, where mipmaps do nothing and would only
+                      // soften it further.
+                      filterQuality: FilterQuality.medium,
                       objectFit:
                           RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
                 ),
