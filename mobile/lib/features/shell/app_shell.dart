@@ -6,6 +6,7 @@ import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/router.dart';
+import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/session_provider.dart';
@@ -128,6 +129,13 @@ class _AppShellState extends ConsumerState<AppShell>
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
     presenceRouteObserver?.publishActiveTab();
+    // Granting the OS location permission used to change nothing: the app-level
+    // sharing mode stayed 'off' and the partner's Home stayed empty until the
+    // user found the second switch in Settings. Runs once, ever.
+    final myCouple = ref.read(sessionProvider).couple;
+    if (myCouple != null) {
+      LocationService.adoptPermissionAsDefault(myCouple.id);
+    }
   }
 
   void _onReach(ReachEvent e) {

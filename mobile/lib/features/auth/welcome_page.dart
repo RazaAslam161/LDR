@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/config.dart';
+import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/features/auth/auth_errors.dart';
@@ -27,15 +28,10 @@ class _WelcomePageState extends ConsumerState<WelcomePage> {
   @override
   void initState() {
     super.initState();
-    // Try to detect the device timezone; fall back to the first known one.
-    try {
-      final detected = DateTime.now().timeZoneName;
-      _timezone = commonTimezones.contains(detected)
-          ? detected
-          : commonTimezones.first;
-    } catch (_) {
-      _timezone = commonTimezones.first;
-    }
+    // Matched by UTC offset, not by name. timeZoneName is an abbreviation
+    // ('PKT') and this list holds IANA names ('Asia/Karachi'), so comparing them
+    // never matched and everyone got America/Los_Angeles.
+    _timezone = TzHelper.deviceZone(commonTimezones);
   }
 
   @override

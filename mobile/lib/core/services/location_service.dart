@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:geocoding/geocoding.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Symmetric, opt-in, revocable location sharing — FOREGROUND ONLY.
 ///
@@ -77,6 +79,34 @@ class LocationService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Turn sharing on the first time the OS permission is actually granted.
+  ///
+  /// The app asked for location permission at startup and then defaulted the
+  /// sharing mode to 'off', so granting it did nothing visible: the partner's
+  /// Home stayed empty until the user found the toggle in Settings and set it
+  /// themselves. Two separate switches for one intention, and only one of them
+  /// was in front of the user.
+  ///
+  /// 'city' rather than 'precise' on purpose — the coarse option is the polite
+  /// default for something enabled on the user's behalf, and Settings still
+  /// offers precise, or off.
+  ///
+  /// Runs at most once ever: after that the stored mode is the user's own
+  /// choice and must not be overridden, including their choice of 'off'.
+  static Future<void> adoptPermissionAsDefault(String coupleId) async {
+    const key = 'location_mode_defaulted';
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(key) ?? false) return;
+
+    if (!await Permission.locationWhenInUse.isGranted) return;
+    await prefs.setBool(key, true);
+
+    final mine = await PresenceService.fetchMine(coupleId);
+    if ((mine?.locationSharingMode ?? 'off') != 'off') return; // already chosen
+    await PresenceService.setSharingMode(coupleId, 'city');
+    await shareOnce(coupleId, 'city');
   }
 
   /// Push the user's CURRENT position honouring their saved mode, which is read

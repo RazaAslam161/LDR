@@ -44,4 +44,35 @@ class TzHelper {
       return tz.UTC;
     }
   }
+
+  /// The device's IANA timezone, matched by its actual UTC offset.
+  ///
+  /// `DateTime.now().timeZoneName` returns an ABBREVIATION — 'PKT', 'PST', 'CET'
+  /// — while everything else here speaks IANA names like 'Asia/Karachi'. The
+  /// onboarding screen compared the two directly, so the match ALWAYS failed and
+  /// every user in the world was silently assigned the first entry in the list,
+  /// America/Los_Angeles. Nothing said so; the clocks were just wrong.
+  ///
+  /// Offset matching cannot separate zones that currently share an offset
+  /// (Europe/London and Europe/Lisbon in winter), so it is a good default rather
+  /// than a certainty — the picker in Settings stays. It is right about the
+  /// thing that matters: the partner clock and the countdown.
+  static String deviceZone(List<String> candidates) {
+    try {
+      ensureInit();
+      final now = DateTime.now();
+      final offset = now.timeZoneOffset;
+      for (final name in candidates) {
+        try {
+          final loc = tz.getLocation(name);
+          if (tz.TZDateTime.from(now, loc).timeZoneOffset == offset) return name;
+        } catch (_) {
+          // Not in the bundled database — skip rather than abort the scan.
+        }
+      }
+    } catch (_) {
+      // Fall through to the caller's default.
+    }
+    return candidates.isEmpty ? 'UTC' : candidates.first;
+  }
 }

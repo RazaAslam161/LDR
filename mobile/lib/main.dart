@@ -296,6 +296,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // and the camera as well as a real app switch, so without this a user
       // attaching one picture goes invisible for the rest of the session.
       presenceRouteObserver?.restore();
+      unawaited(_refreshOnResume());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _stopHeartbeat();
@@ -310,6 +311,38 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // when she had put the phone down. Presence must decay to unknown, never
       // linger as a confident wrong answer.
       presenceRouteObserver?.clear();
+    }
+  }
+
+  /// The last time a resume refresh ran, so a burst of lifecycle events — and
+  /// Android sends several — costs one refresh, not five.
+  DateTime? _lastResumeRefresh;
+
+  /// Bring the app up to date on return, rather than on a full restart.
+  ///
+  /// Realtime rejoins on resume, but it only carries what happens AFTER it
+  /// reconnects: anything that changed while the socket was down is simply
+  /// missed. So the app looked stale until it was killed and relaunched, which
+  /// is the one action that forces a fresh read of everything.
+  ///
+  /// Deliberately narrow. This fires on every return from every picker and
+  /// camera, for every user — a fan-out of queries here is a scaling defect,
+  /// not a fix. Session and timezone only; screens that need more refresh
+  /// themselves.
+  Future<void> _refreshOnResume() async {
+    final last = _lastResumeRefresh;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(seconds: 10)) {
+      return;
+    }
+    _lastResumeRefresh = DateTime.now();
+    try {
+      final session = ref.read(sessionProvider.notifier);
+      await session.loadProfile();
+      // Cheap, and the one thing that silently goes wrong when someone travels.
+      unawaited(session.syncTimezone());
+    } catch (e) {
+      debugPrint('[resume] refresh failed: $e');
     }
   }
 

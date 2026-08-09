@@ -107,11 +107,15 @@ class Presence {
   /// Source: chat_last_read (written every 5s while the chat is open). Window
   /// 20s (> the 5s write cadence, tolerates a missed cycle without flicker).
   /// Drives: "is here" avatar + seen tick.
-  bool get isActivelyInChat {
-    if (chatLastRead == null) return false;
-    final age = DateTime.now().toUtc().difference(chatLastRead!.toUtc());
-    return age.inSeconds <= 20;
-  }
+  /// Is the partner looking at the chat RIGHT NOW?
+  ///
+  /// Ephemeral, and deliberately separate from [chatLastRead]. Deriving it from
+  /// the read watermark meant the two had to be kept in sync by moving the
+  /// watermark backwards, which un-read already-read messages.
+  ///
+  /// typing_in_chat is set on entering the chat and cleared on leaving, and is
+  /// freshness-gated so a hard kill cannot leave it stuck on.
+  bool get isActivelyInChat => typingInChat && isTrulyOnline;
 
   /// GETTER 1 — is the partner genuinely using the app right now?
   /// Source: app_last_active_at (NEVER updated_at / location). Window 45s — the
@@ -220,11 +224,15 @@ class PresenceService {
 
   /// Clears the "in chat" + typing state on exit (app backgrounded / killed).
   ///
-  /// Writes a past chat_last_read so [Presence.isActivelyInChat] returns false
-  /// immediately on the partner's next freshness check — killing the phantom
-  /// "is here" avatar and any premature "seen" tick within the 20s window.
-  /// Also clears typing flags so a half-finished typing indicator doesn't
-  /// linger after the partner has left.
+  /// It used to also rewrite chat_last_read FIVE MINUTES INTO THE PAST, to force
+  /// isActivelyInChat false. That destroyed the one guarantee a read receipt
+  /// has: chat_last_read is a WATERMARK, and a watermark that moves backwards
+  /// un-reads messages that were already read. The reported symptom was exactly
+  /// that — every green tick in the conversation turning black the moment the
+  /// partner closed the chat.
+  ///
+  /// typing_in_chat already carries "is she in the chat right now". The two
+  /// facts are separate and are stored separately now.
   ///
   /// Intentionally NOT isAppActivity: this fires on leave/background, and
   /// stamping app_last_active_at here would keep the partner reading "Online"
@@ -233,10 +241,6 @@ class PresenceService {
   static Future<void> clearChatPresence(String coupleId) => _upsert(coupleId, {
         'typing_in_chat': false,
         'is_typing': false,
-        'chat_last_read': DateTime.now()
-            .toUtc()
-            .subtract(const Duration(minutes: 5))
-            .toIso8601String(),
       });
 
   static Future<void> setMood(String coupleId, String mood, String color) =>

@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:flutter/foundation.dart';
+import 'package:miles/core/config.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -75,6 +78,27 @@ class SessionNotifier extends StateNotifier<SessionState> {
 
     if (current != null) {
       loadProfile();
+    }
+  }
+
+  /// Keep the stored timezone matching the device.
+  ///
+  /// It was captured once during onboarding and never looked at again, so a
+  /// user who travels — or who simply picked the wrong entry from the list —
+  /// had a countdown and a partner clock that were quietly wrong forever, with
+  /// no indication anything needed fixing. The device already knows; nobody
+  /// should have to tell the app twice.
+  Future<void> syncTimezone() async {
+    final profile = state.profile;
+    if (profile == null) return;
+    try {
+      final name = TzHelper.deviceZone(commonTimezones);
+      if (name == profile.timezone) return;
+      debugPrint('[tz] device=$name stored=${profile.timezone} — updating');
+      await SupabaseRepository.updateMyProfile(timezone: name);
+      await loadProfile();
+    } catch (e) {
+      debugPrint('[tz] sync failed: $e');
     }
   }
 

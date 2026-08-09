@@ -558,12 +558,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // LATCH: if this message was ever seen, it stays seen.
     if (_seenMessageIds.contains(m.id)) return _MsgStatus.seen;
 
-    // SEEN now? partner actively in chat (chat_last_read within 20s) AND has
-    // read at/after this message. Latch it the first time it's true.
-    final seenNow = p != null &&
-        p.isActivelyInChat &&
-        p.chatLastRead != null &&
-        p.chatLastRead!
+    // SEEN is a WATERMARK COMPARISON and nothing else. chat_last_read only ever
+    // moves forward, so "she had read up to here" cannot stop being true.
+    //
+    // This used to also require isActivelyInChat — live presence. The moment
+    // she closed the chat that went false, and every message not already
+    // latched in memory fell back to a black double tick. Whether a message has
+    // been read is durable; whether she is looking right now is not. Mixing
+    // them made the durable fact expire.
+    final seenNow = p?.chatLastRead != null &&
+        p!.chatLastRead!
             .isAfter(m.createdAt.subtract(const Duration(seconds: 1)));
     if (seenNow) {
       _seenMessageIds.add(m.id);
