@@ -21,6 +21,16 @@ class CallScreen extends ConsumerWidget {
     // Leave the screen once the call settles back to idle.
     ref.listen(callControllerProvider, (_, __) {
       if (call.state == CallState.idle && context.mounted) {
+        // Say WHY before the screen disappears. Without this the whole
+        // failure is a flash: the call screen appears, the route pops, and
+        // the user is told nothing — which reads as "the app is broken" and
+        // is exactly how two months of call failures were reported.
+        final err = call.takeLastError();
+        if (err != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(err), duration: const Duration(seconds: 5)),
+          );
+        }
         if (context.canPop()) context.pop();
       }
     });

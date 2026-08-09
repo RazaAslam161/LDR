@@ -85,6 +85,15 @@ class Message {
         deletedBy: server.deletedBy,
         localPath: localPath,
         sendStatus: SendStatus.sent,
+        // The server's seq is the whole point of reconciling. Omitting it fell
+        // back to the constructor default of 0, so every optimistically-shown
+        // message and everything arriving over the broadcast fast path stayed
+        // at 0 forever: _maxSeq never advanced, ack_read was never called, and
+        // both partners sat on a single grey tick for the entire conversation.
+        // Invisible to two accounts with history (their mount-time fetch seeds
+        // a non-zero _maxSeq); total for a brand-new couple, whose first
+        // conversation has none.
+        seq: server.seq,
       );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(

@@ -302,8 +302,15 @@ class CallController extends ChangeNotifier {
   /// an actionable report.
   static String? turnError;
 
-  /// Why the last call attempt failed, for the UI. Null when nothing failed.
-  String? lastError;
+  /// Why the last call attempt failed. Consumed once by the call screen as it
+  /// pops, so a stale reason cannot resurface on the next call.
+  String? _lastError;
+
+  String? takeLastError() {
+    final e = _lastError;
+    _lastError = null;
+    return e;
+  }
 
   /// Whether the last ICE config actually contained a relay.
   /// Derived from the cache, not from a side effect of building a peer
@@ -353,6 +360,12 @@ class CallController extends ChangeNotifier {
     Duration budget = const Duration(seconds: 3),
   }) async {
     if (_cachedTurn.any(_isRelay)) return;
+    // A person pressing Call outranks the backoff. The backoff exists to stop
+    // BACKGROUND refreshes hammering a broken function; applied here it made
+    // one failed warm-up at launch abort every call for the next 60 seconds
+    // without touching the network — worst for a new user on a flaky carrier,
+    // whose first attempt is the one most likely to have failed.
+    _turnFailedAt = null;
     try {
       await _sharedTurnFetch().timeout(budget);
     } on TimeoutException {
@@ -441,17 +454,19 @@ class CallController extends ChangeNotifier {
       // rather than arriving too late to be used.
       await _ensureRelay();
       if (!relayAvailable) {
-        // No relay means no candidate pair can succeed unless both people
-        // happen to be on a network that allows a direct path — in practice,
-        // the same wifi. Failing in two seconds with a reason beats 35 seconds
-        // of "Calling…" followed by silence, which is indistinguishable from
-        // the app being broken and is exactly how this was reported.
-        lastError = "Can't reach the calling service. Check your connection "
-            'and try again.';
-        debugPrint('[turn] aborting call: no relay '
-            '(${turnError ?? 'reason unknown'})');
-        _teardown(CallState.ended);
-        return;
+        // Deliberately NOT an abort any more. Aborting here bricked the first
+        // call of every fresh install: relayAvailable is derived from
+        // _cachedTurn, a new device has nothing on disk, and one cold-booting
+        // edge-function fetch inside a 3s budget frequently does not land —
+        // so the very first call a new user ever placed died instantly, with
+        // no message, because lastError was read by nothing.
+        //
+        // A relay-less call is not a doomed call: many networks pair on host
+        // or server-reflexive candidates, only ONE side needs a relay, and
+        // credentials fetched after setLocalDescription still arrive in time
+        // to be trickled. Proceed, and let the banner say the truth.
+        debugPrint('[turn] placing call with no relay yet '
+            '(${turnError ?? 'still fetching'}) — candidates may trickle in');
       }
       await _createPc();
       final offer = await _pc!.createOffer();
@@ -463,9 +478,22 @@ class CallController extends ChangeNotifier {
     } catch (e) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
       debugPrint('[call] startCall failed: $e');
-      lastError = 'Could not start the call.';
+      _lastError = _readableCallError(e);
       _teardown(CallState.ended);
     }
+  }
+
+  /// A sentence the user can act on. The call screen pops itself the moment
+  /// state returns to idle, so without this the whole failure is a flash.
+  static String _readableCallError(Object e) {
+    final s = e.toString();
+    if (s.contains('NotAllowedError') || s.contains('Permission')) {
+      return 'Miles needs camera and microphone access to call.';
+    }
+    if (s.contains('NotFoundError')) {
+      return 'No camera or microphone found on this device.';
+    }
+    return 'Could not start the call. Please try again.';
   }
 
   // ── Incoming ──────────────────────────────────────────────────────────────
