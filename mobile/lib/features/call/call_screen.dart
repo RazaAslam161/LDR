@@ -6,6 +6,10 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/call/call_controller.dart';
 
+/// Whether the diagnostic readout is showing. Outside the widget so it survives
+/// the call screen being minimised to the pill and reopened.
+final ValueNotifier<bool> _showStats = ValueNotifier<bool>(false);
+
 class CallScreen extends ConsumerWidget {
   const CallScreen({super.key});
 
@@ -36,6 +40,15 @@ class CallScreen extends ConsumerWidget {
         backgroundColor: MilesColors.night,
         body: Stack(
           children: [
+            // Long-press anywhere to reveal what the call is really doing.
+            // Hidden by default: this is a diagnostic, not something a partner
+            // should ever see mid-call.
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onLongPress: () => _showStats.value = !_showStats.value,
+              ),
+            ),
             // Remote video (full screen) — video calls only, once connected.
             if (connected && video)
               Positioned.fill(
@@ -46,6 +59,40 @@ class CallScreen extends ConsumerWidget {
             else
               const Positioned.fill(
                   child: ColoredBox(color: MilesColors.night)),
+
+            // The numbers that tell a capture problem from an encoder problem
+            // from a network problem — they look identical on screen otherwise.
+            ValueListenableBuilder<bool>(
+              valueListenable: _showStats,
+              builder: (context, show, _) {
+                final st = call.stats;
+                if (!show || st == null) return const SizedBox.shrink();
+                return Positioned(
+                  top: MediaQuery.paddingOf(context).top + 8,
+                  left: 8,
+                  right: 8,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        st.line,
+                        style: const TextStyle(
+                          color: Color(0xFF7CFF9B),
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          decoration: TextDecoration.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
 
             // Voice centerpiece (or pre-connect state): avatar + name + status.
             if (!video || !connected)

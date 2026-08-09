@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:miles/features/call/call_stats.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -36,6 +37,13 @@ class CallController extends ChangeNotifier {
   bool camOn = true;
   bool isVideo = true; // false = voice-only call
   bool speakerOn = true; // video starts on the speaker, voice at the ear
+
+  /// What the call is actually doing. Null until the first sample lands.
+  CallStats? stats;
+  late final CallStatsMonitor _statsMonitor = CallStatsMonitor((s) {
+    stats = s;
+    notifyListeners();
+  });
   bool frontCamera = true; // drives the local preview mirror
   bool minimized = false; // call screen dismissed but call still running
   String? peerName; // who's calling / being called
@@ -442,6 +450,7 @@ class CallController extends ChangeNotifier {
       debugPrint('[call] pcstate ${s.name}');
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
+        _statsMonitor.start(pc);
         _setState(CallState.connected);
       } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
@@ -528,6 +537,8 @@ class CallController extends ChangeNotifier {
 
   Future<void> _teardown(CallState end) async {
     _connectTimer?.cancel();
+    _statsMonitor.stop();
+    stats = null;
     await CallForegroundService.stop();
     try {
       await _localStream?.dispose();
