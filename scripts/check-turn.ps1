@@ -1,17 +1,20 @@
-# Does this project actually have a working TURN relay?
+# Does this project actually hand the app a usable TURN relay?
 #
-# Two phones on one wifi connect directly and never need a relay, so calling can
-# look perfect while being broken for every real pair of users. Two people
-# behind different carrier NATs almost always need one. This answers the
-# question without a second phone, a second network, or a debugger.
+# The previous version of this script reported HEALTHY for two months while
+# calling was completely broken off-wifi. It grepped the response body for the
+# string "turn:" — which is present INSIDE the object shape the client could
+# not parse. It confirmed the credentials existed and never checked the one
+# thing that mattered: whether `iceServers` is an ARRAY.
 #
-# Run it from PowerShell in E:\LDR :
+# Cloudflare returns it as an OBJECT. The Dart client requires a List, bailed,
+# and cached nothing — so no relay candidate ever entered a peer connection.
+# Two phones on one wifi pair on host candidates and never need a relay, which
+# is why every test passed. This script now checks the shape.
 #
 #   .\scripts\check-turn.ps1 -Url "https://<ref>.supabase.co" -Key "<publishable or anon key>"
 #
-# Both values are in Supabase Dashboard -> Project Settings -> API.
-# Use the PUBLISHABLE key (sb_publishable_...) or the legacy anon key. Never the
-# secret key — it is not needed here and must not leave the server.
+# Both values: Supabase Dashboard -> Project Settings -> API. Use the
+# PUBLISHABLE key (sb_publishable_...) or the legacy anon key. Never the secret.
 
 param(
     [Parameter(Mandatory = $true)][string]$Url,
@@ -22,10 +25,9 @@ $endpoint = "$($Url.TrimEnd('/'))/functions/v1/turn-credentials"
 Write-Host "Asking $endpoint ..." -ForegroundColor Cyan
 Write-Host ""
 
-# curl.exe rather than Invoke-WebRequest on purpose. Windows PowerShell 5.1 has
-# no -SkipHttpErrorCheck and throws on any non-2xx, and the shape of the
-# exception differs between 5.1 and 7 — which is exactly the case this script
-# needs to read. curl ships with Windows 10 1803+ and behaves the same on both.
+# curl.exe rather than Invoke-WebRequest: Windows PowerShell 5.1 has no
+# -SkipHttpErrorCheck and throws on any non-2xx, and the exception shape
+# differs between 5.1 and 7 — which is exactly the case this needs to read.
 $raw = & curl.exe -s -S -w "`n%{http_code}" -X POST $endpoint `
     -H "Authorization: Bearer $Key" `
     -H "Content-Type: application/json" `
@@ -43,38 +45,69 @@ if ($status -eq 0) {
 }
 
 Write-Host "HTTP $status"
-if ($body) { Write-Host ($body.Substring(0, [Math]::Min(1500, $body.Length))) }
+if ($body) { Write-Host ($body.Substring(0, [Math]::Min(1200, $body.Length))) }
 Write-Host ""
 
-switch ($status) {
-    200 {
-        if ($body -match "turns?:") {
-            Write-Host "HEALTHY - the response contains a turn:/turns: relay." -ForegroundColor Green
-            Write-Host "Calls between users on different networks can connect."
+if ($status -ne 200) {
+    switch ($status) {
+        401 { Write-Host "BROKEN - auth rejected. Use the publishable/anon key." -ForegroundColor Red }
+        403 { Write-Host "BROKEN - forbidden. The function may require a signed-in user." -ForegroundColor Red }
+        404 { Write-Host "BROKEN - not deployed. Run: npx supabase functions deploy turn-credentials" -ForegroundColor Red }
+        500 {
+            Write-Host "BROKEN - the function ran and failed. The body above says which:" -ForegroundColor Red
+            Write-Host "  turn_not_configured -> the app_secrets rows are missing."
+            Write-Host "  secret_read_failed  -> the function cannot read app_secrets."
         }
-        else {
-            Write-Host "BROKEN - HTTP 200 but NO turn:/turns: entry in the response." -ForegroundColor Red
-            Write-Host "Only STUN came back. Two users on different networks will fail to"
-            Write-Host "connect, while two phones on your wifi will work fine."
+        502 {
+            Write-Host "BROKEN - Cloudflare rejected the request, or returned a shape" -ForegroundColor Red
+            Write-Host "         this function could not normalise. The body above says which."
         }
+        default { Write-Host "BROKEN - unexpected status. The body above is the detail." -ForegroundColor Red }
     }
-    401 { Write-Host "BROKEN - auth rejected. Check the key is the publishable/anon one." -ForegroundColor Red }
-    403 { Write-Host "BROKEN - forbidden. The function may require a signed-in user." -ForegroundColor Red }
-    404 {
-        Write-Host "BROKEN - the function is not deployed." -ForegroundColor Red
-        Write-Host "Deploy it with:  supabase functions deploy turn-credentials"
-    }
-    500 {
-        Write-Host "BROKEN - the function ran and failed. The body above says which:" -ForegroundColor Red
-        Write-Host "  turn_not_configured -> the app_secrets rows are missing. In the SQL editor:"
-        Write-Host "     insert into app_secrets(key,value) values"
-        Write-Host "       ('CF_TURN_KEY_ID','<cloudflare turn key id>'),"
-        Write-Host "       ('CF_TURN_API_TOKEN','<cloudflare turn api token>');"
-        Write-Host "  secret_read_failed  -> the function cannot read app_secrets."
-    }
-    502 {
-        Write-Host "BROKEN - Cloudflare rejected the request." -ForegroundColor Red
-        Write-Host "Usually the API token is wrong, expired, or lacks Realtime TURN permission."
-    }
-    default { Write-Host "BROKEN - unexpected status. The body above is the detail." -ForegroundColor Red }
+    exit 1
 }
+
+# ── The checks that actually matter ───────────────────────────────────────
+try { $json = $body | ConvertFrom-Json }
+catch {
+    Write-Host "BROKEN - HTTP 200 but the body is not JSON." -ForegroundColor Red
+    exit 1
+}
+
+$ice = $json.iceServers
+if ($null -eq $ice) {
+    Write-Host "BROKEN - HTTP 200 with no iceServers field at all." -ForegroundColor Red
+    exit 1
+}
+
+# THE check the old script missed. PowerShell surfaces a JSON array as
+# object[]; a single JSON object is a PSCustomObject.
+$isArray = $ice -is [System.Array]
+if (-not $isArray) {
+    Write-Host "BROKEN - iceServers is an OBJECT, not an array." -ForegroundColor Red
+    Write-Host "This is the two-month calling bug: the client requires a list and"
+    Write-Host "discards anything else, so it caches no relay and every call between"
+    Write-Host "two different networks fails while same-wifi calls work fine."
+    Write-Host ""
+    Write-Host "The deployed function is older than the code. Deploy it:" -ForegroundColor Yellow
+    Write-Host "  npx -y supabase functions deploy turn-credentials --project-ref <ref>"
+    exit 1
+}
+
+$relays = @($ice | Where-Object {
+    ($_.urls -join ' ') -match '(^|\s)turns?:'
+})
+
+if ($relays.Count -eq 0) {
+    Write-Host "BROKEN - iceServers is an array but contains NO turn:/turns: entry." -ForegroundColor Red
+    Write-Host "Only STUN came back. Users on different networks cannot connect."
+    exit 1
+}
+
+Write-Host "HEALTHY" -ForegroundColor Green
+Write-Host "  iceServers is an ARRAY  ($($ice.Count) entries)"
+Write-Host "  relay entries found:    $($relays.Count)"
+Write-Host ""
+Write-Host "The app can now cache a relay, so calls between two different"
+Write-Host "networks can connect. The real proof is still one call with mobile"
+Write-Host "data on one side and wifi on the other."
