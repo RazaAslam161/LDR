@@ -15,11 +15,24 @@ class SupabaseRepository {
 
   // ─── Auth ────────────────────────────────────────────────────
 
+  /// Where Supabase sends the user back to after they tap a link in an email.
+  ///
+  /// Without this Supabase uses the project's Site URL, which defaults to
+  /// http://localhost:3000 — so every confirmation and reset mail opened
+  /// "localhost refused to connect" on the user's phone. The scheme is
+  /// registered in AndroidManifest.xml and must also be listed under
+  /// Authentication -> URL Configuration -> Redirect URLs in the dashboard.
+  static const authCallbackUrl = 'tethered://auth-callback';
+
   static Future<void> signUp({
     required String email,
     required String password,
   }) async {
-    await _c.auth.signUp(email: email, password: password);
+    await _c.auth.signUp(
+      email: email,
+      password: password,
+      emailRedirectTo: authCallbackUrl,
+    );
   }
 
   static Future<void> signIn({
@@ -38,7 +51,15 @@ class SupabaseRepository {
   /// shows the same message either way, so this cannot be used to discover who
   /// has an account.
   static Future<void> sendPasswordReset(String email) async {
-    await _c.auth.resetPasswordForEmail(email.trim());
+    await _c.auth.resetPasswordForEmail(
+      email.trim(),
+      redirectTo: authCallbackUrl,
+    );
+  }
+
+  /// Sets a new password for the session opened by a recovery link.
+  static Future<void> updatePassword(String newPassword) async {
+    await _c.auth.updateUser(UserAttributes(password: newPassword));
   }
 
   static Future<void> signInWithGoogle() async {

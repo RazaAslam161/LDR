@@ -6,6 +6,7 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/features/auth/couple_page.dart';
 import 'package:miles/features/auth/role_setup_screen.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
+import 'package:miles/features/auth/new_password_page.dart';
 import 'package:miles/features/auth/sign_up_page.dart';
 import 'package:miles/features/auth/welcome_page.dart';
 import 'package:miles/features/breath/breath_sync_screen.dart';
@@ -68,6 +69,12 @@ GoRouter buildRouter(Ref ref) {
 
       final isAuthRoute = path == '/signin' || path == '/signup';
 
+      // A recovery link signs the user in with a short-lived session, so the
+      // onboarding funnel below would otherwise sweep them straight to /app
+      // (or /couple) and they would never reach the password field they came
+      // here to fill in. Recovery outranks the funnel.
+      if (path == '/new-password') return null;
+
       // While the session is resolving, don't bounce — let the current route
       // render until we know where to send them.
       if (session.loading) return null;
@@ -119,6 +126,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/signup',
         builder: (context, state) => const SignUpPage(),
+      ),
+      GoRoute(
+        path: '/new-password',
+        builder: (context, state) => const NewPasswordPage(),
       ),
       GoRoute(
         path: '/welcome',

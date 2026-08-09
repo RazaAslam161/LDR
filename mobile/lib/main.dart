@@ -152,6 +152,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     WidgetsBinding.instance
         .addPostFrameCallback((_) => AppLock.lockIfEnabled());
     _initDeepLinks();
+    _watchPasswordRecovery();
     _startHeartbeat(); // app launches foregrounded
 
     // Panic lock: shake ×3 or volume up+down → snap back to the News cover.
@@ -346,6 +347,19 @@ class _MilesAppState extends ConsumerState<MilesApp>
     }
   }
 
+  /// Route to the new-password screen the moment a recovery session opens.
+  ///
+  /// Listened for here rather than in the router redirect because the event is
+  /// asynchronous: by the time it fires the user is already sitting on
+  /// whichever route the funnel chose, and only a push moves them.
+  void _watchPasswordRecovery() {
+    passwordRecovery.addListener(() {
+      if (!passwordRecovery.value || !mounted) return;
+      passwordRecovery.value = false;
+      ref.read(routerProvider).go('/new-password');
+    });
+  }
+
   Future<void> _initDeepLinks() async {
     try {
       final initial = await _appLinks.getInitialLink();
@@ -356,6 +370,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   /// Handles tethered://join?code=ABCDEF — stash the code and send the user to
   /// the pairing screen (the router gates auth/onboarding from there).
+  ///
+  /// tethered://auth-callback (email confirmation, password recovery) needs no
+  /// handling here: supabase_flutter parses the tokens off the incoming link
+  /// itself and emits the auth event. Recovery is routed from the
+  /// onAuthStateChange listener below.
   void _handleLink(Uri uri) {
     if (uri.scheme != 'tethered' || uri.host != 'join') return;
     final code = uri.queryParameters['code'];

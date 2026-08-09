@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/models.dart';
+import 'package:miles/core/providers.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/config.dart';
@@ -71,6 +72,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
         loading: false,
         session: event.session,
       );
+      // A password-reset link opens a short-lived session and fires this. It
+      // has to be surfaced, or the router's onboarding funnel sweeps the user
+      // into the app and the reason they tapped the link never appears.
+      if (event.event == AuthChangeEvent.passwordRecovery) {
+        passwordRecovery.value = true;
+      }
       if (event.session != null) {
         await loadProfile();
       }

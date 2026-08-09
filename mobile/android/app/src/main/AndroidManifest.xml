@@ -87,6 +87,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="tethered" android:host="join" />
             </intent-filter>
+
+            <!-- Auth callback: tethered://auth-callback
+                 Email confirmation and password-reset links land here. Without
+                 it Supabase falls back to its default Site URL, so every
+                 confirmation and reset mail opened "localhost refused to
+                 connect" — on a phone, which has no server on :3000. That is
+                 every new signup and every forgotten password. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tethered" android:host="auth-callback" />
+            </intent-filter>
         </activity>
 
         <!-- ── Launcher disguises ────────────────────────────────────────────

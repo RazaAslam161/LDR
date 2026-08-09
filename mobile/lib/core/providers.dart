@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/session_provider.dart';
@@ -39,3 +40,7 @@ final pendingInviteCodeProvider = StateProvider<String?>((ref) => null);
 /// The selected bottom-nav tab index in the AppShell (0 = Home). A provider so
 /// the Home screen's quick actions can switch tabs (e.g. open Chat).
 final shellTabProvider = StateProvider<int>((ref) => 0);
+
+/// Set when a password-reset link opens a recovery session, so the app can
+/// route to /new-password instead of letting the onboarding funnel swallow it.
+final passwordRecovery = ValueNotifier<bool>(false);
