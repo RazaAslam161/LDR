@@ -44,7 +44,10 @@ end $$;
 -- the migration claimed to have emptied. Textbook "fixed the data, not the
 -- code path". join_couple_by_code is gone so nothing reads it today, which is
 -- precisely why it would sit there unnoticed until someone adds a lookup.
-create or replace function public.create_pairing_invite(p_ttl_minutes integer)
+-- Signature preserved EXACTLY, default and all. Postgres refuses to remove a
+-- parameter default via CREATE OR REPLACE (42P13), and dropping the default
+-- would also have silently shortened every invite from 24h to 1h.
+create or replace function public.create_pairing_invite(p_ttl_minutes int default 1440)
 returns public.pairing_invites language plpgsql security definer
 set search_path = public as $$
 declare
@@ -71,7 +74,7 @@ begin
     begin
       insert into public.pairing_invites (code, couple_id, created_by, expires_at)
       values (v_code, v_couple_id, v_uid,
-              now() + make_interval(mins => greatest(coalesce(p_ttl_minutes, 60), 1)))
+              now() + make_interval(mins => greatest(coalesce(p_ttl_minutes, 1440), 1)))
       returning * into v_row;
       exit;
     exception when unique_violation then
@@ -80,8 +83,8 @@ begin
   end loop;
   return v_row;
 end; $$;
-revoke execute on function public.create_pairing_invite(integer) from public, anon;
-grant  execute on function public.create_pairing_invite(integer) to authenticated;
+revoke execute on function public.create_pairing_invite(int) from public, anon;
+grant  execute on function public.create_pairing_invite(int) to authenticated;
 
 -- Retire any codes minted since the earlier migration.
 update public.couples set invite_code = null where invite_code is not null;
