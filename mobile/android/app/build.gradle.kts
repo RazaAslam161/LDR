@@ -31,8 +31,8 @@ android {
 
     defaultConfig {
         applicationId = "com.miles.miles"
-        // minSdk 23 (Android 6.0) — required by Supabase Realtime, firebase_messaging
-        // 16.x, and most plugins. Pinned explicitly (FCM needs >= 21; Firebase >= 23).
+        // Resolves to 24 (Android 7.0) from the Flutter SDK - verified in the
+        // merged manifest. Supabase Realtime, FCM and Firebase all need >= 23.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -40,8 +40,20 @@ android {
     }
 
     signingConfigs {
+        // Sign with every scheme the platform accepts. minSdk resolves to 24,
+        // so AGP legitimately drops the v1 (JAR) signature - v2 covers API 24+
+        // and v3 adds key rotation. Asking for all three costs nothing and
+        // means the APK stays installable if minSdk is ever lowered.
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
         if (hasReleaseKey) {
             create("release") {
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
                 storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")

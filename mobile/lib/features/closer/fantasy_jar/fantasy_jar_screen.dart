@@ -1,3 +1,4 @@
+import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/session_provider.dart';
@@ -66,7 +67,13 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
         ),
       ]);
 
-      final entries = results[0] as List<FantasyEntry>;
+      final entryResult = results[0] as CloserLoadResult<FantasyEntry>;
+      final entries = entryResult.items;
+      if (entryResult.hasUnreadable && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(entryResult.unreadableMessage)),
+        );
+      }
       final myHashes = results[1] as Set<String>;
       final partnerHashes = results[2] as Set<String>;
 

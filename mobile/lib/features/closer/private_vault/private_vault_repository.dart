@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
@@ -149,7 +151,7 @@ class PrivateVaultRepository {
   static final _c = SupabaseService.client;
 
   /// Returns all non-deleted vault items for the current couple, newest first.
-  static Future<List<VaultItem>> fetchItems(String coupleId) async {
+  static Future<CloserLoadResult<VaultItem>> fetchItems(String coupleId) async {
     final res = await _c
         .from('vault_items')
         .select()
@@ -159,14 +161,21 @@ class PrivateVaultRepository {
 
     final uid = SupabaseService.currentUserId!;
     final items = <VaultItem>[];
+    var unreadable = 0;
     for (final row in (res as List)) {
       try {
         items.add(VaultItem.fromJson(row as Map<String, dynamic>, uid));
-      } catch (_) {
-        // Skip a single malformed row rather than blanking the whole vault.
+      } catch (e) {
+        // Still skip the row — one bad item must not blank the vault — but
+        // count it, so the screen can say so instead of showing "empty".
+        unreadable++;
+        debugPrint('vault: unreadable row: $e');
       }
     }
-    return List<VaultItem>.unmodifiable(items);
+    return CloserLoadResult(
+      List<VaultItem>.unmodifiable(items),
+      unreadable: unreadable,
+    );
   }
 
   /// Inserts a new encrypted item. The bytes passed in are encrypted

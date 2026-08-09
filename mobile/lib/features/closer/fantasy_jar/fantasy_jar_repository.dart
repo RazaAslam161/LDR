@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
@@ -139,7 +141,7 @@ class FantasyJarRepository {
   }
 
   /// Fetches and decrypts the current user's own entries.
-  static Future<List<FantasyEntry>> fetchMyEntries({
+  static Future<CloserLoadResult<FantasyEntry>> fetchMyEntries({
     required String coupleId,
     required String myId,
   }) async {
@@ -154,6 +156,7 @@ class FantasyJarRepository {
     final hashToTag = {for (final e in tagHashMap.entries) e.value: e.key};
 
     final out = <FantasyEntry>[];
+    var unreadable = 0;
     for (final row in rows as List) {
       try {
         final plain = await CryptoCore.decryptString(
@@ -171,11 +174,16 @@ class FantasyJarRepository {
           tags: tags,
           createdAt: JsonUtils.parseDate(row['created_at']).toLocal(),
         ),);
-      } catch (_) {
+      } catch (e) {
+        // Counted, not silent: an entry the partner wrote before publishing
+        // their key is legitimately unopenable here, and an empty jar reads
+        // as lost data.
+        unreadable++;
+        debugPrint('fantasy jar: unreadable row: $e');
         continue;
       }
     }
-    return out;
+    return CloserLoadResult(out, unreadable: unreadable);
   }
 
   /// Returns the set of tag hashes authored by the partner.

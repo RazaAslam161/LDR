@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
@@ -131,7 +133,8 @@ class MemoryThreadRepository {
 
   /// Live + archived threads for [coupleId]. Deleted rows are excluded.
   /// Ordered newest-first by `happened_on` so the timeline reads top-down.
-  static Future<List<MemoryThread>> fetchThreads(String coupleId) async {
+  static Future<CloserLoadResult<MemoryThread>> fetchThreads(
+      String coupleId) async {
     final res = await _c
         .from('memory_threads')
         .select()
@@ -140,14 +143,19 @@ class MemoryThreadRepository {
         .order('happened_on', ascending: false);
 
     final threads = <MemoryThread>[];
+    var unreadable = 0;
     for (final row in res as List) {
       try {
         threads.add(MemoryThread.fromJson(JsonUtils.asMap(row)));
-      } catch (_) {
-        // Skip a single malformed row so it can't blank the whole timeline.
+      } catch (e) {
+        unreadable++;
+        debugPrint('memory threads: unreadable row: $e');
       }
     }
-    return List<MemoryThread>.unmodifiable(threads);
+    return CloserLoadResult(
+      List<MemoryThread>.unmodifiable(threads),
+      unreadable: unreadable,
+    );
   }
 
   /// Propose a new memory (state = `proposed`). Awaits partner's accept.

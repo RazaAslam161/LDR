@@ -339,10 +339,15 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
 
   Future<void> _refresh(String coupleId) async {
     try {
-      final threads = await MemoryThreadRepository.fetchThreads(coupleId);
+      final result = await MemoryThreadRepository.fetchThreads(coupleId);
       if (!mounted) return;
+      if (result.hasUnreadable) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.unreadableMessage)),
+        );
+      }
       setState(() {
-        _threads = threads;
+        _threads = result.items;
         _loading = false;
         _error = null;
       });

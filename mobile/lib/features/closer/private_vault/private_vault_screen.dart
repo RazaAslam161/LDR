@@ -64,10 +64,15 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
 
   Future<void> _refresh(String coupleId) async {
     try {
-      final items = await PrivateVaultRepository.fetchItems(coupleId);
+      final result = await PrivateVaultRepository.fetchItems(coupleId);
       if (!mounted) return;
+      if (result.hasUnreadable) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.unreadableMessage)),
+        );
+      }
       setState(() {
-        _items = items;
+        _items = result.items;
         _state = _LoadState.ready;
         _error = null;
       });
