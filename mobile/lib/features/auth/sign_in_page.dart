@@ -48,6 +48,34 @@ class _SignInPageState extends ConsumerState<SignInPage> {
     }
   }
 
+  /// Send a reset link.
+  ///
+  /// The confirmation is identical whether or not the address has an account —
+  /// otherwise this screen becomes a way to find out who is registered.
+  Future<void> _forgotPassword() async {
+    final email = _email.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Enter your email above first.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await SupabaseRepository.sendPasswordReset(email);
+    } catch (_) {
+      // Swallowed on purpose — see above.
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('If $email has an account, a reset link is on its way.'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -114,7 +142,16 @@ class _SignInPageState extends ConsumerState<SignInPage> {
                       )
                     : const Text('Sign in'),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _loading ? null : _forgotPassword,
+                  child: const Text('Forgot password?',
+                      style: TextStyle(color: Color(0x99F5EFE6), fontSize: 13)),
+                ),
+              ),
+              const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

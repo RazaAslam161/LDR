@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +14,7 @@ import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/wordmark.dart';
@@ -183,7 +185,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               if (couple == null)
                 const _Centered('Link with your partner to begin.')
               else if (partner == null)
-                const _Centered("Waiting for your partner to join…")
+                const _WaitingForPartner()
               else ...[
                 _PartnerStatusCard(
                   partner: partner,
@@ -385,6 +387,116 @@ class _InfoRow extends StatelessWidget {
               style: const TextStyle(color: MilesColors.cream50, fontSize: 13)),
         ),
       ],
+    );
+  }
+}
+
+/// The half-paired state: a couple exists, but nobody else is in it.
+///
+/// This used to be one line of text and nothing else. The person who created
+/// the invite lands here, and if they lost the code — which happens the moment
+/// they leave the app to send it — there was no way to see it again, no way to
+/// share it again, and no way to undo. The couple existed, so the router would
+/// never send them back to the pairing screen either. A dead end that required
+/// abandoning the account.
+class _WaitingForPartner extends StatefulWidget {
+  const _WaitingForPartner();
+
+  @override
+  State<_WaitingForPartner> createState() => _WaitingForPartnerState();
+}
+
+class _WaitingForPartnerState extends State<_WaitingForPartner> {
+  String? _code;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final invite = await SupabaseRepository.activePairingInvite();
+      if (mounted) setState(() {
+        _code = invite?.code;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Mint a new one. The old code may have expired while they were away, and
+  /// without this the only recovery is leaving the couple entirely.
+  Future<void> _newCode() async {
+    setState(() => _loading = true);
+    try {
+      final invite = await SupabaseRepository.createPairingInvite();
+      if (mounted) setState(() {
+        _code = invite.code;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final code = _code;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Column(
+        children: [
+          const Text('Waiting for your partner to join…',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: MilesColors.cream50, fontSize: 16)),
+          const SizedBox(height: 8),
+          const Text('They need this code. It is still live.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+          const SizedBox(height: 24),
+          if (_loading)
+            const CircularProgressIndicator(color: MilesColors.ember)
+          else if (code != null) ...[
+            SelectableText(
+              code,
+              style: const TextStyle(
+                color: MilesColors.cream50,
+                fontSize: 34,
+                letterSpacing: 8,
+                fontWeight: FontWeight.w300,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: code));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Code copied')),
+                    );
+                  },
+                  icon: const Icon(Icons.copy, size: 18),
+                  label: const Text('Copy code'),
+                ),
+              ],
+            ),
+          ] else
+            const Text('No live code right now.',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _loading ? null : _newCode,
+            child: const Text('Get a new code',
+                style: TextStyle(color: MilesColors.emberSoft, fontSize: 13)),
+          ),
+        ],
+      ),
     );
   }
 }

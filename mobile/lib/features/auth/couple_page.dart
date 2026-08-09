@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
@@ -38,6 +39,28 @@ class _CouplePageState extends ConsumerState<CouplePage> {
     // Pre-fill from a deep link if we arrived via tethered://join?code=…
     final pending = ref.read(pendingInviteCodeProvider);
     if (pending != null) _code.text = pending;
+    _restoreInvite();
+  }
+
+  /// Put the user back on their code if they already made one.
+  ///
+  /// Sharing a code means leaving the app, and leaving the app drops the cover
+  /// over everything and destroys this screen. Coming back landed on a blank
+  /// create/join form with the code gone — while the invite was still live in
+  /// the database and the partner was still holding it. That is how an account
+  /// ends up permanently half-paired with no way forward.
+  Future<void> _restoreInvite() async {
+    try {
+      final invite = await SupabaseRepository.activePairingInvite();
+      if (invite == null || !mounted) return;
+      setState(() {
+        _createdCode = invite.code;
+        _expiresAt = invite.expiresAt;
+      });
+    } catch (_) {
+      // Offline or a transient failure: fall through to the normal form rather
+      // than blocking the screen. Creating a new code still works.
+    }
   }
 
   @override
@@ -87,6 +110,23 @@ class _CouplePageState extends ConsumerState<CouplePage> {
     }
   }
 
+  /// The way out.
+  ///
+  /// The router forces anyone without a couple to '/couple' from every path, so
+  /// a user who cannot pair — wrong account, partner never joined, changed
+  /// their mind — had no exit at all and no way to reach Settings. That turns a
+  /// stalled pairing into a dead account.
+  Future<void> _signOut() async {
+    setState(() => _loading = true);
+    try {
+      await FcmService.clearToken();
+    } catch (_) {
+      // Never block the exit on a push-token cleanup.
+    }
+    await ref.read(sessionProvider.notifier).signOut();
+    if (mounted) context.go('/signin');
+  }
+
   Future<void> _enterApp() async {
     await ref.read(sessionProvider.notifier).loadProfile();
     if (mounted) context.go('/app');
@@ -103,19 +143,37 @@ class _CouplePageState extends ConsumerState<CouplePage> {
       backgroundColor: Colors.transparent,
       body: EmberBackground(
         child: SafeArea(
-          child: _createdCode != null
-              ? _InviteReveal(
-                  code: _createdCode!,
-                  expiresAt: _expiresAt,
-                  onContinue: _enterApp,
-                )
-              : _ConnectView(
-                  codeController: _code,
-                  loading: _loading,
-                  error: _error,
-                  onCreate: _create,
-                  onJoin: _join,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: _createdCode != null
+                    ? _InviteReveal(
+                        code: _createdCode!,
+                        expiresAt: _expiresAt,
+                        onContinue: _enterApp,
+                      )
+                    : _ConnectView(
+                        codeController: _code,
+                        loading: _loading,
+                        error: _error,
+                        onCreate: _create,
+                        onJoin: _join,
+                      ),
+              ),
+              // Always reachable, in both states. This screen is a trap
+              // otherwise: the router redirects every other path back here
+              // until a couple exists.
+              Positioned(
+                top: 4,
+                right: 4,
+                child: TextButton(
+                  onPressed: _loading ? null : _signOut,
+                  child: const Text('Sign out',
+                      style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
                 ),
+              ),
+            ],
+          ),
         ),
       ),
     );

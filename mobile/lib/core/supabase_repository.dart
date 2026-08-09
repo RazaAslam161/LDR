@@ -29,6 +29,18 @@ class SupabaseRepository {
     await _c.auth.signInWithPassword(email: email, password: password);
   }
 
+  /// Emails a password-reset link.
+  ///
+  /// Its absence meant a forgotten password locked someone out of their account
+  /// permanently, with no self-serve way back — the account was simply gone.
+  ///
+  /// Deliberately does NOT report whether the address is registered: the caller
+  /// shows the same message either way, so this cannot be used to discover who
+  /// has an account.
+  static Future<void> sendPasswordReset(String email) async {
+    await _c.auth.resetPasswordForEmail(email.trim());
+  }
+
   static Future<void> signInWithGoogle() async {
     // Native Google sign-in requires the google_sign_in package + config.
     // For v1 we ship email-only; Google lands in v1.1.
@@ -154,6 +166,33 @@ class SupabaseRepository {
   }
 
   // ─── Pairing invites (expiring, single-use) ──────────────────────
+
+  /// The caller's live invite, if they already made one.
+  ///
+  /// Sharing a code REQUIRES leaving the app, and leaving the app tears the
+  /// whole widget tree down behind the disguise cover. Holding the code only in
+  /// widget state meant it was gone the moment it was used for its one purpose:
+  /// the row was still in the database, the partner still had the code, and the
+  /// person who created it could never see it again. The server is the truth;
+  /// the screen is a view of it.
+  ///
+  /// RLS already scopes this to the caller's own couple
+  /// (pairing_invites_select_member), so no filter on created_by is needed.
+  static Future<({String code, DateTime expiresAt})?> activePairingInvite() async {
+    final rows = await _c
+        .from('pairing_invites')
+        .select('code, expires_at')
+        .isFilter('consumed_at', null)
+        .gt('expires_at', DateTime.now().toUtc().toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(1);
+    if (rows.isEmpty) return null;
+    final m = rows.first;
+    return (
+      code: JsonUtils.parseString(m['code']),
+      expiresAt: JsonUtils.parseDate(m['expires_at']).toLocal(),
+    );
+  }
 
   /// Creates the caller's couple if needed and returns a fresh 6-char invite
   /// code with its expiry. Replaces the permanent invite code.
