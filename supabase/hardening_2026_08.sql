@@ -27,22 +27,42 @@
 -- Column-level REVOKE is the whole fix. PostgREST rejects any PATCH naming the
 -- column; the SECURITY DEFINER pairing RPCs run as owner and are unaffected.
 -- The Dart client never writes couple_id through the table API — only via RPC.
-revoke update (couple_id) on public.profiles from authenticated, anon;
+-- NOTE: a column-level revoke is a NO-OP while the role holds TABLE-level
+-- UPDATE, which Supabase grants by default — Postgres does not subtract one
+-- from the other. The table grant has to go, and the other columns re-granted.
+-- See hardening_couple_id_fix.sql; this block is that fix, inlined so a fresh
+-- deploy of this file alone is not left vulnerable.
+do $$
+declare cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+    into cols
+    from information_schema.columns
+   where table_schema = 'public' and table_name = 'profiles'
+     and column_name <> 'couple_id';
+  execute 'revoke update on public.profiles from authenticated';
+  execute 'revoke update on public.profiles from anon';
+  execute format('grant update (%s) on public.profiles to authenticated', cols);
+end $$;
 
 -- Belt and braces: even a future policy mistake cannot move a linked profile
 -- into another couple, because the trigger refuses the transition outright
 -- unless it comes from a SECURITY DEFINER function (which runs as the table
 -- owner, not as `authenticated`).
+-- SECURITY INVOKER deliberately: as SECURITY DEFINER, current_user inside the
+-- trigger is the function OWNER and never 'authenticated', so the raise could
+-- not fire for anyone. As invoker it sees the real writer — 'authenticated'
+-- for a direct PATCH (blocked), the owner when the write comes from inside a
+-- SECURITY DEFINER pairing RPC (allowed).
 create or replace function public.guard_couple_id()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql as $$
 begin
   if new.couple_id is distinct from old.couple_id
-     and current_user = 'authenticated' then
+     and current_user in ('authenticated', 'anon') then
     raise exception 'couple_id is not client-writable';
   end if;
   return new;
 end; $$;
-revoke execute on function public.guard_couple_id() from public, anon, authenticated;
 
 drop trigger if exists trg_guard_couple_id on public.profiles;
 create trigger trg_guard_couple_id
