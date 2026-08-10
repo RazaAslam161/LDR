@@ -9,6 +9,7 @@ import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 /// Watch & listen together — paste a YouTube link (movie, music video, playlist)
@@ -41,7 +42,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _myUid = session.profile?.id;
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(() => SupabaseService.client
-          .channel('watch:${_coupleId!}')
+          .channel('watch:${_coupleId!}', opts: RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'watch', callback: _onMsg)
           .subscribe(),);
     }

@@ -49,7 +49,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   void _attachChannel(String coupleId) {
     if (_channel != null) return;
     _channel = ManagedSubscription.start(() => SupabaseService.client
-        .channel('breath:$coupleId')
+        .channel('breath:$coupleId', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

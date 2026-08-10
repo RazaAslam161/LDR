@@ -14,6 +14,7 @@ import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Synced Truth or Dare. Both partners see the same card and take turns: on your
 /// turn you pick Truth or Dare, the deck draws a card (at the chosen heat
@@ -56,7 +57,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     final cid = _coupleId;
     if (cid == null) return;
     _channel = ManagedSubscription.start(() => SupabaseService.client
-        .channel('game_td:$cid')
+        .channel('game_td:$cid', opts: RealtimeChannelConfig(private: true))
         .onBroadcast(event: 'state', callback: _onState)
         .onBroadcast(event: 'sync', callback: _onSync)
         .subscribe(),);

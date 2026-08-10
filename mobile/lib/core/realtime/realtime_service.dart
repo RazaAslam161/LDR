@@ -27,7 +27,7 @@ class RealtimeService {
     PostgresChangeEvent event = PostgresChangeEvent.all,
   }) {
     return _c
-        .channel(channelName)
+        .channel(channelName, opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: event,
           schema: 'public',
@@ -94,7 +94,7 @@ class RealtimeService {
 
   /// An ephemeral broadcast channel (e.g. proximity pings, typing) — not
   /// persisted to any table.
-  static RealtimeChannel broadcast(String name) => _c.channel(name);
+  static RealtimeChannel broadcast(String name) => _c.channel(name, opts: RealtimeChannelConfig(private: true));
 }
 
 /// A self-healing realtime subscription — the canonical Pattern A primitive.
@@ -111,7 +111,7 @@ class RealtimeService {
 /// _resubscribe);` boilerplate in screens/notifiers:
 /// ```dart
 /// _sub = ManagedSubscription.start(() => SupabaseService.client
-///     .channel('reach:$coupleId')
+///     .channel('reach:$coupleId', opts: RealtimeChannelConfig(private: true))
 ///     .onPostgresChanges(event: ..., callback: _onChange)
 ///     .subscribe());
 /// // ... for a broadcast send: _sub.channel?.sendBroadcastMessage(...)

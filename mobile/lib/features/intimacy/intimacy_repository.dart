@@ -133,7 +133,7 @@ class IntimacyRepository {
 
   static RealtimeChannel subscribe(String coupleId, void Function() onChange) {
     return _c
-        .channel('intimacy:$coupleId')
+        .channel('intimacy:$coupleId', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

@@ -379,7 +379,7 @@ class ChatRepository {
     VoidCallback? onDelete,
   }) {
     return _c
-        .channel('messages:$coupleId')
+        .channel('messages:$coupleId', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

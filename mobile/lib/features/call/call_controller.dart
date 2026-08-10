@@ -107,7 +107,7 @@ class CallController extends ChangeNotifier {
       // 35s timeout looking exactly like a network problem, which is where two
       // months of diagnosis went.
       _chan = SupabaseService.client
-          .channel('call:$id')
+          .channel('call:$id', opts: RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'signal', callback: _onSignal)
           .subscribe((status, err) {
         Diag.record(DiagArea.call, 'signal_subscribe', corr: _callId, fields: {

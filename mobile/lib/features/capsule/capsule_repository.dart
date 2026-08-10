@@ -222,7 +222,7 @@ class CapsuleRepository {
     void Function() onChange,
   ) {
     return _c
-        .channel('capsules:$coupleId')
+        .channel('capsules:$coupleId', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

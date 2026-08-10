@@ -5,6 +5,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A compact, real-time answer strip embedded in every game. Both partners type
 /// here and see each other's answers live (ephemeral broadcast — it's in-game
@@ -42,7 +43,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
     _myUid = s.profile?.id;
     _myName = s.profile?.displayName ?? 'Me';
     _ch = ManagedSubscription.start(() => SupabaseService.client
-        .channel('gchat:${widget.gameKey}:${widget.coupleId}')
+        .channel('gchat:${widget.gameKey}:${widget.coupleId}', opts: RealtimeChannelConfig(private: true))
         .onBroadcast(event: 'msg', callback: _onMsg)
         .subscribe(),);
   }

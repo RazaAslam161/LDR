@@ -88,7 +88,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
     try {
       _channel?.unsubscribe();
     } catch (_) {}
-    final ch = SupabaseService.client.channel('touch_trace:${widget.coupleId}');
+    final ch = SupabaseService.client.channel('touch_trace:${widget.coupleId}', opts: RealtimeChannelConfig(private: true));
 
     // Receive partner's strokes
     ch.onBroadcast(

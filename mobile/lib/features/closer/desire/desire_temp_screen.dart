@@ -33,7 +33,7 @@ class _DesireTempScreenState extends ConsumerState<DesireTempScreen> {
     if (couple != null) {
       _channel = ManagedSubscription.start(
         () => SupabaseService.client
-            .channel('desire_temps:${couple.id}')
+            .channel('desire_temps:${couple.id}', opts: RealtimeChannelConfig(private: true))
             .onPostgresChanges(
               event: PostgresChangeEvent.all,
               schema: 'public',

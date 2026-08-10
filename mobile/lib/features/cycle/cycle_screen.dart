@@ -64,7 +64,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     if (cid == null) return;
     _channel?.unsubscribe();
     _channel = SupabaseService.client
-        .channel('cycle_events:$cid')
+        .channel('cycle_events:$cid', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

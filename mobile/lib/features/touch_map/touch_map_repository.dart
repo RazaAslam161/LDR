@@ -106,7 +106,7 @@ class TouchMapRepository {
     void Function(BodyTouch) onTouch,
   ) {
     return _c
-        .channel('body_touches:$coupleId')
+        .channel('body_touches:$coupleId', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

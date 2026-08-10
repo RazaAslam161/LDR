@@ -12,6 +12,7 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/heartbeat/ppg_detector.dart';
 import 'package:miles/features/shell/app_drawer.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Feel My Heartbeat — your fingertip over the camera + torch reads your pulse;
 /// your partner's phone throbs with your real heartbeat in real time, and vice
@@ -55,7 +56,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
     _myUid = session.profile?.id;
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(() => SupabaseService.client
-          .channel('heartbeat:${_coupleId!}')
+          .channel('heartbeat:${_coupleId!}', opts: RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'hb', callback: _onMsg)
           .subscribe(),);
     }

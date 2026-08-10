@@ -14,6 +14,7 @@ import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/no_repeat_bag.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The two decks this screen can deal.
 ///
@@ -80,7 +81,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     final cid = _coupleId;
     if (cid != null) {
       _sub = ManagedSubscription.start(() => SupabaseService.client
-          .channel('gcard:${widget.deck.key}:$cid')
+          .channel('gcard:${widget.deck.key}:$cid', opts: RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'card', callback: _onCard)
           .onBroadcast(event: 'sync', callback: _onSync)
           .subscribe(),);

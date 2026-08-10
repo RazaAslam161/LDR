@@ -453,7 +453,7 @@ class SupabaseRepository {
     // Distinct channel name from the presence-table subscription so the two
     // don't collide on one client (both were 'presence:$coupleId').
     return _c
-        .channel('profile-sync:$coupleId')
+        .channel('profile-sync:$coupleId', opts: RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

@@ -442,7 +442,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         onDelete: _onRemoteDelete,
       );
       _moodChannel = client
-          .channel('mood_burst:$id')
+          .channel('mood_burst:$id', opts: RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'mood', callback: _onMoodBurst)
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
@@ -467,7 +467,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final partnerId = ref.read(sessionProvider).partner?.id;
       if (partnerId != null) {
         _receiptChannel = client
-            .channel('receipts:$id')
+            .channel('receipts:$id', opts: RealtimeChannelConfig(private: true))
             .onPostgresChanges(
               event: PostgresChangeEvent.all,
               schema: 'public',

@@ -705,7 +705,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (id == null) return;
     // Ephemeral, low-latency touch sync (no DB writes).
     _channel = ManagedSubscription.start(() => SupabaseService.client
-        .channel('touch:$id')
+        .channel('touch:$id', opts: RealtimeChannelConfig(private: true))
         .onBroadcast(event: 'touch', callback: _onTouchMsg)
         .onBroadcast(event: 'frame', callback: _onFrameMsg)
         .onBroadcast(event: 'photo', callback: _onPhotoMsg)

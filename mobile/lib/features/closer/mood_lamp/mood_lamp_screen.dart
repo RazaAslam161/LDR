@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Mood Lamp — pick a color; it glows on your partner's screen in real time.
 /// Pure broadcast, no persistence. Soft, ambient, no words.
@@ -40,7 +41,7 @@ class _MoodLampScreenState extends ConsumerState<MoodLampScreen> {
     final coupleId = couple?.id ?? 'none';
 
     _channel = ManagedSubscription.start(
-      () => SupabaseService.client.channel('mood_lamp:$coupleId').onBroadcast(
+      () => SupabaseService.client.channel('mood_lamp:$coupleId', opts: RealtimeChannelConfig(private: true)).onBroadcast(
         event: 'mood',
         callback: (payload) {
           final from = payload['from'] as String?;

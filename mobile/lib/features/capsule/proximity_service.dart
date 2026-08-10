@@ -74,7 +74,7 @@ class ProximityService {
       return;
     }
 
-    _channel = SupabaseService.client.channel('capsule_proximity:$coupleId');
+    _channel = SupabaseService.client.channel('capsule_proximity:$coupleId', opts: RealtimeChannelConfig(private: true));
     _channel!
         .onBroadcast(
           event: 'loc',
