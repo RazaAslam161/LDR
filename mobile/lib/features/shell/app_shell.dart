@@ -75,6 +75,14 @@ class _AppShellState extends ConsumerState<AppShell>
     // chat not auto-rendering and the online/offline flicker.)
     try {
       await SupabaseService.client.realtime.disconnect();
+      // connect() is marked @internal by realtime_client, so a package upgrade
+      // may remove it without a breaking-change note and this reconnect would
+      // stop compiling — or worse, be "fixed" by deleting it. Kept because the
+      // pair is what actually revives the socket after doze, and every feature
+      // that reads as broken in the field (presence, receipts, call
+      // signalling) rides on that socket. Replacing it needs a two-phone test,
+      // not a refactor.
+      // ignore: invalid_use_of_internal_member
       await SupabaseService.client.realtime.connect();
     } catch (_) {}
   }

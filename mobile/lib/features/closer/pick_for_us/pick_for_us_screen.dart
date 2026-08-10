@@ -134,7 +134,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
     });
 
     // Let the animation play before showing the result.
-    await Future.delayed(const Duration(milliseconds: 850));
+    await Future<void>.delayed(const Duration(milliseconds: 850));
 
     try {
       await PickForUsRepository.saveRoll(

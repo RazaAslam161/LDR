@@ -8,7 +8,6 @@ import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 
 class _Action {
   const _Action(this.key, this.emoji, this.label);

@@ -202,7 +202,7 @@ class PresenceService {
 
       // The row comes back carrying the timestamp the SERVER just wrote, so
       // the 30s heartbeat doubles as a clock sync with no extra round trip.
-      final row = (rows is List && rows.isNotEmpty) ? rows.first : null;
+      final row = rows.isEmpty ? null : rows.first;
       final serverTs = row?['updated_at'];
       final serverAt =
           serverTs is String ? DateTime.tryParse(serverTs)?.toUtc() : null;
@@ -224,7 +224,7 @@ class PresenceService {
             'is_app_activity': isAppActivity,
             'outcome': 'ok',
             'ms': sw.elapsedMilliseconds,
-            'rows_returned': rows is List ? rows.length : 0,
+            'rows_returned': rows.length,
             'server_ts_ms': serverAt?.millisecondsSinceEpoch,
             'app_active_ts_ms': activeAt?.millisecondsSinceEpoch,
           });

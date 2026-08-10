@@ -142,7 +142,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
 
   Future<void> _openAdd() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AddFantasyScreen()),
+      MaterialPageRoute<void>(builder: (_) => const AddFantasyScreen()),
     );
     if (mounted) _load();
   }

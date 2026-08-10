@@ -209,6 +209,51 @@ void main() {
     });
   });
 
+  test('the analyzer reports no errors and no warnings', () {
+    // Worth the ~40s it costs, because this was measured wrong for a whole
+    // session: the grep used to check it required leading whitespace, and the
+    // analyzer prints `warning - ...` flush left while only indenting `info`.
+    // Seven real warnings sat behind a green-looking check — an always-true
+    // type guard, an unused import, a raw Map, two uninferrable constructors
+    // and one use of a package-internal member. A verification that cannot
+    // fail is worse than no verification, because it is trusted.
+    final r = Process.runSync('flutter', ['analyze', '--no-pub'],
+        runInShell: true);
+    final out = '${r.stdout}';
+    final errors =
+        RegExp(r'^error - ', multiLine: true).allMatches(out).length;
+    final warnings =
+        RegExp(r'^warning - ', multiLine: true).allMatches(out).length;
+
+    // Proves the output was actually parsed. `info` lines always exist here;
+    // zero of them means analyze did not run and the counts above are noise.
+    expect(RegExp(r'^ *info - ', multiLine: true).hasMatch(out), isTrue,
+        reason: 'could not read analyzer output — this check is blind');
+
+    expect(errors, 0, reason: 'analyzer errors:\n$out');
+    expect(warnings, 0, reason: 'analyzer warnings:\n$out');
+  }, timeout: const Timeout(Duration(minutes: 4)));
+
+  test('analyzer suppressions stay countable', () {
+    // An `// ignore:` is a warning someone decided to keep. That can be the
+    // right call — the one here guards a package-internal reconnect that only
+    // a two-phone test could safely replace — but it has to stay a decision
+    // rather than a habit, so adding one means deliberately moving this number.
+    final ignores = Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))
+        .expand((f) => f
+            .readAsStringSync()
+            .split('\n')
+            .where((l) => l.contains('// ignore:'))
+            .map((l) => '${f.uri.pathSegments.last}: ${l.trim()}'))
+        .toList();
+    expect(ignores.length, lessThanOrEqualTo(1),
+        reason: 'each suppression needs a reason in a comment above it, and '
+            'this bound moved on purpose: $ignores');
+  });
+
   test('the launcher disguise is intact', () {
     // Not cleanup-adjacent, deliberately. The label looks like a placeholder
     // somebody forgot to change, which is exactly why a well-meaning tidy-up
