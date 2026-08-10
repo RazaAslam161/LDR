@@ -4,9 +4,13 @@ Written overnight, 2026-08-10. Grounded in **215 cited primary sources**, a **91
 with per-module scale risk, **8 domain architectures**, and an adversarial review that **broke all 8**
 before they were revised.
 
-Status of this document: **6 of 8 domains revised and hardened** (transport, messaging, calling,
-presence, push, crypto). **2 domains — data/ops and client — have a v1 design and a list of fatal
-flaws, but no revision yet**; the session hit its usage limit. Those two are marked ⚠ throughout.
+Status: **all 8 domains designed, attacked and revised.** Data/ops closed all 4 of its fatal flaws;
+client closed 3 of 4 (one residue, §6).
+
+**The domains contradict each other in six specific places** — the unavoidable result of designing
+eight architectures in parallel. They are enumerated in §3a and must be reconciled before
+implementation starts. One is fatal to a sibling: the data domain's shared position allocator makes
+`messages.cseq` **sparse**, which breaks the dense-cursor invariant `messaging.md` is built on.
 
 ---
 
@@ -95,7 +99,7 @@ anchor.
 Ordered by: what unblocks everything else → what is silently losing data today → what breaks first as
 users arrive.
 
-### Stage 0 — Make the database reproducible ⚠ *(prerequisite for everything)*
+### Stage 0 — Make the database reproducible *(prerequisite for everything)*
 Adopt `supabase/migrations` + `config.toml` as the single source of truth; commit the source of every
 deployed edge function; add a CI check that the repo reproduces the database. Today several columns the
 client writes exist in no SQL file, and the deployed `reach-notify` may not match the repo.
@@ -103,6 +107,26 @@ client writes exist in no SQL file, and the deployed `reach-notify` may not matc
 **Why first:** every other stage needs staging, review and rollback. Without this, no fix is verifiable
 and no failure is diagnosable.
 **Verify:** `supabase db diff` against a fresh project is empty.
+
+### Stage R — Reconcile the domains *(before any implementation)*
+
+Eight architectures were designed in parallel and each is internally sound. They disagree in six
+places. This stage is cheap, it is pure decision-making, and skipping it means implementing two
+mutually exclusive plans.
+
+| # | Contradiction | Resolution |
+|---|---|---|
+| R1 | **Fatal to a sibling.** `data` uses one shared allocator, making `messages.cseq` sparse. `messaging` requires a *dense* counter for its contiguity canary and `pts_count` gap arithmetic. | Give `messages` its own dense counter incremented inside the same row lock. One line; both designs then hold. |
+| R2 | `data` retires `presence` and forbids indexing it; `design/data.md` v1 still added `presence(couple_id, updated_at desc)`. | Adopt `revised/presence.md`. The index is deleted, not moved. |
+| R3 | `data` makes `public=false` on all four buckets a standing 60s conformance expectation; `crypto` deliberately keeps one bucket public because its objects are encrypted under random paths. | Decide per bucket, and update the expectation row at crypto's cutover — otherwise the alarm fires forever or the assertion is silently weakened. |
+| R4 | `data` declares a budget of exactly 2 cron slots; `calling` and `crypto` each add their own. | Raise the budget explicitly, or move those sweeps into `ops_tick`. Left alone, the conformance check alarms the day calling ships. |
+| R5 | Storage-bucket privacy was declared "another domain's problem" by messaging, push **and** presence. | `data` now owns it (§D5). Confirmed. |
+| R6 | `data` says partition `messages` at 100k users; `messaging` derives 1.46B rows/year and ~900GB at that scale. | Reconcile to the messaging figure; partition far earlier. |
+
+**Also, a live bug in shipped SQL, not a design item:** `hardening_2026_08.sql` computes its
+column-grant list from `information_schema` **at apply time**, and `pg_dump` freezes the *result*. So
+the next `ADD COLUMN` produces a column `authenticated` cannot UPDATE — which already caused the
+`gender`/`gender_set` dead end. It will recur on every future column until a CI assertion catches it.
 
 ### Stage 1 — Instrument before optimising
 Add measurement for: peak concurrent connections, realtime messages/day, push delivery outcomes, and
@@ -141,8 +165,8 @@ simulate symmetric NAT **without a second network**.
 ### Stage 7 — Crypto epochs and recovery
 Independent. Closes the "reinstall destroys everything" cliff.
 
-### Stage 8 — Client architecture ⚠ *(local-first, outbox, no dead ends)*
-Design not yet revised.
+### Stage 8 — Client architecture *(local-first, outbox, no dead ends)*
+Depends on Stage 2. One fatal residue remains — see §6.
 
 ---
 
@@ -206,9 +230,12 @@ Stated plainly, because "it's fixed" has been said too often here.
 6. **A malicious server can withhold key wraps.** Mitigated, not eliminated.
 7. **Fantasy-jar tag matching leaks your full tag set to your partner** — overlap requires a shared
    key; anything less needs Private Set Intersection.
-8. **⚠ Data/ops and client architecture are not yet revised.** Their v1 designs exist with 8 known
-   fatal flaws between them.
-9. **Elsa's presence bug was never root-caused.** Two full audits refuted every candidate. The presence
+8. **The client design has one unclosed fatal:** per-message delete-for-everyone on the chat stream.
+   `hide_message` and `delete_for_everyone` mutate rows the local cache has already passed its cursor
+   over, so a deletion can go unlearned. Needs a tombstone carried on the stream.
+9. **The eight domains contradict each other in six places** (§3a). Reconciliation is Stage R and must
+   happen before implementation.
+10. **Elsa's presence bug was never root-caused.** Two full audits refuted every candidate. The presence
    rebuild (F5) removes the whole class it belongs to, but I cannot claim it fixes the specific report.
 
 ---
@@ -221,7 +248,8 @@ docs/architecture/
   research/*.md           215 cited sources across 7 topics
   inventory/*.md          91 modules, per-module scale risk
   design/*.md             v1 designs + _attacks.json (31 fatal flaws)
-  revised/*.md            6 hardened designs with invariants and accepted limits
+  revised/*.md            8 hardened designs with invariants and accepted limits
+  CROSS-DOMAIN-GAPS.json  the consistency audit behind Stage R
 ```
 
 Each revised design is self-contained: current state, target architecture, invariants (each stating
