@@ -111,6 +111,32 @@ void main() {
     });
   });
 
+  test('the call-site scanner still catches an offender after being loosened',
+      () {
+    // The scan above went green the moment its brace counting was fixed, which
+    // is the same shape as a check that passes because it stopped looking.
+    // These two cases pin both directions: the field map IS scanned, and the
+    // unrelated call that follows it is NOT.
+    final src = '''
+      Diag.record(DiagArea.call, 'signal_sent', corr: _callId, fields: {
+        'kind': kind,
+        'who': partner.displayName,
+      });
+      _send('ice', {
+        'candidate': c.candidate,
+      });
+    '''
+        .split('\n');
+    final inside = _diagCallLines(src);
+    final offender = src.indexWhere((l) => l.contains('displayName'));
+    final unrelated = src.indexWhere((l) => l.contains('c.candidate'));
+    expect(offender, isNonNegative);
+    expect(unrelated, isNonNegative);
+    expect(inside, contains(offender), reason: 'a trace field went unscanned');
+    expect(inside, isNot(contains(unrelated)),
+        reason: 'an unrelated call after a Diag call was scanned as one');
+  });
+
   test('no call site passes a sensitive accessor into a trace field', () {
     // Redaction cannot catch a short, plain, sensitive string — a display name
     // looks exactly like an enum. This reads the actual call sites instead.
@@ -150,11 +176,12 @@ void main() {
       final src = f.readAsStringSync();
       if (!src.contains('Diag.')) continue;
       final lines = src.split('\n');
+      final inside = _diagCallLines(lines);
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i];
         // Field maps span lines, so scan the whole body of a Diag call rather
         // than the single line that names it.
-        if (!_insideDiagCall(lines, i)) continue;
+        if (!inside.contains(i)) continue;
         for (final s in sensitive) {
           final at = line.indexOf(s);
           if (at < 0) continue;
@@ -170,18 +197,37 @@ void main() {
   });
 }
 
-/// True when [i] falls inside a `Diag.record(` / `Diag.span(` argument list.
-/// Crude brace counting is enough: these calls are short and never nested.
-bool _insideDiagCall(List<String> lines, int i) {
-  for (var j = i; j >= 0 && j > i - 12; j--) {
-    if (RegExp(r'Diag\.(record|span)\(').hasMatch(lines[j])) {
-      var depth = 0;
-      for (var k = j; k <= i; k++) {
-        depth += '('.allMatches(lines[k]).length;
-        depth -= ')'.allMatches(lines[k]).length;
+/// Line indices that fall inside a `Diag.record(` / `Diag.span(` argument list.
+///
+/// Counted forward from the opening paren and stopped the moment it closes.
+/// Counting backwards from a candidate line instead — "is there a Diag call
+/// within twelve lines, and is the paren depth positive" — reported every
+/// `_send('ice', {...})` that happened to follow one, because the unrelated
+/// open paren kept the depth above zero. Three false positives on code that was
+/// never a trace field at all.
+Set<int> _diagCallLines(List<String> lines) {
+  final inside = <int>{};
+  var active = false;
+  var depth = 0;
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i];
+    var from = 0;
+    if (!active) {
+      final m = RegExp(r'Diag\.(record|span)\(').firstMatch(line);
+      if (m == null) continue;
+      active = true;
+      depth = 0;
+      from = m.end - 1;
+    }
+    inside.add(i);
+    for (var k = from; k < line.length; k++) {
+      if (line[k] == '(') depth++;
+      if (line[k] == ')') depth--;
+      if (depth == 0) {
+        active = false;
+        break;
       }
-      return depth > 0 || j == i;
     }
   }
-  return false;
+  return inside;
 }

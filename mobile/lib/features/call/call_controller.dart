@@ -6,6 +6,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/features/call/call_stats.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:miles/core/session_provider.dart';
@@ -56,6 +59,26 @@ class CallController extends ChangeNotifier {
   bool _remoteSet = false;
   Timer? _connectTimer;
 
+  /// Shared by both devices for one call, so their traces can be laid side by
+  /// side. It is also the `call_invites` row id, deliberately: the callee that
+  /// was woken by FCM never saw the broadcast, so the invite id is the ONLY
+  /// thing it and the caller both hold.
+  String? _callId;
+
+  /// Candidate types seen, ours and theirs. The counts are the whole diagnosis
+  /// when a call fails: no local relay means TURN never allocated, no remote
+  /// candidates at all means signalling never arrived, and both present with no
+  /// pairing means the network dropped the media itself. Those are three
+  /// different bugs that produce one identical screen.
+  final Map<String, int> _localCandTypes = {};
+  final Map<String, int> _remoteCandTypes = {};
+
+  /// When this attempt began, so every later event carries its own age. "The
+  /// call failed" and "the call failed 34 seconds in, one second before the
+  /// timeout" are the same sentence at different resolutions, and only the
+  /// second one points anywhere.
+  DateTime? _startedAt;
+
   /// Re-subscribe the call channel after the realtime socket is reset (e.g. on
   /// app resume / Android doze) so incoming calls keep ringing.
   Future<void> reconnect() => _subscribeChannel();
@@ -77,10 +100,21 @@ class CallController extends ChangeNotifier {
           await SupabaseService.client.removeChannel(old);
         } catch (_) {}
       }
+      // The status was thrown away here. Every signal this app sends goes over
+      // this one channel, so a subscribe that lands in CHANNEL_ERROR or
+      // TIMED_OUT means no offer, no answer, no ICE and no hangup ever moves —
+      // and _send below drops them without a word. The call then fails at the
+      // 35s timeout looking exactly like a network problem, which is where two
+      // months of diagnosis went.
       _chan = SupabaseService.client
           .channel('call:$id')
           .onBroadcast(event: 'signal', callback: _onSignal)
-          .subscribe();
+          .subscribe((status, err) {
+        Diag.record(DiagArea.call, 'signal_subscribe', corr: _callId, fields: {
+          'status': status.name,
+          if (err != null) 'error': err.runtimeType.toString(),
+        });
+      });
     } finally {
       _subscribingChan = false;
     }
@@ -92,6 +126,21 @@ class CallController extends ChangeNotifier {
     _connectTimer?.cancel();
     _connectTimer = Timer(const Duration(seconds: 35), () {
       if (state != CallState.connected) {
+        // Everything needed to explain the failure, in one row, at the moment
+        // it is known to have failed. Reading it: no remote candidates at all
+        // means signalling never arrived; no local relay means TURN never
+        // allocated; both present means the media path itself was blocked.
+        Diag.record(DiagArea.call, 'connect_timeout', corr: _callId, fields: {
+          'state': state.name,
+          'local_host': _localCandTypes['host'] ?? 0,
+          'local_srflx': _localCandTypes['srflx'] ?? 0,
+          'local_relay': _localCandTypes['relay'] ?? 0,
+          'remote_host': _remoteCandTypes['host'] ?? 0,
+          'remote_srflx': _remoteCandTypes['srflx'] ?? 0,
+          'remote_relay': _remoteCandTypes['relay'] ?? 0,
+          'remote_set': _remoteSet,
+          'turn_error': turnError == null,
+        });
         _send('hangup', {});
         _teardown(CallState.ended);
       }
@@ -103,16 +152,39 @@ class CallController extends ChangeNotifier {
   Future<void> _insertInvite(String offerSdp, bool video) async {
     final couple = _coupleId, me = _myUid;
     final callee = _ref.read(sessionProvider).partner?.id;
-    if (couple == null || me == null || callee == null) return;
+    if (couple == null || me == null || callee == null) {
+      // Returned in silence. The FCM ring hangs entirely off this insert, so
+      // this is "the callee's phone never made a sound" — and the caller's
+      // screen is identical to a call that rang and went unanswered.
+      Diag.record(DiagArea.call, 'invite_skipped', corr: _callId, fields: {
+        'has_couple': couple != null,
+        'has_me': me != null,
+        'has_callee': callee != null,
+      });
+      return;
+    }
     try {
       await SupabaseService.client.from('call_invites').insert({
+        // Explicit, so the row id IS the call id and the FCM-woken callee joins
+        // the same trace as the caller.
+        'id': _callId,
         'couple_id': couple,
         'caller_id': me,
         'callee_id': callee,
         'offer_sdp': offerSdp,
         'video': video,
       });
-    } catch (_) {}
+      Diag.record(DiagArea.call, 'invite_inserted', corr: _callId);
+    } catch (e) {
+      // `catch (_) {}` before. This insert is what fires the push that rings a
+      // closed app, and the policy on call_invites is FOR ALL USING
+      // (couple_id = current_user_couple_id()) — which Postgres also applies as
+      // the INSERT check — so a stale _coupleId rejects it outright. The caller
+      // then waits the full 35s and tears down with no reason to show.
+      Diag.record(DiagArea.call, 'invite_failed', corr: _callId, fields: {
+        'error': e.runtimeType.toString(),
+      });
+    }
   }
 
   /// Ring a call delivered by FCM (the realtime offer was likely missed because
@@ -129,12 +201,22 @@ class CallController extends ChangeNotifier {
           .maybeSingle();
       final sdp = row?['offer_sdp'] as String?;
       if (sdp == null || sdp.isEmpty || state != CallState.idle) return;
+      // The invite row id IS the call id, so a callee woken by FCM files its
+      // trace under the same name as the caller who never saw it ring.
+      _callId = callId;
       _ring(
         RTCSessionDescription(sdp, 'offer'),
         video: (row?['video'] as bool?) ?? fallbackVideo,
         from: fromName,
       );
-    } catch (_) {}
+      Diag.record(DiagArea.call, 'pending_call_rang', corr: callId);
+    } catch (e) {
+      // The whole FCM ring path, silent. An RLS denial or a deleted row here
+      // means the phone buzzed and then nothing happened — which the user
+      // reports as a missed call, not as an error.
+      Diag.record(DiagArea.call, 'pending_call_failed',
+          corr: callId, fields: {'error': e.runtimeType.toString()});
+    }
   }
 
   // ── ICE / TURN ─────────────────────────────────────────────────────────────
@@ -214,8 +296,14 @@ class CallController extends ChangeNotifier {
     final failedAt = _turnFailedAt;
     if (failedAt != null &&
         DateTime.now().difference(failedAt) < const Duration(seconds: 60)) {
+      // Backing off is correct and is also why a call placed right after a
+      // failed fetch has no relay. Without this line that call looks like TURN
+      // was never configured at all.
+      Diag.record(DiagArea.call, 'turn_backoff',
+          fields: {'cached': _cachedTurn.length});
       return _cachedTurn;
     }
+    final endFetch = Diag.span(DiagArea.call, 'turn_fetch');
     try {
       final res = await SupabaseService.client.functions
           .invoke('turn-credentials')
@@ -238,6 +326,7 @@ class CallController extends ChangeNotifier {
         rawList = [raw];
       } else {
         turnError = 'bad response shape';
+        endFetch(outcome: 'bad_shape', fields: {'got': raw.runtimeType.toString()});
         debugPrint('[turn] unexpected response: ${data.runtimeType} $data');
         return _cachedTurn;
       }
@@ -256,6 +345,7 @@ class CallController extends ChangeNotifier {
       final relays = parsed.where(_isRelay).length;
       if (relays == 0) {
         turnError = 'no relay in response';
+        endFetch(outcome: 'no_relay', fields: {'servers': parsed.length});
         debugPrint('[turn] response carried ${parsed.length} servers but no '
             'turn:/turns: entry — relay is NOT available');
         return _cachedTurn;
@@ -264,6 +354,7 @@ class CallController extends ChangeNotifier {
       _cachedTurn = parsed;
       _turnFetchedAt = DateTime.now();
       turnError = null;
+      endFetch(outcome: 'ok', fields: {'relays': relays, 'servers': parsed.length});
       unawaited(_persistTurn(parsed));
       debugPrint('[turn] ok — $relays relay server(s)');
       return parsed;
@@ -429,6 +520,17 @@ class CallController extends ChangeNotifier {
     final session = _ref.read(sessionProvider);
     final couple = session.couple;
     _myUid = session.profile?.id;
+    // _inited is already true above, and _coupleId is assigned nowhere else in
+    // this file — so returning here leaves this controller permanently unable to
+    // subscribe or send, for the rest of the process, with no retry and nothing
+    // logged. Whether that actually happens depends on whether the session had
+    // resolved by the first read of callControllerProvider, which is a race.
+    // This event is how a field test tells "calls never work on my phone" from
+    // "calls failed this once".
+    Diag.record(DiagArea.call, 'init', fields: {
+      'has_couple': couple != null,
+      'has_uid': _myUid != null,
+    });
     if (couple == null) return;
     _coupleId = couple.id;
     await _subscribeChannel();
@@ -446,6 +548,19 @@ class CallController extends ChangeNotifier {
     camOn = video;
     minimized = false;
     peerName = _ref.read(sessionProvider).partner?.displayName ?? 'Partner';
+    // Minted here rather than by the database, because it has to be on the
+    // broadcast offer AND be the invite row id — those are the two separate
+    // paths a callee can learn about this call on, and both traces have to
+    // land under one name.
+    _callId = const Uuid().v4();
+    _startedAt = DateTime.now();
+    _localCandTypes.clear();
+    _remoteCandTypes.clear();
+    Diag.record(DiagArea.call, 'start', corr: _callId, fields: {
+      'video': video,
+      'relay_known': relayKnown,
+      'chan': _chan != null,
+    });
     _setState(CallState.calling);
     try {
       await _openMedia(video: video);
@@ -524,6 +639,14 @@ class CallController extends ChangeNotifier {
   Future<void> accept() async {
     if (state != CallState.ringing || _pendingOffer == null) return;
     camOn = _pendingVideo;
+    _startedAt = DateTime.now();
+    _localCandTypes.clear();
+    _remoteCandTypes.clear();
+    Diag.record(DiagArea.call, 'accept', corr: _callId, fields: {
+      'video': isVideo,
+      'relay_known': relayKnown,
+      'chan': _chan != null,
+    });
     try {
       await _openMedia(video: isVideo);
       await _routeAudio();
@@ -547,7 +670,18 @@ class CallController extends ChangeNotifier {
       _startConnectTimeout();
       _pendingOffer = null;
       await CallForegroundService.start(peerName ?? 'Partner');
-    } catch (_) {
+    } catch (e) {
+      // `catch (_)` before: the exception was bound and dropped. It covers
+      // _openMedia (permissions, camera in use by another app), _routeAudio,
+      // _ensureRelay, _createPc and the SDP exchange — five very different
+      // causes collapsed into one silent hangup, on the device that was TRYING
+      // TO ANSWER. From the caller's side this is indistinguishable from being
+      // ignored.
+      Diag.record(DiagArea.call, 'accept_failed', corr: _callId, fields: {
+        'error': e.runtimeType.toString(),
+        'has_pc': _pc != null,
+        'remote_set': _remoteSet,
+      });
       _send('hangup', {});
       _teardown(CallState.ended);
     }
@@ -682,8 +816,19 @@ class CallController extends ChangeNotifier {
   // is limiting it. That is what call_stats.dart is for.
 
   Future<void> _createPc() async {
-    final pc = await createPeerConnection(await _iceConfig());
+    final config = await _iceConfig();
+    final pc = await createPeerConnection(config);
     _pc = pc;
+    // The ICE servers are read from the static cache HERE and setConfiguration
+    // is called nowhere, so this count is final for this call: a relay that
+    // lands afterwards cannot join it, whatever relayAvailable says later. When
+    // this reads 0 and the banner said relay was fine, the fetch was simply too
+    // slow for this attempt.
+    Diag.record(DiagArea.call, 'pc_created', corr: _callId, fields: {
+      'ice_servers': (config['iceServers'] as List?)?.length ?? 0,
+      'relay_servers': _cachedTurn.where(_isRelay).length,
+      'turn_error': turnError == null,
+    });
     // Start sampling NOW, not when the call connects. Started on Connected, the
     // monitor only ever ran on calls that succeeded — which are exactly the
     // calls that never needed a relay. The NO-RELAY banner was invisible in the
@@ -693,15 +838,27 @@ class CallController extends ChangeNotifier {
     for (final track in _localStream!.getTracks()) {
       await pc.addTrack(track, _localStream!);
     }
-    pc.onIceGatheringState =
-        (g) => debugPrint('[ice] gathering ${g.name}');
-    pc.onIceConnectionState =
-        (i) => debugPrint('[ice] connection ${i.name}');
+    pc.onIceGatheringState = (g) => Diag.record(
+        DiagArea.call, 'ice_gathering',
+        corr: _callId, fields: {'state': g.name});
+    pc.onIceConnectionState = (i) {
+      // The transition sequence IS the diagnosis. checking→failed with no
+      // remote candidates is signalling; checking→failed with both sides'
+      // relays present is the network; connected→disconnected is a different
+      // bug again. Only debugPrint saw any of it before.
+      Diag.record(DiagArea.call, 'ice_connection', corr: _callId, fields: {
+        'state': i.name,
+        'local_relay': _localCandTypes['relay'] ?? 0,
+        'remote_relay': _remoteCandTypes['relay'] ?? 0,
+      });
+    };
     pc.onIceCandidate = (c) {
       // ' typ host|srflx|relay' — the only line that says whether TURN actually
       // allocated. Without a relay candidate here, two carrier NATs cannot pair.
-      final t = RegExp(r'typ (\w+)').firstMatch(c.candidate ?? '')?.group(1);
-      debugPrint('[ice] local candidate typ=${t ?? '?'}');
+      final t = _typeOf(c.candidate);
+      _localCandTypes[t] = (_localCandTypes[t] ?? 0) + 1;
+      Diag.record(DiagArea.call, 'ice_local_candidate',
+          corr: _callId, fields: {'typ': t, 'n': _localCandTypes[t]});
       _localCandidates
           .add(c); // keep so we can re-send if the callee was closed
       _send('ice', {
@@ -722,7 +879,12 @@ class CallController extends ChangeNotifier {
       // an identity check _teardown re-enters itself, and a connection that
       // died a moment ago can end the call that has already replaced it.
       if (!identical(pc, _pc)) return;
-      debugPrint('[call] pcstate ${s.name}');
+      Diag.record(DiagArea.call, 'pc_state', corr: _callId, fields: {
+        'state': s.name,
+        'ms_since_start': _startedAt == null
+            ? null
+            : DateTime.now().difference(_startedAt!).inMilliseconds,
+      });
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
         _setState(CallState.connected);
@@ -739,9 +901,29 @@ class CallController extends ChangeNotifier {
     final data = payload['data'];
     final map =
         data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+    // Adopt the caller's id so both devices file this call under one name. A
+    // callee that already has one (woken by FCM) keeps it — they are the same
+    // id, because the caller uses the invite row id for both.
+    _callId ??= payload['call_id']?.toString();
+    // Paired with signal_sent on the other device, this is what separates "the
+    // offer was never sent" from "the offer was sent and never arrived". They
+    // are indistinguishable from either phone alone, and they have different
+    // causes.
+    Diag.record(DiagArea.call, 'signal_received', corr: _callId, fields: {
+      'kind': kind,
+      'state': state.name,
+    });
     switch (kind) {
       case 'offer':
-        if (state != CallState.idle) return; // busy
+        if (state != CallState.idle) {
+          // Dropped with no ring, no log, and nothing sent back to the caller,
+          // who then waits out the full 35s. It matters because `state` can be
+          // STUCK: any path that leaves it non-idle makes this device silently
+          // unreachable while looking perfectly healthy.
+          Diag.record(DiagArea.call, 'offer_dropped_busy',
+              corr: _callId, fields: {'state': state.name});
+          return;
+        }
         _ring(
           RTCSessionDescription(
               map['sdp']?.toString(), map['type']?.toString()),
@@ -758,10 +940,27 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> _applyAnswer(Map<String, dynamic> map) async {
-    if (_pc == null) return;
-    await _pc!.setRemoteDescription(
-        RTCSessionDescription(map['sdp']?.toString(), map['type']?.toString()));
+    if (_pc == null) {
+      Diag.record(DiagArea.call, 'answer_dropped_no_pc', corr: _callId);
+      return;
+    }
+    try {
+      await _pc!.setRemoteDescription(RTCSessionDescription(
+          map['sdp']?.toString(), map['type']?.toString()));
+    } catch (e) {
+      // _onSignal is void and calls this without awaiting, so a throw here
+      // became an unhandled async error the zone ate. The consequence is
+      // specific and invisible: _remoteSet stays false, so EVERY remote
+      // candidate queues in _pendingRemote forever and the call dies at 35s
+      // looking exactly like candidates that never arrived.
+      Diag.record(DiagArea.call, 'answer_failed', corr: _callId, fields: {
+        'error': e.runtimeType.toString(),
+      });
+      return;
+    }
     _remoteSet = true;
+    Diag.record(DiagArea.call, 'answer_applied',
+        corr: _callId, fields: {'queued': _pendingRemote.length});
     await _flushPending();
     // The callee just came online (it answered). If it was a CLOSED app it
     // missed our first ICE trickle — re-send everything we've gathered.
@@ -780,12 +979,27 @@ class CallController extends ChangeNotifier {
       map['sdpMid']?.toString(),
       (map['sdpMLineIndex'] as num?)?.toInt(),
     );
+    // The candidate line itself is never recorded — it carries this device's
+    // private and public addresses. The TYPE carries the entire diagnosis and
+    // carries no address at all.
+    final t = _typeOf(map['candidate']?.toString());
+    _remoteCandTypes[t] = (_remoteCandTypes[t] ?? 0) + 1;
+    Diag.record(DiagArea.call, 'ice_remote_candidate', corr: _callId, fields: {
+      'typ': t,
+      // Queued means it arrived before the remote description was set. A call
+      // where every remote candidate queued and none flushed is a specific bug
+      // with a specific fix, and it looks like a network failure.
+      'queued': _pc == null || !_remoteSet,
+    });
     if (_pc == null || !_remoteSet) {
       _pendingRemote.add(c);
     } else {
       await _pc!.addCandidate(c);
     }
   }
+
+  static String _typeOf(String? candidate) =>
+      RegExp(r'typ (\w+)').firstMatch(candidate ?? '')?.group(1) ?? 'unknown';
 
   Future<void> _flushPending() async {
     for (final c in _pendingRemote) {
@@ -803,13 +1017,50 @@ class CallController extends ChangeNotifier {
   /// injects 'event'. Both names belong to the transport; using either for our
   /// own data silently destroys it.
   void _send(String kind, Map<String, dynamic> data) {
-    _chan?.sendBroadcastMessage(
+    final chan = _chan;
+    if (chan == null) {
+      // The `?.` made this the quietest failure in the call path: no channel,
+      // no send, no error, no trace. It happens for real — a reconnect nulls
+      // the channel for the length of a removeChannel round trip, and _init
+      // returns early when the couple has not resolved yet.
+      Diag.record(DiagArea.call, 'signal_dropped_no_channel',
+          corr: _callId, fields: {'kind': kind});
+      return;
+    }
+    Diag.record(DiagArea.call, 'signal_sent', corr: _callId, fields: {
+      'kind': kind,
+      // Length, never the SDP: it carries both devices' IP addresses.
+      if (data['sdp'] != null) 'sdp_len': (data['sdp'] as String?)?.length,
+    });
+    chan.sendBroadcastMessage(
       event: 'signal',
-      payload: {'from': _myUid, 'kind': kind, 'data': data},
+      payload: {
+        'from': _myUid,
+        'kind': kind,
+        // Carried on every signal so the callee adopts the caller's id and both
+        // traces join, on the realtime path as well as the FCM one.
+        'call_id': _callId,
+        'data': data,
+      },
     );
   }
 
   Future<void> _teardown(CallState end) async {
+    // The last stats sample is taken BEFORE the monitor stops, because it is
+    // the only record of what the media path was actually doing at the end —
+    // and it is discarded two lines below. On a call that connected and then
+    // degraded, this row is the whole story.
+    Diag.record(DiagArea.call, 'teardown', corr: _callId, fields: {
+      'from_state': state.name,
+      'connected_ever': stats != null,
+      'ms': _startedAt == null
+          ? null
+          : DateTime.now().difference(_startedAt!).inMilliseconds,
+      'relayed': stats?.relayed,
+      'rtt_ms': stats?.rttMs,
+      'rx_kbps': stats?.recvKbps,
+      'tx_kbps': stats?.sendKbps,
+    });
     _connectTimer?.cancel();
     _statsMonitor.stop();
     stats = null;
