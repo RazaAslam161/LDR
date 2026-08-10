@@ -118,15 +118,6 @@ class MilesGradients {
   );
 }
 
-/// Kept for back-compat with screens that referenced a light palette.
-class MilesLightColors {
-  MilesLightColors._();
-  static const surface = Color(0xFFFBF8F4);
-  static const surfaceMuted = Color(0xFFF5EFE6);
-  static const ink = Color(0xFF1B2230);
-  static const inkMuted = Color(0xFF5A6678);
-}
-
 TextTheme _buildTextTheme() {
   TextStyle f(double size, FontWeight w,
           {double ls = 0, double h = 1.2, Color c = MilesColors.cream50, FontStyle? style}) =>

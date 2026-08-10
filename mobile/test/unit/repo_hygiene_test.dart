@@ -104,6 +104,111 @@ void main() {
     expect(Directory('../docs/archive').existsSync(), isTrue);
   });
 
+  group('zero dead code', () {
+    List<File> dartIn(String dir) => Directory(dir)
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))
+        .toList();
+
+    test('every file under lib/ is reachable from another file', () {
+      // Two were not: an unused RepositoryException, and an FcmTodo stub whose
+      // doc comment still said "there's no Firebase project yet" long after
+      // push went live and was verified end to end. Dead code does not just sit
+      // there — it actively misinforms whoever reads it next.
+      final files = dartIn('lib');
+      expect(files.length, greaterThan(100), reason: 'lib/ did not enumerate');
+      final sources = {for (final f in files) f.path: f.readAsStringSync()};
+
+      final orphans = <String>[];
+      for (final f in files) {
+        final name = f.uri.pathSegments.last;
+        if (name == 'main.dart') continue;
+        final rel = f.path.replaceAll(r'\', '/').split('lib/').last;
+        final referenced = sources.entries.any((e) =>
+            e.key != f.path &&
+            (e.value.contains(rel) || e.value.contains("'$name")));
+        if (!referenced) orphans.add(rel);
+      }
+      expect(orphans, isEmpty,
+          reason: 'imported by nothing — delete it, or move a real script to '
+              'tool/: $orphans');
+    });
+
+    test('no code is commented out', () {
+      // Git remembers. A commented-out line is a claim that something might
+      // come back, and it never does.
+      //
+      // Two discriminators, both learned from false positives while writing
+      // this: real code ends in a statement terminator where prose wraps
+      // mid-sentence, and Dart never puts a space before '(' because dartfmt
+      // removes it — so "// _openMedia (permissions, camera in use)" is a
+      // sentence, not a call.
+      final code = RegExp(r'^\s*//\s*('
+          r'(?:await|return|final|const|var|if|for|while|throw|import|print|debugPrint)\b'
+          r'|[A-Za-z_]\w*\('
+          r'|[A-Za-z_]\w*\s*=[^=]'
+          r'|[A-Za-z_][\w.]*\.[A-Za-z_]\w*\('
+          r')');
+      final terminator = RegExp(r'[;{},]\s*$');
+
+      bool isCommentedCode(String line) {
+        final s = line.trim();
+        if (!s.startsWith('//') || s.startsWith('///')) return false;
+        return code.hasMatch(line) && terminator.hasMatch(s.substring(2).trim());
+      }
+
+      // The check is worthless if it cannot recognise the thing it forbids.
+      expect(isCommentedCode('      // await _pc!.setRemoteDescription(o);'),
+          isTrue,
+          reason: 'the detector no longer detects anything');
+      expect(isCommentedCode('      // it covers _openMedia and _routeAudio,'),
+          isFalse,
+          reason: 'the detector flags ordinary prose');
+
+      final hits = <String>[];
+      for (final f in dartIn('lib')) {
+        final lines = f.readAsStringSync().split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          if (isCommentedCode(lines[i])) {
+            hits.add('${f.uri.pathSegments.last}:${i + 1}');
+          }
+        }
+      }
+      expect(hits, isEmpty, reason: 'delete it; git has it: $hits');
+    });
+
+    test('every declared dependency is actually used', () {
+      // `collection` sat in pubspec.yaml imported by nothing. A dependency is a
+      // supply-chain entry, a version constraint and a line of the resolve — it
+      // should have to earn its place.
+      final spec = File('pubspec.yaml').readAsStringSync();
+      final deps = RegExp(r'^dependencies:(.*?)^dev_dependencies:',
+              dotAll: true, multiLine: true)
+          .firstMatch(spec)
+          ?.group(1);
+      expect(deps, isNotNull, reason: 'could not parse the dependencies block');
+
+      final names = RegExp(r'^  ([a-z0-9_]+):', multiLine: true)
+          .allMatches(deps!)
+          .map((m) => m[1]!)
+          .where((n) => n != 'flutter')
+          .toSet();
+      expect(names.length, greaterThan(20), reason: 'dependency parse failed');
+
+      final dart = dartIn('lib').map((f) => f.readAsStringSync()).join('\n');
+      // A package can be used without a Dart import: a lint set is included by
+      // analysis_options, and an icon font is referenced from pubspec itself.
+      final other = File('analysis_options.yaml').readAsStringSync() + spec;
+
+      final unused = names
+          .where((n) => !dart.contains('package:$n') && !other.contains(n))
+          .toList()
+        ..sort();
+      expect(unused, isEmpty, reason: 'declared but never used: $unused');
+    });
+  });
+
   test('the launcher disguise is intact', () {
     // Not cleanup-adjacent, deliberately. The label looks like a placeholder
     // somebody forgot to change, which is exactly why a well-meaning tidy-up

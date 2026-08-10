@@ -1,4 +1,4 @@
-// lib/tools/generate_icon.dart
+// tool/generate_icon.dart
 //
 // One-time generator for the Android launcher icon.
 //
@@ -11,7 +11,7 @@
 // resolution and then averaged down, which gives clean anti-aliased edges.
 //
 // Run from the Flutter project root (mobile/):
-//   dart run lib/tools/generate_icon.dart
+//   dart run tool/generate_icon.dart
 //
 // Uses the `image` package (already a dependency: image ^4.x).
 
