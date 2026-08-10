@@ -9,6 +9,16 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// These pin the properties that make the replacement correct by construction,
 /// not by luck.
+/// Resolves a migration by name, so renumbering or reordering migrations/
+/// cannot break this test the way a hardcoded path does.
+String _migration(String name) {
+  final dir = Directory('../supabase/migrations');
+  final f = dir.listSync().whereType<File>().firstWhere(
+      (f) => f.path.endsWith('_$name.sql'),
+      orElse: () => throw StateError('no migration named $name'));
+  return f.readAsStringSync();
+}
+
 void main() {
   String read(String p) => File(p).readAsStringSync();
   String codeOnly(String s) => s
@@ -16,10 +26,10 @@ void main() {
       .where((l) => !l.trimLeft().startsWith('//') && !l.trimLeft().startsWith('--'))
       .join('\n');
 
-  final sql = read('../supabase/receipts_v2.sql');
+  final sql = _migration('receipts_v2');
   final chat = read('lib/features/chat/chat_screen.dart');
   final repo = read('lib/features/chat/chat_repository.dart');
-  final push = read('../supabase/message_push.sql');
+  final push = _migration('message_push');
 
   group('order comes from the server, never a device', () {
     test('messages carry a server-assigned monotonic seq', () {

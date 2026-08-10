@@ -4,9 +4,19 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Deleting a message removed the row and left the file: the photo stayed in
 /// the bucket and a signed URL could still be minted for it.
+/// Resolves a migration by name, so renumbering or reordering migrations/
+/// cannot break this test the way a hardcoded path does.
+String _migration(String name) {
+  final dir = Directory('../supabase/migrations');
+  final f = dir.listSync().whereType<File>().firstWhere(
+      (f) => f.path.endsWith('_$name.sql'),
+      orElse: () => throw StateError('no migration named $name'));
+  return f.readAsStringSync();
+}
+
 void main() {
   final sql =
-      File('../supabase/chat_media_cleanup.sql').readAsStringSync();
+      _migration('chat_media_cleanup');
 
   test('both hard-delete paths drop the stored files', () {
     for (final f in [
