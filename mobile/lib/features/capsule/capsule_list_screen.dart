@@ -77,7 +77,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
               foregroundColor: MilesColors.cream50,
               onPressed: () async {
                 await context.push('/app/capsule/new');
-                _load();
+                unawaited(_load());
               },
               icon: const Icon(Icons.add),
               label: const Text('New capsule'),
@@ -98,7 +98,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
                         onTap: () async {
                           await context.push('/app/capsule/view',
                               extra: _capsules[i],);
-                          _load();
+                          unawaited(_load());
                         },
                       ),
                     ),

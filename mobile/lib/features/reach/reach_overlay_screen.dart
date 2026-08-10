@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -34,7 +35,7 @@ class _ReachOverlayScreenState extends State<ReachOverlayScreen> {
   Future<void> _buzz() async {
     try {
       if (await Vibration.hasVibrator()) {
-        Vibration.vibrate(pattern: const [0, 300, 120, 500, 120, 300]);
+        unawaited(Vibration.vibrate(pattern: const [0, 300, 120, 500, 120, 300]));
       }
     } catch (_) {}
   }

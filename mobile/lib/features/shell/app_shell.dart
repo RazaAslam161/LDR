@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -103,7 +104,7 @@ class _AppShellState extends ConsumerState<AppShell>
       } catch (_) {}
     }
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
-    ref.read(callControllerProvider).reconnect();
+    unawaited(ref.read(callControllerProvider).reconnect());
     ref.read(sessionProvider.notifier).reconnectPresence();
   }
 

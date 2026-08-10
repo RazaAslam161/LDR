@@ -36,7 +36,7 @@ class _ReachButtonState extends State<ReachButton> {
   Future<void> _reach() async {
     if (_onCooldown || _sending) return;
     setState(() => _sending = true);
-    HapticFeedback.mediumImpact();
+    unawaited(HapticFeedback.mediumImpact());
     try {
       await ReachRepository.reach(widget.coupleId);
       _cooldownUntil = DateTime.now().add(const Duration(seconds: 30));

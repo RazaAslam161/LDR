@@ -123,13 +123,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         replyToId: replyId,
       ), source: 'local_send',);
     }
-    _moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
+    unawaited(_moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
       'id': id,
       'sender': myUid,
       'body': body,
       'createdAt': now.toUtc().toIso8601String(),
       'replyToId': replyId,
-    },);
+    },),);
     try {
       await ChatRepository.sendText(coupleId, body, id: id, replyToId: replyId);
     } catch (_) {
@@ -518,7 +518,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         },);
       }
 
-      PresenceService.setChatLastRead(id);
+      unawaited(PresenceService.setChatLastRead(id));
       // Rejoining a channel does not replay what it missed while gone.
       await _catchUp(trigger: trigger);
       await _refreshPartnerReceipt(source: trigger);
@@ -554,11 +554,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // Photos taken from the shell's camera tab were already uploading before
     // this screen existed — show them now rather than when they land.
     _adoptPending();
-    PresenceService.setOnline(couple.id, online: true);
-    PresenceService.setTypingInChat(couple.id, inChat: true);
+    unawaited(PresenceService.setOnline(couple.id, online: true));
+    unawaited(PresenceService.setTypingInChat(couple.id, inChat: true));
     // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
     // the chat is open (the shell only keeps this screen alive while viewing).
-    PresenceService.setChatLastRead(couple.id);
+    unawaited(PresenceService.setChatLastRead(couple.id));
     await _refreshPartnerReceipt(source: 'chat_open');
     _ackRead('chat_open');
     _readTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -962,7 +962,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       await ChatRepository.clearConversation();
       // Instant fan-out to the partner over the live broadcast channel (same
       // reliable path as typing/msg). Postgres DELETE realtime is the backstop.
-      _moodChannel?.sendBroadcastMessage(event: 'cleared', payload: const {});
+      unawaited(
+        _moodChannel?.sendBroadcastMessage(event: 'cleared', payload: const {}),
+      );
       if (mounted) {
         setState(() {
           _messages.clear();

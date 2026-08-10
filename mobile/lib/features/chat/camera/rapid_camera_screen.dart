@@ -476,7 +476,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       debugPrint('[camera] video preview init failed: $e');
     }
     if (!mounted) {
-      vp.dispose();
+      unawaited(vp.dispose());
       return;
     }
     setState(() {
@@ -496,7 +496,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     _capturedIsVideo = false;
     final vp = _videoPreview;
     _videoPreview = null;
-    vp?.dispose();
+    unawaited(vp?.dispose());
     setState(() => _state = _CamState.preview);
     try {
       await f?.delete();

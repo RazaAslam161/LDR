@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
@@ -147,8 +148,10 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
         _myBpm = null;
       });
     }
-    _channel?.channel?.sendBroadcastMessage(
-        event: 'hb', payload: {'from': _myUid, 'stopped': true},);
+    unawaited(_channel?.channel?.sendBroadcastMessage(
+      event: 'hb',
+      payload: {'from': _myUid, 'stopped': true},
+    ),);
   }
 
   void _onFrame(CameraImage image) {

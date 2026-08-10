@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,7 +54,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(container.read(myScreenProvider), 'Home');
 
-    router.push('/app/touch');
+    unawaited(router.push('/app/touch'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull); // no "modified during build"
     expect(container.read(myScreenProvider), 'Touch');
@@ -81,13 +82,13 @@ void main() {
     // land on the wrong page.
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    router.push('/app/capsule');
+    unawaited(router.push('/app/capsule'));
     await tester.pumpAndSettle();
-    router.push('/app/capsule/new');
+    unawaited(router.push('/app/capsule/new'));
     await tester.pumpAndSettle();
     expect(container.read(myScreenProvider), 'New');
 
-    router.pushReplacement('/app/capsule/view');
+    unawaited(router.pushReplacement('/app/capsule/view'));
     await tester.pumpAndSettle();
     expect(container.read(myScreenProvider), 'View');
   });
@@ -100,7 +101,7 @@ void main() {
     // are standing in.
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    router.push('/app/touch');
+    unawaited(router.push('/app/touch'));
     await tester.pumpAndSettle();
     expect(container.read(myScreenProvider), 'Touch');
 
@@ -116,7 +117,7 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    router.push('/app/touch');
+    unawaited(router.push('/app/touch'));
     await tester.pumpAndSettle();
     expect(container.read(myScreenProvider), 'Touch');
 

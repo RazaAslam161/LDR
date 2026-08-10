@@ -167,7 +167,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
       }
 
       final coupleId = couple.id;
-      _subscribePresence(coupleId);
+      unawaited(_subscribePresence(coupleId));
 
       // PRESENCE INTEGRITY GUARD
       // Silently verify and repair presence.couple_id. Catches the case

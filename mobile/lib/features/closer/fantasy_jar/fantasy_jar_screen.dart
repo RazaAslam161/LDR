@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -144,7 +145,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const AddFantasyScreen()),
     );
-    if (mounted) _load();
+    if (mounted) unawaited(_load());
   }
 
   @override

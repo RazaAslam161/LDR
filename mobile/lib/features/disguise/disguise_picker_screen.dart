@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -62,12 +63,12 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-    if (widget.isOnboarding) Navigator.of(context).maybePop();
+    if (widget.isOnboarding) unawaited(Navigator.of(context).maybePop());
   }
 
   Future<void> _keepAsIs() async {
     await DisguiseService.markChosen();
-    if (mounted) Navigator.of(context).maybePop();
+    if (mounted) unawaited(Navigator.of(context).maybePop());
   }
 
   @override

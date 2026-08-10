@@ -80,7 +80,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
       if (found == null || !mounted) return;
       _capsule = found;
       if (_capsule.isUnlocked && !_revealed && !_opening) {
-        _runCeremony();
+        unawaited(_runCeremony());
       } else {
         setState(() {});
       }
@@ -187,7 +187,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
                         onAdd: () async {
                           await context.push('/app/capsule/fill',
                               extra: _capsule,);
-                          _loadSummary();
+                          unawaited(_loadSummary());
                         },
                         onCheckProximity: _startProximity,
                         onOpen: _attemptOpen,

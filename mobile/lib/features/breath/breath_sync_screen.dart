@@ -87,7 +87,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   Future<void> _beginCycle() async {
     final coupleId = ref.read(sessionProvider).couple!.id;
     _cycleStart = DateTime.now().millisecondsSinceEpoch;
-    _broadcastStart(coupleId, _cycleStart);
+    unawaited(_broadcastStart(coupleId, _cycleStart));
     _beginCycleFromOffset(0);
   }
 

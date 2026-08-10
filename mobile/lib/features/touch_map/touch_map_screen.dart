@@ -405,7 +405,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       mirror: mirror,
     );
 
-    _channel?.channel?.sendBroadcastMessage(
+    unawaited(_channel?.channel?.sendBroadcastMessage(
       event: 'reaction_gif',
       payload: {
         'from': _myUid,
@@ -418,7 +418,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         'gesture': gesture.name,
         'mirror': mirror,
       },
-    );
+    ),);
   }
 
   /// Source choice sheet — 'camera' (photo or video) or 'gallery' (photo only).
@@ -768,8 +768,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         });
       }
       // Tell the partner to reload my photo live.
-      _channel?.channel
-          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid});
+      unawaited(_channel?.channel
+          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid}),);
     }
     if (mounted) setState(() => _uploadingPhoto = false);
   }
@@ -818,8 +818,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     try {
       await TouchMapRepository.deleteBodyPhoto(owner);
       // Tell the other phone to reload both photos live.
-      _channel?.channel
-          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid});
+      unawaited(_channel?.channel
+          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid}),);
     } catch (_) {
       if (mounted) {
         setState(() {

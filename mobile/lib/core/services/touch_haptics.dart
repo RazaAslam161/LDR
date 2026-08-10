@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:vibration/vibration.dart';
 
@@ -30,7 +31,7 @@ class TouchHaptics {
   static Future<void> feel(String type, double heat) async {
     await _ensure();
     if (!_can) {
-      HapticFeedback.mediumImpact(); // graceful fallback
+      unawaited(HapticFeedback.mediumImpact()); // graceful fallback
       return;
     }
     try {
@@ -109,7 +110,7 @@ class TouchHaptics {
           );
       }
     } catch (_) {
-      HapticFeedback.mediumImpact();
+      unawaited(HapticFeedback.mediumImpact());
     }
   }
 

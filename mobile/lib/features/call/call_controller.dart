@@ -193,7 +193,7 @@ class CallController extends ChangeNotifier {
   Future<void> handlePendingCall(
       String callId, String fromName, bool fallbackVideo,) async {
     if (state != CallState.idle || callId.isEmpty) return;
-    reconnect(); // make sure the call channel is live for the answer + ICE
+    unawaited(reconnect()); // make sure the call channel is live for the answer + ICE
     try {
       final row = await SupabaseService.client
           .from('call_invites')
@@ -588,14 +588,14 @@ class CallController extends ChangeNotifier {
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
-      _insertInvite(offer.sdp ?? '', video); // durable → FCM rings a closed app
+      unawaited(_insertInvite(offer.sdp ?? '', video)); // durable → FCM rings a closed app
       await CallForegroundService.start(peerName ?? 'Partner');
       _startConnectTimeout();
     } catch (e) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
       debugPrint('[call] startCall failed: $e');
       _lastError = _readableCallError(e);
-      _teardown(CallState.ended);
+      unawaited(_teardown(CallState.ended));
     }
   }
 
@@ -684,7 +684,7 @@ class CallController extends ChangeNotifier {
         'remote_set': _remoteSet,
       },);
       _send('hangup', {});
-      _teardown(CallState.ended);
+      unawaited(_teardown(CallState.ended));
     }
   }
 

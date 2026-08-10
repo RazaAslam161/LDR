@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:miles/core/services/app_lock.dart';
@@ -38,7 +39,7 @@ class _LockScreenState extends State<LockScreen> {
       // No biometrics enrolled → straight to the PIN.
       _showPin = bio.isEmpty && hasPin;
     });
-    if (bio.isNotEmpty) _authenticate();
+    if (bio.isNotEmpty) unawaited(_authenticate());
   }
 
   Future<void> _authenticate() async {

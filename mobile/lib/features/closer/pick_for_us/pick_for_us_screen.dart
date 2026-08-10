@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -128,7 +129,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
     final tags = PickForUsRepository.rollTags(enabled);
     final tier = enabled.last;
 
-    _spin.forward(from: 0);
+    unawaited(_spin.forward(from: 0));
     setState(() {
       _currentRoll = null; // hide while spinning
     });
