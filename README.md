@@ -51,10 +51,22 @@ Per-environment server values (the Edge Function base URL, the Cloudflare TURN c
 
 ## Working rules
 
-Enforced by `mobile/test/unit/repo_hygiene_test.dart`, not by good intentions:
+These are assertions, not good intentions. `flutter test` fails if any of them breaks.
 
-- **No dead code.** An unreferenced symbol, file, asset or dependency is deleted, not commented out.
+`repo_hygiene_test.dart`:
+
+- **No dead code.** Every file under `lib/` is reachable, every dependency is imported, and no private
+  member is unused (`unused_element` is a warning here, and warnings are fatal).
 - **No commented-out code.** Git remembers it.
-- **DDL only in `supabase/migrations/`,** with a 14-digit ordering prefix.
-- **Comments explain why.** A comment that restates the next line is noise; a comment naming the failure
-  a line prevents is worth keeping.
+- **Zero analyzer errors and warnings.** The suite runs the analyzer itself, because a hand-written grep
+  for this was silently matching nothing for an entire session.
+- **Suppressions stay countable.** `// ignore:` is bounded, so keeping a warning stays a decision.
+- **The root stays clean** and the launcher disguise stays intact.
+
+`migrations_hygiene_test.dart`:
+
+- **DDL only in `supabase/migrations/`,** with a unique 14-digit ordering prefix, no hardcoded project
+  URL, and every table the client queries created by a migration.
+
+And one rule no test can check: **comments explain why.** A comment restating the next line is noise; a
+comment naming the failure that line prevents is the most valuable thing in the file.
