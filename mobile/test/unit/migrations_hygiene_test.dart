@@ -243,7 +243,14 @@ void main() {
     // that has never run the file the statement aborts before scheduling
     // anything. Every call must be gated on cron.job.
     for (final f in sqlIn(migrations)) {
-      final src = f.readAsStringSync();
+      // Comments stripped first. A migration that EXPLAINS this rule in its
+      // header was failing it — the same read-the-comment-as-code mistake the
+      // dollar-quote check below exists for.
+      final src = f
+          .readAsStringSync()
+          .split('\n')
+          .where((l) => !l.trimLeft().startsWith('--'))
+          .join('\n');
       if (!src.contains('cron.unschedule')) continue;
       expect(src, contains('from cron.job'),
           reason: '${f.uri.pathSegments.last}: unguarded cron.unschedule '

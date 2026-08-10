@@ -670,6 +670,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
             const SizedBox(height: 28),
 
+            // ── Diagnostics ──────────────────────────────────────
+            const _SectionHeader(label: 'Diagnostics'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.monitor_heart_outlined,
+                  color: MilesColors.ember),
+              title: const Text('Call & delivery log',
+                  style: TextStyle(color: MilesColors.cream50)),
+              subtitle: const Text(
+                  'What happened during calls, messages and presence',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right,
+                  color: MilesColors.faint, size: 20),
+              onTap: () => context.push('/app/diagnostics'),
+            ),
+
+            const SizedBox(height: 28),
+
             // ── Account ──────────────────────────────────────────
             const _SectionHeader(label: 'Account'),
             ListTile(

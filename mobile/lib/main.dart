@@ -10,6 +10,8 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/config.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/router.dart';
@@ -67,6 +69,11 @@ Future<void> main() async {
     Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
     SupabaseService.init(),
     MilesApp.loadSetupFlag(),
+    // Awaited rather than fired off, so the flush timer and the log file exist
+    // before the first ICE callback. Diag.record() already works without it —
+    // events queue — but a cold-start ordering bug is one of the things being
+    // hunted, and losing the first three seconds would hide it.
+    Diag.init(),
   ]);
   // Must be registered before runApp; runs in its own isolate when a push
   // arrives while the app is backgrounded or terminated. Needs Firebase ready.
@@ -210,6 +217,18 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Lifecycle is the backdrop every other trace is read against. "The
+    // heartbeat stopped" and "the app was backgrounded" are the same log line
+    // from two different distances, and without this you cannot tell a presence
+    // bug from a user putting their phone in a pocket.
+    Diag.record(DiagArea.app, 'lifecycle', fields: {'state': state.name});
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      // The last events before a kill are the ones worth having, and Android
+      // gives no warning before it takes the process. Nothing awaits this.
+      unawaited(Diag.flush());
+    }
+
     // SECURITY (cover layer): drop back to the News screen the instant the app
     // leaves the foreground, so returning ALWAYS requires re-authentication.
     // NEVER set it true here — only the entry flow does, after biometric +
@@ -410,6 +429,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
           next.couple != null) {
         MilesApp.markSetupComplete();
       }
+      // Diagnostics can only be uploaded once there is a couple to scope the
+      // rows to. Bound from the session listener rather than read once, because
+      // the couple resolves asynchronously — reading it at startup is precisely
+      // the mistake that leaves presence bound to null forever.
+      Diag.bind(coupleId: next.couple?.id, userId: next.profile?.id);
     });
 
     // The cover/real swap is driven by the static showRealApp notifier so the
