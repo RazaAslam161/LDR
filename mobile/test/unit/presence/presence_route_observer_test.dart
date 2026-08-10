@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/presence_route_observer.dart';
 import 'package:miles/core/realtime/screen_presence.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
@@ -140,6 +141,45 @@ void main() {
           settings: RouteSettings(name: name),
           builder: (_) => const SizedBox.shrink(),
         );
+
+    test('a couple-less publish does not suppress the real one', () {
+      // The presence bug, as the field trace showed it. With no couple the
+      // publish reaches nobody — but it recorded itself as the current screen
+      // anyway, so when the couple arrived the SAME room was deduped and never
+      // written. The partner could not see where you were until you navigated
+      // somewhere else, which on a phone left open on one screen is never.
+      //
+      // Two full audits refuted every candidate. It took a trace:
+      //   has_couple:false wrote_db:false   (twice)
+      //   deduped:true     wrote_db:false   (once the couple returned)
+      //
+      // Asserted on the trace rather than on myScreenProvider, because the
+      // local value is 'Touch' either way — that is precisely what made the
+      // bug invisible, and a test that watched it would be too.
+      Diag.resetForTest();
+      final (obs, _) = build();
+
+      obs.didPush(page('/app/touch'), null);
+      obs.didPush(page('/app/touch'), null);
+
+      final publishes = Diag.recent
+          .where((e) => e.name == 'presence_screen_publish')
+          .toList();
+      expect(publishes.length, greaterThanOrEqualTo(2),
+          reason: 'the observer stopped recording publishes',);
+
+      // The old behaviour: the second one came back deduped, so the write was
+      // suppressed for a room that had never been written.
+      final deduped =
+          publishes.where((e) => e.fields['deduped'] == true).toList();
+      expect(deduped, isEmpty,
+          reason: 'a room that never reached the database was treated as '
+              'already published: ${deduped.map((e) => e.fields)}',);
+
+      // And it is held for replay rather than dropped.
+      expect(publishes.any((e) => e.fields['deferred'] == true), isTrue,
+          reason: 'the couple-less publish was discarded, not deferred',);
+    });
 
     test('a named page publishes its room', () {
       final (obs, c) = build();

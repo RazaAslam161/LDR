@@ -137,15 +137,25 @@ class PresenceRouteObserver extends NavigatorObserver {
   String _pendingSrc = 'route';
   bool _flushScheduled = false;
 
+  /// The last screen that actually REACHED the database.
+  ///
+  /// The dedupe used to compare against myScreenProvider, which is set for the
+  /// local badge before the couple is even known. A publish made during the
+  /// couple-null window therefore wrote nothing, recorded itself as the current
+  /// screen anyway, and then suppressed every later publish of that same room —
+  /// permanently, until the user happened to navigate somewhere else.
+  ///
+  /// Captured in the field: three rows, has_couple:false/wrote_db:false twice,
+  /// then deduped:true/wrote_db:false once the couple returned.
+  ///
+  /// So the two facts are stored separately now. The provider is what this
+  /// device shows; this is what the partner has been told. Only the second one
+  /// can justify skipping a write.
+  String? _lastWritten;
+  bool _everWritten = false;
+
   void _write(String? name, String src) {
-    // The provider is the record of what was last said — not a durable private
-    // field. A field drifts the moment anything else sets the value, which is
-    // exactly what used to leave a tab unpublishable after a pop.
-    if (name == _ref.read(myScreenProvider)) {
-      // The value below is set before the couple guard, so a publish made while
-      // the couple was still null writes nothing and then dedupes every later
-      // publish of that same room — permanently. deduped/has_couple/wrote_db
-      // are separate fields so that pair is readable as one sequence.
+    if (_everWritten && name == _lastWritten) {
       Diag.record(DiagArea.presence, 'presence_screen_publish', fields: {
         'src': src,
         'has_name': name != null,
@@ -157,12 +167,17 @@ class PresenceRouteObserver extends NavigatorObserver {
       return;
     }
 
-    // Our own value first: it is what this device's badge compares against, and
-    // it should not wait on the couple row to finish loading.
+    // The local badge should not wait on the couple row to load.
     _ref.read(myScreenProvider.notifier).state = name;
 
     final couple = _ref.read(currentCoupleProvider);
     if (couple == null) {
+      // Held, not dropped. The session goes null on every resume - seven
+      // heartbeats were skipped across three and a half minutes in one traced
+      // session - and whatever room the user is in has to survive that window.
+      // flushDeferred() replays it the moment a couple exists.
+      _deferred = name;
+      _hasDeferred = true;
       Diag.record(DiagArea.presence, 'presence_screen_publish', fields: {
         'src': src,
         'has_name': name != null,
@@ -170,14 +185,20 @@ class PresenceRouteObserver extends NavigatorObserver {
         'has_couple': false,
         'wrote_db': false,
         'announced': false,
+        'deferred': true,
       },);
-      return; // nobody to tell yet
+      return;
     }
 
     // Durable value for a partner who opens the app later...
     PresenceService.setScreen(couple.id, name);
     // ...and the instant broadcast for one who is already looking.
     _ref.read(partnerScreenProvider.notifier).announce(name);
+    // Only now. Recording it before the write is what made a failed publish
+    // look like a successful one to every publish after it.
+    _lastWritten = name;
+    _everWritten = true;
+    _hasDeferred = false;
     Diag.record(DiagArea.presence, 'presence_screen_publish', fields: {
       'src': src,
       'has_name': name != null,
@@ -186,6 +207,24 @@ class PresenceRouteObserver extends NavigatorObserver {
       'wrote_db': true,
       'announced': true,
     },);
+  }
+
+  /// A screen held back because there was no couple to tell.
+  String? _deferred;
+  bool _hasDeferred = false;
+
+  /// Replay whatever the couple-null window swallowed.
+  ///
+  /// Called when a couple appears. Without it the user sits in a room their
+  /// partner cannot see until they navigate somewhere else — which, on a phone
+  /// left open on one screen, is never.
+  void flushDeferred() {
+    if (!_hasDeferred) return;
+    final name = _deferred;
+    _hasDeferred = false;
+    Diag.record(DiagArea.presence, 'presence_screen_publish',
+        fields: {'src': 'couple_ready', 'has_name': name != null},);
+    _write(name, 'couple_ready');
   }
 
   /// The room we were in when the app went to the background, kept so

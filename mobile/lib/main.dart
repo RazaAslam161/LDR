@@ -457,6 +457,19 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // the couple resolves asynchronously — reading it at startup is precisely
       // the mistake that leaves presence bound to null forever.
       Diag.bind(coupleId: next.couple?.id, userId: next.profile?.id);
+
+      // The couple resolves LATE, and goes null again on every resume — a
+      // traced session skipped seven consecutive heartbeats across three and a
+      // half minutes, during which the partner simply read "offline".
+      //
+      // Nothing used to notice it coming back. The heartbeat waited out its
+      // 30s cycle and the screen a user was already sitting on was never
+      // published at all. Both are driven off the transition now.
+      final gained = previous?.couple == null && next.couple != null;
+      if (gained) {
+        _startHeartbeat();
+        presenceRouteObserver?.flushDeferred();
+      }
     });
 
     // ref.listen fires on CHANGE only, so a session that had already resolved
