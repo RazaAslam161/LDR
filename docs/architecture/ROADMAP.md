@@ -164,13 +164,25 @@ column-grant list from `information_schema` **at apply time**, and `pg_dump` fre
 the next `ADD COLUMN` produces a column `authenticated` cannot UPDATE — which already caused the
 `gender`/`gender_set` dead end. It will recur on every future column until a CI assertion catches it.
 
-### Stage 1 — Instrument before optimising
+### Stage 1 — Instrument before optimising — **DONE (correctness half)**
 Add measurement for: peak concurrent connections, realtime messages/day, push delivery outcomes, and
 frame timings. Every scale number in this document rests on an **assumed 8% peak concurrency** which is
 a rule of thumb, not a measurement — and for a couples app, where both partners are active in the same
 evening window, the real figure could be 2×.
 
 **Verify:** the dashboards exist and disagree with, or confirm, the assumption.
+
+**Shipped 2026-08-10.** `Diag` (`mobile/lib/core/diag/`) writes to memory, disk and the `diag_events`
+table; `corr` joins both devices' view of one interaction and `seq` preserves order inside a
+millisecond. No content can reach it — the redactor accepts single tokens only, and a test scans the
+call sites. Reading procedure and the pattern→cause table are in [`docs/FIELD-TEST.md`](../FIELD-TEST.md).
+
+A 63-agent audit of the three paths confirmed **44 silent failures and refuted 15**. Instrumentation
+covers all of them; the ones that could each *alone* explain a reported symptom are listed in §6.11.
+
+**Still open:** this half answers *"which of these is happening"*. The scale half — peak concurrency,
+messages/day, the typing-indicator billing multiplier — is not measured yet, and the 8% assumption
+still stands unverified.
 
 ### Stage 2 — F1 + F2: the per-couple stream and the untrusted doorbell
 The foundation for messaging, receipts and eventually calls.
@@ -279,6 +291,29 @@ Stated plainly, because "it's fixed" has been said too often here.
    two documents price the same event on different topologies. Stage 1 exists to measure them.
 10. **Elsa's presence bug was never root-caused.** Two full audits refuted every candidate. The presence
    rebuild (F5) removes the whole class it belongs to, but I cannot claim it fixes the specific report.
+11. **Eleven confirmed defects could each alone explain a reported symptom**, found by the Stage 1 audit
+   (2026-08-10, 63 agents, 44 confirmed / 15 refuted). They are **instrumented, not fixed** — deliberately,
+   because every previous round fixed on theory and was wrong. The field test decides which is live.
+
+   *Calls.* `init()` sets `_inited` before the couple null-check and `_coupleId` is assigned nowhere
+   else, so losing that race disables calling for the whole process, silently, with no retry.
+   `_applyAnswer` is called unawaited from a void handler, so a throw leaves `_remoteSet` false and every
+   remote candidate queues forever — which presents as candidates that never arrived. An incoming offer
+   is dropped with no ring and no reply whenever `state` is non-idle, so a stuck state makes a device
+   silently unreachable. ICE servers are read from the static cache when the peer connection is built and
+   `setConfiguration` is called nowhere, so a relay arriving later cannot join that call whatever
+   `relayAvailable` reports afterwards. `_send`'s null-aware call discards signals whole.
+
+   *Receipts.* `ackDelivered` has exactly one call site, in `ChatScreen` — so a message arriving while the
+   chat is closed is never delivery-acked, and the sender's tick cannot advance until the recipient opens
+   the conversation. The `message` push handler returns without acking. The `receipts:` channel discards
+   its subscribe status. The broadcast path constructs a `Message` with no `seq`, so it stays 0 and can
+   never be acked.
+
+   *Presence.* `_write()` sets `myScreenProvider` **before** the couple null-check and later dedupes
+   against that same provider, so a publish made while the couple is null writes nothing and is then
+   suppressed forever. `fetchPartner` orders by `updated_at`, which GPS pings also bump, and takes one
+   row — with a stray third presence row the wrong one can win.
 
 ---
 

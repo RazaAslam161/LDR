@@ -183,6 +183,15 @@ class Diag {
 
   static int get droppedCount => _dropped;
 
+  /// How the server copy is doing, surfaced because it fails the same silent
+  /// way everything else here does. The insert policy requires couple_id to
+  /// equal current_user_couple_id(), so a stale binding rejects every row — and
+  /// without this the first sign would be an empty table after a field test
+  /// that cannot be repeated. When uploads are failing, the disk copy is the
+  /// one to collect.
+  static int uploadedCount = 0;
+  static String? lastUploadError;
+
   /// Write what is pending to disk and to the server. Safe to call at any time;
   /// runs at most once concurrently.
   static Future<void> flush() async {
@@ -245,7 +254,10 @@ class Diag {
           }
       ]);
       _pendingUpload.removeRange(0, batch.length);
+      uploadedCount += batch.length;
+      lastUploadError = null;
     } catch (e) {
+      lastUploadError = e.runtimeType.toString();
       // Kept for the next attempt. The queue cap above stops this growing
       // forever when the device is offline for a long time.
       debugPrint('[diag] upload failed: $e');

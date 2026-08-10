@@ -220,6 +220,43 @@ void main() {
             'body: ${offenders.join(' | ')}');
   });
 
+  test('the diag_events insert names only columns the migration creates', () {
+    // PostgREST rejects the WHOLE batch when any named column is missing
+    // (PGRST204), and the upload is best-effort — the failure is one debugPrint
+    // and an empty table. That would be discovered after a field test on two
+    // phones in two cities, which is not a test anyone gets to repeat cheaply.
+    final sql = File('../supabase/migrations/20260601004000_diag_events.sql')
+        .readAsStringSync();
+    final ddl = RegExp(r'create table[^;]*?diag_events\s*\((.*?)\n\);',
+            dotAll: true, caseSensitive: false)
+        .firstMatch(sql)!
+        .group(1)!;
+    final columns = ddl
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty && !l.startsWith('--'))
+        .map((l) => l.split(RegExp(r'\s+')).first)
+        .toSet();
+
+    final dart = File('lib/core/diag/diag.dart').readAsStringSync();
+    final insert = RegExp(r"from\('diag_events'\)\s*\.insert\(\[(.*?)\n\s*\]\)",
+            dotAll: true)
+        .firstMatch(dart)!
+        .group(1)!;
+    final keys = RegExp(r"'(\w+)':")
+        .allMatches(insert)
+        .map((m) => m[1]!)
+        .toSet();
+
+    expect(keys, isNotEmpty, reason: 'the insert payload could not be parsed');
+    expect(keys.difference(columns), isEmpty,
+        reason: 'the client writes columns diag_events does not have');
+    // received_at and id are server-side; everything else must be supplied or
+    // the NOT NULL constraint rejects the row.
+    expect(columns.difference(keys..addAll({'id', 'received_at'})), isEmpty,
+        reason: 'diag_events has NOT NULL columns the client never sends');
+  });
+
   test('every dollar-quote tag appears an even number of times', () {
     // Catches the mistake the second replay found, which the nesting check
     // above does not: a tag named inside a COMMENT within its own block.

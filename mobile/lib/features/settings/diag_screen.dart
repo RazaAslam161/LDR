@@ -142,9 +142,20 @@ class _DiagScreenState extends State<DiagScreen> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '${events.length} shown · ${Diag.recent.length} held'
-                '${Diag.droppedCount > 0 ? ' · ${Diag.droppedCount} dropped' : ''}',
-                style: const TextStyle(color: MilesColors.faint, fontSize: 11),
+                '${events.length} shown · ${Diag.recent.length} held · '
+                '${Diag.uploadedCount} uploaded'
+                '${Diag.droppedCount > 0 ? ' · ${Diag.droppedCount} dropped' : ''}'
+                '${Diag.lastUploadError != null ? ' · upload failing: ${Diag.lastUploadError}' : ''}',
+                style: TextStyle(
+                  // Upload failure is the one number on this screen that
+                  // changes what the person holding the phone should do: it
+                  // means collect the disk copy by hand, because the server
+                  // will have nothing.
+                  color: Diag.lastUploadError == null
+                      ? MilesColors.faint
+                      : MilesColors.blush,
+                  fontSize: 11,
+                ),
               ),
             ),
           ),
