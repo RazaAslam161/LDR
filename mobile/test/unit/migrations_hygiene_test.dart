@@ -166,7 +166,8 @@ void main() {
     // Known gap, tracked: these three predate the migration directory and
     // their real shape is only in the production dashboard. Reconstructing
     // them requires dumping production, not reading the client.
-    const knownMissing = {'cycle_events', 'cycle_settings', 'love_reasons'};
+    // Was a tracked gap; all three are now reconstructed from production.
+    const knownMissing = <String>{};
 
     final missing = used.keys
         .where((t) => !created.contains(t) && !knownMissing.contains(t))
