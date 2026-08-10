@@ -111,6 +111,38 @@ void main() {
     }
   });
 
+  test('dollar-quoted bodies are never nested with the same tag', () {
+    // Found by the first staging replay, in two migrations that had been in
+    // the repo for weeks and could NEVER have executed: a cron job body quoted
+    // with a bare $$ inside a `do $$` block terminates the outer block —
+    // "syntax error at or near delete". Nested quoting needs distinct tags.
+    for (final f in sqlIn(migrations)) {
+      final src = f.readAsStringSync();
+      for (final m in RegExp(r'do\s+\$\$(.*?)end\s*\$\$',
+              dotAll: true, caseSensitive: false)
+          .allMatches(src)) {
+        expect(RegExp(r'\$\$[^$]*(delete|update|insert|select)',
+                caseSensitive: false)
+            .hasMatch(m.group(1)!), isFalse,
+            reason: '${f.uri.pathSegments.last}: a \$\$-quoted body nested '
+                'inside a do \$\$ block cannot parse — tag the outer block');
+      }
+    }
+  });
+
+  test('cron.unschedule is guarded before it is called', () {
+    // cron.unschedule RAISES when the job does not exist, so on a database
+    // that has never run the file the statement aborts before scheduling
+    // anything. Every call must be gated on cron.job.
+    for (final f in sqlIn(migrations)) {
+      final src = f.readAsStringSync();
+      if (!src.contains('cron.unschedule')) continue;
+      expect(src, contains('from cron.job'),
+          reason: '${f.uri.pathSegments.last}: unguarded cron.unschedule '
+              'fails on any database where the job is absent');
+    }
+  });
+
   test('a column-level revoke is never used alone on a granted table', () {
     // A column-level REVOKE cannot narrow a TABLE-level grant — Postgres
     // ignores it and the statement still reports success. Three protections

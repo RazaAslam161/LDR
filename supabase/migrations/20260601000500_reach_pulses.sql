@@ -27,14 +27,25 @@ create policy "reach_pulses_insert_member" on public.reach_pulses
   for insert with check (couple_id = public.current_user_couple_id());
 
 -- Auto-clean rows older than 1 hour (these are ephemeral).
-do $$
+do $do$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    perform cron.unschedule('miles_reach_cleanup');
+    -- Two bugs lived here and neither could ever have run.
+    --
+    -- 1. The job body was quoted with a bare $$ while nested inside a do $$
+    --    block, so the inner $$ terminated the outer one: "syntax error at or
+    --    near delete". The outer block is tagged $do$ now, so the plain $$
+    --    inside it is just text.
+    -- 2. cron.unschedule() RAISES when the job does not exist, so on any
+    --    database that had never run this file the statement aborted before
+    --    reaching cron.schedule. It is guarded on the catalogue now.
+    if exists (select 1 from cron.job where jobname = 'miles_reach_cleanup') then
+      perform cron.unschedule('miles_reach_cleanup');
+    end if;
     perform cron.schedule(
       'miles_reach_cleanup',
       '*/30 * * * *',
-      $$delete from public.reach_pulses where created_at < now() - interval '1 hour';$$
+      $job$delete from public.reach_pulses where created_at < now() - interval '1 hour';$job$
     );
   end if;
-end $$;
+end $do$;
