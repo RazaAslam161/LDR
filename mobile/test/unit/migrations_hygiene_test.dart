@@ -130,6 +130,53 @@ void main() {
     }
   });
 
+  test('every table the client queries is created by a migration', () {
+    // care_nudges existed only in the production dashboard, so a fresh
+    // database had nothing for care_call_push's trigger to attach to and the
+    // replay stopped dead. That one failed loudly because a MIGRATION
+    // referenced it; a table only the CLIENT touches fails silently instead —
+    // the replay succeeds and the app breaks for the first real user.
+    final sql = sqlIn(migrations).map((f) => f.readAsStringSync()).join('\n');
+    final created = RegExp(
+            r'create table(?:\s+if not exists)?\s+public\.(\w+)',
+            caseSensitive: false)
+        .allMatches(sql)
+        .map((m) => m[1]!.toLowerCase())
+        .toSet();
+
+    final used = <String, String>{};
+    for (final f in Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      final src = f.readAsStringSync();
+      for (final m in RegExp(r"\.from\(\s*'([a-z_]+)'").allMatches(src)) {
+        // .storage.from('bucket') is a storage bucket, not a table — and the
+        // call is routinely split across lines, so a one-word lookback misses
+        // it. Scan a window back from the match instead.
+        final from = m.start - 60 < 0 ? 0 : m.start - 60;
+        if (src.substring(from, m.start).contains('storage')) continue;
+        used[m[1]!] = f.uri.pathSegments.last;
+      }
+      for (final m in RegExp(r"table:\s*'([a-z_]+)'").allMatches(src)) {
+        used[m[1]!] = f.uri.pathSegments.last;
+      }
+    }
+
+    // Known gap, tracked: these three predate the migration directory and
+    // their real shape is only in the production dashboard. Reconstructing
+    // them requires dumping production, not reading the client.
+    const knownMissing = {'cycle_events', 'cycle_settings', 'love_reasons'};
+
+    final missing = used.keys
+        .where((t) => !created.contains(t) && !knownMissing.contains(t))
+        .toList()
+      ..sort();
+    expect(missing, isEmpty,
+        reason: 'queried by the client, created by no migration: '
+            '${missing.map((t) => '$t (${used[t]})').join(', ')}');
+  });
+
   test('every dollar-quote tag appears an even number of times', () {
     // Catches the mistake the second replay found, which the nesting check
     // above does not: a tag named inside a COMMENT within its own block.
