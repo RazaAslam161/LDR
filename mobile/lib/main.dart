@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -74,6 +75,10 @@ Future<void> main() async {
     // events queue — but a cold-start ordering bug is one of the things being
     // hunted, and losing the first three seconds would hide it.
     Diag.init(),
+    // Before anything talks to the backend. A build below the minimum is told
+    // to update rather than discovering it as a screen that will not load —
+    // this app is sideloaded, so old versions never go away on their own.
+    ReleaseGate.check(),
   ]);
   // Must be registered before runApp; runs in its own isolate when a push
   // arrives while the app is backgrounded or terminated. Needs Firebase ready.
@@ -470,6 +475,36 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // instant the app backgrounds. Only a secret trigger + biometric pass +
         // the splash swaps in the real app. Its clean light theme shares
         // nothing with Miles' Emberlight dark theme.
+        // An out-of-date build stops here, above the cover and the lock: the
+        // parts below it assume a schema this build may no longer understand.
+        if (ReleaseGate.isBlocked) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            home: Scaffold(
+              backgroundColor: MilesColors.night,
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.system_update,
+                          color: MilesColors.ember, size: 44,),
+                      const SizedBox(height: 20),
+                      Text(
+                        ReleaseGate.message,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: MilesColors.cream50, fontSize: 16, height: 1.5,),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
         if (!isReal) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
