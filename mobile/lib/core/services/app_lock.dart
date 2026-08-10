@@ -93,10 +93,7 @@ class AppLock {
         // someone is most likely to be watching over a shoulder.
         localizedReason: "Verify it's you",
         options: const AuthenticationOptions(
-          biometricOnly:
-              false, // allow device PIN/passcode as a system fallback
           stickyAuth: true, // survive the app backgrounding mid-prompt
-          useErrorDialogs: true,
         ),
       );
       if (ok) locked.value = false;

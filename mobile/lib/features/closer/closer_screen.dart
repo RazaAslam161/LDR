@@ -370,7 +370,7 @@ class _FeatureTile extends StatelessWidget {
               children: [
                 Text(emoji, style: const TextStyle(fontSize: 28)),
                 const Icon(Icons.arrow_outward,
-                    size: 14, color: Color(0xFFEF6F58)),
+                    size: 14, color: Color(0xFFEF6F58),),
               ],
             ),
             Column(

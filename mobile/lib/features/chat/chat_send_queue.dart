@@ -101,7 +101,7 @@ class ChatSendQueue extends ChangeNotifier {
     try {
       if (send.kind == 'video') {
         await ChatRepository.sendVideo(send.coupleId, send.file,
-            replyToId: send.replyToId);
+            replyToId: send.replyToId,);
       } else {
         final path = await ChatRepository.sendImage(
           send.coupleId,

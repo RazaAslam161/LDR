@@ -52,12 +52,12 @@ class ChatReceiptRepository {
     try {
       await _c.rpc<dynamic>('ack_delivered', params: {'p_seq': seq});
       _traceAck('ack_delivered', seq, trigger,
-          ok: true, ms: sw.elapsedMilliseconds);
+          ok: true, ms: sw.elapsedMilliseconds,);
     } catch (e) {
       // Best-effort: a lost ack self-corrects on the next one, because the
       // server takes the max. It must never break sending or reading.
       _traceAck('ack_delivered', seq, trigger,
-          ok: false, error: e, ms: sw.elapsedMilliseconds);
+          ok: false, error: e, ms: sw.elapsedMilliseconds,);
       debugPrint('[receipts] ackDelivered failed: $e');
     }
   }
@@ -74,7 +74,7 @@ class ChatReceiptRepository {
       _traceAck('ack_read', seq, trigger, ok: true, ms: sw.elapsedMilliseconds);
     } catch (e) {
       _traceAck('ack_read', seq, trigger,
-          ok: false, error: e, ms: sw.elapsedMilliseconds);
+          ok: false, error: e, ms: sw.elapsedMilliseconds,);
       debugPrint('[receipts] ackRead failed: $e');
     }
   }
@@ -100,12 +100,12 @@ class ChatReceiptRepository {
       'error_class': error?.runtimeType.toString(),
       'pg_code': error is PostgrestException ? error.code : null,
       'latency_ms': ms,
-    });
+    },);
   }
 
   /// The partner's current position. Null when they have no row yet.
   static Future<ChatReceipt?> fetchPartner(
-      String coupleId, String partnerId) async {
+      String coupleId, String partnerId,) async {
     try {
       final row = await _c
           .from('chat_receipts')

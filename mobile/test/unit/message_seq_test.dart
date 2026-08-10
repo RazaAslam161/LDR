@@ -11,7 +11,7 @@ void main() {
   Message local(String id) => Message(
         id: id,
         senderId: 'me',
-        createdAt: DateTime(2026, 1, 1),
+        createdAt: DateTime(2026),
         body: 'hello',
         localPath: '/tmp/photo.jpg',
         sendStatus: SendStatus.sending,
@@ -28,7 +28,7 @@ void main() {
   test('an optimistic message adopts the server seq when it lands', () {
     final reconciled = local('a').reconcileWith(server('a', 41));
     expect(reconciled.seq, 41,
-        reason: 'without this the tick can never leave "sent"');
+        reason: 'without this the tick can never leave "sent"',);
   });
 
   test('reconciling keeps the local file so the image does not re-download', () {
@@ -55,7 +55,7 @@ void main() {
     final m = Message.fromJson({
       'id': 'a',
       'sender_id': 'me',
-      'created_at': DateTime(2026, 1, 1).toIso8601String(),
+      'created_at': DateTime(2026).toIso8601String(),
       'kind': 'text',
       'seq': 1234,
     });
@@ -67,7 +67,7 @@ void main() {
     final m = Message.fromJson({
       'id': 'a',
       'sender_id': 'me',
-      'created_at': DateTime(2026, 1, 1).toIso8601String(),
+      'created_at': DateTime(2026).toIso8601String(),
       'kind': 'text',
     });
     expect(m.seq, 0);

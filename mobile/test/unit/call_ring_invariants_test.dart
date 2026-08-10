@@ -42,7 +42,7 @@ void main() {
     );
     expect(body, contains('isVideo = video'),
         reason: '_ring must set isVideo, or the ringing screen shows the '
-            'type of whatever call happened last');
+            'type of whatever call happened last',);
     expect(body, contains('_setState(CallState.ringing)'));
   });
 
@@ -53,6 +53,6 @@ void main() {
     final body = accept.substring(0, accept.indexOf('\n  void decline()'));
     expect(body.contains('isVideo ='), isFalse,
         reason: 'the call type must be settled when it starts ringing, '
-            'not when it is answered');
+            'not when it is answered',);
   });
 }

@@ -31,9 +31,9 @@ void main() {
 
     test('would-you-rather and never-have-i-ever match in length', () {
       expect(wyrPool(ContentLanguage.english).length,
-          wyrPool(ContentLanguage.romanUrdu).length);
+          wyrPool(ContentLanguage.romanUrdu).length,);
       expect(nhiePool(ContentLanguage.english).length,
-          nhiePool(ContentLanguage.romanUrdu).length);
+          nhiePool(ContentLanguage.romanUrdu).length,);
     });
 
     test('no pool is empty', () {
@@ -125,7 +125,7 @@ void main() {
         at,
       );
       expect(
-          byOwnTier?.text, truthPool(ContentLanguage.english, TDTier.flirty)[at]);
+          byOwnTier?.text, truthPool(ContentLanguage.english, TDTier.flirty)[at],);
       expect(
         byOwnTier?.text,
         isNot(truthPool(ContentLanguage.english, TDTier.spicy)[at]),

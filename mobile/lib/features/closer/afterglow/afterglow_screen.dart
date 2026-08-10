@@ -289,10 +289,10 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
       final results = await Future.wait([
         if (widget.entry.gratitudeABytes != null)
           _decryptGratitude(widget.entry.gratitudeABytes!,
-              widget.entry.nonceABytes!, adA),
+              widget.entry.nonceABytes!, adA,),
         if (widget.entry.gratitudeBBytes != null)
           _decryptGratitude(widget.entry.gratitudeBBytes!,
-              widget.entry.nonceBBytes!, adB),
+              widget.entry.nonceBBytes!, adB,),
       ]);
       if (!mounted) return;
       setState(() {
@@ -315,7 +315,7 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
   }
 
   Future<String> _decryptGratitude(
-      Uint8List blob, Uint8List nonce, String ad) async {
+      Uint8List blob, Uint8List nonce, String ad,) async {
     // Afterglow schema has dedicated nonce columns but no separate MAC column,
     // so the blob is packed as `mac || ciphertext`. The author uid is the AD.
     final payload = unpackMacAndCiphertext(blob: blob, nonce: nonce);

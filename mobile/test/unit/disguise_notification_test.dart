@@ -44,12 +44,12 @@ void main() {
         final text = '${s.title} ${s.body}'.toLowerCase();
         for (final tell in _tells) {
           expect(text.contains(tell), isFalse,
-              reason: '${d.label} notification leaks "$tell": $text');
+              reason: '${d.label} notification leaks "$tell": $text',);
         }
       }
     });
 
-    test('a cover never wears another cover\'s wording', () {
+    test("a cover never wears another cover's wording", () {
       // The reported bug: a care reminder arriving on a Calculator phone
       // titled "News update".
       for (final d in kDisguises) {
@@ -58,7 +58,7 @@ void main() {
           if (other.aliasId == d.aliasId) continue;
           expect(s.title.toLowerCase().contains(other.label.toLowerCase()),
               isFalse,
-              reason: '${d.label} notification mentions ${other.label}');
+              reason: '${d.label} notification mentions ${other.label}',);
         }
       }
     });
@@ -100,9 +100,9 @@ void main() {
             .any((d) => d
                 .listSync()
                 .whereType<File>()
-                .any((f) => f.uri.pathSegments.last.split('.').first == name));
+                .any((f) => f.uri.pathSegments.last.split('.').first == name),);
         expect(found, isTrue,
-            reason: '$cover names ${style.smallIcon}, which does not exist');
+            reason: '$cover names ${style.smallIcon}, which does not exist',);
       }
     });
 
@@ -117,7 +117,7 @@ void main() {
       for (final d in kDisguises.where((d) => d.cover != DisguiseCover.news)) {
         final s = notificationStyleFor(d);
         expect(s.smallIcon, isNot('@mipmap/ic_launcher'),
-            reason: '${d.label} would show the News icon');
+            reason: '${d.label} would show the News icon',);
       }
     });
   });
@@ -141,7 +141,7 @@ void main() {
         for (final s in strings) {
           for (final tell in _tells) {
             expect(s.toLowerCase().contains(tell), isFalse,
-                reason: 'the $key channel leaks "$tell": "$s"');
+                reason: 'the $key channel leaks "$tell": "$s"',);
           }
         }
       });

@@ -32,8 +32,6 @@ AndroidNotificationChannel buildReachChannel() => AndroidNotificationChannel(
       kReachChannelName,
       description: kReachChannelDesc,
       importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
       vibrationPattern: reachVibrationPattern(),
     );
 
@@ -56,8 +54,6 @@ Future<void> showReachNotification({
     importance: Importance.max,
     priority: Priority.max,
     category: AndroidNotificationCategory.call, // signals urgency
-    playSound: true,
-    enableVibration: true,
     vibrationPattern: reachVibrationPattern(),
     fullScreenIntent: fullScreen,
     icon: style.smallIcon,
@@ -95,8 +91,6 @@ AndroidNotificationChannel buildCallChannel() => AndroidNotificationChannel(
       kCallChannelName,
       description: kCallChannelDesc,
       importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
       vibrationPattern: callVibrationPattern(),
     );
 
@@ -120,8 +114,6 @@ Future<void> showCallNotification({
     category: AndroidNotificationCategory.call,
     fullScreenIntent: fullScreen,
     ongoing: true,
-    playSound: true,
-    enableVibration: true,
     vibrationPattern: callVibrationPattern(),
     icon: style.smallIcon,
     ticker: style.ticker,
@@ -151,8 +143,6 @@ AndroidNotificationChannel buildCareChannel() =>
       kCareChannelName,
       description: kCareChannelDesc,
       importance: Importance.high,
-      playSound: true,
-      enableVibration: true,
     );
 
 AndroidNotificationChannel buildMsgChannel() =>
@@ -161,8 +151,6 @@ AndroidNotificationChannel buildMsgChannel() =>
       kMsgChannelName,
       description: kMsgChannelDesc,
       importance: Importance.high,
-      playSound: true,
-      enableVibration: true,
     );
 
 /// A new chat message arrived while the app was backgrounded or killed.

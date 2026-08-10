@@ -1,11 +1,11 @@
-import 'package:flutter/foundation.dart';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/providers.dart';
+import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -198,7 +198,7 @@ class PresenceService {
         'updated_at': marker,
         if (isAppActivity) 'app_last_active_at': marker,
         ...patch,
-      }, onConflict: 'user_id').select('updated_at,app_last_active_at');
+      }, onConflict: 'user_id',).select('updated_at,app_last_active_at');
 
       // The row comes back carrying the timestamp the SERVER just wrote, so
       // the 30s heartbeat doubles as a clock sync with no extra round trip.
@@ -227,7 +227,7 @@ class PresenceService {
             'rows_returned': rows.length,
             'server_ts_ms': serverAt?.millisecondsSinceEpoch,
             'app_active_ts_ms': activeAt?.millisecondsSinceEpoch,
-          });
+          },);
     } catch (e) {
       // presence is best-effort; never surface an error to the user — but a
       // silent write failure here means no online status and no partner
@@ -244,7 +244,7 @@ class PresenceService {
         if (e is PostgrestException) 'pg_code': e.code,
         if (e is PostgrestException) 'err_msg_len': e.message.length,
         'ms': sw.elapsedMilliseconds,
-      });
+      },);
     }
   }
 
@@ -269,12 +269,12 @@ class PresenceService {
 
   static Future<void> setTyping(String coupleId, {required bool typing}) =>
       _upsert(coupleId, {'is_typing': typing},
-          op: 'set_typing', isAppActivity: true);
+          op: 'set_typing', isAppActivity: true,);
 
   static Future<void> setTypingInChat(String coupleId,
-          {required bool inChat}) =>
+          {required bool inChat,}) =>
       _upsert(coupleId, {'typing_in_chat': inChat},
-          op: 'set_typing_in_chat', isAppActivity: true);
+          op: 'set_typing_in_chat', isAppActivity: true,);
 
   /// Marks the chat read "now" — refreshed periodically while the chat is open.
   /// Drives the partner's read-receipts (seen) and the "in chat" avatar.
@@ -325,17 +325,17 @@ class PresenceService {
   /// Which feature/section the user is currently in (so the partner can see).
   static Future<void> setScreen(String coupleId, String? screen) =>
       _upsert(coupleId, {'current_screen': screen},
-          op: 'set_screen', isAppActivity: true);
+          op: 'set_screen', isAppActivity: true,);
 
   /// The user's full-body photo for the Touch feature (private bucket path).
   static Future<void> setBodyPhoto(String coupleId, String path) =>
       _upsert(coupleId, {'body_photo_path': path},
-          op: 'set_body_photo', isAppActivity: true);
+          op: 'set_body_photo', isAppActivity: true,);
 
   /// The user's chosen avatar (emoji) for the "Together" space.
   static Future<void> setAvatarEmoji(String coupleId, String emoji) =>
       _upsert(coupleId, {'avatar_emoji': emoji},
-          op: 'set_avatar_emoji', isAppActivity: true);
+          op: 'set_avatar_emoji', isAppActivity: true,);
 
   // ╔═══════════════════════════════════════════════════════════════════════╗
   // ║ LOCATION ONLY — never stamps app_last_active_at. GPS runs while the     ║
@@ -344,7 +344,7 @@ class PresenceService {
 
   static Future<void> setSharingMode(String coupleId, String mode) =>
       _upsert(coupleId, {'location_sharing_mode': mode},
-          op: 'set_sharing_mode');
+          op: 'set_sharing_mode',);
 
   static Future<void> setLocation(
     String coupleId, {
@@ -364,7 +364,7 @@ class PresenceService {
         // app_last_active_at (isAppActivity:false), so location updates can't
         // make anyone read as falsely "online" / "active".
         'location_updated_at': DateTime.now().toUtc().toIso8601String(),
-      }, op: 'set_location');
+      }, op: 'set_location',);
 
   /// A single live-location tick (precise mode): coords + accuracy + freshness.
   static Future<void> setLiveLocation(
@@ -383,7 +383,7 @@ class PresenceService {
         // Only overwrite the label when we re-geocoded (keeps the dashboard
         // text in sync with the live map without geocoding every tick).
         if (label != null) 'location_label': label,
-      }, op: 'set_live_location');
+      }, op: 'set_live_location',);
 
   /// Clears coords when live sharing stops (so the partner sees "paused", not a
   /// stale pin presented as live).
@@ -392,7 +392,7 @@ class PresenceService {
         'latitude': null,
         'longitude': null,
         'location_accuracy': null,
-      }, op: 'clear_live_location');
+      }, op: 'clear_live_location',);
 
   /// App activity (the user actively shared a snap) — stamps app_last_active_at.
   static Future<void> setCheckinPhoto(String coupleId, String url) => _upsert(
@@ -415,7 +415,7 @@ class PresenceService {
   /// all while their partner saw everything, because the failure depends on
   /// which rows happen to exist on each side.
   static Future<Presence?> fetchPartner(String coupleId,
-      {String src = 'other'}) async {
+      {String src = 'other',}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
     final sw = Stopwatch()..start();
@@ -456,7 +456,7 @@ class PresenceService {
             // False means freshness was measured against the raw device clock,
             // which is indistinguishable from a partner who is simply offline.
             'clock_known': ServerClock.isKnown,
-          });
+          },);
       return p;
     } catch (e) {
       Diag.record(DiagArea.presence, 'presence_partner_read', fields: {
@@ -464,7 +464,7 @@ class PresenceService {
         'outcome': 'err',
         'err_class': e.runtimeType.toString(),
         'ms': sw.elapsedMilliseconds,
-      });
+      },);
       rethrow;
     }
   }
@@ -500,11 +500,11 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
           'has_couple': false,
           'chan_live': _channel != null,
           'poll_started': _poll != null,
-        });
+        },);
       } else if (id != _coupleId) {
         _bind(id);
       }
-    }, fireImmediately: true);
+    }, fireImmediately: true,);
     realtimeResumed.addListener(_subscribe); // rejoin + refetch on reconnect
   }
 
@@ -525,7 +525,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
       'phase': 'start',
       'has_couple': true,
       'is_first': isFirst,
-    });
+    },);
     var fetchOk = true;
     try {
       final p = await PresenceService.fetchPartner(coupleId, src: 'bind');
@@ -555,7 +555,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
       'is_first': isFirst,
       'fetch_ok': fetchOk,
       'poll_started': pollStarted,
-    });
+    },);
   }
 
   Future<void> _subscribe() async {
@@ -595,7 +595,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
                 'is_self': payload.newRecord['user_id'] ==
                     SupabaseService.currentUserId,
                 'has_app_active': activeAt != null,
-              });
+              },);
           // The partner's client re-stamps presence every ~5s while their chat
           // is open, and every one of those writes used to trigger a full
           // SELECT here. Only the newest value matters, so coalesce bursts —
@@ -629,5 +629,5 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
 
 final partnerPresenceProvider =
     StateNotifierProvider.autoDispose<PartnerPresenceNotifier, Presence?>(
-  (ref) => PartnerPresenceNotifier(ref),
+  PartnerPresenceNotifier.new,
 );

@@ -47,7 +47,7 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
     );
     final t = time ?? const TimeOfDay(hour: 20, minute: 0);
     setState(() =>
-        _date = DateTime(date.year, date.month, date.day, t.hour, t.minute));
+        _date = DateTime(date.year, date.month, date.day, t.hour, t.minute),);
   }
 
   Future<void> _save() async {
@@ -100,7 +100,7 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
           padding: const EdgeInsets.all(24),
           children: [
             Text('Name your capsule',
-                style: Theme.of(context).textTheme.displaySmall),
+                style: Theme.of(context).textTheme.displaySmall,),
             const SizedBox(height: 8),
             const Text(
               'Something to look forward to — "Until Lisbon", "Our reunion".',
@@ -114,12 +114,12 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
             ),
             const SizedBox(height: 32),
             Text('How should it open?',
-                style: Theme.of(context).textTheme.titleLarge),
+                style: Theme.of(context).textTheme.titleLarge,),
             const SizedBox(height: 12),
             _ModeTile(
               emoji: '🧲',
-              title: 'When we\'re together',
-              blurb: 'Unlocks when you\'re in the same place again.',
+              title: "When we're together",
+              blurb: "Unlocks when you're in the same place again.",
               selected: _mode == CapsuleUnlockMode.proximity,
               onTap: () => setState(() => _mode = CapsuleUnlockMode.proximity),
             ),
@@ -178,7 +178,7 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
                   ? const SizedBox(
                       height: 20,
                       width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2),)
                   : const Text('Seal & start filling'),
             ),
           ],
@@ -233,11 +233,11 @@ class _ModeTile extends StatelessWidget {
                     Text(title,
                         style: const TextStyle(
                             color: MilesColors.cream50,
-                            fontWeight: FontWeight.w600)),
+                            fontWeight: FontWeight.w600,),),
                     const SizedBox(height: 2),
                     Text(blurb,
                         style: const TextStyle(
-                            color: MilesColors.taupe, fontSize: 12.5)),
+                            color: MilesColors.taupe, fontSize: 12.5,),),
                   ],
                 ),
               ),

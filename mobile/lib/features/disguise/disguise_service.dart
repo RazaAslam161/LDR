@@ -74,7 +74,7 @@ class DisguiseService {
         'aliasId': profile.aliasId,
         'all': kDisguises.map((d) => d.aliasId).toList(),
       });
-      if (ok == true) return true;
+      if (ok ?? false) return true;
     } on PlatformException catch (e) {
       debugPrint('Disguise switch failed: ${e.code} — ${e.message}');
     } on MissingPluginException {

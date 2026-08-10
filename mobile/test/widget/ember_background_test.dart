@@ -9,7 +9,7 @@ int _backdrops(WidgetTester tester) => tester
     .widgetList<DecoratedBox>(find.byType(DecoratedBox))
     .where((d) =>
         d.decoration is BoxDecoration &&
-        (d.decoration as BoxDecoration).color == MilesColors.night)
+        (d.decoration as BoxDecoration).color == MilesColors.night,)
     .length;
 
 void main() {

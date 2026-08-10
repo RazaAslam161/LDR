@@ -101,7 +101,7 @@ class ServerClock {
         if (next != null) 'offset_ms': next.inMilliseconds,
         'prev_offset_ms': prev.inMilliseconds,
         'was_known': wasKnown,
-      });
+      },);
 
   /// Server-relative now. Use this for every freshness comparison.
   static DateTime now() => DateTime.now().toUtc().add(_offset);

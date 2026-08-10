@@ -40,7 +40,7 @@ class StealthLayer extends StatelessWidget {
           builder: (_, active, __) => active
               ? Positioned.fill(child: _StealthScrim(onDismiss: () {
                   stealthActive.value = false;
-                }))
+                },),)
               : const SizedBox.shrink(),
         ),
       ],
@@ -60,7 +60,7 @@ class _StealthScrim extends StatelessWidget {
       // Solid near-opaque light surface (NOT a BackdropFilter — it renders
       // unpredictably over FLAG_SECURE on some devices). Looks like a real
       // news-app loading screen.
-      child: Container(
+      child: ColoredBox(
         color: const Color(0xFFF5F5F5),
         child: SafeArea(
           child: Column(

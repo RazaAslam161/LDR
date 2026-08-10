@@ -153,7 +153,7 @@ class PresenceRouteObserver extends NavigatorObserver {
         'has_couple': _ref.read(currentCoupleProvider) != null,
         'wrote_db': false,
         'announced': false,
-      });
+      },);
       return;
     }
 
@@ -170,7 +170,7 @@ class PresenceRouteObserver extends NavigatorObserver {
         'has_couple': false,
         'wrote_db': false,
         'announced': false,
-      });
+      },);
       return; // nobody to tell yet
     }
 
@@ -185,7 +185,7 @@ class PresenceRouteObserver extends NavigatorObserver {
       'has_couple': true,
       'wrote_db': true,
       'announced': true,
-    });
+    },);
   }
 
   /// The room we were in when the app went to the background, kept so

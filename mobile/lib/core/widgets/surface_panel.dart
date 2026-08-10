@@ -18,8 +18,7 @@ import 'package:miles/core/theme.dart';
 /// call sites left.
 class SurfacePanel extends StatelessWidget {
   const SurfacePanel({
-    super.key,
-    required this.child,
+    required this.child, super.key,
     this.padding = const EdgeInsets.all(20),
     this.radius = 18,
     this.color,
@@ -71,7 +70,7 @@ class SurfacePanel extends StatelessWidget {
 
 /// Solid bottom navigation surface. Pass the child NavigationBar.
 class SurfaceNavBar extends StatelessWidget {
-  const SurfaceNavBar({super.key, required this.child});
+  const SurfaceNavBar({required this.child, super.key});
   final Widget child;
 
   @override
@@ -91,8 +90,7 @@ class SurfaceNavBar extends StatelessWidget {
 /// Solid floating pill — HUD chips (distance, freshness).
 class SurfacePill extends StatelessWidget {
   const SurfacePill({
-    super.key,
-    required this.child,
+    required this.child, super.key,
     this.padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
     this.radius = 24,
   });

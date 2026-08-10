@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
@@ -14,14 +13,7 @@ import 'package:record/record.dart';
 /// Chat input bar with three actions: text, image attach, hold-to-record voice.
 class ChatInputBar extends StatefulWidget {
   const ChatInputBar({
-    super.key,
-    required this.coupleId,
-    required this.onSendText,
-    required this.onSendImage,
-    required this.onSendVoice,
-    required this.onSendVideo,
-    required this.onFlingGif,
-    required this.onPickGif,
+    required this.coupleId, required this.onSendText, required this.onSendImage, required this.onSendVoice, required this.onSendVideo, required this.onFlingGif, required this.onPickGif, super.key,
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
@@ -135,7 +127,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     context.push('/app/rapid-camera', extra: {
       'coupleId': widget.coupleId,
       'myUid': SupabaseService.currentUserId ?? '',
-    });
+    },);
   }
 
   Future<void> _pickFromGallery() => _pickAndSend(ImageSource.gallery);
@@ -144,7 +136,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     try {
       // Crop / adjust / enhance / compress before sending.
       final file = await PhotoPickerService.pick(
-          source: source, enhanceContext: context);
+          source: source, enhanceContext: context,);
       if (file == null) return;
       setState(() => _sending = true);
       await widget.onSendImage(file);
@@ -181,7 +173,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       context: context,
       builder: (_) => ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: Container(
+        child: ColoredBox(
           color: MilesColors.surface1,
           child: SafeArea(
       child: Column(
@@ -191,9 +183,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
             leading:
                 const Icon(Icons.gif_box_outlined, color: MilesColors.blush),
             title: const Text('GIF',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
             subtitle: const Text('Search & send an animated GIF',
-                style: TextStyle(color: MilesColors.taupe, fontSize: 11.5)),
+                style: TextStyle(color: MilesColors.taupe, fontSize: 11.5),),
             onTap: () {
               Navigator.pop(context);
               widget.onPickGif();
@@ -201,9 +193,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ),
           ListTile(
             leading: const Icon(Icons.camera_alt_outlined,
-                color: MilesColors.cream50),
+                color: MilesColors.cream50,),
             title: const Text('Camera',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
             onTap: () {
               Navigator.pop(context);
               _openRapidCamera();
@@ -213,7 +205,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             leading:
                 const Icon(Icons.photo_outlined, color: MilesColors.cream50),
             title: const Text('Gallery',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
             onTap: () {
               Navigator.pop(context);
               _pickFromGallery();
@@ -221,9 +213,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ),
           ListTile(
             leading: const Icon(Icons.videocam_outlined,
-                color: MilesColors.emberSoft),
+                color: MilesColors.emberSoft,),
             title: const Text('Record video',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
             onTap: () {
               Navigator.pop(context);
               _pickAndSendVideo(ImageSource.camera);
@@ -231,9 +223,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ),
           ListTile(
             leading: const Icon(Icons.video_library_outlined,
-                color: MilesColors.emberSoft),
+                color: MilesColors.emberSoft,),
             title: const Text('Video from gallery',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
             onTap: () {
               Navigator.pop(context);
               _pickAndSendVideo(ImageSource.gallery);
@@ -263,9 +255,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _recorder.start(
         const RecordConfig(
-          encoder: AudioEncoder.aacLc,
           bitRate: 96000,
-          sampleRate: 44100,
         ),
         path: path,
       );
@@ -316,7 +306,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           children: [
             if (widget.replyingTo != null)
               _ReplyBar(
-                  message: widget.replyingTo!, onCancel: widget.onCancelReply),
+                  message: widget.replyingTo!, onCancel: widget.onCancelReply,),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -338,15 +328,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             borderRadius: BorderRadius.circular(24),
                           ),
                           alignment: Alignment.centerLeft,
-                          child: Row(
+                          child: const Row(
                             children: [
-                              const Icon(Icons.fiber_manual_record,
-                                  color: MilesColors.ember, size: 16),
-                              const SizedBox(width: 8),
-                              const Text(
+                              Icon(Icons.fiber_manual_record,
+                                  color: MilesColors.ember, size: 16,),
+                              SizedBox(width: 8),
+                              Text(
                                 'Slide up to cancel · release to send',
                                 style: TextStyle(
-                                    color: MilesColors.cream50, fontSize: 13),
+                                    color: MilesColors.cream50, fontSize: 13,),
                               ),
                             ],
                           ),
@@ -374,11 +364,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             hintText: 'Message…',
                             hintStyle: TextStyle(
                                 color:
-                                    MilesColors.cream50.withValues(alpha: 0.4)),
+                                    MilesColors.cream50.withValues(alpha: 0.4),),
                             filled: true,
                             fillColor: MilesColors.surface1,
                             contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
+                                horizontal: 16, vertical: 12,),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(24),
                               borderSide: BorderSide.none,
@@ -400,17 +390,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ],
 
                 // Mic button (when no text) OR Send button (when text)
-                _sending
-                    ? const SizedBox(
+                if (_sending) const SizedBox(
                         width: 44,
                         height: 44,
                         child: Padding(
                           padding: EdgeInsets.all(12),
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: MilesColors.cream50),
+                              strokeWidth: 2, color: MilesColors.cream50,),
                         ),
-                      )
-                    : GestureDetector(
+                      ) else GestureDetector(
                         onLongPressStart: (_) => _startRecording(),
                         onLongPressEnd: (_) => _stopRecording(),
                         onTap: _hasText ? _sendText : null,
@@ -471,7 +459,7 @@ class _ReplyBar extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('Replying to',
-                  style: TextStyle(color: MilesColors.blush, fontSize: 11)),
+                  style: TextStyle(color: MilesColors.blush, fontSize: 11),),
               Text(
                 message.previewText(),
                 maxLines: 1,
@@ -494,7 +482,7 @@ class _ReplyBar extends StatelessWidget {
 }
 
 class CircleIconButton extends StatelessWidget {
-  const CircleIconButton({super.key, required this.icon, this.onTap});
+  const CircleIconButton({required this.icon, super.key, this.onTap});
   final IconData icon;
   final VoidCallback? onTap;
 

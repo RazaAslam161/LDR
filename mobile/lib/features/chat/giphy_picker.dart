@@ -78,14 +78,13 @@ class _GiphySheetState extends State<_GiphySheet> {
               height: 4,
               decoration: BoxDecoration(
                   color: MilesColors.taupe,
-                  borderRadius: BorderRadius.circular(2)),
+                  borderRadius: BorderRadius.circular(2),),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: TextField(
                 controller: _search,
                 onChanged: _onSearchChanged,
-                autofocus: false,
                 style: const TextStyle(color: MilesColors.cream50),
                 decoration: InputDecoration(
                   hintText: 'Search GIFs — happy, love, sulky, miss you…',
@@ -94,7 +93,7 @@ class _GiphySheetState extends State<_GiphySheet> {
                       const Icon(Icons.search, color: MilesColors.taupe),
                   filled: true,
                   fillColor: MilesColors.surface2,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                  contentPadding: const EdgeInsets.symmetric(),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide.none,
@@ -107,7 +106,7 @@ class _GiphySheetState extends State<_GiphySheet> {
             const Padding(
               padding: EdgeInsets.only(bottom: 8, top: 2),
               child: Text('Powered by GIPHY',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 10)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 10),),
             ),
           ],
         ),
@@ -135,7 +134,7 @@ class _GiphySheetState extends State<_GiphySheet> {
     if (_gifs.isEmpty) {
       return const Center(
         child: Text('No GIFs found — try another word.',
-            style: TextStyle(color: MilesColors.taupe)),
+            style: TextStyle(color: MilesColors.taupe),),
       );
     }
     return GridView.builder(

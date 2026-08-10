@@ -22,7 +22,7 @@ void main() {
       Message(
         id: id,
         senderId: sender,
-        createdAt: DateTime(2026, 1, 1),
+        createdAt: DateTime(2026),
         kind: kind,
         sendStatus: status,
         deletedForEveryone: tombstone,
@@ -190,7 +190,7 @@ void main() {
     test('deleting nothing is not an error', () async {
       final s = ChatSelection();
       expect(await s.deleteAll((_) async => fail('must not be called')),
-          isEmpty);
+          isEmpty,);
     });
   });
 }

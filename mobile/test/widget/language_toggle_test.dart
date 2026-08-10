@@ -57,7 +57,7 @@ void main() {
     expect(width, lessThan(100), reason: 'the pill swallowed the row');
     // And the row's own text still gets a sane share of the width.
     expect(tester.getSize(find.text('Content language')).width,
-        greaterThan(100));
+        greaterThan(100),);
   });
 
   testWidgets('starts in English', (tester) async {

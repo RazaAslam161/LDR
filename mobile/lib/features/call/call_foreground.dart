@@ -40,13 +40,9 @@ class CallForegroundService {
       ),
       iosNotificationOptions: const IOSNotificationOptions(
         showNotification: false,
-        playSound: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
         eventAction: ForegroundTaskEventAction.nothing(),
-        autoRunOnBoot: false,
-        autoRunOnMyPackageReplaced: false,
-        allowWakeLock: true,
         allowWifiLock: true,
       ),
     );

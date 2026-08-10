@@ -25,27 +25,27 @@ void main() {
     // which is the opposite of a disguise. Counted across real <activity-alias>
     // declarations only — matching raw text would also catch the comment that
     // documents this very rule.
-    final aliases = RegExp(r'<activity-alias.*?</activity-alias>', dotAll: true)
+    final aliases = RegExp('<activity-alias.*?</activity-alias>', dotAll: true)
         .allMatches(manifest)
         .map((m) => m.group(0)!);
     expect(aliases, isNotEmpty, reason: 'no aliases declared at all');
     final enabled =
         aliases.where((a) => a.contains('android:enabled="true"')).toList();
     expect(enabled.length, 1,
-        reason: '${enabled.length} aliases are enabled; exactly 1 must be');
+        reason: '${enabled.length} aliases are enabled; exactly 1 must be',);
   });
 
   test('the enabled alias is the catalog default', () {
     final block = aliasBlock(kDefaultDisguise.aliasId).firstMatch(manifest);
     expect(block, isNotNull,
-        reason: 'no <activity-alias> for ${kDefaultDisguise.aliasId}');
+        reason: 'no <activity-alias> for ${kDefaultDisguise.aliasId}',);
     expect(block!.group(0)!.contains('android:enabled="true"'), isTrue);
   });
 
   test('every offered disguise has a manifest alias', () {
     for (final d in kDisguises) {
       expect(aliasBlock(d.aliasId).hasMatch(manifest), isTrue,
-          reason: '${d.label} is offered but has no <activity-alias>');
+          reason: '${d.label} is offered but has no <activity-alias>',);
     }
   });
 
@@ -68,13 +68,13 @@ void main() {
     ).firstMatch(manifest);
     expect(activity, isNotNull);
     expect(activity!.group(0)!.contains('android.intent.category.LAUNCHER'),
-        isFalse);
+        isFalse,);
   });
 
   test('every launcher icon the manifest names actually exists', () {
     // A missing icon resource is a build failure at best and an app with no
     // visible icon at worst, and neither shows up in `flutter analyze`.
-    final refs = RegExp(r'android:icon="@(mipmap|drawable)/([a-z0-9_]+)"')
+    final refs = RegExp('android:icon="@(mipmap|drawable)/([a-z0-9_]+)"')
         .allMatches(manifest);
     expect(refs, isNotEmpty);
     for (final m in refs) {
@@ -88,7 +88,7 @@ void main() {
           .any((d) => d
               .listSync()
               .whereType<File>()
-              .any((f) => f.uri.pathSegments.last.split('.').first == name));
+              .any((f) => f.uri.pathSegments.last.split('.').first == name),);
       expect(found, isTrue, reason: '@$kind/$name is referenced but missing');
     }
   });
@@ -110,7 +110,7 @@ void main() {
 
     // Only icons the manifest actually references. Unused leftovers in res/
     // (ic_launcher_round, which nothing points at) are not a shipping risk.
-    final referenced = RegExp(r'android:icon="@mipmap/([a-z0-9_]+)"')
+    final referenced = RegExp('android:icon="@mipmap/([a-z0-9_]+)"')
         .allMatches(manifest)
         .map((m) => m.group(1)!)
         .toSet();
@@ -119,14 +119,14 @@ void main() {
         .listSync()
         .whereType<File>()
         .where((f) =>
-            referenced.contains(f.uri.pathSegments.last.split('.').first))) {
+            referenced.contains(f.uri.pathSegments.last.split('.').first),)) {
       final base = f.uri.pathSegments.last.split('.').first;
       final found = fallbackDirs.any((d) => d
           .listSync()
           .whereType<File>()
-          .any((c) => c.uri.pathSegments.last.split('.').first == base));
+          .any((c) => c.uri.pathSegments.last.split('.').first == base),);
       expect(found, isTrue,
-          reason: '$base has no pre-API-26 fallback in any mipmap bucket');
+          reason: '$base has no pre-API-26 fallback in any mipmap bucket',);
     }
   });
 
@@ -136,7 +136,7 @@ void main() {
       // The label the launcher shows comes from the manifest, so it must match
       // what the picker promised the user.
       expect(block.contains('android:label="${d.label}"'), isTrue,
-          reason: '${d.aliasId} label does not match the catalog');
+          reason: '${d.aliasId} label does not match the catalog',);
       expect(block.contains('android:icon="'), isTrue);
     }
   });

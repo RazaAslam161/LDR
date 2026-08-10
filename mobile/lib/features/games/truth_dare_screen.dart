@@ -9,8 +9,8 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
@@ -59,7 +59,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
         .channel('game_td:$cid')
         .onBroadcast(event: 'state', callback: _onState)
         .onBroadcast(event: 'sync', callback: _onSync)
-        .subscribe());
+        .subscribe(),);
     // On (re)connect, ask the partner to re-share the current game state.
     _syncTimer?.cancel();
     _syncTimer = Timer(const Duration(milliseconds: 900), () {
@@ -118,7 +118,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
       'tier': _tier.name,
       'round': _round,
       'card': _card?.toJson(),
-    });
+    },);
   }
 
   void _start() {
@@ -208,7 +208,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                     padding: const EdgeInsets.only(top: 8),
                     child: Text('Round $_round',
                         style: const TextStyle(
-                            color: MilesColors.taupe, fontSize: 12)),
+                            color: MilesColors.taupe, fontSize: 12,),),
                   ),
                 if (_coupleId != null) ...[
                   const SizedBox(height: 10),
@@ -236,7 +236,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
               labelStyle: TextStyle(
                   color: _tier == t ? MilesColors.night : MilesColors.cream50,
                   fontWeight: FontWeight.w600,
-                  fontSize: 12),
+                  fontSize: 12,),
               selectedColor: MilesColors.gilt,
               backgroundColor: MilesColors.surface2,
               side: BorderSide(color: MilesColors.gilt.withValues(alpha: 0.25)),
@@ -266,7 +266,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
               style: TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 22,
-                  fontWeight: FontWeight.w700)),
+                  fontWeight: FontWeight.w700,),),
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -274,7 +274,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
               w.howItWorks,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                  color: MilesColors.taupe, fontSize: 13.5, height: 1.5),
+                  color: MilesColors.taupe, fontSize: 13.5, height: 1.5,),
             ),
           ),
           const SizedBox(height: 28),
@@ -301,10 +301,10 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
               style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 20,
-                  fontWeight: FontWeight.w700)),
+                  fontWeight: FontWeight.w700,),),
           const SizedBox(height: 6),
           Text(w.whatWillItBe,
-              style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 13),),
           const SizedBox(height: 28),
           _bigChoice(
             label: 'Truth',
@@ -343,7 +343,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
           gradient: LinearGradient(colors: [
             color.withValues(alpha: 0.30),
             color.withValues(alpha: 0.14),
-          ]),
+          ],),
           border: Border.all(color: color.withValues(alpha: 0.45)),
         ),
         child: Row(
@@ -357,10 +357,10 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                     style: const TextStyle(
                         color: MilesColors.cream50,
                         fontSize: 20,
-                        fontWeight: FontWeight.w700)),
+                        fontWeight: FontWeight.w700,),),
                 Text(sub,
                     style: const TextStyle(
-                        color: MilesColors.taupe, fontSize: 12)),
+                        color: MilesColors.taupe, fontSize: 12,),),
               ],
             ),
           ],
@@ -378,7 +378,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
           const SizedBox(height: 20),
           Text(text,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 15)),
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 15),),
         ],
       ),
     );
@@ -422,7 +422,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                             color: accent,
                             fontSize: 13,
                             letterSpacing: 2,
-                            fontWeight: FontWeight.w700)),
+                            fontWeight: FontWeight.w700,),),
                   ),
                   const SizedBox(height: 24),
                   Text(card.text,
@@ -431,7 +431,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                           color: MilesColors.cream50,
                           fontSize: 21,
                           height: 1.5,
-                          fontWeight: FontWeight.w500)),
+                          fontWeight: FontWeight.w500,),),
                 ],
               ),
             ),
@@ -454,9 +454,9 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
           TextButton.icon(
             onPressed: _redraw,
             icon: const Icon(Icons.casino_outlined,
-                color: MilesColors.taupe, size: 18),
+                color: MilesColors.taupe, size: 18,),
             label: Text(w.newCard,
-                style: const TextStyle(color: MilesColors.taupe)),
+                style: const TextStyle(color: MilesColors.taupe),),
           ),
         ] else
           Padding(

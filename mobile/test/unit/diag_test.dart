@@ -54,7 +54,7 @@ void main() {
     Diag.record(DiagArea.receipt, 'send', fields: {
       'seq': 41,
       'body': 'are you still awake? I keep thinking about what you said',
-    });
+    },);
     final e = Diag.recent.single;
     expect(e.fields['seq'], 41);
     expect(e.fields['body'], DiagRedact.redacted);

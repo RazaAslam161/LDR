@@ -34,7 +34,7 @@ void main() {
       final body = init.substring(0, init.indexOf(closeBrace));
       expect(body, contains('_restoreInvite'),
           reason: 'the code must be recovered when the screen is rebuilt, '
-              'because the screen holding it does not survive the share');
+              'because the screen holding it does not survive the share',);
       expect(couplePage, contains('activePairingInvite'));
     });
 
@@ -54,7 +54,7 @@ void main() {
       // The router sends anyone without a couple back to /couple from every
       // path, so without this there is no exit and no route to Settings.
       expect(couplePage, contains('Future<void> _signOut'),
-          reason: '/couple is inescapable by design of the redirect');
+          reason: '/couple is inescapable by design of the redirect',);
       // And wired to something tappable, not just present.
       expect(couplePage, contains('onPressed: _loading ? null : _signOut'));
     });
@@ -66,11 +66,11 @@ void main() {
       final w = home.substring(home.indexOf('class _WaitingForPartnerState'));
       final init = w.substring(w.indexOf('void initState()'));
       expect(init.substring(0, init.indexOf(closeBrace)), contains('_load'),
-          reason: 'the code must be fetched when the state appears');
+          reason: 'the code must be fetched when the state appears',);
       expect(w, contains('activePairingInvite'),
-          reason: 'must be able to show the code again');
+          reason: 'must be able to show the code again',);
       expect(w, contains('createPairingInvite'),
-          reason: 'must be able to mint a new one when the old has expired');
+          reason: 'must be able to mint a new one when the old has expired',);
     });
   });
 
@@ -85,9 +85,9 @@ void main() {
       final fn = signIn.substring(signIn.indexOf('_forgotPassword'));
       final body = fn.substring(0, fn.indexOf('\n  @override'));
       expect(body, contains('If '),
-          reason: 'the confirmation must read the same either way');
+          reason: 'the confirmation must read the same either way',);
       expect(body.contains('catch'), isTrue,
-          reason: 'a failure must not be reported differently from a success');
+          reason: 'a failure must not be reported differently from a success',);
     });
   });
 }

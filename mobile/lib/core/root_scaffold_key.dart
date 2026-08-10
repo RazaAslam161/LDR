@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/features/shell/app_shell.dart' show AppShell;
 
 /// Key on the [AppShell] Scaffold so any tab screen's hamburger can open the one
 /// shared nav drawer. The drawer lives on the shell's full-height Scaffold (above

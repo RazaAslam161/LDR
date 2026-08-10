@@ -11,7 +11,7 @@ String friendlyAuthError(Object e) {
       s.contains('timed out') ||
       s.contains('connection')) {
     return "Couldn't reach the server. Check this phone's internet "
-        "connection and that its date & time are set automatically, "
+        'connection and that its date & time are set automatically, '
         'then try again.';
   }
 

@@ -38,7 +38,9 @@ class PpgDetector {
     if (n < 6) return;
 
     final mean = _vals.reduce((a, b) => a + b) / n;
-    final a = _vals[n - 3], b = _vals[n - 2], c = _vals[n - 1];
+    final a = _vals[n - 3];
+    final b = _vals[n - 2];
+    final c = _vals[n - 1];
     final tB = _times[n - 2];
 
     // b is a local maximum above the mean, with a refractory gap (<=180 BPM).

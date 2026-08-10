@@ -30,7 +30,7 @@ class Capsule {
         coupleId: JsonUtils.parseString(j['couple_id']),
         title: JsonUtils.parseString(j['title']),
         unlockMode: _modeFrom(
-            JsonUtils.parseString(j['unlock_mode'], fallback: 'date')),
+            JsonUtils.parseString(j['unlock_mode'], fallback: 'date'),),
         unlockDate: JsonUtils.parseDateOrNull(j['unlock_date'])?.toLocal(),
         unlockedAt: JsonUtils.parseDateOrNull(j['unlocked_at'])?.toLocal(),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
@@ -179,7 +179,7 @@ class CapsuleRepository {
     await _c.storage.from(_bucket).uploadBinary(
           path,
           bytes,
-          fileOptions: FileOptions(contentType: contentType, upsert: false),
+          fileOptions: FileOptions(contentType: contentType),
         );
     await _c.from('capsule_items').insert({
       'capsule_id': capsuleId,

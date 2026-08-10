@@ -34,7 +34,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
     _myUid = session.profile?.id;
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(
-          () => ReasonsRepository.subscribe(_coupleId!, _load));
+          () => ReasonsRepository.subscribe(_coupleId!, _load),);
     }
     _load();
   }
@@ -55,10 +55,12 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
     }
     try {
       final r = await ReasonsRepository.list(id);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _reasons = r;
         _loading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -75,7 +77,8 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
 
   Future<void> _add() async {
     final text = _input.text.trim();
-    final id = _coupleId, uid = _myUid;
+    final id = _coupleId;
+    final uid = _myUid;
     if (text.isEmpty || id == null || uid == null) return;
     setState(() => _adding = true);
     try {
@@ -122,7 +125,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                                   'Add the first reason you love $partnerName.\nOne shows up here each day.',
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
-                                      color: MilesColors.taupe, fontSize: 13),
+                                      color: MilesColors.taupe, fontSize: 13,),
                                 ),
                               ),
                             )
@@ -137,7 +140,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                                 final mine = r.author == _myUid;
                                 return Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 12),
+                                      horizontal: 14, vertical: 12,),
                                   decoration: BoxDecoration(
                                     color: MilesColors.surface1,
                                     borderRadius: BorderRadius.circular(14),
@@ -145,14 +148,14 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                                   child: Row(
                                     children: [
                                       Text(mine ? '💗' : '💛',
-                                          style: const TextStyle(fontSize: 16)),
+                                          style: const TextStyle(fontSize: 16),),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Text(r.text,
                                             style: const TextStyle(
                                                 color: MilesColors.cream50,
                                                 fontSize: 14,
-                                                height: 1.3)),
+                                                height: 1.3,),),
                                       ),
                                       if (mine)
                                         GestureDetector(
@@ -164,7 +167,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                                             padding: EdgeInsets.only(left: 8),
                                             child: Icon(Icons.close,
                                                 size: 16,
-                                                color: MilesColors.taupe),
+                                                color: MilesColors.taupe,),
                                           ),
                                         ),
                                     ],
@@ -213,7 +216,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                       ? const Padding(
                           padding: EdgeInsets.all(13),
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2, color: Colors.white,),
                         )
                       : const Icon(Icons.add, color: Colors.white),
                 ),
@@ -252,14 +255,14 @@ class _FeaturedCard extends StatelessWidget {
                   color: MilesColors.gilt,
                   fontSize: 10,
                   letterSpacing: 1.5,
-                  fontWeight: FontWeight.w600)),
+                  fontWeight: FontWeight.w600,),),
           const SizedBox(height: 8),
           Text('“${reason.text}”',
               style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 18,
                   height: 1.4,
-                  fontWeight: FontWeight.w500)),
+                  fontWeight: FontWeight.w500,),),
         ],
       ),
     );

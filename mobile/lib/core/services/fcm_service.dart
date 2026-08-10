@@ -152,7 +152,7 @@ class FcmService {
             // this is the same fact the fast path depends on.
             'chat_mounted': ChatBroadcastService.active != null,
             'has_message_id': m.data['message_id'] != null,
-          });
+          },);
       // In the foreground the chat's realtime subscription already delivers
       // the message, and the catch-up fetch covers a dropped socket — so a
       // notification here would double up on a conversation the user is
@@ -198,7 +198,7 @@ class FcmService {
       pendingCall.value = CallTap(
         parts.length > 1 ? parts[1] : '',
         parts.length > 2 ? parts[2] : 'Your partner',
-        parts.length > 3 ? parts[3] == '1' : true,
+        !(parts.length > 3) || parts[3] == '1',
       );
       return;
     }

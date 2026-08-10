@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -48,7 +47,7 @@ Uint8List _processBytes(_FilterArgs a) {
     case 'warm':
       image = img.colorOffset(image, red: 24, green: 8, blue: -14);
     case 'cool':
-      image = img.colorOffset(image, red: -12, green: 0, blue: 22);
+      image = img.colorOffset(image, red: -12, blue: 22);
     case 'bw':
       image = img.grayscale(image);
     case 'vintage':
@@ -63,7 +62,7 @@ Uint8List _processBytes(_FilterArgs a) {
 /// Full-screen editor: pick a beauty preset, preview live, confirm.
 /// Returns the processed [File], or null on cancel.
 class FilterEditorScreen extends StatefulWidget {
-  const FilterEditorScreen({super.key, required this.file});
+  const FilterEditorScreen({required this.file, super.key});
   final File file;
 
   static Future<File?> edit(BuildContext context, File file) {
@@ -164,7 +163,7 @@ class _FilterEditorScreenState extends State<FilterEditorScreen> {
                       alignment: Alignment.center,
                       children: [
                         Image.memory(_preview!,
-                            fit: BoxFit.contain, gaplessPlayback: true),
+                            fit: BoxFit.contain, gaplessPlayback: true,),
                         if (_busy)
                           const CircularProgressIndicator(strokeWidth: 2),
                       ],

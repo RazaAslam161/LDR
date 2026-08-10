@@ -7,8 +7,8 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
 import 'package:miles/features/cycle/love_note_preview_sheet.dart';
@@ -90,7 +90,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         final events = await CycleRepository.events(uid);
         final settings = await CycleRepository.settings(uid);
         final pred = CyclePrediction.compute(
-            CycleRepository.startDates(events), settings);
+            CycleRepository.startDates(events), settings,);
         if (mounted) {
           setState(() {
             _events = events;
@@ -129,7 +129,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
   }
 
   Future<void> _toggle(bool on) async {
-    final cid = _coupleId, uid = _myUid;
+    final cid = _coupleId;
+    final uid = _myUid;
     if (cid == null || uid == null) return;
     setState(() {
       _onPeriod = on;
@@ -144,7 +145,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
   }
 
   Future<void> _saveSettings(CycleSettings s) async {
-    final cid = _coupleId, uid = _myUid;
+    final cid = _coupleId;
+    final uid = _myUid;
     if (cid == null || uid == null) return;
     setState(() => _settings = s);
     await CycleRepository.saveSettings(userId: uid, coupleId: cid, s: s);
@@ -193,9 +195,9 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           gradient: LinearGradient(colors: [
             _period.withValues(alpha: _onPeriod ? 0.30 : 0.12),
             MilesColors.blush.withValues(alpha: 0.14),
-          ]),
+          ],),
           border: Border.all(
-              color: _period.withValues(alpha: _onPeriod ? 0.5 : 0.2)),
+              color: _period.withValues(alpha: _onPeriod ? 0.5 : 0.2),),
         ),
         child: Row(
           children: [
@@ -209,13 +211,13 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
                       style: TextStyle(
                           color: MilesColors.cream50,
                           fontSize: 16,
-                          fontWeight: FontWeight.w600)),
+                          fontWeight: FontWeight.w600,),),
                   Text(
                       _onPeriod
                           ? 'Logged — turn off when it ends'
                           : 'Toggle on when it starts',
                       style: const TextStyle(
-                          color: MilesColors.taupe, fontSize: 12)),
+                          color: MilesColors.taupe, fontSize: 12,),),
                 ],
               ),
             ),
@@ -238,7 +240,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
                 'Next period',
                 _pred.daysUntilNext! <= 0
                     ? 'around now (estimate)'
-                    : 'in ~${_pred.daysUntilNext} days (estimate)'),
+                    : 'in ~${_pred.daysUntilNext} days (estimate)',),
         ]),
       if (_pred.hasData) const SizedBox(height: 14),
       _CycleCalendar(
@@ -265,24 +267,24 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     return _wrapCard(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Settings', style: _h),
+        const Text('Settings', style: _h),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           value: _settings.shareWithPartner,
           activeThumbColor: MilesColors.ember,
           onChanged: (v) => _saveSettings(_settings.copyWith(share: v)),
           title: Text('Share with $name',
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 14)),
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 14),),
           subtitle: Text(
               _settings.shareWithPartner
                   ? 'They see a gentle heads-up — never the details'
                   : 'Private to you',
-              style: const TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 12),),
         ),
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Average cycle length',
-              style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+              style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           trailing: _stepper(
             _settings.avgCycleLength,
             (v) => _saveSettings(_settings.copyWith(cycle: v)),
@@ -293,7 +295,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Average period length',
-              style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+              style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           trailing: _stepper(
             _settings.avgPeriodLength,
             (v) => _saveSettings(_settings.copyWith(period: v)),
@@ -302,11 +304,11 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           ),
         ),
       ],
-    ));
+    ),);
   }
 
   Widget _stepper(int value, ValueChanged<int> onChanged,
-      {required int min, required int max}) {
+      {required int min, required int max,}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -316,7 +318,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           onPressed: value > min ? () => onChanged(value - 1) : null,
         ),
         Text('$value',
-            style: const TextStyle(color: MilesColors.cream50, fontSize: 15)),
+            style: const TextStyle(color: MilesColors.cream50, fontSize: 15),),
         IconButton(
           icon: const Icon(Icons.add_circle_outline, color: MilesColors.gilt),
           onPressed: value < max ? () => onChanged(value + 1) : null,
@@ -337,10 +339,10 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
             Expanded(
               child: Text('$name keeps her cycle private right now.',
                   style:
-                      const TextStyle(color: MilesColors.taupe, fontSize: 13)),
+                      const TextStyle(color: MilesColors.taupe, fontSize: 13),),
             ),
           ],
-        )),
+        ),),
       ];
     }
     final until = _partnerPred.daysUntilNext;
@@ -353,10 +355,10 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
             (_partnerOnPeriod ? _period : MilesColors.blush)
                 .withValues(alpha: 0.28),
             MilesColors.ember.withValues(alpha: 0.14),
-          ]),
+          ],),
           border: Border.all(
               color: (_partnerOnPeriod ? _period : MilesColors.gilt)
-                  .withValues(alpha: 0.4)),
+                  .withValues(alpha: 0.4),),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -364,7 +366,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
             Row(
               children: [
                 Text(_partnerOnPeriod ? '🩸' : '💛',
-                    style: const TextStyle(fontSize: 26)),
+                    style: const TextStyle(fontSize: 26),),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -378,7 +380,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
                     style: const TextStyle(
                         color: MilesColors.cream50,
                         fontSize: 17,
-                        fontWeight: FontWeight.w600),
+                        fontWeight: FontWeight.w600,),
                   ),
                 ),
               ],
@@ -389,10 +391,10 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
                     ? 'Maybe send some care — be extra gentle today 💕'
                     : _partnerPred.partnerNote,
                 style: const TextStyle(
-                    color: MilesColors.cream50, fontSize: 13.5, height: 1.4)),
+                    color: MilesColors.cream50, fontSize: 13.5, height: 1.4,),),
             const SizedBox(height: 8),
             const Text('Estimate only — for closeness, not medical use.',
-                style: TextStyle(color: MilesColors.taupe, fontSize: 11)),
+                style: TextStyle(color: MilesColors.taupe, fontSize: 11),),
           ],
         ),
       ),
@@ -431,7 +433,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     if (cid == null) return;
     try {
       await ChatRepository.sendText(
-          cid, 'Thinking of you 💕 take it easy today, I’ve got you.');
+          cid, 'Thinking of you 💕 take it easy today, I’ve got you.',);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Care note sent 💕')),
@@ -463,7 +465,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: MilesColors.surface1,
         title: const Text('Who is this for?',
-            style: TextStyle(color: MilesColors.cream50)),
+            style: TextStyle(color: MilesColors.cream50),),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -474,10 +476,10 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel'),),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('Save')),
+              child: const Text('Save'),),
         ],
       ),
     );
@@ -543,16 +545,16 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
               'For tracking and closeness only — not for medical, fertility, or '
               'contraception decisions. All predictions are estimates.',
               style: TextStyle(
-                  color: MilesColors.taupe, fontSize: 11.5, height: 1.35),
+                  color: MilesColors.taupe, fontSize: 11.5, height: 1.35,),
             ),
           ),
         ],
-      ));
+      ),);
 
   Widget _infoCard(List<Widget> rows) => _wrapCard(Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: rows,
-      ));
+      ),);
 
   Widget _wrapCard(Widget child) => Container(
         padding: const EdgeInsets.all(18),
@@ -570,10 +572,10 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label,
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 13)),
+                style: const TextStyle(color: MilesColors.taupe, fontSize: 13),),
             Text(value,
                 style:
-                    const TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                    const TextStyle(color: MilesColors.cream50, fontSize: 14),),
           ],
         ),
       );
@@ -582,7 +584,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
       color: MilesColors.gilt,
       fontSize: 12,
       letterSpacing: 1.5,
-      fontWeight: FontWeight.w600);
+      fontWeight: FontWeight.w600,);
 }
 
 /// A compact month calendar: logged period days filled, predicted window ringed.
@@ -650,17 +652,17 @@ class _CycleCalendarState extends State<_CycleCalendar> {
               IconButton(
                 icon: const Icon(Icons.chevron_left, color: MilesColors.gilt),
                 onPressed: () => setState(
-                    () => _month = DateTime(_month.year, _month.month - 1)),
+                    () => _month = DateTime(_month.year, _month.month - 1),),
               ),
               Text(DateFormat.yMMMM().format(_month),
                   style: const TextStyle(
                       color: MilesColors.cream50,
                       fontSize: 15,
-                      fontWeight: FontWeight.w600)),
+                      fontWeight: FontWeight.w600,),),
               IconButton(
                 icon: const Icon(Icons.chevron_right, color: MilesColors.gilt),
                 onPressed: () => setState(
-                    () => _month = DateTime(_month.year, _month.month + 1)),
+                    () => _month = DateTime(_month.year, _month.month + 1),),
               ),
             ],
           ),
@@ -671,7 +673,7 @@ class _CycleCalendarState extends State<_CycleCalendar> {
                   child: Center(
                     child: Text(d,
                         style: const TextStyle(
-                            color: MilesColors.taupe, fontSize: 11)),
+                            color: MilesColors.taupe, fontSize: 11,),),
                   ),
                 ),
             ],
@@ -715,7 +717,7 @@ class _CycleCalendarState extends State<_CycleCalendar> {
               ? Border.all(color: MilesColors.gilt.withValues(alpha: 0.7))
               : isToday
                   ? Border.all(
-                      color: MilesColors.cream50.withValues(alpha: 0.4))
+                      color: MilesColors.cream50.withValues(alpha: 0.4),)
                   : null,
         ),
         child: Center(
@@ -723,7 +725,7 @@ class _CycleCalendarState extends State<_CycleCalendar> {
               style: TextStyle(
                   color: period ? Colors.white : MilesColors.cream50,
                   fontSize: 12,
-                  fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
+                  fontWeight: isToday ? FontWeight.bold : FontWeight.normal,),),
         ),
       ),
     );
@@ -746,7 +748,7 @@ class _CycleCalendarState extends State<_CycleCalendar> {
         ),
         const SizedBox(width: 5),
         Text(label,
-            style: const TextStyle(color: MilesColors.taupe, fontSize: 11)),
+            style: const TextStyle(color: MilesColors.taupe, fontSize: 11),),
       ],
     );
   }

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/realtime_service.dart';
+import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
@@ -45,7 +45,7 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
             table: 'cycle_events',
             callback: (_) => _load(),
           )
-          .subscribe());
+          .subscribe(),);
     }
   }
 
@@ -99,16 +99,16 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
           child: Row(
             children: [
               Text(_onPeriod ? '🩸' : '💛',
-                  style: const TextStyle(fontSize: 22)),
+                  style: const TextStyle(fontSize: 22),),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(text,
                     style: const TextStyle(
-                        color: MilesColors.cream50, fontSize: 13.5)),
+                        color: MilesColors.cream50, fontSize: 13.5,),),
               ),
               Icon(Icons.chevron_right,
                   color: (_onPeriod ? _period : MilesColors.gilt)
-                      .withValues(alpha: 0.8)),
+                      .withValues(alpha: 0.8),),
             ],
           ),
         ),

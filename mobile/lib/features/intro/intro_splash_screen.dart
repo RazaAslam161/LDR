@@ -14,7 +14,7 @@ import 'package:miles/core/widgets/wordmark.dart';
 /// no decoder, no second surface, no asset, and it is over in well under a
 /// second. Tap to skip even that.
 class IntroSplashScreen extends StatefulWidget {
-  const IntroSplashScreen({super.key, required this.onComplete});
+  const IntroSplashScreen({required this.onComplete, super.key});
 
   /// Fired exactly once, when the splash finishes or the user taps through.
   final VoidCallback onComplete;

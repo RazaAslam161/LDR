@@ -4,8 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/content_language.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 
 /// Games hub — a little arcade of couple mini-games. Truth or Dare is synced
@@ -81,14 +81,14 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
                   style: const TextStyle(
                       color: MilesColors.cream50,
                       fontSize: 20,
-                      fontWeight: FontWeight.w700)),
+                      fontWeight: FontWeight.w700,),),
               const SizedBox(height: 4),
               Text(
                   en
                       ? 'Close even from far away — play one today.'
                       : 'Door reh kar bhi paas — ek game khelo aaj.',
                   style: const TextStyle(
-                      color: MilesColors.taupe, fontSize: 13)),
+                      color: MilesColors.taupe, fontSize: 13,),),
               const SizedBox(height: 20),
               for (final g in _gamesIn(lang)) _card(g),
             ],
@@ -131,12 +131,12 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
                             style: const TextStyle(
                                 color: MilesColors.cream50,
                                 fontSize: 17,
-                                fontWeight: FontWeight.w700)),
+                                fontWeight: FontWeight.w700,),),
                         const SizedBox(width: 8),
                         if (g.synced)
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
+                                horizontal: 7, vertical: 2,),
                             decoration: BoxDecoration(
                               color: MilesColors.gilt.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(20),
@@ -146,7 +146,7 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
                                     color: MilesColors.gilt,
                                     fontSize: 9,
                                     letterSpacing: 1,
-                                    fontWeight: FontWeight.w700)),
+                                    fontWeight: FontWeight.w700,),),
                           ),
                       ],
                     ),
@@ -155,7 +155,7 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
                         style: const TextStyle(
                             color: MilesColors.taupe,
                             fontSize: 12.5,
-                            height: 1.3)),
+                            height: 1.3,),),
                   ],
                 ),
               ),

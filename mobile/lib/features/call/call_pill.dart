@@ -36,14 +36,14 @@ class CallPill extends ConsumerWidget {
                   boxShadow: [
                     BoxShadow(
                         color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 10),
+                        blurRadius: 10,),
                   ],
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(call.isVideo ? Icons.videocam : Icons.call,
-                        color: Colors.white, size: 18),
+                        color: Colors.white, size: 18,),
                     const SizedBox(width: 8),
                     Text(
                       call.state == CallState.calling
@@ -52,7 +52,7 @@ class CallPill extends ConsumerWidget {
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 13,
-                          fontWeight: FontWeight.w600),
+                          fontWeight: FontWeight.w600,),
                     ),
                     const SizedBox(width: 10),
                     GestureDetector(
@@ -61,9 +61,9 @@ class CallPill extends ConsumerWidget {
                         width: 30,
                         height: 30,
                         decoration: const BoxDecoration(
-                            shape: BoxShape.circle, color: Colors.red),
+                            shape: BoxShape.circle, color: Colors.red,),
                         child: const Icon(Icons.call_end,
-                            color: Colors.white, size: 16),
+                            color: Colors.white, size: 16,),
                       ),
                     ),
                   ],

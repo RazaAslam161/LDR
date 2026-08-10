@@ -164,7 +164,7 @@ void main() {
       (tester) async {
     // Reachable in the window before our own screen has been published, and a
     // push would stack a second copy of the page on top of itself.
-    await pump(tester, myScreen: null, theirScreen: 'Care', at: '/app/care');
+    await pump(tester, myScreen: null, theirScreen: 'Care');
     await tester.tap(find.byType(PartnerHereBadge));
     expect(await settleTo(tester), '/app/care');
     expect(find.byType(PartnerHereBadge), findsOneWidget); // not stacked twice
@@ -173,7 +173,7 @@ void main() {
   testWidgets('tapping while together navigates nowhere', (tester) async {
     // Together, the tap warms the room. Going somewhere would be the one thing
     // neither of them asked for.
-    await pump(tester, myScreen: 'Touch', theirScreen: 'Touch', at: '/app/care');
+    await pump(tester, myScreen: 'Touch', theirScreen: 'Touch');
     await tester.tap(find.byType(PartnerHereBadge));
     expect(await settleTo(tester), '/app/care');
   });

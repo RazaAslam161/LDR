@@ -62,14 +62,14 @@ class FsiPermission {
         title: const Text('Let them wake your screen 💕'),
         content: Text(
           'To let $partnerName light up your phone when they reach for you '
-          '(even when it\'s locked), allow full-screen alerts. Without it you\'ll '
+          "(even when it's locked), allow full-screen alerts. Without it you'll "
           'still get a notification — just not the wake-the-screen kind.',
           style: const TextStyle(color: MilesColors.taupe, height: 1.5),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Not now')),
+              child: const Text('Not now'),),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: MilesColors.blush),
             onPressed: () => Navigator.pop(ctx, true),

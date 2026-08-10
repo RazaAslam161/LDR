@@ -14,7 +14,7 @@ import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/features/capsule/proximity_service.dart';
 
 class CapsuleDetailScreen extends ConsumerStatefulWidget {
-  const CapsuleDetailScreen({super.key, required this.capsule});
+  const CapsuleDetailScreen({required this.capsule, super.key});
   final Capsule capsule;
 
   @override
@@ -42,7 +42,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   void initState() {
     super.initState();
     _channel = ManagedSubscription.start(
-        () => CapsuleRepository.subscribe(_capsule.coupleId, _reload));
+        () => CapsuleRepository.subscribe(_capsule.coupleId, _reload),);
     if (_capsule.isUnlocked) {
       _revealAlreadyOpen();
     } else {
@@ -115,7 +115,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
     } catch (e) {
       final s = e.toString();
       setState(() => _error =
-          s.contains('too_early') ? 'It\'s not time yet.' : 'Could not open it.');
+          s.contains('too_early') ? "It's not time yet." : 'Could not open it.',);
     }
   }
 
@@ -146,7 +146,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not play that memo.')));
+            const SnackBar(content: Text('Could not play that memo.')),);
       }
     }
   }
@@ -186,7 +186,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
                         error: _error,
                         onAdd: () async {
                           await context.push('/app/capsule/fill',
-                              extra: _capsule);
+                              extra: _capsule,);
                           _loadSummary();
                         },
                         onCheckProximity: _startProximity,
@@ -233,7 +233,6 @@ class _SealedView extends StatelessWidget {
         const SizedBox(height: 12),
         Center(
           child: BreathingGlow(
-            color: MilesColors.blush,
             child: Container(
               width: 150,
               height: 150,
@@ -242,10 +241,10 @@ class _SealedView extends StatelessWidget {
                 gradient: RadialGradient(colors: [
                   MilesColors.surface2,
                   MilesColors.nightDeep,
-                ]),
+                ],),
               ),
               child: const Center(
-                  child: Text('🔒', style: TextStyle(fontSize: 52))),
+                  child: Text('🔒', style: TextStyle(fontSize: 52)),),
             ),
           ),
         ),
@@ -255,13 +254,13 @@ class _SealedView extends StatelessWidget {
               style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 16,
-                  fontWeight: FontWeight.w600)),
+                  fontWeight: FontWeight.w600,),),
         ),
         const SizedBox(height: 6),
         Center(
           child: Text(_anticipation(capsule),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: MilesColors.taupe, height: 1.5)),
+              style: const TextStyle(color: MilesColors.taupe, height: 1.5),),
         ),
         const SizedBox(height: 28),
         OutlinedButton.icon(
@@ -282,7 +281,7 @@ class _SealedView extends StatelessWidget {
           const SizedBox(height: 14),
           Center(
               child: Text(error!,
-                  style: const TextStyle(color: MilesColors.blush))),
+                  style: const TextStyle(color: MilesColors.blush),),),
         ],
       ],
     );
@@ -291,14 +290,14 @@ class _SealedView extends StatelessWidget {
   String _anticipation(Capsule c) {
     switch (c.unlockMode) {
       case CapsuleUnlockMode.proximity:
-        return 'Sealed until you\'re together again.';
+        return "Sealed until you're together again.";
       case CapsuleUnlockMode.date:
         final d = c.unlockDate;
         return d == null
             ? 'Sealed until the day.'
             : 'Sealed until ${DateFormat('MMMM d, y').format(d)}.';
       case CapsuleUnlockMode.both:
-        return 'Sealed until you\'re together, on the day.';
+        return "Sealed until you're together, on the day.";
     }
   }
 }
@@ -339,7 +338,7 @@ class _UnlockSection extends StatelessWidget {
         capsule.dateConditionMet
             ? 'The day has come'
             : 'Opens from ${DateFormat('MMM d').format(capsule.unlockDate!)}',
-      ));
+      ),);
       children.add(const SizedBox(height: 8));
     }
 
@@ -348,7 +347,7 @@ class _UnlockSection extends StatelessWidget {
         onPressed: onCheckProximity,
         icon: const Icon(Icons.my_location),
         label: const Text('Are we together? Check'),
-      ));
+      ),);
     } else {
       children.add(_proximityStatus(context));
     }
@@ -373,40 +372,40 @@ class _UnlockSection extends StatelessWidget {
         children: [
           _hintCard(
             'Location is off. A "when you\'re together" capsule needs it to '
-            'know you\'ve reunited. ${capsule.unlockMode == CapsuleUnlockMode.both ? 'It can still open on its date.' : ''}',
+            "know you've reunited. ${capsule.unlockMode == CapsuleUnlockMode.both ? 'It can still open on its date.' : ''}",
             icon: Icons.location_off,
           ),
           const SizedBox(height: 8),
-          OutlinedButton(
+          const OutlinedButton(
             onPressed: Geolocator.openAppSettings,
-            child: const Text('Open location settings'),
+            child: Text('Open location settings'),
           ),
         ],
       );
     }
     if (s.withinRange) {
-      return _hintCard('You\'re together 💞  Open it.',
-          icon: Icons.favorite, color: MilesColors.sage);
+      return _hintCard("You're together 💞  Open it.",
+          icon: Icons.favorite, color: MilesColors.sage,);
     }
     if (s.partnerSeen && s.distanceMeters != null) {
       return _hintCard('So close — about ${s.distanceMeters!.round()}m apart.',
-          icon: Icons.near_me);
+          icon: Icons.near_me,);
     }
     return _hintCard(
         'Waiting for your partner to open this on their phone too…',
-        icon: Icons.hourglass_top);
+        icon: Icons.hourglass_top,);
   }
 
   Widget _conditionRow(bool met, String label) {
     return Row(
       children: [
         Icon(met ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 18, color: met ? MilesColors.sage : MilesColors.faint),
+            size: 18, color: met ? MilesColors.sage : MilesColors.faint,),
         const SizedBox(width: 8),
         Text(label,
             style: TextStyle(
                 color: met ? MilesColors.cream50 : MilesColors.taupe,
-                fontSize: 13)),
+                fontSize: 13,),),
       ],
     );
   }
@@ -420,7 +419,7 @@ class _UnlockSection extends StatelessWidget {
   Widget _sealedHint(String text) => _hintCard(text, icon: Icons.lock_clock);
 
   Widget _hintCard(String text,
-      {IconData icon = Icons.info_outline, Color color = MilesColors.taupe}) {
+      {IconData icon = Icons.info_outline, Color color = MilesColors.taupe,}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -434,7 +433,7 @@ class _UnlockSection extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
               child: Text(text,
-                  style: TextStyle(color: color, height: 1.4, fontSize: 13))),
+                  style: TextStyle(color: color, height: 1.4, fontSize: 13),),),
         ],
       ),
     );
@@ -466,10 +465,10 @@ class _CeremonyView extends StatelessWidget {
                   MilesColors.emberSoft,
                   MilesColors.blush,
                   MilesColors.nightDeep,
-                ]),
+                ],),
               ),
               child: const Center(
-                  child: Text('💝', style: TextStyle(fontSize: 64))),
+                  child: Text('💝', style: TextStyle(fontSize: 64)),),
             ),
           )
               .animate(onPlay: (c) => c.forward())
@@ -477,14 +476,14 @@ class _CeremonyView extends StatelessWidget {
                   begin: const Offset(0.6, 0.6),
                   end: const Offset(1, 1),
                   duration: 900.ms,
-                  curve: Curves.easeOutBack)
+                  curve: Curves.easeOutBack,)
               .then()
               .shimmer(duration: 1200.ms, color: MilesColors.starlight)
               .then()
               .scale(
                   begin: const Offset(1, 1),
                   end: const Offset(1.12, 1.12),
-                  duration: 500.ms),
+                  duration: 500.ms,),
           const SizedBox(height: 36),
           Text('Opening…', style: Theme.of(context).textTheme.displaySmall)
               .animate(onPlay: (c) => c.repeat())
@@ -493,7 +492,7 @@ class _CeremonyView extends StatelessWidget {
               .fadeOut(duration: 800.ms),
           const SizedBox(height: 8),
           const Text('Everything you saved, all at once.',
-                  style: TextStyle(color: MilesColors.taupe))
+                  style: TextStyle(color: MilesColors.taupe),)
               .animate()
               .fadeIn(delay: 600.ms, duration: 900.ms),
         ],
@@ -518,7 +517,7 @@ class _RevealedView extends StatelessWidget {
           padding: EdgeInsets.all(32),
           child: Text('This capsule was empty. Next time, fill it up 💫',
               textAlign: TextAlign.center,
-              style: TextStyle(color: MilesColors.taupe)),
+              style: TextStyle(color: MilesColors.taupe),),
         ),
       );
     }
@@ -531,7 +530,7 @@ class _RevealedView extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Text('Opened together 💖',
-                    style: Theme.of(context).textTheme.displaySmall)
+                    style: Theme.of(context).textTheme.displaySmall,)
                 .animate()
                 .fadeIn(duration: 600.ms),
           );
@@ -553,7 +552,7 @@ class _RevealedItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final card = (Widget child) => Container(
+    Container card(Widget child) => Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: MilesColors.surface1,
@@ -567,7 +566,7 @@ class _RevealedItem extends StatelessWidget {
       case CapsuleItemType.note:
         return card(Text(item.contentText ?? '',
             style: const TextStyle(
-                color: MilesColors.cream50, fontSize: 16, height: 1.45)));
+                color: MilesColors.cream50, fontSize: 16, height: 1.45,),),);
       case CapsuleItemType.photo:
         return ClipRRect(
           borderRadius: BorderRadius.circular(20),
@@ -580,10 +579,10 @@ class _RevealedItem extends StatelessWidget {
                 return Container(
                     height: 200,
                     color: MilesColors.surface2,
-                    child: const Center(child: CircularProgressIndicator()));
+                    child: const Center(child: CircularProgressIndicator()),);
               }
               return Image.network(snap.data!,
-                  fit: BoxFit.cover, width: double.infinity);
+                  fit: BoxFit.cover, width: double.infinity,);
             },
           ),
         );
@@ -598,16 +597,16 @@ class _RevealedItem extends StatelessWidget {
                 width: 46,
                 height: 46,
                 decoration: const BoxDecoration(
-                    shape: BoxShape.circle, color: MilesColors.ember),
+                    shape: BoxShape.circle, color: MilesColors.ember,),
                 child: const Icon(Icons.play_arrow,
-                    color: MilesColors.cream50),
+                    color: MilesColors.cream50,),
               ),
             ),
             const SizedBox(width: 14),
             const Text('A voice memo for you 🎙️',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
           ],
-        ));
+        ),);
     }
   }
 }

@@ -41,6 +41,23 @@ class Message {
     this.seq = 0,
   });
 
+  factory Message.fromJson(Map<String, dynamic> j) => Message(
+        id: JsonUtils.parseString(j['id']),
+        senderId: JsonUtils.parseString(j['sender_id']),
+        body: JsonUtils.parseStringOrNull(j['body']),
+        imagePath: JsonUtils.parseStringOrNull(j['image_path']),
+        voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
+        videoPath: JsonUtils.parseStringOrNull(j['video_path']),
+        replyToId: JsonUtils.parseStringOrNull(j['reply_to_id']),
+        kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
+        createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
+        seq: JsonUtils.parseInt(j['seq']),
+        deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
+        deletedBy: j['deleted_by'] is List
+            ? (j['deleted_by'] as List).map((e) => e.toString()).toList()
+            : const [],
+      );
+
   /// Server-assigned monotonic order. Receipts compare THIS, never a clock:
   /// created_at is stamped by Postgres while the old read watermark was
   /// stamped by the reader's phone, so "seen" was a comparison between two
@@ -86,7 +103,6 @@ class Message {
         deletedForEveryone: server.deletedForEveryone,
         deletedBy: server.deletedBy,
         localPath: localPath,
-        sendStatus: SendStatus.sent,
         // The server's seq is the whole point of reconciling. Omitting it fell
         // back to the constructor default of 0, so every optimistically-shown
         // message and everything arriving over the broadcast fast path stayed
@@ -96,23 +112,6 @@ class Message {
         // a non-zero _maxSeq); total for a brand-new couple, whose first
         // conversation has none.
         seq: server.seq,
-      );
-
-  factory Message.fromJson(Map<String, dynamic> j) => Message(
-        id: JsonUtils.parseString(j['id']),
-        senderId: JsonUtils.parseString(j['sender_id']),
-        body: JsonUtils.parseStringOrNull(j['body']),
-        imagePath: JsonUtils.parseStringOrNull(j['image_path']),
-        voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
-        videoPath: JsonUtils.parseStringOrNull(j['video_path']),
-        replyToId: JsonUtils.parseStringOrNull(j['reply_to_id']),
-        kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
-        createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
-        seq: JsonUtils.parseInt(j['seq']),
-        deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
-        deletedBy: j['deleted_by'] is List
-            ? (j['deleted_by'] as List).map((e) => e.toString()).toList()
-            : const [],
       );
 
   final String id;
@@ -222,7 +221,7 @@ class ChatRepository {
   }
 
   static Future<void> sendText(String coupleId, String body,
-      {String? replyToId, String? id}) async {
+      {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     final trimmed = body.trim();
@@ -251,7 +250,7 @@ class ChatRepository {
         'server_seq':
             rows.isEmpty ? null : JsonUtils.parseInt(rows.first['seq']),
         'latency_ms': sw.elapsedMilliseconds,
-      });
+      },);
     } catch (e) {
       Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
         'kind': 'text',
@@ -260,7 +259,7 @@ class ChatRepository {
         'error_class': e.runtimeType.toString(),
         'pg_code': e is PostgrestException ? e.code : null,
         'latency_ms': sw.elapsedMilliseconds,
-      });
+      },);
       rethrow;
     }
   }
@@ -269,7 +268,7 @@ class ChatRepository {
   /// message row of kind='image'. Returns the storage path (so callers can
   /// broadcast the fast-path 'msg'), or null if there's no signed-in user.
   static Future<String?> sendImage(String coupleId, File file,
-      {String? replyToId, String? id}) async {
+      {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
 
@@ -290,7 +289,7 @@ class ChatRepository {
         'kind': 'image',
         'ok': true,
         'latency_ms': sw.elapsedMilliseconds,
-      });
+      },);
     } catch (e) {
       Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
         'kind': 'image',
@@ -298,7 +297,7 @@ class ChatRepository {
         'error_class': e.runtimeType.toString(),
         'pg_code': e is PostgrestException ? e.code : null,
         'latency_ms': sw.elapsedMilliseconds,
-      });
+      },);
       rethrow;
     }
     return path;
@@ -316,7 +315,7 @@ class ChatRepository {
   /// Uploads a video to the PRIVATE couple_intimate bucket and inserts a
   /// message of kind='video'. Served via short-lived signed URLs (couple-only).
   static Future<void> sendVideo(String coupleId, File file,
-      {String? replyToId}) async {
+      {String? replyToId,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -346,7 +345,7 @@ class ChatRepository {
 
   /// Uploads a voice note and inserts a message row of kind='voice'.
   static Future<void> sendVoice(String coupleId, File file,
-      {String? replyToId}) async {
+      {String? replyToId,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -402,7 +401,7 @@ class ChatRepository {
         'topic_kind': 'messages',
         'status': status.name,
         'error_class': error?.runtimeType.toString(),
-      });
+      },);
       if (kRtChatDebug) {
         debugPrint('[rt] messages:$coupleId join=$status err=${error ?? ''}');
       }

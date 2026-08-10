@@ -12,16 +12,6 @@ class CareNudge {
     this.acknowledgedAt,
   });
 
-  final String id;
-  final String fromUser;
-  final String kind;
-  final String message;
-  final DateTime createdAt;
-  final DateTime? acknowledgedAt;
-
-  bool isMine(String? uid) => fromUser == uid;
-  bool get acknowledged => acknowledgedAt != null;
-
   factory CareNudge.fromJson(Map<String, dynamic> j) => CareNudge(
         id: JsonUtils.parseString(j['id']),
         fromUser: JsonUtils.parseString(j['from_user']),
@@ -31,6 +21,16 @@ class CareNudge {
         acknowledgedAt:
             JsonUtils.parseDateOrNull(j['acknowledged_at'])?.toLocal(),
       );
+
+  final String id;
+  final String fromUser;
+  final String kind;
+  final String message;
+  final DateTime createdAt;
+  final DateTime? acknowledgedAt;
+
+  bool isMine(String? uid) => fromUser == uid;
+  bool get acknowledged => acknowledgedAt != null;
 }
 
 class CareRepository {

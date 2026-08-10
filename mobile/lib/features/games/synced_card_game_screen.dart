@@ -9,8 +9,8 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/no_repeat_bag.dart';
@@ -50,7 +50,7 @@ enum CardDeck {
 /// Ever). Either partner can draw the next card and both jump to it; a live
 /// answer strip lets them respond in real time.
 class SyncedCardGameScreen extends ConsumerStatefulWidget {
-  const SyncedCardGameScreen({super.key, required this.deck});
+  const SyncedCardGameScreen({required this.deck, super.key});
 
   final CardDeck deck;
 
@@ -83,7 +83,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
           .channel('gcard:${widget.deck.key}:$cid')
           .onBroadcast(event: 'card', callback: _onCard)
           .onBroadcast(event: 'sync', callback: _onSync)
-          .subscribe());
+          .subscribe(),);
       _syncTimer = Timer(const Duration(milliseconds: 900), () {
         _sub?.channel
             ?.sendBroadcastMessage(event: 'sync', payload: {'from': _myUid});
@@ -127,7 +127,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
       'from': _myUid,
       'text': _card,
       'index': _cardIndex,
-    });
+    },);
   }
 
   String? _cardAt(ContentLanguage lang, int index) {
@@ -188,7 +188,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
                 Text(widget.deck.subtitle(lang),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        color: MilesColors.taupe, fontSize: 13)),
+                        color: MilesColors.taupe, fontSize: 13,),),
                 const SizedBox(height: 16),
                 Expanded(child: _cardArea()),
                 const SizedBox(height: 14),
@@ -211,7 +211,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
                 if (_coupleId != null) ...[
                   const SizedBox(height: 12),
                   GameChatPanel(
-                      coupleId: _coupleId!, gameKey: 'card_${widget.deck.key}'),
+                      coupleId: _coupleId!, gameKey: 'card_${widget.deck.key}',),
                 ],
               ],
             ),
@@ -271,7 +271,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
                       color: MilesColors.cream50,
                       fontSize: 20,
                       height: 1.45,
-                      fontWeight: FontWeight.w500)),
+                      fontWeight: FontWeight.w500,),),
             ],
           ),
         ),

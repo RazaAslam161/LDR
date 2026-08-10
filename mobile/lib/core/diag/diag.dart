@@ -3,13 +3,12 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
-
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 /// Field evidence for the three mechanisms that keep failing.
 ///
@@ -88,7 +87,7 @@ class Diag {
     record(DiagArea.app, 'session_start', fields: {
       'session': sessionId,
       'debug': kDebugMode,
-    });
+    },);
   }
 
   static Future<void> setEnabled(bool v) async {
@@ -115,7 +114,7 @@ class Diag {
     record(DiagArea.app, 'diag_bound', fields: {
       'has_couple': coupleId != null,
       'has_user': userId != null,
-    });
+    },);
   }
 
   /// Record one observation. Synchronous, allocation-light, never throws.
@@ -174,7 +173,7 @@ class Diag {
         'ms': sw.elapsedMilliseconds,
         if (outcome != null) 'outcome': outcome,
         ...fields,
-      });
+      },);
     };
   }
 
@@ -235,7 +234,8 @@ class Diag {
   }
 
   static Future<void> _flushUpload() async {
-    final couple = _coupleId, user = _userId;
+    final couple = _coupleId;
+    final user = _userId;
     if (couple == null || user == null || _pendingUpload.isEmpty) return;
     final batch = List<DiagEvent>.from(_pendingUpload);
     try {
@@ -251,7 +251,7 @@ class Diag {
             'name': e.name,
             'corr': e.corr,
             'fields': e.fields,
-          }
+          },
       ]);
       _pendingUpload.removeRange(0, batch.length);
       uploadedCount += batch.length;

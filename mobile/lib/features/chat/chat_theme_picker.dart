@@ -65,10 +65,10 @@ class _ChatThemeSheetState extends ConsumerState<_ChatThemeSheet> {
               style: TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 18,
-                  fontWeight: FontWeight.w700)),
+                  fontWeight: FontWeight.w700,),),
           const SizedBox(height: 4),
           const Text('Only you see this — your partner keeps her own.',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 12.5)),
+              style: TextStyle(color: MilesColors.taupe, fontSize: 12.5),),
           const SizedBox(height: 18),
           GridView.count(
             crossAxisCount: 3,
@@ -110,7 +110,7 @@ class _ChatThemeSheetState extends ConsumerState<_ChatThemeSheet> {
 
 class _Swatch extends StatelessWidget {
   const _Swatch(
-      {required this.theme, required this.selected, required this.onTap});
+      {required this.theme, required this.selected, required this.onTap,});
   final ChatTheme theme;
   final bool selected;
   final VoidCallback onTap;
@@ -155,7 +155,7 @@ class _Swatch extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   color: selected ? MilesColors.gilt : MilesColors.taupe,
-                  fontSize: 10.5)),
+                  fontSize: 10.5,),),
         ],
       ),
     );
@@ -197,7 +197,7 @@ class _Tile extends StatelessWidget {
           color: MilesColors.surface2,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: selected ? MilesColors.gilt : Colors.transparent),
+              color: selected ? MilesColors.gilt : Colors.transparent,),
         ),
         child: Row(
           children: [
@@ -205,13 +205,13 @@ class _Tile extends StatelessWidget {
               const SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: CircularProgressIndicator(strokeWidth: 2),)
             else
               Icon(icon, color: MilesColors.gilt, size: 20),
             const SizedBox(width: 12),
             Text(label,
                 style:
-                    const TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                    const TextStyle(color: MilesColors.cream50, fontSize: 14),),
           ],
         ),
       ),

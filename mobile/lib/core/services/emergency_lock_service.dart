@@ -25,7 +25,7 @@ class EmergencyLockService {
   static DateTime? _lastVolUp;
   static DateTime? _lastVolDown;
 
-  static const double _shakeThreshold = 15.0; // m/s² above gravity
+  static const double _shakeThreshold = 15; // m/s² above gravity
   static const int _shakesRequired = 3;
   static const int _shakeWindowMs = 1500;
   static const int _volumeWindowMs = 1000;
@@ -37,7 +37,7 @@ class EmergencyLockService {
     _onLock = onLock;
     _shouldDetect = shouldDetect;
     _accelSub ??= accelerometerEventStream(
-      samplingPeriod: SensorInterval.normalInterval,
+      
     ).listen(_onAccelerometer, onError: (_) {});
   }
 
@@ -72,7 +72,7 @@ class EmergencyLockService {
     _lastShake = now;
     _shakeTimes.add(now);
     _shakeTimes.removeWhere(
-        (t) => now.difference(t).inMilliseconds > _shakeWindowMs);
+        (t) => now.difference(t).inMilliseconds > _shakeWindowMs,);
     if (_shakeTimes.length >= _shakesRequired) {
       _shakeTimes.clear();
       _lastShake = null;

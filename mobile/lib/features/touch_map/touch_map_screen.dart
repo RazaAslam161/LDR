@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show compute;
@@ -11,9 +10,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
-import 'package:miles/main.dart' show MilesApp;
-import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -23,27 +19,42 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/rapid_camera_screen.dart' show RapidCameraScreen;
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:miles/features/touch_map/touch_map_repository.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:miles/features/touch_map/reaction_gesture_service.dart';
 import 'package:miles/features/touch_map/reaction_segment_service.dart';
+import 'package:miles/features/touch_map/touch_map_repository.dart';
+import 'package:miles/main.dart' show MilesApp;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vibration/vibration.dart';
 import 'package:video_player/video_player.dart';
 
 class _PendingCameraIcon {
+  const _PendingCameraIcon({required this.x, required this.y});
   final double x;
   final double y;
-  const _PendingCameraIcon({required this.x, required this.y});
 }
 
 class _ActiveReactionGif {
+
+  const _ActiveReactionGif({
+    required this.mediaUrl,
+    required this.owner,
+    required this.x,
+    required this.y,
+    required this.id,
+    required this.isPhoto,
+    this.gesture = ReactionGesture.unknown,
+    this.mirror = false,
+  });
   final String mediaUrl;
 
   /// WHOSE body it landed on — same contract as [_ActiveTouch.owner], so the
@@ -61,17 +72,6 @@ class _ActiveReactionGif {
   /// can't flip on the file without FFmpeg) so the played-back reaction matches
   /// the mirrored selfie preview. Photos are flipped at capture instead.
   final bool mirror;
-
-  const _ActiveReactionGif({
-    required this.mediaUrl,
-    required this.owner,
-    required this.x,
-    required this.y,
-    required this.id,
-    required this.isPhoto,
-    this.gesture = ReactionGesture.unknown,
-    this.mirror = false,
-  });
 }
 
 class _TouchType {
@@ -177,7 +177,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       'scale': scale,
       'dx': dx,
       'dy': dy,
-    });
+    },);
   }
 
   void _onFrameMsg(Map<String, dynamic> p) {
@@ -188,7 +188,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           scale: (p['scale'] as num?)?.toDouble() ?? 1,
           dx: (p['dx'] as num?)?.toDouble() ?? 0,
           dy: (p['dy'] as num?)?.toDouble() ?? 0,
-        ));
+        ),);
   }
 
   /// The partner swapped their photo — reload it live (no need to leave + return).
@@ -226,10 +226,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   }
 
   void _addNeon(String owner, double x, double y, String stroke,
-      {required bool mine}) {
+      {required bool mine,}) {
     if (mine) _lastNeonPt = Offset(x, y);
     setState(() => _neon
-        .add(_NP(owner, x, y, DateTime.now().millisecondsSinceEpoch, stroke)));
+        .add(_NP(owner, x, y, DateTime.now().millisecondsSinceEpoch, stroke)),);
     _ensureNeonTimer();
     if (mine) {
       _bumpHeat();
@@ -239,7 +239,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         'stroke': stroke,
         'x': x,
         'y': y,
-      });
+      },);
     }
   }
 
@@ -499,7 +499,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                 ),
                 const SizedBox(height: 16),
                 TextButton(
-                  onPressed: () => Navigator.pop(sheetCtx, null),
+                  onPressed: () => Navigator.pop(sheetCtx),
                   child: const Text(
                     'Cancel',
                     style: TextStyle(color: MilesColors.taupe),
@@ -594,7 +594,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           .upload(
             path,
             file,
-            fileOptions: FileOptions(contentType: contentType, upsert: false),
+            fileOptions: FileOptions(contentType: contentType),
           );
       return await SupabaseService.client.storage
           .from('couple_intimate')
@@ -638,28 +638,23 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           pattern: [0, 80, 200, 60, 200, 80, 200, 60],
           intensities: [0, 60, 0, 50, 0, 55, 0, 50],
         );
-        break;
       case ReactionGesture.pinch:
         Vibration.vibrate(
           pattern: [0, 40, 30, 40],
           intensities: [0, 255, 0, 255],
         );
-        break;
       case ReactionGesture.squeeze:
         Vibration.vibrate(
           pattern: [0, 300],
           intensities: [0, 200],
         );
-        break;
       case ReactionGesture.point:
         Vibration.vibrate(
           pattern: [0, 60],
           intensities: [0, 180],
         );
-        break;
       case ReactionGesture.unknown:
         HapticFeedback.mediumImpact();
-        break;
     }
   }
 
@@ -716,7 +711,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         .onBroadcast(event: 'photo', callback: _onPhotoMsg)
         .onBroadcast(event: 'neon', callback: _onNeonMsg)
         .onBroadcast(event: 'reaction_gif', callback: _onReactionGifMsg)
-        .subscribe());
+        .subscribe(),);
   }
 
   @override
@@ -767,8 +762,9 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         setState(() {
           _myPhotoUrl = url;
           _myBodyPath = path;
-          if (_myUid != null)
+          if (_myUid != null) {
             _frames.remove(_myUid); // fresh photo, fresh frame
+          }
         });
       }
       // Tell the partner to reload my photo live.
@@ -797,7 +793,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: const Text('Cancel'),),
           FilledButton(
             style:
                 FilledButton.styleFrom(backgroundColor: MilesColors.emberDeep),
@@ -874,7 +870,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       // 'type' with 'broadcast' before sending, so every partner has been
       // seeing the fallback effect rather than the one that was chosen.
       'effect': _type,
-    });
+    },);
     // REACTION MODE ONLY — camera icon appears at touch point on partner's body.
     if (_reactionModeActive && owner == _partnerUid) {
       _cameraIconTimer?.cancel();
@@ -914,7 +910,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final me = _myUid, partner = _partnerUid;
+    final me = _myUid;
+    final partner = _partnerUid;
     // Deterministic order so BOTH phones render the two bodies identically.
     String? leftUid, rightUid;
     if (me != null && partner != null) {
@@ -977,7 +974,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
             tooltip:
                 _drawing ? 'Drawing hot lines — tap to stop' : 'Draw hot lines',
             icon: Icon(Icons.gesture,
-                color: _drawing ? MilesColors.ember : MilesColors.gilt),
+                color: _drawing ? MilesColors.ember : MilesColors.gilt,),
             onPressed: () => setState(() => _drawing = !_drawing),
           ),
           IconButton(
@@ -990,7 +987,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       body: (_coupleId == null || leftUid == null || rightUid == null)
           ? const Center(
               child: Text('Link with your partner first.',
-                  style: TextStyle(color: MilesColors.taupe)))
+                  style: TextStyle(color: MilesColors.taupe),),)
           : Column(
               children: [
                 const SizedBox(height: 8),
@@ -1048,12 +1045,12 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                         color: t.color
-                            .withValues(alpha: _type == t.key ? 0.8 : 0.3)),
+                            .withValues(alpha: _type == t.key ? 0.8 : 0.3),),
                   ),
                   child: Center(
                     child: Text('${t.emoji} ${t.label}',
                         style: const TextStyle(
-                            color: MilesColors.cream50, fontSize: 13)),
+                            color: MilesColors.cream50, fontSize: 13,),),
                   ),
                 ),
               ),
@@ -1070,7 +1067,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         children: [
           Icon(Icons.local_fire_department,
               color: MilesColors.blush.withValues(alpha: 0.4 + _heat * 0.6),
-              size: 16),
+              size: 16,),
           const SizedBox(width: 8),
           Expanded(
             child: ClipRRect(
@@ -1088,7 +1085,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           MilesColors.gilt,
                           MilesColors.blush,
                           MilesColors.ember,
-                        ]),
+                        ],),
                       ),
                     ),
                   ),
@@ -1117,7 +1114,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         ),
         child: LayoutBuilder(
           builder: (context, c) {
-            final w = c.maxWidth, h = c.maxHeight;
+            final w = c.maxWidth;
+            final h = c.maxHeight;
             final adjusting = _adjusting == owner;
             final f = _frames[owner] ?? const _Frame();
             return GestureDetector(
@@ -1127,12 +1125,12 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   : (d) => _touch(
                       owner,
                       (d.localPosition.dx / w).clamp(0.0, 1.0),
-                      (d.localPosition.dy / h).clamp(0.0, 1.0)),
+                      (d.localPosition.dy / h).clamp(0.0, 1.0),),
               onPanStart: (!adjusting && _drawing)
                   ? (d) => _neonStart(
                       owner,
                       (d.localPosition.dx / w).clamp(0.0, 1.0),
-                      (d.localPosition.dy / h).clamp(0.0, 1.0))
+                      (d.localPosition.dy / h).clamp(0.0, 1.0),)
                   : null,
               onPanUpdate: adjusting
                   ? null
@@ -1178,7 +1176,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                                       MediaQuery.devicePixelRatioOf(context))
                                   .round(),
                               errorBuilder: (_, __, ___) =>
-                                  CustomPaint(painter: _SilhouettePainter()))
+                                  CustomPaint(painter: _SilhouettePainter()),)
                           : CustomPaint(painter: _SilhouettePainter()),
                     ),
                   ),
@@ -1207,14 +1205,14 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                     child: Center(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 3),
+                            horizontal: 10, vertical: 3,),
                         decoration: BoxDecoration(
                           color: MilesColors.surface1,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(isMe ? '$name (you)' : name,
                             style: const TextStyle(
-                                color: MilesColors.cream50, fontSize: 12)),
+                                color: MilesColors.cream50, fontSize: 12,),),
                       ),
                     ),
                   ),
@@ -1234,7 +1232,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           shape: BoxShape.circle,
                         ),
                         child: Icon(adjusting ? Icons.check : Icons.crop_free,
-                            color: MilesColors.cream50, size: 16),
+                            color: MilesColors.cream50, size: 16,),
                       ),
                     ),
                   ),
@@ -1263,10 +1261,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                                     height: 26,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: MilesColors.emberSoft),
+                                        color: MilesColors.emberSoft,),
                                   )
                                 : const Icon(Icons.add,
-                                    color: MilesColors.emberSoft, size: 26),
+                                    color: MilesColors.emberSoft, size: 26,),
                           ),
                         ),
                       ),
@@ -1280,7 +1278,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         onTap: _uploadingPhoto ? null : _setMyPhoto,
                         child: Container(
                           padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                             color: MilesColors.surface1,
                             shape: BoxShape.circle,
                           ),
@@ -1290,10 +1288,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                                   height: 16,
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      color: MilesColors.cream50),
+                                      color: MilesColors.cream50,),
                                 )
                               : const Icon(Icons.add,
-                                  color: MilesColors.cream50, size: 16),
+                                  color: MilesColors.cream50, size: 16,),
                         ),
                       ),
                     ),
@@ -1306,12 +1304,12 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                         onTap: () => _deletePhoto(owner),
                         child: Container(
                           padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                             color: MilesColors.surface1,
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.delete_outline,
-                              color: MilesColors.cream50, size: 16),
+                              color: MilesColors.cream50, size: 16,),
                         ),
                       ),
                     ),
@@ -1328,12 +1326,11 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: SaveMediaButton(
-                          size: 20,
                           onSave: () {
                             final p = _bodyPathOf(owner);
                             if (p == null) return Future.value(false);
                             return SaveMediaService.saveIntimatePhotoToVault(
-                                path: p, senderName: isMe ? 'you' : name);
+                                path: p, senderName: isMe ? 'you' : name,);
                           },
                         ),
                       ),
@@ -1346,7 +1343,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       child: Center(
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
+                              horizontal: 10, vertical: 4,),
                           decoration: BoxDecoration(
                             color: MilesColors.night.withValues(alpha: 0.7),
                             borderRadius: BorderRadius.circular(12),
@@ -1354,7 +1351,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           child: const Text(
                             'Pinch to zoom · drag to move — live',
                             style: TextStyle(
-                                color: MilesColors.cream50, fontSize: 10.5),
+                                color: MilesColors.cream50, fontSize: 10.5,),
                           ),
                         ),
                       ),
@@ -1370,7 +1367,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                             : 'Waiting for $name’s photo',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            color: MilesColors.gilt, fontSize: 11),
+                            color: MilesColors.gilt, fontSize: 11,),
                       ),
                     ),
                   // Glows that landed on THIS body.
@@ -1390,7 +1387,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                       child: Center(
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
+                              horizontal: 10, vertical: 4,),
                           decoration: BoxDecoration(
                             color: MilesColors.ember.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
@@ -1435,7 +1432,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           await _startReactionCapture(owner, pos.x, pos.y);
                         },
                         child: TweenAnimationBuilder<double>(
-                          tween: Tween(begin: 0.0, end: 1.0),
+                          tween: Tween(begin: 0, end: 1),
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.elasticOut,
                           builder: (_, v, child) =>
@@ -1475,7 +1472,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           onExpired: () {
                             if (mounted) setState(() => _reactions.remove(r));
                           },
-                        )),
+                        ),),
                 ],
               ),
             );
@@ -1540,7 +1537,7 @@ class _GlowState extends State<_Glow> with SingleTickerProviderStateMixin {
                       gradient: RadialGradient(colors: [
                         t.color.withValues(alpha: 0.6 * opacity),
                         t.color.withValues(alpha: 0),
-                      ]),
+                      ],),
                     ),
                   ),
                 ),
@@ -1597,7 +1594,8 @@ class _NeonPainter extends CustomPainter {
   @override
   void paint(Canvas c, Size s) {
     for (var i = 1; i < points.length; i++) {
-      final a = points[i - 1], b = points[i];
+      final a = points[i - 1];
+      final b = points[i];
       if (a.stroke != b.stroke) continue; // don't bridge separate strokes
       final age = now - b.t;
       if (age > _life) continue;
@@ -1610,7 +1608,7 @@ class _NeonPainter extends CustomPainter {
           p2,
           _corePaint
             ..color =
-                Color.lerp(_neon, Colors.white, 0.4)!.withValues(alpha: op));
+                Color.lerp(_neon, Colors.white, 0.4)!.withValues(alpha: op),);
     }
   }
 
@@ -1623,11 +1621,6 @@ class _NeonPainter extends CustomPainter {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ReactionGifWidget extends StatefulWidget {
-  final _ActiveReactionGif reaction;
-  final double containerWidth;
-  final double containerHeight;
-  final double size;
-  final VoidCallback onExpired;
 
   const _ReactionGifWidget({
     required this.reaction,
@@ -1636,6 +1629,11 @@ class _ReactionGifWidget extends StatefulWidget {
     required this.size,
     required this.onExpired,
   });
+  final _ActiveReactionGif reaction;
+  final double containerWidth;
+  final double containerHeight;
+  final double size;
+  final VoidCallback onExpired;
 
   @override
   State<_ReactionGifWidget> createState() => _ReactionGifWidgetState();
@@ -1653,7 +1651,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
     _fadeCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
-      value: 1.0,
+      value: 1,
     );
 
     if (!widget.reaction.isPhoto) {
@@ -1737,7 +1735,7 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
       child: FadeTransition(
         opacity: _fadeCtrl,
         child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.3, end: 1.0),
+          tween: Tween(begin: 0.3, end: 1),
           duration: const Duration(milliseconds: 400),
           curve: Curves.elasticOut,
           builder: (_, v, child) =>
@@ -1772,26 +1770,22 @@ class _ReactionGifWidgetState extends State<_ReactionGifWidget>
 
 /// The captured reaction media handed back from the camera or gallery.
 class _ReactionCapture {
-  final File file;
-  final bool isPhoto;
-
-  /// Display-mirror this media when it's shown as a reaction. Set for
-  /// front-camera VIDEO (photos are flipped on the file at capture instead).
-  final bool mirror;
 
   const _ReactionCapture({
     required this.file,
     required this.isPhoto,
     this.mirror = false,
   });
+  final File file;
+  final bool isPhoto;
+
+  /// Display-mirror this media when it's shown as a reaction. Set for
+  /// front-camera VIDEO (photos are flipped on the file at capture instead).
+  final bool mirror;
 }
 
 /// One option tile in the reaction source sheet (Camera / Gallery).
 class _SourceOption extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String subtitle;
-  final VoidCallback onTap;
 
   const _SourceOption({
     required this.icon,
@@ -1799,6 +1793,10 @@ class _SourceOption extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
   });
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2140,7 +2138,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.no_photography_outlined,
-                      color: MilesColors.emberSoft, size: 40),
+                      color: MilesColors.emberSoft, size: 40,),
                   const SizedBox(height: 14),
                   Text(
                     'Camera access needed',
@@ -2159,9 +2157,9 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
                     ),
                   ),
                   const SizedBox(height: 18),
-                  TextButton(
+                  const TextButton(
                     onPressed: Geolocator.openAppSettings,
-                    child: const Text(
+                    child: Text(
                       'Open Settings',
                       style: TextStyle(color: MilesColors.emberSoft),
                     ),
@@ -2190,7 +2188,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
       // reliable across devices than Transform.scale(scaleX: -1).
       preview = Transform(
         alignment: Alignment.center,
-        transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
+        transform: Matrix4.identity()..scale(-1.0, 1, 1),
         child: preview,
       );
     }
@@ -2431,7 +2429,8 @@ Uint8List? _compressReactionPhoto(String path) {
 class _SilhouettePainter extends CustomPainter {
   @override
   void paint(Canvas c, Size s) {
-    final w = s.width, h = s.height;
+    final w = s.width;
+    final h = s.height;
     final fill = Paint()
       ..color = MilesColors.surface1.withValues(alpha: 0.65)
       ..style = PaintingStyle.fill;

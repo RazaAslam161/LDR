@@ -77,7 +77,7 @@ void main() {
       f.path,
       filterId: 'test',
       matrix: [-1, 0, 0, 0, 255, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
-    ));
+    ),);
     final before = img.decodeImage(f.readAsBytesSync())!;
     final after = img.decodeImage(out)!;
     expect(after.getPixel(10, 10).r, isNot(closeTo(before.getPixel(10, 10).r, 8)));
@@ -138,7 +138,7 @@ void main() {
               final a = original.getPixel(x, y);
               final b = copy.getPixel(x, y);
               expect([b.r, b.g, b.b, b.a], [a.r, a.g, a.b, a.a],
-                  reason: 'pixel ($x,$y) came back changed');
+                  reason: 'pixel ($x,$y) came back changed',);
             }
           }
         });

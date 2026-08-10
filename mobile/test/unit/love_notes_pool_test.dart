@@ -16,7 +16,7 @@ void main() {
 
     test('leaves a note without a placeholder untouched', () {
       expect(renderLoveNote('aap bohot pyaari ho', 'Aisha'),
-          'aap bohot pyaari ho');
+          'aap bohot pyaari ho',);
     });
   });
 
@@ -29,7 +29,7 @@ void main() {
         final offenders = kLoveNotes.where((n) => n.contains(term)).toList();
         expect(offenders, isEmpty,
             reason: '"$term" is hardcoded in ${offenders.length} note(s); '
-                'address the user through $kLoveNoteNameToken instead');
+                'address the user through $kLoveNoteNameToken instead',);
       }
     });
 
@@ -42,7 +42,7 @@ void main() {
     test('every note renders with no {name} residue', () {
       for (final note in kLoveNotes) {
         expect(renderLoveNote(note, 'Aisha'), isNot(contains('{name}')),
-            reason: 'placeholder survived rendering in: $note');
+            reason: 'placeholder survived rendering in: $note',);
       }
     });
 

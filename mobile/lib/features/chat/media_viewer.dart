@@ -6,8 +6,7 @@ import 'package:miles/core/widgets/save_media_button.dart';
 /// home snap. Tap the backdrop or the X to close.
 class MediaViewer extends StatelessWidget {
   const MediaViewer({
-    super.key,
-    required this.imageUrl,
+    required this.imageUrl, super.key,
     this.heroTag,
     this.senderName = 'a message',
   });
@@ -17,12 +16,12 @@ class MediaViewer extends StatelessWidget {
   final String senderName;
 
   static void open(BuildContext context, String url,
-      {Object? heroTag, String senderName = 'a message'}) {
+      {Object? heroTag, String senderName = 'a message',}) {
     Navigator.of(context).push(MaterialPageRoute<void>(
       fullscreenDialog: true,
       builder: (_) =>
           MediaViewer(imageUrl: url, heroTag: heroTag, senderName: senderName),
-    ));
+    ),);
   }
 
   @override
@@ -33,7 +32,7 @@ class MediaViewer extends StatelessWidget {
       loadingBuilder: (_, child, progress) => progress == null
           ? child
           : const Center(
-              child: CircularProgressIndicator(color: Colors.white70)),
+              child: CircularProgressIndicator(color: Colors.white70),),
       errorBuilder: (_, __, ___) => const Center(
         child:
             Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
@@ -47,7 +46,6 @@ class MediaViewer extends StatelessWidget {
             child: GestureDetector(
               onTap: () => Navigator.of(context).maybePop(),
               child: InteractiveViewer(
-                minScale: 0.8,
                 maxScale: 5,
                 child: Center(
                   child: heroTag != null
@@ -75,7 +73,7 @@ class MediaViewer extends StatelessWidget {
                   size: 24,
                   color: Colors.white,
                   onSave: () => SaveMediaService.savePhotoToVault(
-                      url: imageUrl, senderName: senderName),
+                      url: imageUrl, senderName: senderName,),
                 ),
               ),
             ),

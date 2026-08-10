@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// animated Noto-emoji (Lottie) for the cute animated rendering.
 class MoodData {
   const MoodData(this.key, this.emoji, this.label, this.hex, this.desc,
-      {this.intimate = false});
+      {this.intimate = false,});
   final String key;
   final String emoji;
   final String label;
@@ -39,14 +39,14 @@ const List<MoodData> kMoods = [
   MoodData('annoyed', '😤', 'Annoyed', '#C9824A', 'Irritated'),
   // ── Bold / intimate (adult expressions — never children) ──
   MoodData('horny', '🥵', 'Turned on', '#E84A6F', 'Aching for you',
-      intimate: true),
+      intimate: true,),
   MoodData('flirty', '😏', 'Flirty', '#D45A77', 'Feeling cheeky',
-      intimate: true),
+      intimate: true,),
   MoodData('devilish', '😈', 'Devilish', '#9B59B6', 'Up to no good',
-      intimate: true),
+      intimate: true,),
   MoodData('kiss', '😘', 'Kissy', '#F2A9BC', 'Blowing a kiss', intimate: true),
   MoodData('kissmark', '💋', 'Marked you', '#E0564B', 'Left a mark',
-      intimate: true),
+      intimate: true,),
 ];
 
 /// Everyday moods only (no bold/intimate ones) — for the general mood selector.

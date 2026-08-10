@@ -16,10 +16,10 @@ import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/router.dart';
 import 'package:miles/core/services/app_lock.dart';
+import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
-import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
@@ -28,8 +28,8 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
-import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_pill.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/firebase_options.dart';
@@ -55,7 +55,7 @@ Future<void> main() async {
   final envUrl = dotenv.maybeGet(MilesConfig.supabaseUrlKey) ?? '';
   final envKey = dotenv.maybeGet(MilesConfig.supabaseAnonKeyKey) ?? '';
   debugPrint(
-      'ENV CHECK → url len: ${envUrl.length}, key len: ${envKey.length}');
+      'ENV CHECK → url len: ${envUrl.length}, key len: ${envKey.length}',);
   if (envUrl.isEmpty || envKey.isEmpty) {
     throw StateError('Supabase env missing: ensure mobile/.env has '
         '${MilesConfig.supabaseUrlKey} and ${MilesConfig.supabaseAnonKeyKey}.');
@@ -215,7 +215,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
         'has_couple': c != null,
         if (prev != null)
           'since_prev_beat_ms': now.difference(prev).inMilliseconds,
-      });
+      },);
       prevBeat = now;
       if (c != null) PresenceService.setOnline(c.id, online: true);
     }
@@ -223,7 +223,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     Diag.record(DiagArea.presence, 'presence_heartbeat', fields: {
       'action': 'start',
       'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
-    });
+    },);
     beat(); // immediate beat so we read online without waiting a cycle
     _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) => beat());
   }
@@ -438,12 +438,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // display. Also what stops the first-run exemption in
       // didChangeAppLifecycleState from stranding a logged-out session
       // uncovered.
-      if (previous?.isAuthenticated == true && !next.isAuthenticated) {
+      if ((previous?.isAuthenticated ?? false) && !next.isAuthenticated) {
         MilesApp.showRealApp.value = false;
       }
       // Setup finished → the first-run exemption is spent, permanently.
       if (next.isAuthenticated &&
-          next.profile?.isOnboarded == true &&
+          (next.profile?.isOnboarded ?? false) &&
           next.couple != null) {
         MilesApp.markSetupComplete();
       }
@@ -472,19 +472,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // nothing with Miles' Emberlight dark theme.
         if (!isReal) {
           return MaterialApp(
-            // Empty on purpose: Flutter then leaves the Android task
-            // description alone and recents falls back to the enabled
-            // <activity-alias> label — which IS the disguise the user chose.
-            // Hardcoding "News" here would announce the old identity in the
-            // task switcher no matter which icon they picked.
-            title: '',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
               brightness: Brightness.light,
               scaffoldBackgroundColor: Colors.white,
               colorScheme: ColorScheme.fromSeed(
                 seedColor: const Color(0xFF1A73E8),
-                brightness: Brightness.light,
               ),
               useMaterial3: true,
             ),
@@ -566,13 +559,13 @@ class _SessionLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Wordmark(size: 32),
-          const SizedBox(height: 24),
-          const SizedBox(
+          Wordmark(size: 32),
+          SizedBox(height: 24),
+          SizedBox(
             width: 24,
             height: 24,
             child: CircularProgressIndicator(

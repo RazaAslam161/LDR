@@ -55,7 +55,7 @@ class RssService {
     }
     // Newest first.
     articles.sort((a, b) =>
-        (b.pubDate ?? DateTime(0)).compareTo(a.pubDate ?? DateTime(0)));
+        (b.pubDate ?? DateTime(0)).compareTo(a.pubDate ?? DateTime(0)),);
     final result = articles.take(30).toList();
     if (result.isNotEmpty) {
       cached = result;
@@ -82,7 +82,7 @@ class RssService {
           imageUrl: _image(item),
           pubDate: pub,
           timeAgo: _timeAgo(pub),
-        ));
+        ),);
       }
       return out;
     } catch (_) {
@@ -98,7 +98,7 @@ class RssService {
 
   // Strip any stray HTML tags that slipped through CDATA.
   static String _clean(String s) =>
-      s.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+      s.replaceAll(RegExp('<[^>]*>'), '').trim();
 
   // <media:content url> / <media:thumbnail url> / <enclosure url type="image/*">.
   static String? _image(XmlElement item) {

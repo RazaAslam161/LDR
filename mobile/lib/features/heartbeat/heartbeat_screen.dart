@@ -45,9 +45,9 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _myPulse = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 220));
+        vsync: this, duration: const Duration(milliseconds: 220),);
     _partnerPulse = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 220));
+        vsync: this, duration: const Duration(milliseconds: 220),);
     _ppg = PpgDetector(onBpm: _onMyBpm, onBeat: _onMyBeat);
     final session = ref.read(sessionProvider);
     _coupleId = session.couple?.id;
@@ -56,7 +56,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
       _channel = ManagedSubscription.start(() => SupabaseService.client
           .channel('heartbeat:${_coupleId!}')
           .onBroadcast(event: 'hb', callback: _onMsg)
-          .subscribe());
+          .subscribe(),);
     }
   }
 
@@ -148,7 +148,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
       });
     }
     _channel?.channel?.sendBroadcastMessage(
-        event: 'hb', payload: {'from': _myUid, 'stopped': true});
+        event: 'hb', payload: {'from': _myUid, 'stopped': true},);
   }
 
   void _onFrame(CameraImage image) {
@@ -164,7 +164,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
       }
       if (count > 0) {
         _ppg.addSample(
-            sum / count, DateTime.now().millisecondsSinceEpoch);
+            sum / count, DateTime.now().millisecondsSinceEpoch,);
       }
     } catch (_) {
     } finally {
@@ -175,13 +175,13 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
   void _onMyBpm(int bpm) {
     if (mounted) setState(() => _myBpm = bpm);
     _channel?.channel?.sendBroadcastMessage(
-        event: 'hb', payload: {'from': _myUid, 'bpm': bpm});
+        event: 'hb', payload: {'from': _myUid, 'bpm': bpm},);
   }
 
   void _onMyBeat() {
     if (mounted) _myPulse.forward(from: 0);
     _channel?.channel?.sendBroadcastMessage(
-        event: 'hb', payload: {'from': _myUid, 'beat': true});
+        event: 'hb', payload: {'from': _myUid, 'beat': true},);
   }
 
   void _onMsg(Map<String, dynamic> payload) {
@@ -248,7 +248,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
                 child: Text(_error!,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        color: MilesColors.ember, fontSize: 12)),
+                        color: MilesColors.ember, fontSize: 12,),),
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
@@ -262,7 +262,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
                       ? 'Starting…'
                       : (_measuring
                           ? 'Stop'
-                          : 'Start — read my heartbeat')),
+                          : 'Start — read my heartbeat'),),
                 ),
               ),
             ),
@@ -299,17 +299,17 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
             style: const TextStyle(
                 color: MilesColors.cream50,
                 fontSize: 34,
-                fontWeight: FontWeight.w700),
+                fontWeight: FontWeight.w700,),
           ),
           Text('$label · BPM',
-              style: const TextStyle(color: MilesColors.taupe, fontSize: 12)),
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 12),),
           if (hint != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 10, 28, 0),
               child: Text(hint,
                   textAlign: TextAlign.center,
                   style:
-                      const TextStyle(color: MilesColors.taupe, fontSize: 11.5)),
+                      const TextStyle(color: MilesColors.taupe, fontSize: 11.5),),
             ),
         ],
       ),

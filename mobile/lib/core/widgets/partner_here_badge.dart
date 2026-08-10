@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,8 +10,8 @@ import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/providers.dart';
-import 'package:miles/core/router.dart';
 import 'package:miles/core/realtime_resume.dart';
+import 'package:miles/core/router.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
@@ -28,7 +27,7 @@ final myScreenProvider = StateProvider<String?>((ref) => null);
 /// value (`current_screen`) is the fallback + freshness source.
 final partnerScreenProvider =
     StateNotifierProvider<PartnerScreenNotifier, String?>(
-  (ref) => PartnerScreenNotifier(ref),
+  PartnerScreenNotifier.new,
 );
 
 /// Bumped every time either partner "warms the room" — a shared bloom that both
@@ -41,7 +40,7 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
     // Bind the moment the couple resolves, and rebind if it changes.
     ref.listen(currentCoupleProvider, (prev, next) {
       if (next?.id != _coupleId) _subscribe();
-    }, fireImmediately: true);
+    }, fireImmediately: true,);
     // Rejoin on realtime reconnect (doze / network drop / resume).
     realtimeResumed.addListener(_subscribe);
   }
@@ -79,7 +78,7 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
               'keys_n': payload.length,
               'from_is_self': payload['from'] == myUid,
               'screen_null': payload['screen'] == null,
-            });
+            },);
             if (payload['from'] == myUid) return; // ignore our own echo
             if (mounted) state = payload['screen'] as String?;
           },
@@ -471,7 +470,7 @@ class _PresenceAvatarState extends State<_PresenceAvatar>
                   _initial,
                   style: GoogleFonts.inter(
                     fontSize: 13,
-                    height: 1.0,
+                    height: 1,
                     fontWeight: FontWeight.w600,
                     color: MilesColors.cream50,
                     decoration: TextDecoration.none,

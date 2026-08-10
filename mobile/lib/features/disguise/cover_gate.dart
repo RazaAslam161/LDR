@@ -70,7 +70,7 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
       // event from dropping the cover out from under the prompt.
       MilesApp.authInProgress = true;
       final enabled = await AppLock.isEnabled();
-      final passed = enabled ? await AppLock.authenticate() : true;
+      final passed = !enabled || await AppLock.authenticate();
       MilesApp.authInProgress = false;
 
       if (!passed || !mounted) return;
@@ -82,8 +82,6 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
       if (!forCall) {
         await Navigator.of(context).push(
           PageRouteBuilder<void>(
-            opaque: true,
-            transitionDuration: const Duration(milliseconds: 300),
             pageBuilder: (_, __, ___) => IntroSplashScreen(
               onComplete: () => Navigator.of(context).pop(),
             ),

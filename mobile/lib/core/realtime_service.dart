@@ -44,7 +44,7 @@ class RealtimeService {
             // different bugs; only the arrival event separates them.
             Diag.record(DiagArea.presence, 'rt_change',
                 corr: coupleId,
-                fields: {'table': table, 'event': payload.eventType.name});
+                fields: {'table': table, 'event': payload.eventType.name},);
             onChange(payload);
           },
         )
@@ -60,7 +60,7 @@ class RealtimeService {
         'table': table,
         'status': status.name,
         if (err != null) 'error': err.runtimeType.toString(),
-      });
+      },);
     });
   }
 
@@ -150,7 +150,7 @@ class ManagedSubscription {
           await SupabaseService.client.removeChannel(old);
         } catch (e) {
           Diag.record(DiagArea.app, 'rt_remove_failed',
-              fields: {'error': e.runtimeType.toString()});
+              fields: {'error': e.runtimeType.toString()},);
         }
       }
       if (_disposed) return;

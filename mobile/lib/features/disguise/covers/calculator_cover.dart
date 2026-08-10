@@ -15,7 +15,7 @@ import 'package:miles/features/disguise/cover_gate.dart';
 /// user does by accident, it leaves no visible affordance, and it cannot be
 /// stumbled into while genuinely using the calculator.
 class CalculatorCover extends StatefulWidget {
-  const CalculatorCover({super.key, required this.onAuthenticated});
+  const CalculatorCover({required this.onAuthenticated, super.key});
 
   final VoidCallback onAuthenticated;
 
@@ -80,7 +80,7 @@ class _CalculatorCoverState extends State<CalculatorCover>
           if (_startNewEntry || _display == '0') {
             _display = key;
             _startNewEntry = false;
-          } else if (_display.replaceAll(RegExp(r'[^0-9]'), '').length < 12) {
+          } else if (_display.replaceAll(RegExp('[^0-9]'), '').length < 12) {
             _display = '$_display$key';
           }
       }

@@ -9,8 +9,7 @@ import 'package:miles/core/theme.dart';
 /// clear (e.g. on a wrong PIN).
 class PinPad extends StatefulWidget {
   const PinPad({
-    super.key,
-    required this.onComplete,
+    required this.onComplete, super.key,
     this.errorSignal = 0,
     this.enabled = true,
   });
@@ -130,7 +129,7 @@ class _PinPadState extends State<PinPad>
               style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 24,
-                  fontWeight: FontWeight.w300)),
+                  fontWeight: FontWeight.w300,),),
         ),
       ),
     );

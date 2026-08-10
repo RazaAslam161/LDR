@@ -108,16 +108,16 @@ class DiagRedact {
   static final _token = RegExp(r'^[A-Za-z0-9_.:/-]+$');
 
   static final _url = RegExp(r'https?:|[a-z0-9-]+\.(com|co|net|org|io)\b',
-      caseSensitive: false);
-  static final _jwt = RegExp(r'^ey[A-Za-z0-9_-]{8,}');
+      caseSensitive: false,);
+  static final _jwt = RegExp('^ey[A-Za-z0-9_-]{8,}');
   static final _ipv4 = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
 
   /// A storage object, which is media. One slash is a mime type ('video/VP8')
   /// and is kept, because the codec is real evidence in a call trace.
-  static final _objectPath = RegExp(r'/.*/');
+  static final _objectPath = RegExp('/.*/');
   static final _mediaFile =
       RegExp(r'\.(jpg|jpeg|png|webp|gif|heic|mp4|m4a|aac|opus|ogg)$',
-          caseSensitive: false);
+          caseSensitive: false,);
 
   static Object? value(Object? v) {
     if (v == null || v is num || v is bool) return v;

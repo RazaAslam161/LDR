@@ -42,6 +42,9 @@ dependencies:
 
   # ─── Crypto (E2EE for the Closer intimacy module) ────────────
   cryptography: ^2.7.0
+  # Direct because app_lock.dart imports it; it was only ever present
+  # transitively, which is a dependency you do not control the version of.
+  crypto: ^3.0.7
   flutter_secure_storage: ^9.2.2
 
   # ─── Local auth (PIN / biometric gate for Closer) ────────────

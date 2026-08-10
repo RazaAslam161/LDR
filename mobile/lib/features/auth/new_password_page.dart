@@ -84,7 +84,7 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
                     style: TextStyle(
                         color: MilesColors.cream50,
                         fontSize: 26,
-                        fontWeight: FontWeight.w700)),
+                        fontWeight: FontWeight.w700,),),
                 const SizedBox(height: 24),
                 LoveTextField(
                   controller: _password,
@@ -101,7 +101,7 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
                   const SizedBox(height: 14),
                   Text(_error!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: MilesColors.ember)),
+                      style: const TextStyle(color: MilesColors.ember),),
                 ],
                 const SizedBox(height: 24),
                 GlowButton(

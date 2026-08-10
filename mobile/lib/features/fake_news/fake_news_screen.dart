@@ -23,7 +23,7 @@ const _divider = Color(0xFFE0E0E0);
 /// whole app over to the real Miles experience. Everything else behaves like
 /// a real news app (live RSS, external article links, pull-to-refresh).
 class FakeNewsScreen extends StatefulWidget {
-  const FakeNewsScreen({super.key, required this.onAuthenticated});
+  const FakeNewsScreen({required this.onAuthenticated, super.key});
 
   final VoidCallback onAuthenticated;
 
@@ -155,7 +155,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       // beneath it. If the app-lock isn't set up, entry is granted immediately.
       MilesApp.authInProgress = true;
       final enabled = await AppLock.isEnabled();
-      final passed = enabled ? await AppLock.authenticate() : true;
+      final passed = !enabled || await AppLock.authenticate();
       MilesApp.authInProgress = false;
 
       if (!passed) return; // wrong biometric/PIN → stay on news, no error
@@ -168,8 +168,6 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       if (!forCall) {
         await Navigator.of(context).push(
           PageRouteBuilder<void>(
-            opaque: true,
-            transitionDuration: const Duration(milliseconds: 300),
             pageBuilder: (_, __, ___) => IntroSplashScreen(
               onComplete: () => Navigator.of(context).pop(),
             ),
@@ -260,7 +258,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       list = list
           .where((a) =>
               a.title.toLowerCase().contains(q) ||
-              a.source.toLowerCase().contains(q))
+              a.source.toLowerCase().contains(q),)
           .toList();
     }
     return list;
@@ -312,7 +310,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
       actions: [
         IconButton(
           icon: Icon(_searchOpen ? Icons.close : Icons.search,
-              color: _textMuted),
+              color: _textMuted,),
           onPressed: () {
             setState(() {
               _searchOpen = !_searchOpen;
@@ -338,7 +336,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
                   style: TextStyle(
                       color: Colors.white,
                       fontSize: 14,
-                      fontWeight: FontWeight.w600)),
+                      fontWeight: FontWeight.w600,),),
             ),
           ),
         ),
@@ -421,7 +419,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
                 Icon(Icons.refresh, color: _textMuted, size: 36),
                 SizedBox(height: 12),
                 Text("Couldn't load news. Tap to retry.",
-                    style: TextStyle(color: _textMuted, fontSize: 14)),
+                    style: TextStyle(color: _textMuted, fontSize: 14),),
               ],
             ),
           ),
@@ -439,7 +437,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
                 SizedBox(height: 120),
                 Center(
                   child: Text('No results',
-                      style: TextStyle(color: _textMuted, fontSize: 14)),
+                      style: TextStyle(color: _textMuted, fontSize: 14),),
                 ),
               ],
             )
@@ -507,14 +505,13 @@ class _NewsLogo extends StatelessWidget {
       height: 32,
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           const Text('G',
               style: TextStyle(
                   color: _accent,
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
-                  height: 1)),
+                  height: 1,),),
           const SizedBox(width: 2),
           Column(
             mainAxisSize: MainAxisSize.min,
@@ -605,7 +602,7 @@ class _ArticleCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(article.source,
-                      style: const TextStyle(color: _textMuted, fontSize: 12)),
+                      style: const TextStyle(color: _textMuted, fontSize: 12),),
                   const SizedBox(height: 4),
                   Text(
                     article.title,
@@ -622,7 +619,7 @@ class _ArticleCard extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(article.timeAgo,
                         style:
-                            const TextStyle(color: _textMuted, fontSize: 12)),
+                            const TextStyle(color: _textMuted, fontSize: 12),),
                   ],
                 ],
               ),
@@ -687,7 +684,7 @@ class _NavItem extends StatelessWidget {
                 style: TextStyle(
                     color: color,
                     fontSize: 11,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400)),
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,),),
           ],
         ),
       ),

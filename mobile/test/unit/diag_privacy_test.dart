@@ -134,7 +134,7 @@ void main() {
     expect(unrelated, isNonNegative);
     expect(inside, contains(offender), reason: 'a trace field went unscanned');
     expect(inside, isNot(contains(unrelated)),
-        reason: 'an unrelated call after a Diag call was scanned as one');
+        reason: 'an unrelated call after a Diag call was scanned as one',);
   });
 
   test('no call site passes a sensitive accessor into a trace field', () {
@@ -193,7 +193,7 @@ void main() {
     }
     expect(offenders, isEmpty,
         reason: 'a trace field may not carry content — use the derived form '
-            '(sdp_len, has_relay, name_set): ${offenders.join(' | ')}');
+            '(sdp_len, has_relay, name_set): ${offenders.join(' | ')}',);
   });
 }
 

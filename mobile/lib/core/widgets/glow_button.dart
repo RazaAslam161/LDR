@@ -8,8 +8,7 @@ import 'package:miles/core/theme.dart';
 /// Usage: GlowButton(label: 'Send', color: MilesColors.blush, onPressed: ...)
 class GlowButton extends StatefulWidget {
   const GlowButton({
-    super.key,
-    required this.label,
+    required this.label, super.key,
     this.onPressed,
     this.icon,
     this.color = MilesColors.ember,
@@ -82,7 +81,7 @@ class _GlowButtonState extends State<GlowButton>
                   ),
                   borderRadius: BorderRadius.circular(28),
                   border: Border.all(
-                      color: MilesColors.gilt.withValues(alpha: 0.14)),
+                      color: MilesColors.gilt.withValues(alpha: 0.14),),
                   boxShadow: [
                     BoxShadow(
                       color: widget.color.withValues(alpha: 0.38),
@@ -102,7 +101,7 @@ class _GlowButtonState extends State<GlowButton>
                 height: 20,
                 width: 20,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: MilesColors.cream50))
+                    strokeWidth: 2, color: MilesColors.cream50,),)
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -115,7 +114,7 @@ class _GlowButtonState extends State<GlowButton>
                     style: const TextStyle(
                         color: MilesColors.cream50,
                         fontSize: 15,
-                        fontWeight: FontWeight.w600),
+                        fontWeight: FontWeight.w600,),
                   ),
                 ],
               ),

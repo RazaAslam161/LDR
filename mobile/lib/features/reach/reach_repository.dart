@@ -45,7 +45,7 @@ class ReachRepository {
 
   static Future<void> acknowledge(String id) async {
     await _c.from('reach_events').update(
-        {'acknowledged_at': DateTime.now().toUtc().toIso8601String()}).eq('id', id);
+        {'acknowledged_at': DateTime.now().toUtc().toIso8601String()},).eq('id', id);
   }
 
   static RealtimeChannel subscribe(

@@ -3,10 +3,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/intimacy/intimacy_controller.dart';
 import 'package:miles/features/intimacy/intimacy_repository.dart';
 
@@ -63,10 +63,9 @@ class _OptIn extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       children: [
         const SizedBox(height: 16),
-        Center(
+        const Center(
           child: BreathingGlow(
-            color: MilesColors.blush,
-            child: const Text('🕯️', style: TextStyle(fontSize: 56)),
+            child: Text('🕯️', style: TextStyle(fontSize: 56)),
           ),
         ),
         const SizedBox(height: 28),
@@ -76,14 +75,14 @@ class _OptIn extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('A little closer, tonight',
-                  style: Theme.of(context).textTheme.displaySmall),
+                  style: Theme.of(context).textTheme.displaySmall,),
               const SizedBox(height: 10),
               const Text(
-                'A gentle way to let each other know you\'re feeling close — '
+                "A gentle way to let each other know you're feeling close — "
                 'a flicker of warmth across the distance.\n\n'
                 'It only ever works both ways: your partner sees your signal '
-                'only if they\'re feeling it too, in the same window. If '
-                'they\'re not, nothing shows, and no one feels put on the spot.',
+                "only if they're feeling it too, in the same window. If "
+                "they're not, nothing shows, and no one feels put on the spot.",
                 style: TextStyle(color: MilesColors.taupe, height: 1.6),
               ),
               const SizedBox(height: 8),
@@ -104,7 +103,7 @@ class _OptIn extends StatelessWidget {
         const SizedBox(height: 12),
         const Center(
           child: Text('Off by default · always opt-in',
-              style: TextStyle(color: MilesColors.faint, fontSize: 12)),
+              style: TextStyle(color: MilesColors.faint, fontSize: 12),),
         ),
       ],
     );
@@ -128,8 +127,8 @@ class _Picker extends StatelessWidget {
               const Text('🤍', style: TextStyle(fontSize: 40)),
               const SizedBox(height: 12),
               const Text(
-                'You\'re set to receive only. Turn on sending in '
-                'comfort & consent whenever you\'d like to reach out first.',
+                "You're set to receive only. Turn on sending in "
+                "comfort & consent whenever you'd like to reach out first.",
                 textAlign: TextAlign.center,
                 style: TextStyle(color: MilesColors.taupe, height: 1.5),
               ),
@@ -148,10 +147,10 @@ class _Picker extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       children: [
         Text('How are you feeling tonight?',
-            style: Theme.of(context).textTheme.displaySmall),
+            style: Theme.of(context).textTheme.displaySmall,),
         const SizedBox(height: 8),
         const Text(
-          'Tap to let them know. They\'ll only see it if they\'re feeling '
+          "Tap to let them know. They'll only see it if they're feeling "
           'it too — so it always stays mutual.',
           style: TextStyle(color: MilesColors.taupe, height: 1.5),
         ),
@@ -163,7 +162,7 @@ class _Picker extends StatelessWidget {
         const SizedBox(height: 8),
         const Center(
           child: Text('No pressure, ever. Not feeling it? Just close this.',
-              style: TextStyle(color: MilesColors.faint, fontSize: 12)),
+              style: TextStyle(color: MilesColors.faint, fontSize: 12),),
         ),
       ],
     );
@@ -190,10 +189,10 @@ class _MoodTile extends StatelessWidget {
                   style: const TextStyle(
                       color: MilesColors.cream50,
                       fontSize: 16,
-                      fontWeight: FontWeight.w500)),
+                      fontWeight: FontWeight.w500,),),
             ),
             const Icon(Icons.send_rounded,
-                size: 18, color: MilesColors.blush),
+                size: 18, color: MilesColors.blush,),
           ],
         ),
       ),
@@ -224,22 +223,22 @@ class _Waiting extends StatelessWidget {
                 gradient: RadialGradient(colors: [
                   MilesColors.surface2,
                   MilesColors.nightDeep,
-                ]),
+                ],),
               ),
               child: Center(
-                  child: Text(m.emoji, style: const TextStyle(fontSize: 48))),
+                  child: Text(m.emoji, style: const TextStyle(fontSize: 48)),),
             ),
           ),
         ),
         const SizedBox(height: 32),
         Center(
           child: Text('You let them know 💫',
-              style: Theme.of(context).textTheme.displaySmall),
+              style: Theme.of(context).textTheme.displaySmall,),
         ),
         const SizedBox(height: 10),
         const Center(
           child: Text(
-            'If they\'re feeling it too, you\'ll both see it — softly, at the '
+            "If they're feeling it too, you'll both see it — softly, at the "
             'same time. Until then, this stays just yours.',
             textAlign: TextAlign.center,
             style: TextStyle(color: MilesColors.taupe, height: 1.6),
@@ -269,7 +268,6 @@ class _MutualMoment extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             BreathingGlow(
-              color: MilesColors.blush,
               period: const Duration(milliseconds: 3200),
               child: Container(
                 width: 168,
@@ -280,10 +278,10 @@ class _MutualMoment extends StatelessWidget {
                     MilesColors.emberSoft,
                     MilesColors.blush,
                     MilesColors.nightDeep,
-                  ]),
+                  ],),
                 ),
                 child: const Center(
-                    child: Text('💞', style: TextStyle(fontSize: 64))),
+                    child: Text('💞', style: TextStyle(fontSize: 64)),),
               ),
             )
                 .animate()
@@ -291,12 +289,12 @@ class _MutualMoment extends StatelessWidget {
                     begin: const Offset(0.7, 0.7),
                     end: const Offset(1, 1),
                     duration: 700.ms,
-                    curve: Curves.easeOutBack)
+                    curve: Curves.easeOutBack,)
                 .shimmer(delay: 400.ms, duration: 1400.ms, color: MilesColors.starlight),
             const SizedBox(height: 30),
-            Text('You\'re both feeling it tonight',
+            Text("You're both feeling it tonight",
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.displaySmall)
+                    style: Theme.of(context).textTheme.displaySmall,)
                 .animate()
                 .fadeIn(delay: 300.ms, duration: 800.ms),
             const SizedBox(height: 14),
@@ -311,8 +309,8 @@ class _MutualMoment extends StatelessWidget {
               ),
             ).animate().fadeIn(delay: 600.ms, duration: 900.ms),
             const SizedBox(height: 18),
-            const Text('Maybe it\'s a good night for a call 🌙',
-                style: TextStyle(color: MilesColors.taupe)),
+            const Text("Maybe it's a good night for a call 🌙",
+                style: TextStyle(color: MilesColors.taupe),),
           ],
         ),
       ),
@@ -325,11 +323,11 @@ class _MutualMoment extends StatelessWidget {
         Text(m.emoji, style: const TextStyle(fontSize: 22)),
         const SizedBox(width: 14),
         Text(who,
-            style: const TextStyle(color: MilesColors.faint, fontSize: 12)),
+            style: const TextStyle(color: MilesColors.faint, fontSize: 12),),
         const Spacer(),
         Text(m.label,
             style: const TextStyle(
-                color: MilesColors.cream50, fontWeight: FontWeight.w500)),
+                color: MilesColors.cream50, fontWeight: FontWeight.w500,),),
       ],
     );
   }

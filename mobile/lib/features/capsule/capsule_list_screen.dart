@@ -38,7 +38,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
     }
     _coupleId = couple.id;
     _channel = ManagedSubscription.start(
-        () => CapsuleRepository.subscribe(couple.id, _load));
+        () => CapsuleRepository.subscribe(couple.id, _load),);
     await _load();
   }
 
@@ -97,7 +97,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
                         capsule: _capsules[i],
                         onTap: () async {
                           await context.push('/app/capsule/view',
-                              extra: _capsules[i]);
+                              extra: _capsules[i],);
                           _load();
                         },
                       ),
@@ -109,7 +109,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
 String unlockModeLabel(Capsule c) {
   switch (c.unlockMode) {
     case CapsuleUnlockMode.proximity:
-      return 'Opens when you\'re together';
+      return "Opens when you're together";
     case CapsuleUnlockMode.date:
       return 'Opens on a chosen date';
     case CapsuleUnlockMode.both:
@@ -161,20 +161,20 @@ class _CapsuleCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(capsule.title,
-                      style: Theme.of(context).textTheme.titleLarge),
+                      style: Theme.of(context).textTheme.titleLarge,),
                   const SizedBox(height: 4),
                   if (opened)
                     Text('Opened — relive it 💫',
-                        style: TextStyle(color: accent, fontSize: 12.5))
+                        style: TextStyle(color: accent, fontSize: 12.5),)
                   else if (ready)
                     Text('Ready to open ✨',
-                        style: TextStyle(color: accent, fontSize: 12.5))
+                        style: TextStyle(color: accent, fontSize: 12.5),)
                   else if (capsule.unlockDate != null &&
                       capsule.unlockDate!.isAfter(DateTime.now()))
                     _CountdownText(target: capsule.unlockDate!, color: accent)
                   else
                     Text(unlockModeLabel(capsule),
-                        style: TextStyle(color: accent, fontSize: 12.5)),
+                        style: TextStyle(color: accent, fontSize: 12.5),),
                 ],
               ),
             ),
@@ -200,11 +200,11 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 16),
             Text('Start a capsule',
                 style: Theme.of(context).textTheme.displaySmall,
-                textAlign: TextAlign.center),
+                textAlign: TextAlign.center,),
             const SizedBox(height: 8),
             const Text(
               'Fill it with notes, photos, and voice memos over the months '
-              'apart. It stays sealed until the day you\'re back together.',
+              "apart. It stays sealed until the day you're back together.",
               textAlign: TextAlign.center,
               style: TextStyle(color: MilesColors.taupe, height: 1.5),
             ),
@@ -256,7 +256,7 @@ class _CountdownTextState extends State<_CountdownText> {
   @override
   Widget build(BuildContext context) {
     return Text(_fmt(),
-        style: TextStyle(color: widget.color, fontSize: 12.5));
+        style: TextStyle(color: widget.color, fontSize: 12.5),);
   }
 }
 
@@ -269,7 +269,7 @@ class _Centered extends StatelessWidget {
           padding: const EdgeInsets.all(32),
           child: Text(text,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: MilesColors.taupe)),
+              style: const TextStyle(color: MilesColors.taupe),),
         ),
       );
 }

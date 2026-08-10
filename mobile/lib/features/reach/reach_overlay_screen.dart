@@ -14,9 +14,7 @@ import 'package:vibration/vibration.dart';
 /// manifest already declares USE_FULL_SCREEN_INTENT + WAKE_LOCK for that.
 class ReachOverlayScreen extends StatefulWidget {
   const ReachOverlayScreen({
-    super.key,
-    required this.partnerName,
-    required this.eventId,
+    required this.partnerName, required this.eventId, super.key,
   });
 
   final String partnerName;
@@ -58,20 +56,19 @@ class _ReachOverlayScreenState extends State<ReachOverlayScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                BreathingGlow(
-                  color: MilesColors.blush,
-                  period: const Duration(milliseconds: 1100),
-                  child: const Text('💗', style: TextStyle(fontSize: 96)),
+                const BreathingGlow(
+                  period: Duration(milliseconds: 1100),
+                  child: Text('💗', style: TextStyle(fontSize: 96)),
                 ),
                 const SizedBox(height: 32),
                 Text('${widget.partnerName} is',
                         style: const TextStyle(
-                            color: MilesColors.taupe, fontSize: 16))
+                            color: MilesColors.taupe, fontSize: 16,),)
                     .animate()
                     .fadeIn(duration: 500.ms),
                 Text('reaching for you 💕',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.displaySmall)
+                        style: Theme.of(context).textTheme.displaySmall,)
                     .animate()
                     .fadeIn(delay: 150.ms, duration: 600.ms),
                 const SizedBox(height: 48),
@@ -81,7 +78,7 @@ class _ReachOverlayScreenState extends State<ReachOverlayScreen> {
                     width: double.infinity,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                          backgroundColor: MilesColors.blush),
+                          backgroundColor: MilesColors.blush,),
                       onPressed: _acknowledge,
                       child: const Text("I'm here 💕"),
                     ),
@@ -90,7 +87,7 @@ class _ReachOverlayScreenState extends State<ReachOverlayScreen> {
                 TextButton(
                   onPressed: () => Navigator.of(context).maybePop(),
                   child: const Text('Dismiss',
-                      style: TextStyle(color: MilesColors.faint)),
+                      style: TextStyle(color: MilesColors.faint),),
                 ),
               ],
             ),

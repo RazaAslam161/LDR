@@ -6,21 +6,21 @@ import 'package:miles/core/providers.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/router.dart';
-import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
+import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
-import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
+import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/home/home_screen.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
-import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/shell/app_drawer.dart';
+import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Bottom-nav shell. Tab 0 is Home (the landing screen). The Closer tab is only
@@ -307,6 +307,6 @@ class _AppShellState extends ConsumerState<AppShell>
     context.push('/app/rapid-camera', extra: {
       'coupleId': couple.id,
       'myUid': SupabaseService.currentUserId ?? '',
-    });
+    },);
   }
 }

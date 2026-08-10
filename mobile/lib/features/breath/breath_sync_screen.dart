@@ -7,8 +7,8 @@ import 'package:miles/core/realtime_service.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A shared breathing pacer. When one partner taps "Begin", both phones
 /// pulse in unison across the world, following the 4-7-8 relaxation breath.
@@ -68,7 +68,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
             }
           },
         )
-        .subscribe());
+        .subscribe(),);
   }
 
   void _onPartnerStartedCycle(int startedAtMs) {

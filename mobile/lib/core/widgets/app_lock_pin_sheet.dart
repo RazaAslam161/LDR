@@ -95,7 +95,7 @@ class _PinSheetState extends State<_PinSheet> {
               style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 17,
-                  fontWeight: FontWeight.w600)),
+                  fontWeight: FontWeight.w600,),),
           const SizedBox(height: 6),
           Text(
             _message ??
@@ -108,7 +108,7 @@ class _PinSheetState extends State<_PinSheet> {
                         _message == "Those didn't match — try again"
                     ? MilesColors.blush
                     : MilesColors.taupe,
-                fontSize: 13),
+                fontSize: 13,),
           ),
           const SizedBox(height: 16),
           PinPad(
@@ -120,7 +120,7 @@ class _PinSheetState extends State<_PinSheet> {
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel',
-                style: TextStyle(color: MilesColors.taupe)),
+                style: TextStyle(color: MilesColors.taupe),),
           ),
         ],
       ),

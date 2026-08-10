@@ -11,13 +11,7 @@ class CycleSettings {
     this.shareWithPartner = true,
     this.trackingEnabled = false,
     this.onPeriodNow = false,
-  });
-
-  final int avgCycleLength;
-  final int avgPeriodLength;
-  final bool shareWithPartner;
-  final bool trackingEnabled;
-  final bool onPeriodNow; // live "on my period" flag (mirrors latest event)
+  }); // live "on my period" flag (mirrors latest event)
 
   factory CycleSettings.fromJson(Map<String, dynamic> j) => CycleSettings(
         avgCycleLength: JsonUtils.parseInt(j['avg_cycle_length'], fallback: 28),
@@ -27,6 +21,12 @@ class CycleSettings {
         trackingEnabled: (j['tracking_enabled'] as bool?) ?? false,
         onPeriodNow: (j['on_period_now'] as bool?) ?? false,
       );
+
+  final int avgCycleLength;
+  final int avgPeriodLength;
+  final bool shareWithPartner;
+  final bool trackingEnabled;
+  final bool onPeriodNow;
 
   CycleSettings copyWith({
     int? cycle,
@@ -53,19 +53,19 @@ class CycleEvent {
     required this.createdAt,
   });
 
-  final String id;
-  final String type; // 'period_start' | 'period_end'
-  final DateTime eventDate;
-  final DateTime createdAt;
-
-  bool get isStart => type == 'period_start';
-
   factory CycleEvent.fromJson(Map<String, dynamic> j) => CycleEvent(
         id: JsonUtils.parseString(j['id']),
         type: JsonUtils.parseString(j['type'], fallback: 'period_start'),
         eventDate: JsonUtils.parseDate(j['event_date']),
         createdAt: JsonUtils.parseDate(j['created_at']),
       );
+
+  final String id;
+  final String type; // 'period_start' | 'period_end'
+  final DateTime eventDate;
+  final DateTime createdAt;
+
+  bool get isStart => type == 'period_start';
 }
 
 /// A start→end period span (end is null while the period is ongoing).
@@ -127,14 +127,14 @@ class CyclePrediction {
 
   /// Build from logged period-start dates + settings.
   static CyclePrediction compute(
-      List<DateTime> starts, CycleSettings settings) {
+      List<DateTime> starts, CycleSettings settings,) {
     if (starts.isEmpty) return const CyclePrediction();
     final sorted = [...starts]..sort();
     final last = DateUtils.dateOnly(sorted.last);
     final today = DateUtils.dateOnly(DateTime.now());
 
     // Average gap between starts if we have ≥2 cycles, else the setting.
-    int cycleLen = settings.avgCycleLength;
+    var cycleLen = settings.avgCycleLength;
     if (sorted.length >= 2) {
       var total = 0;
       var n = 0;

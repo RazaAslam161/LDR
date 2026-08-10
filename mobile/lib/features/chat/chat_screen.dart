@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -19,24 +18,24 @@ import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
-import 'package:miles/core/widgets/animated_mood.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/call/call_controller.dart';
-import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
-import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_input_bar.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
-import 'package:miles/features/chat/selectable_message.dart';
 import 'package:miles/features/chat/chat_theme.dart';
 import 'package:miles/features/chat/chat_theme_controller.dart';
 import 'package:miles/features/chat/chat_theme_picker.dart';
 import 'package:miles/features/chat/giphy_picker.dart';
 import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/chat/mood_selector.dart';
+import 'package:miles/features/chat/selectable_message.dart';
 import 'package:miles/features/chat/typing_indicator.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:path_provider/path_provider.dart';
@@ -121,9 +120,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         senderId: myUid,
         createdAt: now,
         body: body,
-        kind: 'text',
         replyToId: replyId,
-      ), source: 'local_send');
+      ), source: 'local_send',);
     }
     _moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
       'id': id,
@@ -131,7 +129,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       'body': body,
       'createdAt': now.toUtc().toIso8601String(),
       'replyToId': replyId,
-    });
+    },);
     try {
       await ChatRepository.sendText(coupleId, body, id: id, replyToId: replyId);
     } catch (_) {
@@ -157,7 +155,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       body: kind == 'text' ? payload['body']?.toString() : null,
       imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
       replyToId: payload['replyToId']?.toString(),
-    ), source: 'broadcast');
+    ), source: 'broadcast',);
   }
 
   void _sendGifBurst(String url) {
@@ -259,7 +257,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       if (i >= 0) {
         if (_messages[i].sendStatus != s.status) {
           setState(() =>
-              _messages[i] = _messages[i].copyWith(sendStatus: s.status));
+              _messages[i] = _messages[i].copyWith(sendStatus: s.status),);
         }
         continue;
       }
@@ -271,7 +269,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         localPath: s.file.path,
         sendStatus: s.status,
         replyToId: s.replyToId,
-      ), source: 'send_queue');
+      ), source: 'send_queue',);
     }
 
     // Anything the queue has finished with is either reconciled by the DB echo
@@ -283,7 +281,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           m.sendStatus == SendStatus.sending &&
           !live.contains(m.id)) {
         setState(() =>
-            _messages[i] = _messages[i].copyWith(sendStatus: SendStatus.sent));
+            _messages[i] = _messages[i].copyWith(sendStatus: SendStatus.sent),);
       }
     }
   }
@@ -379,7 +377,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'read_seq': r?.readSeq,
           'prev_delivered_seq': prev?.deliveredSeq,
           'prev_read_seq': prev?.readSeq,
-        });
+        },);
     if (r != null && mounted) setState(() => _partnerReceipt = r);
   }
 
@@ -402,7 +400,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // We have now genuinely received them; say so, and if the chat is open
       // they are also read.
       unawaited(
-          ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger));
+          ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger),);
       _ackRead(trigger);
     } catch (e) {
       debugPrint('[chat] catch-up failed: $e');
@@ -416,7 +414,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final attempt = ++_joinAttempt;
     try {
       final client = SupabaseService.client;
-      final old1 = _channel, old2 = _moodChannel;
+      final old1 = _channel;
+      final old2 = _moodChannel;
       _channel = null;
       _moodChannel = null;
       if (old1 != null) {
@@ -457,7 +456,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'status': status.name,
           'error_class': err?.runtimeType.toString(),
           'attempt_n': attempt,
-        });
+        },);
       });
       // Let other screens (e.g. the rapid camera) push the fast-path on THIS
       // live channel instead of creating a duplicate-topic one.
@@ -492,7 +491,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       'read_seq': r.readSeq,
                       'prev_delivered_seq': prev?.deliveredSeq,
                       'prev_read_seq': prev?.readSeq,
-                    });
+                    },);
                 setState(() => _partnerReceipt = r);
               },
             )
@@ -505,7 +504,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             'error_class': err?.runtimeType.toString(),
             'partner_id_known': true,
             'attempt_n': attempt,
-          });
+          },);
         });
       } else {
         // No partner id means no receipts channel is created at all, so the
@@ -516,7 +515,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'status': 'not_subscribed',
           'partner_id_known': false,
           'attempt_n': attempt,
-        });
+        },);
       }
 
       PresenceService.setChatLastRead(id);
@@ -597,7 +596,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'is_duplicate': isDuplicate,
           'chat_mounted': mounted,
           'max_seq_after': _maxSeq,
-        });
+        },);
     if (isDuplicate) {
       // Already shown (optimistic / broadcast). When the authoritative DB row
       // arrives, adopt its SERVER timestamp + paths so ordering is correct
@@ -614,7 +613,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             'seq': m.seq,
             'source': source,
             'was_optimistic': wasOptimistic,
-          });
+          },);
         }
       }
       trace();
@@ -647,7 +646,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _videoCall() async {
     // In-app WebRTC call. The shell listens for the state change and pushes the
     // call screen; the partner's app rings if it's open.
-    await ref.read(callControllerProvider).startCall(video: true);
+    await ref.read(callControllerProvider).startCall();
   }
 
   Future<void> _voiceCall() async {
@@ -675,7 +674,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           _scroll.position.minScrollExtent; // 0 = newest (reverse:true)
       if (animate) {
         _scroll.animateTo(target,
-            duration: const Duration(milliseconds: 240), curve: Curves.easeOut);
+            duration: const Duration(milliseconds: 240), curve: Curves.easeOut,);
       } else {
         _scroll.jumpTo(target);
       }
@@ -758,7 +757,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         'partner_delivered_seq': _partnerReceipt?.deliveredSeq,
         'partner_read_seq': _partnerReceipt?.readSeq,
         'status': st.name,
-      });
+      },);
     }
     return st;
   }
@@ -791,13 +790,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       }
     } else if (m.kind == 'video' && m.videoPath != null) {
       success = await SaveMediaService.saveVideoToVault(
-          path: m.videoPath!, senderName: sender);
+          path: m.videoPath!, senderName: sender,);
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-            success ? 'Saved to your vault 🔒' : 'Could not save to vault'),
+            success ? 'Saved to your vault 🔒' : 'Could not save to vault',),
         backgroundColor: success ? MilesColors.sage : MilesColors.ember,
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
@@ -856,7 +855,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // rather than queueing a second pass over the same messages.
     final pending = _selection.deleteAll(everyone
         ? ChatRepository.deleteForEveryone
-        : ChatRepository.deleteForMe);
+        : ChatRepository.deleteForMe,);
     setState(() {});
     final failed = await pending;
     if (!mounted) return;
@@ -867,8 +866,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         content: Text(failed.length == 1
             ? '1 message could not be deleted — still selected.'
             : '${failed.length} messages could not be deleted — still '
-                'selected.'),
-      ));
+                'selected.',),
+      ),);
     }
   }
 
@@ -901,14 +900,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 style: const TextStyle(
                     color: MilesColors.cream50,
                     fontSize: 16,
-                    fontWeight: FontWeight.w600),
+                    fontWeight: FontWeight.w600,),
               ),
             ),
             ListTile(
               leading:
                   const Icon(Icons.visibility_off, color: MilesColors.taupe),
               title: const Text('Delete for me',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               onTap: () => Navigator.pop(ctx, 'me'),
             ),
             if (mineOnly)
@@ -916,13 +915,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 leading:
                     const Icon(Icons.delete_outline, color: Color(0xFFB83A57)),
                 title: const Text('Delete for everyone',
-                    style: TextStyle(color: Color(0xFFB83A57))),
+                    style: TextStyle(color: Color(0xFFB83A57)),),
                 onTap: () => Navigator.pop(ctx, 'everyone'),
               ),
             ListTile(
               leading: const Icon(Icons.close, color: MilesColors.faint),
               title: const Text('Cancel',
-                  style: TextStyle(color: MilesColors.taupe)),
+                  style: TextStyle(color: MilesColors.taupe),),
               onTap: () => Navigator.pop(ctx),
             ),
           ],
@@ -949,12 +948,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: const Text('Cancel'),),
           FilledButton(
               style: FilledButton.styleFrom(
-                  backgroundColor: MilesColors.ember),
+                  backgroundColor: MilesColors.ember,),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete for everyone')),
+              child: const Text('Delete for everyone'),),
         ],
       ),
     );
@@ -975,7 +974,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not clear the conversation.')));
+            const SnackBar(content: Text('Could not clear the conversation.')),);
       }
     }
   }
@@ -1010,7 +1009,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       PresenceService.setTypingInChat(id, inChat: false);
     }
     final client = SupabaseService.client;
-    final c1 = _channel, c2 = _moodChannel;
+    final c1 = _channel;
+    final c2 = _moodChannel;
     if (ChatBroadcastService.active == c2) ChatBroadcastService.active = null;
     if (c1 != null) client.removeChannel(c1);
     if (c2 != null) client.removeChannel(c2);
@@ -1069,7 +1069,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         style: const TextStyle(
                             color: MilesColors.cream50,
                             fontSize: 18,
-                            fontWeight: FontWeight.w600)),
+                            fontWeight: FontWeight.w600,),),
                   ),
                   if (partnerMood != null) ...[
                     const SizedBox(width: 8),
@@ -1119,7 +1119,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   PopupMenuItem(value: 'gif', child: Text('Fling a GIF 🎞️')),
                   PopupMenuItem(value: 'theme', child: Text('Chat theme')),
                   PopupMenuItem(
-                      value: 'clear', child: Text('Clear conversation')),
+                      value: 'clear', child: Text('Clear conversation'),),
                 ],
               ),
           ],
@@ -1129,7 +1129,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             : Stack(
                 children: [
                   Positioned.fill(
-                      child: _ChatBg(theme: chatTheme, bgUrl: chatBgUrl)),
+                      child: _ChatBg(theme: chatTheme, bgUrl: chatBgUrl),),
                   Column(
                     children: [
                       // Only while selecting. It says how many, and — more
@@ -1142,12 +1142,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             bottom: false,
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 6),
+                                  horizontal: 8, vertical: 6,),
                               child: Row(
                                 children: [
                                   IconButton(
                                     icon: const Icon(Icons.close,
-                                        color: MilesColors.cream50),
+                                        color: MilesColors.cream50,),
                                     onPressed: _clearSelection,
                                   ),
                                   Text(
@@ -1155,14 +1155,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                     style: const TextStyle(
                                         color: MilesColors.cream50,
                                         fontSize: 15,
-                                        fontWeight: FontWeight.w600),
+                                        fontWeight: FontWeight.w600,),
                                   ),
                                   const Spacer(),
                                   if (one != null) ...[
                                     IconButton(
                                       tooltip: 'Reply',
                                       icon: const Icon(Icons.reply,
-                                          color: MilesColors.emberSoft),
+                                          color: MilesColors.emberSoft,),
                                       onPressed: () {
                                         _clearSelection();
                                         _startReply(one);
@@ -1173,7 +1173,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                       IconButton(
                                         tooltip: 'Save to gallery',
                                         icon: const Icon(Icons.download_rounded,
-                                            color: MilesColors.cream50),
+                                            color: MilesColors.cream50,),
                                         onPressed: () {
                                           _clearSelection();
                                           _saveMessageMedia(one);
@@ -1183,7 +1183,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   IconButton(
                                     tooltip: 'Delete selected',
                                     icon: const Icon(Icons.delete_outline,
-                                        color: Color(0xFFB83A57)),
+                                        color: Color(0xFFB83A57),),
                                     // Quiet while a batch is running: the
                                     // deletes are sequential and a second tap
                                     // would sit behind all of them.
@@ -1207,17 +1207,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                         .where((m) => !m.isHiddenFor(uid))
                                         .where((m) =>
                                             cleared == null ||
-                                            m.createdAt.isAfter(cleared))
+                                            m.createdAt.isAfter(cleared),)
                                         .toList();
-                                    if (visible.isEmpty)
+                                    if (visible.isEmpty) {
                                       return const _EmptyChat();
+                                    }
                                     return Stack(
                                       children: [
                                         ListView.builder(
                                           controller: _scroll,
                                           reverse: true,
                                           padding: const EdgeInsets.fromLTRB(
-                                              16, 12, 16, 12),
+                                              16, 12, 16, 12,),
                                           itemCount: visible.length,
                                           itemBuilder: (_, i) {
                                             final m = visible[i];
@@ -1228,14 +1229,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                 i == visible.length - 1 ||
                                                     !DateUtils.isSameDay(
                                                         visible[i + 1].createdAt,
-                                                        m.createdAt);
+                                                        m.createdAt,);
                                             return Dismissible(
                                                 key: ValueKey('rpl-${m.id}'),
                                                 direction:
                                                     DismissDirection.startToEnd,
                                                 dismissThresholds: const {
                                                   DismissDirection.startToEnd:
-                                                      0.22
+                                                      0.22,
                                                 },
                                                 confirmDismiss: (_) async {
                                                   _startReply(m); // slide → reply
@@ -1248,7 +1249,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                     alignment:
                                                         Alignment.centerLeft,
                                                     child: Icon(Icons.reply,
-                                                        color: MilesColors.blush),
+                                                        color: MilesColors.blush,),
                                                   ),
                                                 ),
                                                 child: SelectableMessage(
@@ -1271,10 +1272,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                     tick: _receiptTick,
                                                     status: m.isMine(uid)
                                                         ? () => _statusFor(
-                                                            m, presence)
+                                                            m, presence,)
                                                         : null,
                                                   ),
-                                                ));
+                                                ),);
                                           },
                                         ),
                                         if (_hasNewMessage)
@@ -1286,7 +1287,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                               child: _NewMessageChip(
                                                 onTap: () {
                                                   setState(() =>
-                                                      _hasNewMessage = false);
+                                                      _hasNewMessage = false,);
                                                   _scrollToNewest();
                                                 },
                                               ),
@@ -1301,7 +1302,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                           ),
                                       ],
                                     );
-                                  }),
+                                  },),
                       ),
                       // The "<name> is here" strip used to live here. Removed: it
                       // duplicated the global presence avatar, and it read from
@@ -1317,9 +1318,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         onSendText: (t) => _sendTextFast(couple.id, t),
                         onSendImage: (f) async => _sendImageFast(couple.id, f),
                         onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
-                            replyToId: _takeReplyId()),
+                            replyToId: _takeReplyId(),),
                         onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
-                            replyToId: _takeReplyId()),
+                            replyToId: _takeReplyId(),),
                         onFlingGif: _flingGifFile,
                         onPickGif: _attachGif,
                         onClearConversation: _clearOrDeleteSelected,
@@ -1344,7 +1345,7 @@ class _ChatSubtitle extends StatelessWidget {
     final p = presence;
     if (p == null) {
       return const Text('together, even from here',
-          style: TextStyle(fontSize: 11, color: MilesColors.taupe));
+          style: TextStyle(fontSize: 11, color: MilesColors.taupe),);
     }
     // Only show typing if the partner is genuinely online — prevents a stale
     // typing flag (left over after they left) from showing "typing…" forever.
@@ -1353,7 +1354,7 @@ class _ChatSubtitle extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('typing',
-              style: TextStyle(fontSize: 11, color: MilesColors.sage)),
+              style: TextStyle(fontSize: 11, color: MilesColors.sage),),
           SizedBox(width: 6),
           TypingIndicator(),
         ],
@@ -1368,7 +1369,7 @@ class _ChatSubtitle extends StatelessWidget {
           _Dot(color: MilesColors.sage),
           SizedBox(width: 6),
           Text('Online',
-              style: TextStyle(fontSize: 11, color: MilesColors.sage)),
+              style: TextStyle(fontSize: 11, color: MilesColors.sage),),
         ],
       );
     }
@@ -1389,7 +1390,7 @@ class _Dot extends StatelessWidget {
   Widget build(BuildContext context) => Container(
       width: 7,
       height: 7,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle));
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),);
 }
 
 class _Bubble extends StatelessWidget {
@@ -1464,19 +1465,17 @@ class _Bubble extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (repliedTo != null) _ReplyPreview(message: repliedTo!),
-                message.deletedForEveryone
-                    ? Text(
+                if (message.deletedForEveryone) Text(
                         'This message was deleted',
                         style: TextStyle(
                             color: theme.text,
                             fontStyle: FontStyle.italic,
-                            fontSize: 14),
-                      )
-                    : _Content(
+                            fontSize: 14,),
+                      ) else _Content(
                         message: message,
                         player: player,
                         textColor: theme.text,
-                        senderName: senderName),
+                        senderName: senderName,),
               ],
             ),
           ),
@@ -1541,10 +1540,9 @@ class _ActiveBurst {
 /// on both phones in real time (sent over an ephemeral broadcast channel).
 class _BurstAnimation extends StatefulWidget {
   const _BurstAnimation({
-    super.key,
+    required this.onDone, super.key,
     this.mood,
     this.gifUrl,
-    required this.onDone,
   });
   final MoodData? mood;
   final String? gifUrl;
@@ -1662,7 +1660,7 @@ class _ReplyPreview extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(
-            color: MilesColors.cream50, fontSize: 12, height: 1.2),
+            color: MilesColors.cream50, fontSize: 12, height: 1.2,),
       ),
     );
   }
@@ -1692,7 +1690,7 @@ class _Content extends StatelessWidget {
           return const Padding(
             padding: EdgeInsets.all(8),
             child: Text('📷 image unavailable',
-                style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           );
         }
         // Optimistic: render the local file instantly while it uploads; the
@@ -1702,7 +1700,7 @@ class _Content extends StatelessWidget {
                 width: 220,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) =>
-                    const SizedBox(width: 220, height: 140))
+                    const SizedBox(width: 220, height: 140),)
             : Image.network(
                 url!,
                 width: 220,
@@ -1724,14 +1722,14 @@ class _Content extends StatelessWidget {
                   padding: EdgeInsets.all(12),
                   child: Text('📷 could not load',
                       style:
-                          TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                          TextStyle(color: MilesColors.cream50, fontSize: 14),),
                 ),
               );
         return GestureDetector(
           onTap: url == null
               ? null
               : () => MediaViewer.open(context, url,
-                  heroTag: url, senderName: senderName),
+                  heroTag: url, senderName: senderName,),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: Stack(
@@ -1746,7 +1744,7 @@ class _Content extends StatelessWidget {
                           width: 22,
                           height: 22,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2, color: Colors.white,),
                         ),
                       ),
                     ),
@@ -1763,24 +1761,24 @@ class _Content extends StatelessWidget {
                       behavior: HitTestBehavior.opaque,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
+                            horizontal: 10, vertical: 6,),
                         decoration: BoxDecoration(
                           color: const Color(0xCC1A0E12),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                              color: const Color(0xFFE0564B), width: 1),
+                              color: const Color(0xFFE0564B),),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.refresh_rounded,
-                                color: Color(0xFFE0564B), size: 16),
+                                color: Color(0xFFE0564B), size: 16,),
                             SizedBox(width: 5),
                             Text('Retry',
                                 style: TextStyle(
                                     color: Color(0xFFE0564B),
                                     fontSize: 12,
-                                    fontWeight: FontWeight.w600)),
+                                    fontWeight: FontWeight.w600,),),
                           ],
                         ),
                       ),
@@ -1798,7 +1796,7 @@ class _Content extends StatelessWidget {
                       child: SaveMediaButton(
                         size: 18,
                         onSave: () => SaveMediaService.savePhotoToVault(
-                            url: url, senderName: senderName),
+                            url: url, senderName: senderName,),
                       ),
                     ),
                   ),
@@ -1812,11 +1810,11 @@ class _Content extends StatelessWidget {
           return const Padding(
             padding: EdgeInsets.all(8),
             child: Text('🎙️ voice unavailable',
-                style: TextStyle(color: MilesColors.cream50, fontSize: 14)),
+                style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           );
         }
         return _VoicePlayer(
-            url: url, player: player, senderName: senderName);
+            url: url, player: player, senderName: senderName,);
       case 'video':
         return _VideoBubble(path: m.videoPath, senderName: senderName);
       default:
@@ -1879,7 +1877,7 @@ class _ChatBg extends StatelessWidget {
 
 class _VoicePlayer extends StatefulWidget {
   const _VoicePlayer(
-      {required this.url, required this.player, required this.senderName});
+      {required this.url, required this.player, required this.senderName,});
   final String url;
   final AudioPlayer player;
   final String senderName;
@@ -1970,7 +1968,7 @@ class _VoicePlayerState extends State<_VoicePlayer> {
           size: 16,
           color: MilesColors.taupe,
           onSave: () => SaveMediaService.saveVoiceToVault(
-              url: widget.url, senderName: widget.senderName),
+              url: widget.url, senderName: widget.senderName,),
         ),
       ],
     );
@@ -2008,7 +2006,7 @@ class _NewMessageChip extends StatelessWidget {
               Icon(Icons.arrow_downward, size: 16, color: MilesColors.cream50),
               SizedBox(width: 6),
               Text('New message',
-                  style: TextStyle(color: MilesColors.cream50, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.cream50, fontSize: 12),),
             ],
           ),
         ),
@@ -2044,7 +2042,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
           builder: (_) => _FullScreenVideo(
-              url: url, videoPath: widget.path, senderName: widget.senderName)),
+              url: url, videoPath: widget.path, senderName: widget.senderName,),),
     );
   }
 
@@ -2066,13 +2064,13 @@ class _VideoBubbleState extends State<_VideoBubble> {
                   ? const SizedBox(
                       width: 24,
                       height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2),)
                   : Container(
                       padding: const EdgeInsets.all(10),
                       decoration: const BoxDecoration(
-                          shape: BoxShape.circle, color: MilesColors.blush),
+                          shape: BoxShape.circle, color: MilesColors.blush,),
                       child: const Icon(Icons.play_arrow,
-                          color: MilesColors.cream50, size: 30),
+                          color: MilesColors.cream50, size: 30,),
                     ),
             ),
           ),
@@ -2088,7 +2086,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
               child: SaveMediaButton(
                 size: 18,
                 onSave: () => SaveMediaService.saveVideoToVault(
-                    path: widget.path!, senderName: widget.senderName),
+                    path: widget.path!, senderName: widget.senderName,),
               ),
             ),
           ),
@@ -2101,7 +2099,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
 /// screenshotted / screen-recorded / shown in the recents preview.
 class _FullScreenVideo extends StatefulWidget {
   const _FullScreenVideo(
-      {required this.url, this.videoPath, this.senderName = 'a message'});
+      {required this.url, this.videoPath, this.senderName = 'a message',});
   final String url;
   final String? videoPath;
   final String senderName;
@@ -2138,7 +2136,6 @@ class _FullScreenVideoState extends State<_FullScreenVideo> {
       _chewie = ChewieController(
         videoPlayerController: vp,
         autoPlay: true,
-        looping: false,
         aspectRatio: vp.value.aspectRatio == 0 ? 16 / 9 : vp.value.aspectRatio,
       );
     });
@@ -2168,7 +2165,7 @@ class _FullScreenVideoState extends State<_FullScreenVideo> {
                   size: 24,
                   color: Colors.white,
                   onSave: () => SaveMediaService.saveVideoToVault(
-                      path: widget.videoPath!, senderName: widget.senderName),
+                      path: widget.videoPath!, senderName: widget.senderName,),
                 ),
               ),
             ),
@@ -2197,7 +2194,7 @@ class _EmptyChat extends StatelessWidget {
             const Text('💌', style: TextStyle(fontSize: 44)),
             const SizedBox(height: 16),
             Text('Say something sweet',
-                style: Theme.of(context).textTheme.displaySmall),
+                style: Theme.of(context).textTheme.displaySmall,),
             const SizedBox(height: 8),
             const Text(
               'This is your private space — just the two of you. '

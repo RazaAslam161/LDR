@@ -31,7 +31,7 @@ void main() {
               child: GestureDetector(
                 onTap: onInner,
                 child: Container(
-                    width: 200, height: 200, color: const Color(0xFF333333)),
+                    width: 200, height: 200, color: const Color(0xFF333333),),
               ),
             ),
           ),
@@ -44,7 +44,7 @@ void main() {
       selecting: false,
       onToggle: () => fired.add('toggle'),
       onInner: () => fired.add('open'),
-    ));
+    ),);
 
     await t.tapAt(t.getCenter(find.byType(SelectableMessage)));
     await t.pump();
@@ -62,13 +62,13 @@ void main() {
       selecting: true,
       onToggle: () => fired.add('toggle'),
       onInner: () => fired.add('open'),
-    ));
+    ),);
 
     await t.tapAt(t.getCenter(find.byType(SelectableMessage)));
     await t.pump();
 
     expect(fired, ['toggle'],
-        reason: 'a tap during selection must pick, and must not open');
+        reason: 'a tap during selection must pick, and must not open',);
   });
 
   testWidgets('long-press starts a selection from a media bubble', (t) async {
@@ -77,7 +77,7 @@ void main() {
       selecting: false,
       onToggle: () => fired.add('toggle'),
       onInner: () => fired.add('open'),
-    ));
+    ),);
 
     await t.longPressAt(t.getCenter(find.byType(SelectableMessage)));
     await t.pump();
@@ -92,7 +92,7 @@ void main() {
         .widgetList<ColoredBox>(find.descendant(
           of: find.byType(SelectableMessage),
           matching: find.byType(ColoredBox),
-        ))
+        ),)
         .first
         .color;
 
@@ -103,7 +103,7 @@ void main() {
         onToggle: () {},
         child: Container(width: 10, height: 10, color: const Color(0xFF222222)),
       ),
-    ));
+    ),);
     final unselected = colorOf(t);
 
     await t.pumpWidget(MaterialApp(
@@ -113,7 +113,7 @@ void main() {
         onToggle: () {},
         child: Container(width: 10, height: 10, color: const Color(0xFF222222)),
       ),
-    ));
+    ),);
 
     expect(colorOf(t), isNot(unselected));
     expect(unselected.a, 0, reason: 'an unselected bubble must not be tinted');

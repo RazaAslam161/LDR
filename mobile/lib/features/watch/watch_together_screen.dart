@@ -43,10 +43,10 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       _channel = ManagedSubscription.start(() => SupabaseService.client
           .channel('watch:${_coupleId!}')
           .onBroadcast(event: 'watch', callback: _onMsg)
-          .subscribe());
+          .subscribe(),);
     }
     _heartbeat = Timer.periodic(
-        const Duration(milliseconds: 2500), (_) => _broadcast());
+        const Duration(milliseconds: 2500), (_) => _broadcast(),);
   }
 
   @override
@@ -63,7 +63,6 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     if (_controller == null) {
       _controller = YoutubePlayerController(
         initialVideoId: id,
-        flags: const YoutubePlayerFlags(autoPlay: true, mute: false),
       )..addListener(_onControllerChange);
       setState(() {});
     } else {
@@ -122,7 +121,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       'videoId': id,
       'playing': c.value.isPlaying,
       'pos': c.value.position.inMilliseconds,
-    });
+    },);
   }
 
   void _onMsg(Map<String, dynamic> payload) {
@@ -187,11 +186,11 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
                 IconButton(
                   tooltip: 'Paste link',
                   icon: const Icon(Icons.content_paste,
-                      color: MilesColors.emberSoft),
+                      color: MilesColors.emberSoft,),
                   onPressed: _paste,
                 ),
                 FilledButton(
-                    onPressed: _onUrlSubmit, child: const Text('Play')),
+                    onPressed: _onUrlSubmit, child: const Text('Play'),),
               ],
             ),
           ),

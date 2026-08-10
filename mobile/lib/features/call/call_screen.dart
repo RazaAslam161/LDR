@@ -41,8 +41,6 @@ class CallScreen extends ConsumerWidget {
     final video = call.isVideo;
 
     return PopScope(
-      // Backing out doesn't end the call — it minimises it (pill returns you).
-      canPop: true,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop && call.state != CallState.idle) call.setMinimized(true);
       },
@@ -64,11 +62,11 @@ class CallScreen extends ConsumerWidget {
               Positioned.fill(
                 child: RTCVideoView(call.remoteRenderer,
                     objectFit:
-                        RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+                        RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
               )
             else
               const Positioned.fill(
-                  child: ColoredBox(color: MilesColors.night)),
+                  child: ColoredBox(color: MilesColors.night),),
 
             // The numbers that tell a capture problem from an encoder problem
             // from a network problem — they look identical on screen otherwise.
@@ -84,7 +82,7 @@ class CallScreen extends ConsumerWidget {
                   child: IgnorePointer(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                          horizontal: 10, vertical: 6,),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(8),
@@ -118,7 +116,7 @@ class CallScreen extends ConsumerWidget {
                 child: IgnorePointer(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                        horizontal: 12, vertical: 8,),
                     decoration: BoxDecoration(
                       color: const Color(0xCC5A1A14),
                       borderRadius: BorderRadius.circular(10),
@@ -148,13 +146,13 @@ class CallScreen extends ConsumerWidget {
                   children: [
                     _Avatar(
                         url: partner?.avatarUrl,
-                        name: call.peerName ?? 'Partner'),
+                        name: call.peerName ?? 'Partner',),
                     const SizedBox(height: 20),
                     Text(call.peerName ?? 'Partner',
                         style: const TextStyle(
                             color: MilesColors.cream50,
                             fontSize: 24,
-                            fontWeight: FontWeight.w600)),
+                            fontWeight: FontWeight.w600,),),
                     const SizedBox(height: 8),
                     Text(
                       ringing
@@ -167,7 +165,7 @@ class CallScreen extends ConsumerWidget {
                                   ? 'Voice call · connected'
                                   : '',
                       style: const TextStyle(
-                          color: MilesColors.taupe, fontSize: 15),
+                          color: MilesColors.taupe, fontSize: 15,),
                     ),
                   ],
                 ),
@@ -184,7 +182,7 @@ class CallScreen extends ConsumerWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: MilesColors.gilt.withValues(alpha: 0.3)),
+                        color: MilesColors.gilt.withValues(alpha: 0.3),),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: RTCVideoView(call.localRenderer,
@@ -199,7 +197,7 @@ class CallScreen extends ConsumerWidget {
                       // soften it further.
                       filterQuality: FilterQuality.medium,
                       objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
                 ),
               ),
 
@@ -210,7 +208,7 @@ class CallScreen extends ConsumerWidget {
                   alignment: Alignment.topLeft,
                   child: IconButton(
                     icon: const Icon(Icons.keyboard_arrow_down,
-                        color: MilesColors.cream50, size: 30),
+                        color: MilesColors.cream50, size: 30,),
                     tooltip: 'Minimize',
                     onPressed: () {
                       call.setMinimized(true);
@@ -233,12 +231,12 @@ class CallScreen extends ConsumerWidget {
                               icon: Icons.call_end,
                               bg: Colors.red,
                               label: 'Decline',
-                              onTap: call.decline),
+                              onTap: call.decline,),
                           _RoundBtn(
                               icon: video ? Icons.videocam : Icons.call,
                               bg: MilesColors.sage,
                               label: 'Accept',
-                              onTap: call.accept),
+                              onTap: call.accept,),
                         ],
                       )
                     : Row(
@@ -248,7 +246,7 @@ class CallScreen extends ConsumerWidget {
                               icon: call.micOn ? Icons.mic : Icons.mic_off,
                               bg: MilesColors.surface2,
                               label: 'Mute',
-                              onTap: call.toggleMic),
+                              onTap: call.toggleMic,),
                           // Also the only way back to a headset connected
                           // after the call started — turning the speaker off
                           // re-scans and prefers bluetooth, then wired, then
@@ -259,7 +257,7 @@ class CallScreen extends ConsumerWidget {
                                   : Icons.phone_in_talk,
                               bg: MilesColors.surface2,
                               label: 'Speaker',
-                              onTap: () => call.setSpeaker(!call.speakerOn)),
+                              onTap: () => call.setSpeaker(!call.speakerOn),),
                           if (video) ...[
                             _RoundBtn(
                                 icon: call.camOn
@@ -267,18 +265,18 @@ class CallScreen extends ConsumerWidget {
                                     : Icons.videocam_off,
                                 bg: MilesColors.surface2,
                                 label: 'Camera',
-                                onTap: call.toggleCam),
+                                onTap: call.toggleCam,),
                             _RoundBtn(
                                 icon: Icons.cameraswitch,
                                 bg: MilesColors.surface2,
                                 label: 'Flip',
-                                onTap: call.switchCamera),
+                                onTap: call.switchCamera,),
                           ],
                           _RoundBtn(
                               icon: Icons.call_end,
                               bg: Colors.red,
                               label: 'End',
-                              onTap: call.hangup),
+                              onTap: call.hangup,),
                         ],
                       ),
               ),
@@ -305,10 +303,10 @@ class _Avatar extends StatelessWidget {
         shape: BoxShape.circle,
         color: MilesColors.surface2,
         border: Border.all(
-            color: MilesColors.gilt.withValues(alpha: 0.35), width: 2),
+            color: MilesColors.gilt.withValues(alpha: 0.35), width: 2,),
         boxShadow: [
           BoxShadow(
-              color: MilesColors.blush.withValues(alpha: 0.3), blurRadius: 30),
+              color: MilesColors.blush.withValues(alpha: 0.3), blurRadius: 30,),
         ],
       ),
       clipBehavior: Clip.antiAlias,
@@ -316,13 +314,13 @@ class _Avatar extends StatelessWidget {
           ? Center(
               child: Text(initial,
                   style: const TextStyle(
-                      color: MilesColors.cream50, fontSize: 52)))
+                      color: MilesColors.cream50, fontSize: 52,),),)
           : Image.network(url!,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Center(
                   child: Text(initial,
                       style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 52)))),
+                          color: MilesColors.cream50, fontSize: 52,),),),),
     );
   }
 }
@@ -332,7 +330,7 @@ class _RoundBtn extends StatelessWidget {
       {required this.icon,
       required this.bg,
       required this.label,
-      required this.onTap});
+      required this.onTap,});
   final IconData icon;
   final Color bg;
   final String label;
@@ -354,7 +352,7 @@ class _RoundBtn extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(label,
-            style: const TextStyle(color: MilesColors.taupe, fontSize: 11)),
+            style: const TextStyle(color: MilesColors.taupe, fontSize: 11),),
       ],
     );
   }

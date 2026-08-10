@@ -32,7 +32,7 @@ void main() {
       // _clearConversation it can only ever mean "wipe everything".
       expect(chat, contains('onClearConversation: _clearOrDeleteSelected'));
       expect(chat.contains('onClearConversation: _clearConversation'), isFalse,
-          reason: 'that wiring is what deleted the whole chat regardless');
+          reason: 'that wiring is what deleted the whole chat regardless',);
     });
 
     test('clearing everything is reachable only with nothing selected', () {
@@ -40,7 +40,7 @@ void main() {
       expect(body, contains('if (_selecting)'));
       expect(body.indexOf('_confirmDeleteSelected'),
           lessThan(body.indexOf('_clearConversation')),
-          reason: 'the selection branch has to return before the clear-all');
+          reason: 'the selection branch has to return before the clear-all',);
     });
   });
 
@@ -74,7 +74,7 @@ void main() {
       expect(body, contains('shell.isDrawerOpen'));
       expect(
           body.indexOf('closeDrawer'), lessThan(body.indexOf('_clearSelection')),
-          reason: 'the drawer has to win, or the press is swallowed');
+          reason: 'the drawer has to win, or the press is swallowed',);
     });
 
     test('the bar carries a visible way out', () {

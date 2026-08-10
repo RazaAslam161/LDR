@@ -58,7 +58,7 @@ class CryptoCore {
       final kp = await _x25519.newKeyPair();
       final data = await kp.extract();
       await _storage.write(
-          key: _privKeyStoreKey, value: base64Encode(data.bytes));
+          key: _privKeyStoreKey, value: base64Encode(data.bytes),);
       _myKeyPair = kp;
     }
     return _myKeyPair!;
@@ -101,7 +101,6 @@ class CryptoCore {
     );
     _sharedKey = await _hkdf.deriveKey(
       secretKey: shared,
-      nonce: const <int>[],
       info: utf8.encode('miles-closer-v1'),
     );
   }

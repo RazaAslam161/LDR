@@ -11,10 +11,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 /// MapLibre GL JS inside a WebView.
 class Map3DScreen extends StatefulWidget {
   const Map3DScreen({
-    super.key,
-    required this.lat,
-    required this.lon,
-    required this.name,
+    required this.lat, required this.lon, required this.name, super.key,
   });
 
   final double lat;
@@ -45,7 +42,7 @@ class _Map3DScreenState extends State<Map3DScreen> {
         actions: const [PartnerHereAction()],
         backgroundColor: MilesColors.night,
         title: Text('${widget.name} · 3D',
-            style: const TextStyle(color: MilesColors.cream50)),
+            style: const TextStyle(color: MilesColors.cream50),),
         iconTheme: const IconThemeData(color: MilesColors.cream50),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -57,15 +54,15 @@ class _Map3DScreenState extends State<Map3DScreen> {
       // eats the pinch and the map won't zoom.
       body: WebViewWidget(
         controller: _controller,
-        gestureRecognizers: {
-          Factory<EagerGestureRecognizer>(() => EagerGestureRecognizer()),
+        gestureRecognizers: const {
+          Factory<EagerGestureRecognizer>(EagerGestureRecognizer.new),
         },
       ),
     );
   }
 
   static String _esc(String s) =>
-      s.replaceAll('\\', '').replaceAll('"', '').replaceAll('\n', ' ');
+      s.replaceAll(r'\', '').replaceAll('"', '').replaceAll('\n', ' ');
 
   static String _html(double lat, double lon, String name) {
     _esc(name); // (name kept for the title bar; marker is unlabeled)

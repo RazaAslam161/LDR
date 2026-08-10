@@ -78,7 +78,7 @@ class TouchHaptics {
                     0,
                     _amp255(120, heat),
                     0,
-                    _amp255(90, heat)
+                    _amp255(90, heat),
                   ]
                 : const [],
           );

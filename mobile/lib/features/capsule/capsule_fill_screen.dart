@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:miles/main.dart' show MilesApp;
 import 'package:miles/core/theme.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
+import 'package:miles/main.dart' show MilesApp;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -15,7 +15,7 @@ import 'package:record/record.dart';
 /// stays hidden (you can't read items back) until the capsule unlocks — so
 /// the contents are a genuine surprise for the reunion.
 class CapsuleFillScreen extends ConsumerStatefulWidget {
-  const CapsuleFillScreen({super.key, required this.capsule});
+  const CapsuleFillScreen({required this.capsule, super.key});
   final Capsule capsule;
 
   @override
@@ -69,7 +69,7 @@ class _CapsuleFillScreenState extends ConsumerState<CapsuleFillScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('Write a note',
-                style: Theme.of(ctx).textTheme.titleLarge),
+                style: Theme.of(ctx).textTheme.titleLarge,),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
@@ -191,10 +191,10 @@ class _CapsuleFillScreenState extends ConsumerState<CapsuleFillScreen> {
           padding: const EdgeInsets.all(24),
           children: [
             Text(_capsule.title,
-                style: Theme.of(context).textTheme.displaySmall),
+                style: Theme.of(context).textTheme.displaySmall,),
             const SizedBox(height: 6),
             const Text(
-              'Tuck in little surprises. You won\'t be able to peek — '
+              "Tuck in little surprises. You won't be able to peek — "
               'they stay sealed until it opens.',
               style: TextStyle(color: MilesColors.taupe, height: 1.5),
             ),
@@ -248,7 +248,7 @@ class _SealedSilhouettes extends StatelessWidget {
             style: const TextStyle(
                 color: MilesColors.cream50,
                 fontSize: 16,
-                fontWeight: FontWeight.w600),
+                fontWeight: FontWeight.w600,),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -265,16 +265,16 @@ class _SealedSilhouettes extends StatelessWidget {
                     gradient: RadialGradient(colors: [
                       MilesColors.blush.withValues(alpha: 0.4),
                       MilesColors.blush.withValues(alpha: 0.05),
-                    ]),
+                    ],),
                     border: Border.all(
-                        color: MilesColors.gilt.withValues(alpha: 0.2)),
+                        color: MilesColors.gilt.withValues(alpha: 0.2),),
                   ),
                   child: const Icon(Icons.lock,
-                      size: 14, color: MilesColors.starlight),
+                      size: 14, color: MilesColors.starlight,),
                 ),
               if (total == 0)
                 const Text('Nothing yet — add the first thing 💫',
-                    style: TextStyle(color: MilesColors.taupe)),
+                    style: TextStyle(color: MilesColors.taupe),),
             ],
           ),
         ],
@@ -311,7 +311,7 @@ class _AddButton extends StatelessWidget {
                   style: const TextStyle(
                       color: MilesColors.cream50,
                       fontSize: 15,
-                      fontWeight: FontWeight.w600)),
+                      fontWeight: FontWeight.w600,),),
               const Spacer(),
               const Icon(Icons.add, color: MilesColors.ember),
             ],
@@ -336,7 +336,7 @@ class _RecordingSheetState extends State<_RecordingSheet> {
   void initState() {
     super.initState();
     _t = Timer.periodic(const Duration(seconds: 1),
-        (_) => setState(() => _seconds++));
+        (_) => setState(() => _seconds++),);
   }
 
   @override
@@ -362,7 +362,7 @@ class _RecordingSheetState extends State<_RecordingSheet> {
           const SizedBox(height: 12),
           Text('Recording…  $_elapsed',
               style: const TextStyle(
-                  color: MilesColors.cream50, fontSize: 16)),
+                  color: MilesColors.cream50, fontSize: 16,),),
           const SizedBox(height: 24),
           Row(
             children: [

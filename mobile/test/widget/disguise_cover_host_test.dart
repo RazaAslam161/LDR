@@ -49,7 +49,7 @@ void main() {
     tester.takeException();
     expect(find.byType(FakeNewsScreen), findsOneWidget,
         reason: 'no cover mounted $when — the user would be stuck on a blank '
-            'screen with no way into the app');
+            'screen with no way into the app',);
   }
 
   testWidgets('mounts a cover when the platform channel never answers',

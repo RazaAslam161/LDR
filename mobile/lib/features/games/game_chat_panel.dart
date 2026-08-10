@@ -11,9 +11,7 @@ import 'package:miles/core/theme.dart';
 /// banter, not saved chat). Each game gets its own channel via [gameKey].
 class GameChatPanel extends ConsumerStatefulWidget {
   const GameChatPanel({
-    super.key,
-    required this.coupleId,
-    required this.gameKey,
+    required this.coupleId, required this.gameKey, super.key,
   });
 
   final String coupleId;
@@ -46,7 +44,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
     _ch = ManagedSubscription.start(() => SupabaseService.client
         .channel('gchat:${widget.gameKey}:${widget.coupleId}')
         .onBroadcast(event: 'msg', callback: _onMsg)
-        .subscribe());
+        .subscribe(),);
   }
 
   @override
@@ -60,7 +58,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
   void _onMsg(Map<String, dynamic> payload) {
     if (payload['from'] == _myUid || !mounted) return;
     setState(
-        () => _msgs.add(_GameMsg(false, payload['text']?.toString() ?? '')));
+        () => _msgs.add(_GameMsg(false, payload['text']?.toString() ?? '')),);
     _scrollDown();
   }
 
@@ -80,7 +78,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+            duration: const Duration(milliseconds: 200), curve: Curves.easeOut,);
       }
     });
   }
@@ -103,7 +101,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
                 ? const Center(
                     child: Text('Yahaan ek dusre ko jawab do — live 💬',
                         style:
-                            TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                            TextStyle(color: MilesColors.taupe, fontSize: 12),),
                   )
                 : ListView.builder(
                     controller: _scroll,
@@ -132,7 +130,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
                     filled: true,
                     fillColor: MilesColors.surface2,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
+                        horizontal: 14, vertical: 10,),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -165,7 +163,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(m.text,
-            style: const TextStyle(color: MilesColors.cream50, fontSize: 13)),
+            style: const TextStyle(color: MilesColors.cream50, fontSize: 13),),
       ),
     );
   }

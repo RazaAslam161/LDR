@@ -63,10 +63,10 @@ class MilesColors {
   // out badly enough that content behind them competed with content on them.
   // Lower sigma reads as cleaner glass AND costs meaningfully less per frame on
   // the low-end phones this has to run on.
-  static const double blurSm = 6.0;
-  static const double blurMd = 12.0;
-  static const double blurLg = 18.0;
-  static const double blurXl = 48.0;
+  static const double blurSm = 6;
+  static const double blurMd = 12;
+  static const double blurLg = 18;
+  static const double blurXl = 48;
 
   static BoxDecoration glassDecoration({
     double radius = 18,
@@ -120,11 +120,11 @@ class MilesGradients {
 
 TextTheme _buildTextTheme() {
   TextStyle f(double size, FontWeight w,
-          {double ls = 0, double h = 1.2, Color c = MilesColors.cream50, FontStyle? style}) =>
+          {double ls = 0, double h = 1.2, Color c = MilesColors.cream50, FontStyle? style,}) =>
       GoogleFonts.fraunces(
-          fontSize: size, fontWeight: w, letterSpacing: ls, height: h, color: c, fontStyle: style);
+          fontSize: size, fontWeight: w, letterSpacing: ls, height: h, color: c, fontStyle: style,);
   TextStyle i(double size, FontWeight w,
-          {double ls = 0, double h = 1.4, Color c = MilesColors.cream50}) =>
+          {double ls = 0, double h = 1.4, Color c = MilesColors.cream50,}) =>
       GoogleFonts.inter(fontSize: size, fontWeight: w, letterSpacing: ls, height: h, color: c);
 
   return TextTheme(
@@ -184,12 +184,12 @@ ThemeData milesDarkTheme() {
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
         borderSide: BorderSide(
-            color: MilesColors.gilt.withValues(alpha: 0.12)),
+            color: MilesColors.gilt.withValues(alpha: 0.12),),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
         borderSide: BorderSide(
-            color: MilesColors.gilt.withValues(alpha: 0.12)),
+            color: MilesColors.gilt.withValues(alpha: 0.12),),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
@@ -252,10 +252,10 @@ ThemeData milesDarkTheme() {
       color: MilesColors.gilt.withValues(alpha: 0.1),
       thickness: 1,
     ),
-    bottomSheetTheme: BottomSheetThemeData(
+    bottomSheetTheme: const BottomSheetThemeData(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
     ),

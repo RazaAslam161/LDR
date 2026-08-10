@@ -30,9 +30,14 @@ class CallStats {
     this.noRelay = false,
   });
 
-  final int sendWidth, sendHeight, recvWidth, recvHeight;
-  final double sendFps, recvFps;
-  final int sendKbps, recvKbps;
+  final int sendWidth;
+  final int sendHeight;
+  final int recvWidth;
+  final int recvHeight;
+  final double sendFps;
+  final double recvFps;
+  final int sendKbps;
+  final int recvKbps;
 
   /// libwebrtc's own reason for capping the outgoing video: 'cpu', 'bandwidth',
   /// 'none', or 'other'. This decides what to do about poor quality, and
@@ -55,11 +60,7 @@ class CallStats {
 
   /// One line, short enough for logcat and for an on-screen overlay.
   String get line =>
-      (noRelay ? 'NO-RELAY! ' : '') +
-      'tx ${sendWidth}x$sendHeight@${sendFps.toStringAsFixed(0)} ${sendKbps}kbps | '
-      'rx ${recvWidth}x$recvHeight@${recvFps.toStringAsFixed(0)} ${recvKbps}kbps | '
-      'limit=${limitation.isEmpty ? '?' : limitation} rtt=${rttMs}ms '
-      'lost=$packetsLost ${relayed ? 'RELAY' : 'p2p'} $codec';
+      '${noRelay ? 'NO-RELAY! ' : ''}tx ${sendWidth}x$sendHeight@${sendFps.toStringAsFixed(0)} ${sendKbps}kbps | rx ${recvWidth}x$recvHeight@${recvFps.toStringAsFixed(0)} ${recvKbps}kbps | limit=${limitation.isEmpty ? '?' : limitation} rtt=${rttMs}ms lost=$packetsLost ${relayed ? 'RELAY' : 'p2p'} $codec';
 }
 
 /// Polls a peer connection and reports what it finds.
@@ -111,7 +112,9 @@ class CallStatsMonitor {
       // last.
       final byId = {for (final r in reports) r.id: r};
 
-      StatsReport? outVideo, inVideo, selectedPair;
+      StatsReport? outVideo;
+      StatsReport? inVideo;
+      StatsReport? selectedPair;
 
       for (final r in reports) {
         final v = r.values;

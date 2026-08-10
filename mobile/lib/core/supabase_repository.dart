@@ -283,7 +283,7 @@ class SupabaseRepository {
     } on PostgrestException catch (e) {
       final m = e.message;
       if (m.contains('invalid_code')) {
-        throw StateError('We couldn\'t find that code.');
+        throw StateError("We couldn't find that code.");
       }
       if (m.contains('expired')) {
         throw StateError('That code has expired — ask for a new one.');
@@ -295,7 +295,7 @@ class SupabaseRepository {
         throw StateError('That couple already has two people.');
       }
       if (m.contains('already_paired')) {
-        throw StateError('You\'re already linked with someone.');
+        throw StateError("You're already linked with someone.");
       }
       rethrow;
     }

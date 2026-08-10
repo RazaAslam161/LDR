@@ -1,6 +1,12 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show ColorFilter;
 
+import 'package:flutter/cupertino.dart' show ColorFilter;
+import 'package:flutter/material.dart' show ColorFilter;
+import 'package:flutter/painting.dart' show ColorFilter;
+import 'package:flutter/rendering.dart' show ColorFilter;
+import 'package:flutter/widgets.dart' show ColorFilter;
 import 'package:image/image.dart' as img;
 
 /// Inputs for the off-isolate bake. All fields are primitives/Lists so the
@@ -140,11 +146,22 @@ Uint8List bakeSnap(BakeRequest req) {
 /// The 5th column is a constant in 0..255 — identical semantics to Flutter's
 /// ColorFilter, so the baked photo matches the live preview.
 void _applyMatrix(img.Image image, List<double> m) {
-  final r0 = m[0], r1 = m[1], r2 = m[2], rc = m[4];
-  final g0 = m[5], g1 = m[6], g2 = m[7], gc = m[9];
-  final b0 = m[10], b1 = m[11], b2 = m[12], bc = m[14];
+  final r0 = m[0];
+  final r1 = m[1];
+  final r2 = m[2];
+  final rc = m[4];
+  final g0 = m[5];
+  final g1 = m[6];
+  final g2 = m[7];
+  final gc = m[9];
+  final b0 = m[10];
+  final b1 = m[11];
+  final b2 = m[12];
+  final bc = m[14];
   for (final p in image) {
-    final r = p.r.toDouble(), g = p.g.toDouble(), b = p.b.toDouble();
+    final r = p.r.toDouble();
+    final g = p.g.toDouble();
+    final b = p.b.toDouble();
     p.r = (r0 * r + r1 * g + r2 * b + rc).clamp(0, 255).round();
     p.g = (g0 * r + g1 * g + g2 * b + gc).clamp(0, 255).round();
     p.b = (b0 * r + b1 * g + b2 * b + bc).clamp(0, 255).round();
@@ -167,7 +184,9 @@ void _applyOverlay(img.Image image, int argb, bool screen) {
   }
 
   for (final p in image) {
-    final br = p.r.toDouble(), bg = p.g.toDouble(), bb = p.b.toDouble();
+    final br = p.r.toDouble();
+    final bg = p.g.toDouble();
+    final bb = p.b.toDouble();
     p.r = (br * (1 - oa) + blend(br, or) * oa).clamp(0, 255).round();
     p.g = (bg * (1 - oa) + blend(bg, og) * oa).clamp(0, 255).round();
     p.b = (bb * (1 - oa) + blend(bb, ob) * oa).clamp(0, 255).round();

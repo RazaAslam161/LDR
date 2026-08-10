@@ -1,12 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 
 /// What kind of thing a vault row holds. Maps to the `kind` text column.
 enum VaultKind { note, photo, voice, trace }

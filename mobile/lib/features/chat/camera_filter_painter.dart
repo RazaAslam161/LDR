@@ -10,9 +10,7 @@ import 'package:miles/features/chat/camera_filters.dart';
 /// capture time (camera_bake.dart), so this costs nothing but a few shader ops.
 class FilterPreviewLayer extends StatelessWidget {
   const FilterPreviewLayer({
-    super.key,
-    required this.filter,
-    required this.child,
+    required this.filter, required this.child, super.key,
   });
 
   final CameraFilter filter;
@@ -122,7 +120,7 @@ class _GrainPainter extends CustomPainter {
   final int seed;
   final double intensity;
 
-  static const double _block = 2.0; // 2×2 logical px per grain cell
+  static const double _block = 2; // 2×2 logical px per grain cell
 
   @override
   void paint(Canvas canvas, Size size) {

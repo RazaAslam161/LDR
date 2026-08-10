@@ -1,14 +1,13 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 
 /// Fixed tag taxonomy for Fantasy Jar entries. Tags are hashed before storage
 /// (see §F2 of INTIMACY_LAYER.md) so the server never sees plaintext tags.
@@ -77,7 +76,7 @@ class FantasyJarRepository {
     // and had become unreachable.
     if (partnerPub == CryptoCore.legacyPublicKey) {
       throw Exception(
-        "Partner has not published a key yet. Ask them to open Closer once.",
+        'Partner has not published a key yet. Ask them to open Closer once.',
       );
     }
     await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);

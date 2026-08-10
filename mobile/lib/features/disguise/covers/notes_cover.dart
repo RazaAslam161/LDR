@@ -16,7 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// only when there are no notes on screen, so it cannot be hit by someone
 /// actually using the pad.
 class NotesCover extends StatefulWidget {
-  const NotesCover({super.key, required this.onAuthenticated});
+  const NotesCover({required this.onAuthenticated, super.key});
 
   final VoidCallback onAuthenticated;
 
@@ -92,7 +92,7 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _edit(),
+        onPressed: _edit,
         backgroundColor: const Color(0xFFF4B400),
         foregroundColor: Colors.white,
         child: const Icon(Icons.add),
@@ -113,7 +113,7 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
                         alignment: Alignment.centerRight,
                         padding: const EdgeInsets.only(right: 20),
                         child: const Icon(Icons.delete_outline,
-                            color: Color(0xFF5F6368)),
+                            color: Color(0xFF5F6368),),
                       ),
                       direction: DismissDirection.endToStart,
                       onDismissed: (_) => _delete(n),
@@ -138,11 +138,11 @@ class _EmptyState extends StatelessWidget {
         // notepad normally can land on it.
         onLongPress: onSecretHold,
         behavior: HitTestBehavior.opaque,
-        child: Column(
+        child: const Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.sticky_note_2_outlined,
-                size: 72, color: Color(0xFFDADCE0)),
+                size: 72, color: Color(0xFFDADCE0),),
             SizedBox(height: 16),
             Text(
               'Notes you add appear here',
@@ -244,7 +244,7 @@ class _NoteEditorState extends State<_NoteEditor> {
           TextButton(
             onPressed: _save,
             child: const Text('Save',
-                style: TextStyle(color: Color(0xFFF4B400))),
+                style: TextStyle(color: Color(0xFFF4B400)),),
           ),
         ],
       ),

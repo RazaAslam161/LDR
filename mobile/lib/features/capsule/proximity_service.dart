@@ -98,7 +98,7 @@ class ProximityService {
               partnerSeen: true,
               distanceMeters: d,
               withinRange: d <= thresholdMeters,
-            ));
+            ),);
           },
         )
         .subscribe();
@@ -124,7 +124,7 @@ class ProximityService {
         partnerSeen: _lastDistance != null,
         distanceMeters: _lastDistance,
         withinRange: _lastDistance != null && _lastDistance! <= thresholdMeters,
-      ));
+      ),);
     } catch (e) {
       _onUpdate?.call(ProximityStatus(error: e.toString()));
     }

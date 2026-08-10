@@ -10,7 +10,7 @@ String _migration(String name) {
   final dir = Directory('../supabase/migrations');
   final f = dir.listSync().whereType<File>().firstWhere(
       (f) => f.path.endsWith('_$name.sql'),
-      orElse: () => throw StateError('no migration named $name'));
+      orElse: () => throw StateError('no migration named $name'),);
   return f.readAsStringSync();
 }
 
@@ -21,7 +21,7 @@ void main() {
   test('both hard-delete paths drop the stored files', () {
     for (final f in [
       'delete_message_for_everyone',
-      'clear_conversation_everyone'
+      'clear_conversation_everyone',
     ]) {
       final body = sql.substring(sql.indexOf(f));
       expect(body, contains('delete from storage.objects'), reason: f);
@@ -41,13 +41,13 @@ void main() {
 
   test('a storage hiccup cannot make the delete itself fail', () {
     expect(RegExp('exception when others then null').allMatches(sql).length, 2,
-        reason: 'best-effort in both functions, like clear_body_photo');
+        reason: 'best-effort in both functions, like clear_body_photo',);
   });
 
   test('clear-all removes files before the rows that name them', () {
     final body = sql.substring(sql.indexOf('clear_conversation_everyone'));
     expect(body.indexOf('storage.objects'),
         lessThan(body.indexOf('delete from public.messages')),
-        reason: 'rows deleted first would leave nothing to find the files by');
+        reason: 'rows deleted first would leave nothing to find the files by',);
   });
 }

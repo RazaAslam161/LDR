@@ -15,7 +15,7 @@ import 'package:miles/features/fake_news/fake_news_screen.dart';
 /// Resolved from SharedPreferences rather than passed down, because the very
 /// first frame after a cold start is this widget and there is no session yet.
 class DisguiseCoverHost extends StatefulWidget {
-  const DisguiseCoverHost({super.key, required this.onAuthenticated});
+  const DisguiseCoverHost({required this.onAuthenticated, super.key});
 
   final VoidCallback onAuthenticated;
 

@@ -221,7 +221,7 @@ class _DisguiseTile extends StatelessWidget {
               ),
               if (selected)
                 const Icon(Icons.check_circle,
-                    color: MilesColors.blush, size: 22),
+                    color: MilesColors.blush, size: 22,),
             ],
           ),
         ),

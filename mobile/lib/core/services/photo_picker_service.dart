@@ -41,14 +41,13 @@ class PhotoPickerService {
     BuildContext? enhanceContext,
   }) async {
     final picked = await _picker.pickImage(
-        source: source, maxWidth: 2400, imageQuality: 92);
+        source: source, maxWidth: 2400, imageQuality: 92,);
     if (picked == null) return null;
 
     final cropped = await ImageCropper().cropImage(
       sourcePath: picked.path,
       maxWidth: 1200,
       maxHeight: 1200,
-      compressFormat: ImageCompressFormat.jpg,
       compressQuality: 80,
       aspectRatio: shape == PhotoShape.square
           ? const CropAspectRatio(ratioX: 1, ratioY: 1)
@@ -114,16 +113,16 @@ class PhotoPickerService {
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt_outlined,
-                  color: MilesColors.emberSoft),
+                  color: MilesColors.emberSoft,),
               title: const Text('Take a photo',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined,
-                  color: MilesColors.emberSoft),
+                  color: MilesColors.emberSoft,),
               title: const Text('Choose from gallery',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
           ],

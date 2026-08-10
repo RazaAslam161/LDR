@@ -11,17 +11,17 @@ class LoveReason {
     required this.createdAt,
   });
 
-  final String id;
-  final String author;
-  final String text;
-  final DateTime createdAt;
-
   factory LoveReason.fromJson(Map<String, dynamic> j) => LoveReason(
         id: JsonUtils.parseString(j['id']),
         author: JsonUtils.parseString(j['author']),
         text: JsonUtils.parseString(j['text']),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
       );
+
+  final String id;
+  final String author;
+  final String text;
+  final DateTime createdAt;
 }
 
 class ReasonsRepository {

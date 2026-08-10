@@ -31,7 +31,7 @@ void main() {
       // is worse than no test: it made dead code look load-bearing.
       final body = fn('_turnServers()');
       expect(body, contains('on FunctionException catch'),
-          reason: 'turn_not_configured and cloudflare_error arrive by throw');
+          reason: 'turn_not_configured and cloudflare_error arrive by throw',);
       expect(body, contains('e.status'));
       expect(body, contains('e.details'));
     });
@@ -55,11 +55,11 @@ void main() {
 
     test('every failure path records a reason', () {
       final body = fn('_turnServers()');
-      for (final path in ['timeout', 'HTTP \${e.status}', 'bad response shape']) {
+      for (final path in ['timeout', r'HTTP ${e.status}', 'bad response shape']) {
         expect(body, contains(path), reason: 'unlabelled failure: $path');
       }
       expect(src, contains('static String? turnError'),
-          reason: 'the reason has to outlive the fetch to be reportable');
+          reason: 'the reason has to outlive the fetch to be reportable',);
     });
   });
 
@@ -70,7 +70,7 @@ void main() {
       // unconditionally and showed a "no relay" banner on a healthy device.
       expect(src, contains('static bool get relayAvailable'));
       expect(src, contains('static bool? get relayKnown'),
-          reason: '"not fetched yet" is not the same as "no relay"');
+          reason: '"not fetched yet" is not the same as "no relay"',);
     });
 
     test('placing a call without a relay is logged as a warning', () {
@@ -90,8 +90,8 @@ void main() {
   test('a relay is recognised by scheme, not by hostname', () {
     // Hostnames change; turn:/turns: is what actually makes it a relay.
     final helper = fn('static bool _isRelay');
-    expect(helper, contains("turn:"));
-    expect(helper, contains("turns:"));
+    expect(helper, contains('turn:'));
+    expect(helper, contains('turns:'));
   });
 
   group('the diagnostics work on the calls that fail', () {
@@ -104,7 +104,7 @@ void main() {
       expect(pc, contains('_statsMonitor.start(pc)'));
       final connected = src.substring(src.indexOf('onConnectionState'));
       expect(connected.substring(0, 600).contains('_statsMonitor.start'), isFalse,
-          reason: 'starting it here makes it useless for failed calls');
+          reason: 'starting it here makes it useless for failed calls',);
     });
 
     test('accepting a call does not claim it is connected', () {
@@ -113,7 +113,7 @@ void main() {
       // irreconcilable stories, neither describing the real failure.
       final accept = fn('Future<void> accept()');
       expect(accept.contains('_setState(CallState.connected)'), isFalse,
-          reason: 'only onConnectionState may declare a call connected');
+          reason: 'only onConnectionState may declare a call connected',);
     });
 
     test('the callee gets a timeout too', () {
@@ -151,15 +151,15 @@ void main() {
       expect(src, contains('_persistTurn'));
       final load = fn('static Future<void> loadCachedTurn()');
       expect(load, contains('_isRelay'),
-          reason: 'a cached entry with no relay is not worth restoring');
+          reason: 'a cached entry with no relay is not worth restoring',);
       expect(load, contains('Duration(hours: 20)'),
-          reason: 'must expire before the 24h credential TTL does');
+          reason: 'must expire before the 24h credential TTL does',);
     });
 
     test('the cache is warmed before the first call', () {
       final init = fn('Future<void> init()');
       expect(init, contains('await loadCachedTurn()'),
-          reason: 'restoring after the network fetch would defeat the point');
+          reason: 'restoring after the network fetch would defeat the point',);
     });
 
     test('the fetch timeout is long enough for mobile data', () {
@@ -177,10 +177,10 @@ void main() {
       // function, which is exactly the fetch most likely to miss.
       for (final f in ['Future<void> startCall(', 'Future<void> accept()']) {
         final body = fn(f);
-        expect(body, contains('await _ensureRelay()'), reason: '$f');
+        expect(body, contains('await _ensureRelay()'), reason: f);
         expect(body.indexOf('_ensureRelay'), lessThan(body.indexOf('_createPc')),
             reason: 'the relay must be in the ICE config, so it has to be '
-                'fetched BEFORE the peer connection is built');
+                'fetched BEFORE the peer connection is built',);
       }
     });
 
@@ -201,9 +201,9 @@ void main() {
       final ensure = src.substring(at, src.indexOf('\n  }', bodyStart));
       expect(ensure, contains('Duration budget'));
       expect(ensure, contains('.timeout(budget)'),
-          reason: 'the budget has to be enforced, not merely declared');
+          reason: 'the budget has to be enforced, not merely declared',);
       expect(ensure, contains('TimeoutException'),
-          reason: 'and exceeding it must proceed, not abort the call');
+          reason: 'and exceeding it must proceed, not abort the call',);
 
       // And the peer-connection path must never touch the network at all.
       // Comments stripped first: the comment explaining that this USED to
@@ -214,7 +214,7 @@ void main() {
           .where((l) => !l.trimLeft().startsWith('//'))
           .join('\n');
       expect(ice.contains('await _turnServers()'), isFalse,
-          reason: 'building the connection must not block on a fetch');
+          reason: 'building the connection must not block on a fetch',);
       expect(ice, contains('_cachedTurn'));
     });
   });

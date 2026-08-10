@@ -16,8 +16,7 @@ import 'package:miles/core/theme.dart';
 /// could see — on top of the root one that was still running underneath.
 class EmberBackground extends StatefulWidget {
   const EmberBackground({
-    super.key,
-    required this.child,
+    required this.child, super.key,
     this.embers = 14,
     this.stars = 34,
   });
@@ -111,13 +110,13 @@ class _EmberBackgroundState extends State<EmberBackground>
         fit: StackFit.expand,
         children: [
           const DecoratedBox(
-              decoration: BoxDecoration(color: MilesColors.night)),
+              decoration: BoxDecoration(color: MilesColors.night),),
           RepaintBoundary(
             child: AnimatedBuilder(
               animation: controller,
               builder: (context, _) => CustomPaint(
                 painter: _EmberPainter(
-                    t: controller.value, embers: _embers, stars: _stars),
+                    t: controller.value, embers: _embers, stars: _stars,),
                 size: Size.infinite,
               ),
             ),
@@ -138,7 +137,12 @@ class _Ember {
     required this.sway,
     required this.phase,
   });
-  final double x, y0, speed, size, sway, phase;
+  final double x;
+  final double y0;
+  final double speed;
+  final double size;
+  final double sway;
+  final double phase;
 }
 
 class _Star {
@@ -151,7 +155,12 @@ class _Star {
     required this.phase,
     required this.violet,
   });
-  final double x, y, size, base, speed, phase;
+  final double x;
+  final double y;
+  final double size;
+  final double base;
+  final double speed;
+  final double phase;
   final bool violet;
 }
 
@@ -171,21 +180,22 @@ class _EmberPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
+    final w = size.width;
+    final h = size.height;
     final rect = Offset.zero & size;
     final pulse = 0.5 + 0.5 * math.sin(t * 2 * math.pi);
 
     // Candle glow.
     final center = Offset(w * (0.5 + 0.03 * math.sin(t * 2 * math.pi)),
-        h * (0.32 + 0.02 * math.cos(t * 2 * math.pi)));
+        h * (0.32 + 0.02 * math.cos(t * 2 * math.pi)),);
     canvas.drawRect(
       rect,
       _glowPaint
-        ..shader = RadialGradient(
-          colors: const [Color(0xFF3A1622), Color(0xFF1C0A10), MilesColors.nightDeep],
-          stops: const [0.0, 0.55, 1.0],
+        ..shader = const RadialGradient(
+          colors: [Color(0xFF3A1622), Color(0xFF1C0A10), MilesColors.nightDeep],
+          stops: [0.0, 0.55, 1.0],
         ).createShader(
-            Rect.fromCircle(center: center, radius: h * (0.95 + 0.08 * pulse))),
+            Rect.fromCircle(center: center, radius: h * (0.95 + 0.08 * pulse)),),
     );
 
     // Stars.
@@ -206,7 +216,7 @@ class _EmberPainter extends CustomPainter {
       final prog = (e.y0 + 1 - (t * e.speed) % 1) % 1; // 1 → 0 upward
       final y = h * prog;
       final x = w * (e.x + e.sway * math.sin((t * 4 + e.phase) * 2 * math.pi));
-      final fade = (math.sin(prog * math.pi)).clamp(0.0, 1.0); // dim at top/bottom
+      final fade = math.sin(prog * math.pi).clamp(0.0, 1.0); // dim at top/bottom
       _emberPaint.color = MilesColors.emberSoft.withValues(alpha: 0.5 * fade);
       canvas.drawCircle(Offset(x, y), e.size, _emberPaint);
     }

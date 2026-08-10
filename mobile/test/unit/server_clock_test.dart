@@ -25,20 +25,20 @@ void main() {
     // Simulate: the server says it is 60s later than this device believes.
     final sentAt = DateTime.now().toUtc();
     ServerClock.observe(sentAt.add(const Duration(seconds: 60)),
-        sentAt: sentAt);
+        sentAt: sentAt,);
 
     expect(ServerClock.isKnown, isTrue);
     expect(ServerClock.offset.inSeconds, closeTo(60, 2));
     final corrected =
         ServerClock.now().difference(DateTime.now().toUtc()).inSeconds;
     expect(corrected, closeTo(60, 2),
-        reason: 'server-relative now must run ahead of this slow device');
+        reason: 'server-relative now must run ahead of this slow device',);
   });
 
   test('a device running fast is corrected backward', () {
     final sentAt = DateTime.now().toUtc();
     ServerClock.observe(sentAt.subtract(const Duration(seconds: 90)),
-        sentAt: sentAt);
+        sentAt: sentAt,);
     expect(ServerClock.offset.inSeconds, closeTo(-90, 2));
   });
 
@@ -55,7 +55,7 @@ void main() {
     final sentAt = DateTime.now().toUtc().subtract(const Duration(seconds: 60));
     ServerClock.observe(DateTime.now().toUtc(), sentAt: sentAt);
     expect(ServerClock.offset.inSeconds, 30,
-        reason: 'a 60s round trip cannot locate the server instant');
+        reason: 'a 60s round trip cannot locate the server instant',);
   });
 
   test('a clock that jumps backwards is discarded', () {
@@ -71,7 +71,7 @@ void main() {
     final sentAt = DateTime.now().toUtc();
     // Would compute ~11s — inside the 2s deadband, so it must be ignored.
     ServerClock.observe(sentAt.add(const Duration(seconds: 11)),
-        sentAt: sentAt);
+        sentAt: sentAt,);
     expect(ServerClock.offset.inSeconds, 10);
   });
 
@@ -86,7 +86,7 @@ void main() {
       // -120 ... which is <= 45, so it would read online here. Flip it:
       final sentAt = DateTime.now().toUtc();
       ServerClock.observe(sentAt.add(const Duration(seconds: 120)),
-          sentAt: sentAt);
+          sentAt: sentAt,);
       final partnerStampedByServer = ServerClock.now();
       expect(online(partnerStampedByServer), isTrue);
     });
@@ -97,7 +97,7 @@ void main() {
       // the window. Corrected, they read offline.
       final sentAt = DateTime.now().toUtc();
       ServerClock.observe(sentAt.subtract(const Duration(seconds: 120)),
-          sentAt: sentAt);
+          sentAt: sentAt,);
       final stampedTwoMinutesAgo =
           ServerClock.now().subtract(const Duration(seconds: 120));
       expect(online(stampedTwoMinutesAgo), isFalse);
@@ -109,7 +109,7 @@ void main() {
       // 120s stale — permanently offline, no screen, forever.
       final sentAt = DateTime.now().toUtc();
       ServerClock.observe(sentAt.add(const Duration(seconds: 120)),
-          sentAt: sentAt);
+          sentAt: sentAt,);
       final partnerActiveTenSecondsAgo =
           ServerClock.now().subtract(const Duration(seconds: 10));
       expect(online(partnerActiveTenSecondsAgo), isTrue);
@@ -120,7 +120,7 @@ void main() {
           .difference(partnerActiveTenSecondsAgo)
           .inSeconds;
       expect(uncorrected, lessThan(-45),
-          reason: 'proves the raw device clock got this wrong');
+          reason: 'proves the raw device clock got this wrong',);
     });
   });
 }

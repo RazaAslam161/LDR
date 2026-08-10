@@ -49,16 +49,16 @@ void main() {
       var timedOut = false;
       unawaited(client
           .send(http.Request(
-              'POST', Uri.parse('https://x.co/storage/v1/object/media/a.jpg')))
+              'POST', Uri.parse('https://x.co/storage/v1/object/media/a.jpg'),),)
           .catchError((_) {
         timedOut = true;
         return http.StreamedResponse(const Stream.empty(), 500);
-      }));
+      }),);
 
       // Well past the API timeout; the upload must still be in flight.
       await Future<void>.delayed(const Duration(milliseconds: 300));
       expect(timedOut, isFalse,
-          reason: 'an upload was cancelled by the short API timeout');
+          reason: 'an upload was cancelled by the short API timeout',);
     });
 
     test('requests pass through untouched when they answer', () async {

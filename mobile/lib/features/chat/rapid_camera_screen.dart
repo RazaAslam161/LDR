@@ -1,6 +1,6 @@
-import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -8,17 +8,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:miles/main.dart' show MilesApp;
-import 'package:screen_brightness/screen_brightness.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/chat/camera_bake.dart';
 import 'package:miles/features/chat/camera_filter_painter.dart';
 import 'package:miles/features/chat/camera_filters.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/main.dart' show MilesApp;
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:video_player/video_player.dart';
 
 enum _CamState { preview, recording, captured, sending }
@@ -32,9 +32,7 @@ enum _CamState { preview, recording, captured, sending }
 ///   caller instead of sending to chat.
 class RapidCameraScreen extends StatefulWidget {
   const RapidCameraScreen({
-    super.key,
-    required this.coupleId,
-    required this.myUid,
+    required this.coupleId, required this.myUid, super.key,
     this.onSent,
     this.returnFile = false,
   });
@@ -276,7 +274,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
 
   Future<void> _boostBrightness() async {
     try {
-      await ScreenBrightness().setScreenBrightness(1.0);
+      await ScreenBrightness().setScreenBrightness(1);
     } catch (_) {}
   }
 
@@ -432,8 +430,9 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     _recordTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (!mounted) return;
       setState(() => _recordElapsed += const Duration(milliseconds: 200));
-      if (_recordElapsed >= _maxRecord)
+      if (_recordElapsed >= _maxRecord) {
         _stopRecording(); // auto-stop at the cap
+      }
     });
   }
 
@@ -552,7 +551,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
             )
           : !_ready && _state == _CamState.preview
               ? const Center(
-                  child: CircularProgressIndicator(color: MilesColors.ember))
+                  child: CircularProgressIndicator(color: MilesColors.ember),)
               : (_state == _CamState.preview || _state == _CamState.recording)
                   ? _buildPreview()
                   : _buildCaptured(),
@@ -564,7 +563,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   void _onZoomUpdate(ScaleUpdateDetails d) {
     if (_maxZoom <= _minZoom) return; // fixed lens — nothing to do
     final next =
-        (_zoomAtGestureStart * d.scale).clamp(_minZoom, _maxZoom).toDouble();
+        (_zoomAtGestureStart * d.scale).clamp(_minZoom, _maxZoom);
     if ((next - _zoom).abs() < 0.01) return;
     setState(() => _zoom = next);
     _applyZoom(next);
@@ -597,7 +596,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     final c = _controller;
     if (c == null || !c.value.isInitialized) {
       return const Center(
-          child: CircularProgressIndicator(color: MilesColors.ember));
+          child: CircularProgressIndicator(color: MilesColors.ember),);
     }
     // 1. live filtered viewfinder. The preview is NOT mirrored (shows the true
     //    camera orientation) — the mirror is applied only to the SAVED photo
@@ -637,7 +636,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 5),
+                      horizontal: 12, vertical: 5,),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(20),
@@ -646,7 +645,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
                       style: const TextStyle(
                           color: MilesColors.cream50,
                           fontSize: 12,
-                          fontWeight: FontWeight.w600)),
+                          fontWeight: FontWeight.w600,),),
                 ),
               ),
             ),
@@ -731,7 +730,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
                         child: Text(
                           'Recording… release to stop',
                           style: TextStyle(
-                              color: MilesColors.cream100, fontSize: 12),
+                              color: MilesColors.cream100, fontSize: 12,),
                         ),
                       )
                     : _filterStrip(),
@@ -855,10 +854,10 @@ class _CameraUnavailable extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.no_photography_outlined,
-                      color: MilesColors.emberSoft, size: 40),
+                      color: MilesColors.emberSoft, size: 40,),
                   const SizedBox(height: 14),
                   Text('Camera unavailable',
-                      style: Theme.of(context).textTheme.headlineSmall),
+                      style: Theme.of(context).textTheme.headlineSmall,),
                   const SizedBox(height: 8),
                   const Text(
                     'Allow camera access to send a quick snap.',
@@ -872,9 +871,9 @@ class _CameraUnavailable extends StatelessWidget {
                     onPressed: onRetry,
                   ),
                   const SizedBox(height: 6),
-                  TextButton(
+                  const TextButton(
                     onPressed: Geolocator.openAppSettings,
-                    child: const Text('Open Settings'),
+                    child: Text('Open Settings'),
                   ),
                 ],
               ),
@@ -1071,12 +1070,12 @@ class _RecPill extends StatelessWidget {
             width: 10,
             height: 10,
             decoration: const BoxDecoration(
-                color: MilesColors.blush, shape: BoxShape.circle),
+                color: MilesColors.blush, shape: BoxShape.circle,),
           ),
           const SizedBox(width: 8),
           Text('$mm:$ss',
               style: const TextStyle(
-                  color: MilesColors.cream50, fontWeight: FontWeight.w600)),
+                  color: MilesColors.cream50, fontWeight: FontWeight.w600,),),
         ],
       ),
     );
@@ -1115,7 +1114,7 @@ class _VideoReview extends StatelessWidget {
           )
         else
           const Center(
-              child: CircularProgressIndicator(color: MilesColors.ember)),
+              child: CircularProgressIndicator(color: MilesColors.ember),),
         SafeArea(
           child: Align(
             alignment: Alignment.topLeft,
@@ -1134,7 +1133,7 @@ class _VideoReview extends StatelessWidget {
                 TextButton(
                   onPressed: onRetake,
                   child: const Text('Retake',
-                      style: TextStyle(color: MilesColors.cream100)),
+                      style: TextStyle(color: MilesColors.cream100),),
                 ),
                 SizedBox(
                   width: 130,
@@ -1177,16 +1176,7 @@ class _Sticker {
 
 class _AnnotateHost extends StatefulWidget {
   const _AnnotateHost({
-    super.key,
-    required this.imageFile,
-    required this.annotating,
-    required this.onAnnotateStart,
-    required this.onAnnotateDone,
-    required this.onAnnotateCancel,
-    required this.onRetake,
-    required this.onSend,
-    required this.sending,
-    required this.sendLabel,
+    required this.imageFile, required this.annotating, required this.onAnnotateStart, required this.onAnnotateDone, required this.onAnnotateCancel, required this.onRetake, required this.onSend, required this.sending, required this.sendLabel, super.key,
     this.previewFilter,
     this.previewMirror = false,
   });
@@ -1250,10 +1240,10 @@ class _AnnotateHostState extends State<_AnnotateHost> {
 
   Future<void> _flattenAndDone() async {
     try {
-      final boundary = _captureKey.currentContext!.findRenderObject()
+      final boundary = _captureKey.currentContext!.findRenderObject()!
           as RenderRepaintBoundary;
       final dpr = MediaQuery.of(context).devicePixelRatio;
-      final ui.Image image = await boundary.toImage(pixelRatio: dpr);
+      final image = await boundary.toImage(pixelRatio: dpr);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) {
         widget.onAnnotateDone(null);
@@ -1261,7 +1251,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
       }
       final dir = await getTemporaryDirectory();
       final file = File(
-          '${dir.path}/annot_${DateTime.now().millisecondsSinceEpoch}.png');
+          '${dir.path}/annot_${DateTime.now().millisecondsSinceEpoch}.png',);
       await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
       _clearAnnotations();
       widget.onAnnotateDone(file);
@@ -1321,8 +1311,9 @@ class _AnnotateHostState extends State<_AnnotateHost> {
                 _strokes.add(stroke);
               }),
               onPanUpdate: (d) => setState(() {
-                if (_strokes.isNotEmpty)
+                if (_strokes.isNotEmpty) {
                   _strokes.last.points.add(d.localPosition);
+                }
               }),
               behavior: HitTestBehavior.translucent,
             ),
@@ -1365,7 +1356,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
           TextButton(
             onPressed: widget.onRetake,
             child: const Text('Retake',
-                style: TextStyle(color: MilesColors.cream100)),
+                style: TextStyle(color: MilesColors.cream100),),
           ),
           _RoundIcon(icon: Icons.edit, onTap: widget.onAnnotateStart),
           SizedBox(
@@ -1395,7 +1386,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
                 for (final e in _emojis)
                   GestureDetector(
                     onTap: () => setState(() =>
-                        _stickers.add(_Sticker(e, const Offset(150, 280)))),
+                        _stickers.add(_Sticker(e, const Offset(150, 280))),),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6),
                       child: Text(e, style: const TextStyle(fontSize: 26)),
@@ -1411,7 +1402,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
               TextButton(
                 onPressed: _cancelAnnotate,
                 child: const Text('Cancel',
-                    style: TextStyle(color: MilesColors.cream100)),
+                    style: TextStyle(color: MilesColors.cream100),),
               ),
               // pen colour toggle
               Row(
@@ -1434,7 +1425,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
                 child: const Text('Done',
                     style: TextStyle(
                         color: MilesColors.emberSoft,
-                        fontWeight: FontWeight.w600)),
+                        fontWeight: FontWeight.w600,),),
               ),
             ],
           ),

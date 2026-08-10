@@ -30,7 +30,7 @@ void main() {
     CryptoCore.clearCache();
     final p = legacy(utf8.encode('an old note from before encryption'));
     expect(await CryptoCore.decryptString(p),
-        'an old note from before encryption');
+        'an old note from before encryption',);
   });
 
   test('a legacy binary row still decrypts', () async {
@@ -104,6 +104,6 @@ void main() {
       macB64: base64Encode(Uint8List(16)..[0] = 1),
     );
     expect(
-        () => CryptoCore.decryptBytes(zeroNonceRealMac), throwsStateError);
+        () => CryptoCore.decryptBytes(zeroNonceRealMac), throwsStateError,);
   });
 }

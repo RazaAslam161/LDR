@@ -6,8 +6,7 @@ import 'package:miles/core/theme.dart';
 /// screen so all save actions look and behave the same.
 class SaveMediaButton extends StatefulWidget {
   const SaveMediaButton({
-    super.key,
-    required this.onSave,
+    required this.onSave, super.key,
     this.color,
     this.size = 20,
     this.successMessage = 'Saved to your vault 🔒',

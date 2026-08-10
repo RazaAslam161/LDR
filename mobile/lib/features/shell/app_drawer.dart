@@ -210,7 +210,7 @@ class AppDrawer extends ConsumerWidget {
                 const SizedBox(height: 8),
                 ListTile(
                   leading: const Icon(Icons.settings,
-                      color: MilesColors.faint),
+                      color: MilesColors.faint,),
                   title: const Text(
                     'Settings',
                     style: TextStyle(color: MilesColors.faint),
@@ -268,7 +268,7 @@ class _PresenceDot extends StatelessWidget {
 
 class _DrawerTile extends StatelessWidget {
   const _DrawerTile(
-      {required this.icon, required this.label, required this.onTap});
+      {required this.icon, required this.label, required this.onTap,});
   final IconData icon;
   final String label;
   final VoidCallback onTap;

@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:geocoding/geocoding.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Symmetric, opt-in, revocable location sharing — FOREGROUND ONLY.

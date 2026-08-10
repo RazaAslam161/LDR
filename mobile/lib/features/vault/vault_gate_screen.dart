@@ -227,14 +227,14 @@ class _GateBody extends StatelessWidget {
         const SizedBox(height: 8),
         Text(subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: MilesColors.taupe)),
+            style: const TextStyle(color: MilesColors.taupe),),
         const SizedBox(height: 12),
         SizedBox(
           height: 20,
           child: message == null
               ? null
               : Text(message!,
-                  style: const TextStyle(color: MilesColors.blush, fontSize: 13)),
+                  style: const TextStyle(color: MilesColors.blush, fontSize: 13),),
         ),
         const SizedBox(height: 12),
         PinPad(
@@ -249,7 +249,7 @@ class _GateBody extends StatelessWidget {
             onPressed: onBiometric,
             icon: const Icon(Icons.fingerprint, color: MilesColors.gilt),
             label: const Text('Use biometrics',
-                style: TextStyle(color: MilesColors.gilt)),
+                style: TextStyle(color: MilesColors.gilt),),
           ),
         const Spacer(),
       ],

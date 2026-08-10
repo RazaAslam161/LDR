@@ -5,16 +5,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/features/call/call_stats.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/features/call/call_foreground.dart';
+import 'package:miles/features/call/call_stats.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 enum CallState { idle, calling, ringing, connected, ended }
 
@@ -113,7 +113,7 @@ class CallController extends ChangeNotifier {
         Diag.record(DiagArea.call, 'signal_subscribe', corr: _callId, fields: {
           'status': status.name,
           if (err != null) 'error': err.runtimeType.toString(),
-        });
+        },);
       });
     } finally {
       _subscribingChan = false;
@@ -140,7 +140,7 @@ class CallController extends ChangeNotifier {
           'remote_relay': _remoteCandTypes['relay'] ?? 0,
           'remote_set': _remoteSet,
           'turn_error': turnError == null,
-        });
+        },);
         _send('hangup', {});
         _teardown(CallState.ended);
       }
@@ -150,7 +150,8 @@ class CallController extends ChangeNotifier {
   /// Store the offer durably so a CLOSED callee can still answer; the insert
   /// trigger fires the FCM ring (call-notify).
   Future<void> _insertInvite(String offerSdp, bool video) async {
-    final couple = _coupleId, me = _myUid;
+    final couple = _coupleId;
+    final me = _myUid;
     final callee = _ref.read(sessionProvider).partner?.id;
     if (couple == null || me == null || callee == null) {
       // Returned in silence. The FCM ring hangs entirely off this insert, so
@@ -160,7 +161,7 @@ class CallController extends ChangeNotifier {
         'has_couple': couple != null,
         'has_me': me != null,
         'has_callee': callee != null,
-      });
+      },);
       return;
     }
     try {
@@ -183,14 +184,14 @@ class CallController extends ChangeNotifier {
       // then waits the full 35s and tears down with no reason to show.
       Diag.record(DiagArea.call, 'invite_failed', corr: _callId, fields: {
         'error': e.runtimeType.toString(),
-      });
+      },);
     }
   }
 
   /// Ring a call delivered by FCM (the realtime offer was likely missed because
   /// the app was closed). Fetch the stored offer and present it as ringing.
   Future<void> handlePendingCall(
-      String callId, String fromName, bool fallbackVideo) async {
+      String callId, String fromName, bool fallbackVideo,) async {
     if (state != CallState.idle || callId.isEmpty) return;
     reconnect(); // make sure the call channel is live for the answer + ICE
     try {
@@ -215,7 +216,7 @@ class CallController extends ChangeNotifier {
       // means the phone buzzed and then nothing happened — which the user
       // reports as a missed call, not as an error.
       Diag.record(DiagArea.call, 'pending_call_failed',
-          corr: callId, fields: {'error': e.runtimeType.toString()});
+          corr: callId, fields: {'error': e.runtimeType.toString()},);
     }
   }
 
@@ -272,7 +273,7 @@ class CallController extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_turnCacheKey, jsonEncode(servers));
       await prefs.setInt(
-          _turnCacheAtKey, DateTime.now().millisecondsSinceEpoch);
+          _turnCacheAtKey, DateTime.now().millisecondsSinceEpoch,);
     } catch (_) {
       // A cache that fails to save is not worth failing a call over.
     }
@@ -300,7 +301,7 @@ class CallController extends ChangeNotifier {
       // failed fetch has no relay. Without this line that call looks like TURN
       // was never configured at all.
       Diag.record(DiagArea.call, 'turn_backoff',
-          fields: {'cached': _cachedTurn.length});
+          fields: {'cached': _cachedTurn.length},);
       return _cachedTurn;
     }
     final endFetch = Diag.span(DiagArea.call, 'turn_fetch');
@@ -498,14 +499,14 @@ class CallController extends ChangeNotifier {
         {
           'urls': 'turns:$host:443?transport=tcp',
           'username': user,
-          'credential': cred
+          'credential': cred,
         },
       ]);
     }
 
     debugPrint('[turn] ice config: ${servers.length} servers, '
         'relay=${relayAvailable ? 'YES' : 'NO'}'
-        '${turnError == null ? '' : ' (${turnError})'}');
+        '${turnError == null ? '' : ' ($turnError)'}');
     return {'iceServers': servers, 'sdpSemantics': 'unified-plan'};
   }
 
@@ -530,7 +531,7 @@ class CallController extends ChangeNotifier {
     Diag.record(DiagArea.call, 'init', fields: {
       'has_couple': couple != null,
       'has_uid': _myUid != null,
-    });
+    },);
     if (couple == null) return;
     _coupleId = couple.id;
     await _subscribeChannel();
@@ -560,7 +561,7 @@ class CallController extends ChangeNotifier {
       'video': video,
       'relay_known': relayKnown,
       'chan': _chan != null,
-    });
+    },);
     _setState(CallState.calling);
     try {
       await _openMedia(video: video);
@@ -646,7 +647,7 @@ class CallController extends ChangeNotifier {
       'video': isVideo,
       'relay_known': relayKnown,
       'chan': _chan != null,
-    });
+    },);
     try {
       await _openMedia(video: isVideo);
       await _routeAudio();
@@ -681,7 +682,7 @@ class CallController extends ChangeNotifier {
         'error': e.runtimeType.toString(),
         'has_pc': _pc != null,
         'remote_set': _remoteSet,
-      });
+      },);
       _send('hangup', {});
       _teardown(CallState.ended);
     }
@@ -828,7 +829,7 @@ class CallController extends ChangeNotifier {
       'ice_servers': (config['iceServers'] as List?)?.length ?? 0,
       'relay_servers': _cachedTurn.where(_isRelay).length,
       'turn_error': turnError == null,
-    });
+    },);
     // Start sampling NOW, not when the call connects. Started on Connected, the
     // monitor only ever ran on calls that succeeded — which are exactly the
     // calls that never needed a relay. The NO-RELAY banner was invisible in the
@@ -840,7 +841,7 @@ class CallController extends ChangeNotifier {
     }
     pc.onIceGatheringState = (g) => Diag.record(
         DiagArea.call, 'ice_gathering',
-        corr: _callId, fields: {'state': g.name});
+        corr: _callId, fields: {'state': g.name},);
     pc.onIceConnectionState = (i) {
       // The transition sequence IS the diagnosis. checking→failed with no
       // remote candidates is signalling; checking→failed with both sides'
@@ -850,7 +851,7 @@ class CallController extends ChangeNotifier {
         'state': i.name,
         'local_relay': _localCandTypes['relay'] ?? 0,
         'remote_relay': _remoteCandTypes['relay'] ?? 0,
-      });
+      },);
     };
     pc.onIceCandidate = (c) {
       // ' typ host|srflx|relay' — the only line that says whether TURN actually
@@ -858,7 +859,7 @@ class CallController extends ChangeNotifier {
       final t = _typeOf(c.candidate);
       _localCandTypes[t] = (_localCandTypes[t] ?? 0) + 1;
       Diag.record(DiagArea.call, 'ice_local_candidate',
-          corr: _callId, fields: {'typ': t, 'n': _localCandTypes[t]});
+          corr: _callId, fields: {'typ': t, 'n': _localCandTypes[t]},);
       _localCandidates
           .add(c); // keep so we can re-send if the callee was closed
       _send('ice', {
@@ -884,7 +885,7 @@ class CallController extends ChangeNotifier {
         'ms_since_start': _startedAt == null
             ? null
             : DateTime.now().difference(_startedAt!).inMilliseconds,
-      });
+      },);
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
         _setState(CallState.connected);
@@ -912,7 +913,7 @@ class CallController extends ChangeNotifier {
     Diag.record(DiagArea.call, 'signal_received', corr: _callId, fields: {
       'kind': kind,
       'state': state.name,
-    });
+    },);
     switch (kind) {
       case 'offer':
         if (state != CallState.idle) {
@@ -921,12 +922,12 @@ class CallController extends ChangeNotifier {
           // STUCK: any path that leaves it non-idle makes this device silently
           // unreachable while looking perfectly healthy.
           Diag.record(DiagArea.call, 'offer_dropped_busy',
-              corr: _callId, fields: {'state': state.name});
+              corr: _callId, fields: {'state': state.name},);
           return;
         }
         _ring(
           RTCSessionDescription(
-              map['sdp']?.toString(), map['type']?.toString()),
+              map['sdp']?.toString(), map['type']?.toString(),),
           video: map['video'] as bool? ?? true,
           from: _ref.read(sessionProvider).partner?.displayName ?? 'Partner',
         );
@@ -946,7 +947,7 @@ class CallController extends ChangeNotifier {
     }
     try {
       await _pc!.setRemoteDescription(RTCSessionDescription(
-          map['sdp']?.toString(), map['type']?.toString()));
+          map['sdp']?.toString(), map['type']?.toString(),),);
     } catch (e) {
       // _onSignal is void and calls this without awaiting, so a throw here
       // became an unhandled async error the zone ate. The consequence is
@@ -955,12 +956,12 @@ class CallController extends ChangeNotifier {
       // looking exactly like candidates that never arrived.
       Diag.record(DiagArea.call, 'answer_failed', corr: _callId, fields: {
         'error': e.runtimeType.toString(),
-      });
+      },);
       return;
     }
     _remoteSet = true;
     Diag.record(DiagArea.call, 'answer_applied',
-        corr: _callId, fields: {'queued': _pendingRemote.length});
+        corr: _callId, fields: {'queued': _pendingRemote.length},);
     await _flushPending();
     // The callee just came online (it answered). If it was a CLOSED app it
     // missed our first ICE trickle — re-send everything we've gathered.
@@ -990,7 +991,7 @@ class CallController extends ChangeNotifier {
       // where every remote candidate queued and none flushed is a specific bug
       // with a specific fix, and it looks like a network failure.
       'queued': _pc == null || !_remoteSet,
-    });
+    },);
     if (_pc == null || !_remoteSet) {
       _pendingRemote.add(c);
     } else {
@@ -1024,14 +1025,14 @@ class CallController extends ChangeNotifier {
       // the channel for the length of a removeChannel round trip, and _init
       // returns early when the couple has not resolved yet.
       Diag.record(DiagArea.call, 'signal_dropped_no_channel',
-          corr: _callId, fields: {'kind': kind});
+          corr: _callId, fields: {'kind': kind},);
       return;
     }
     Diag.record(DiagArea.call, 'signal_sent', corr: _callId, fields: {
       'kind': kind,
       // Length, never the SDP: it carries both devices' IP addresses.
       if (data['sdp'] != null) 'sdp_len': (data['sdp'] as String?)?.length,
-    });
+    },);
     chan.sendBroadcastMessage(
       event: 'signal',
       payload: {
@@ -1060,7 +1061,7 @@ class CallController extends ChangeNotifier {
       'rtt_ms': stats?.rttMs,
       'rx_kbps': stats?.recvKbps,
       'tx_kbps': stats?.sendKbps,
-    });
+    },);
     _connectTimer?.cancel();
     _statsMonitor.stop();
     stats = null;

@@ -148,7 +148,7 @@ class _SignInPageState extends ConsumerState<SignInPage> {
                 child: TextButton(
                   onPressed: _loading ? null : _forgotPassword,
                   child: const Text('Forgot password?',
-                      style: TextStyle(color: Color(0x99F5EFE6), fontSize: 13)),
+                      style: TextStyle(color: Color(0x99F5EFE6), fontSize: 13),),
                 ),
               ),
               const SizedBox(height: 8),

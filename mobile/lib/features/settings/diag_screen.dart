@@ -65,7 +65,7 @@ class _DiagScreenState extends State<DiagScreen> {
       SnackBar(
         content: Text(text.isEmpty
             ? 'Nothing on disk yet'
-            : '${text.length ~/ 1024}KB copied, including previous runs'),
+            : '${text.length ~/ 1024}KB copied, including previous runs',),
       ),
     );
   }
@@ -95,9 +95,9 @@ class _DiagScreenState extends State<DiagScreen> {
         children: [
           SwitchListTile(
             value: Diag.enabled,
-            activeColor: MilesColors.ember,
+            activeThumbColor: MilesColors.ember,
             title: const Text('Record diagnostics',
-                style: TextStyle(color: MilesColors.cream50)),
+                style: TextStyle(color: MilesColors.cream50),),
             subtitle: const Text(
               'Call, delivery and presence events. Never message text, '
               'photos or location.',
@@ -120,7 +120,7 @@ class _DiagScreenState extends State<DiagScreen> {
                         _chip('all', _filter == null, () => setState(() => _filter = null)),
                         for (final a in DiagArea.values)
                           _chip(a.name, _filter == a,
-                              () => setState(() => _filter = a)),
+                              () => setState(() => _filter = a),),
                       ],
                     ),
                   ),
@@ -128,7 +128,7 @@ class _DiagScreenState extends State<DiagScreen> {
                 IconButton(
                   tooltip: 'Clear',
                   icon: const Icon(Icons.delete_outline,
-                      color: MilesColors.faint),
+                      color: MilesColors.faint,),
                   onPressed: () async {
                     await Diag.clear();
                     if (mounted) setState(() {});
@@ -164,7 +164,7 @@ class _DiagScreenState extends State<DiagScreen> {
             child: events.isEmpty
                 ? const Center(
                     child: Text('Nothing recorded yet',
-                        style: TextStyle(color: MilesColors.faint)),
+                        style: TextStyle(color: MilesColors.faint),),
                   )
                 : ListView.builder(
                     itemCount: events.length,
@@ -172,7 +172,7 @@ class _DiagScreenState extends State<DiagScreen> {
                       final e = events[i];
                       return Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 3),
+                            horizontal: 16, vertical: 3,),
                         child: Text(
                           e.line,
                           style: TextStyle(

@@ -15,7 +15,7 @@ import 'package:miles/features/disguise/cover_gate.dart';
 /// The way in is a **long-press on the temperature**. Large, obvious to reach
 /// deliberately, and inert to a tap.
 class WeatherCover extends StatefulWidget {
-  const WeatherCover({super.key, required this.onAuthenticated});
+  const WeatherCover({required this.onAuthenticated, super.key});
 
   final VoidCallback onAuthenticated;
 
@@ -63,7 +63,7 @@ class _WeatherCoverState extends State<WeatherCover>
                 child: Column(
                   children: [
                     Icon(_forecast.today.icon,
-                        size: 84, color: Colors.white.withValues(alpha: 0.95)),
+                        size: 84, color: Colors.white.withValues(alpha: 0.95),),
                     const SizedBox(height: 8),
                     Text(
                       '${_forecast.today.high}°',
@@ -71,7 +71,7 @@ class _WeatherCoverState extends State<WeatherCover>
                         color: Colors.white,
                         fontSize: 76,
                         fontWeight: FontWeight.w200,
-                        height: 1.0,
+                        height: 1,
                       ),
                     ),
                     Text(
@@ -114,7 +114,7 @@ class _WeatherCoverState extends State<WeatherCover>
                               child: Text(
                                 i == 0 ? 'Today' : _weekdayShort(now, i),
                                 style: const TextStyle(
-                                    color: Colors.white, fontSize: 15),
+                                    color: Colors.white, fontSize: 15,),
                               ),
                             ),
                             Icon(d.icon, color: Colors.white, size: 22),
@@ -122,7 +122,7 @@ class _WeatherCoverState extends State<WeatherCover>
                             Text(
                               '${d.low}°',
                               style: const TextStyle(
-                                  color: Colors.white60, fontSize: 15),
+                                  color: Colors.white60, fontSize: 15,),
                             ),
                             const SizedBox(width: 14),
                             SizedBox(
@@ -131,7 +131,7 @@ class _WeatherCoverState extends State<WeatherCover>
                                 '${d.high}°',
                                 textAlign: TextAlign.right,
                                 style: const TextStyle(
-                                    color: Colors.white, fontSize: 15),
+                                    color: Colors.white, fontSize: 15,),
                               ),
                             ),
                           ],
@@ -176,9 +176,6 @@ class _Day {
 
 class _Forecast {
   const _Forecast(this.week);
-  final List<_Day> week;
-
-  _Day get today => week.first;
 
   /// Seeded on the calendar day, so the forecast is stable all day and only
   /// changes overnight — the way a real one behaves. A forecast that reshuffles
@@ -197,6 +194,9 @@ class _Forecast {
       final c = conditions[rnd.nextInt(conditions.length)];
       final high = base + rnd.nextInt(5) - 2;
       return _Day(c.$1, c.$2, high, high - 6 - rnd.nextInt(3));
-    }));
+    }),);
   }
+  final List<_Day> week;
+
+  _Day get today => week.first;
 }

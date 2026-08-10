@@ -13,17 +13,17 @@ import 'package:miles/core/providers.dart';
 import 'package:miles/core/root_scaffold_key.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/presence_service.dart';
-import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
-import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/time/tz_helper.dart';
-import 'package:miles/core/widgets/net_image.dart';
-import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
+import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/chat/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
@@ -117,7 +117,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       'coupleId': couple.id,
       'myUid': uid,
       'mode': 'checkin',
-    });
+    },);
     if (file == null) return;
     if (!mounted) return;
     setState(() => _uploading = true);
@@ -138,7 +138,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not share the snap.')));
+            const SnackBar(content: Text('Could not share the snap.')),);
       }
     }
     if (mounted) setState(() => _uploading = false);
@@ -254,7 +254,7 @@ class _PartnerStatusCard extends StatelessWidget {
                 period: const Duration(seconds: 5),
                 child: _Avatar(
                     photoUrl: presence?.checkinPhotoUrl,
-                    name: partner.displayName),
+                    name: partner.displayName,),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -266,7 +266,7 @@ class _PartnerStatusCard extends StatelessWidget {
                         Flexible(
                           child: Text(partner.displayName,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.headlineSmall),
+                              style: Theme.of(context).textTheme.headlineSmall,),
                         ),
                         if (mood != null) ...[
                           const SizedBox(width: 6),
@@ -294,7 +294,7 @@ class _PartnerStatusCard extends StatelessWidget {
                                   ? 'Offline'
                                   : 'Last seen ${DateFormat('h:mm a').format(presence!.lastSeen!)}',
                           style: const TextStyle(
-                              color: MilesColors.taupe, fontSize: 12),
+                              color: MilesColors.taupe, fontSize: 12,),
                         ),
                       ],
                     ),
@@ -310,13 +310,13 @@ class _PartnerStatusCard extends StatelessWidget {
           if (mood != null) ...[
             const SizedBox(height: 8),
             _InfoRow(
-                icon: Icons.favorite_outline, text: 'Feeling ${mood.label}'),
+                icon: Icons.favorite_outline, text: 'Feeling ${mood.label}',),
           ],
           if (online && presence?.currentScreen != null) ...[
             const SizedBox(height: 8),
             _InfoRow(
                 icon: Icons.smartphone_outlined,
-                text: 'In ${presence!.currentScreen}'),
+                text: 'In ${presence!.currentScreen}',),
           ],
           const SizedBox(height: 16),
           OutlinedButton.icon(
@@ -325,7 +325,7 @@ class _PartnerStatusCard extends StatelessWidget {
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    child: CircularProgressIndicator(strokeWidth: 2),)
                 : const Icon(Icons.camera_alt_outlined, size: 18),
             label: const Text('Share a snap'),
           ),
@@ -357,15 +357,14 @@ class _Avatar extends StatelessWidget {
               ? Center(
                   child: Text(initial,
                       style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 24)))
+                          color: MilesColors.cream50, fontSize: 24,),),)
               : Hero(
                   tag: 'snap-$url',
                   child: NetImage(url,
-                      fit: BoxFit.cover,
                       error: Center(
                           child: Text(initial,
                               style: const TextStyle(
-                                  color: MilesColors.cream50, fontSize: 24))))),
+                                  color: MilesColors.cream50, fontSize: 24,),),),),),
         ),
       ),
     );
@@ -384,7 +383,7 @@ class _InfoRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: Text(text,
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 13)),
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 13),),
         ),
       ],
     );
@@ -419,10 +418,12 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
   Future<void> _load() async {
     try {
       final invite = await SupabaseRepository.activePairingInvite();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _code = invite?.code;
         _loading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -434,10 +435,12 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
     setState(() => _loading = true);
     try {
       final invite = await SupabaseRepository.createPairingInvite();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _code = invite.code;
         _loading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -452,11 +455,11 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
         children: [
           const Text('Waiting for your partner to join…',
               textAlign: TextAlign.center,
-              style: TextStyle(color: MilesColors.cream50, fontSize: 16)),
+              style: TextStyle(color: MilesColors.cream50, fontSize: 16),),
           const SizedBox(height: 8),
           const Text('They need this code. It is still live.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+              style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
           const SizedBox(height: 24),
           if (_loading)
             const CircularProgressIndicator(color: MilesColors.ember)
@@ -488,12 +491,12 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
             ),
           ] else
             const Text('No live code right now.',
-                style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+                style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
           const SizedBox(height: 8),
           TextButton(
             onPressed: _loading ? null : _newCode,
             child: const Text('Get a new code',
-                style: TextStyle(color: MilesColors.emberSoft, fontSize: 13)),
+                style: TextStyle(color: MilesColors.emberSoft, fontSize: 13),),
           ),
         ],
       ),
@@ -511,6 +514,6 @@ class _Centered extends StatelessWidget {
         padding: const EdgeInsets.all(40),
         child: Text(text,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: MilesColors.taupe)),
+            style: const TextStyle(color: MilesColors.taupe),),
       );
 }

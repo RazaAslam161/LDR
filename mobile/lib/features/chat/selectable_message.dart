@@ -17,11 +17,7 @@ import 'package:miles/core/theme.dart';
 /// mid-selection should add it to the selection, not open it full screen.
 class SelectableMessage extends StatelessWidget {
   const SelectableMessage({
-    super.key,
-    required this.selecting,
-    required this.selected,
-    required this.onToggle,
-    required this.child,
+    required this.selecting, required this.selected, required this.onToggle, required this.child, super.key,
   });
 
   /// Whether a selection is open anywhere in the conversation — not whether

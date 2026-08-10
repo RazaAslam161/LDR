@@ -1,14 +1,14 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/config.dart';
 import 'package:miles/core/models.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/services/presence_service.dart';
-import 'package:flutter/foundation.dart';
-import 'package:miles/core/config.dart';
 import 'package:miles/core/supabase_repository.dart';
-import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/time/tz_helper.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The full state of "who am I + who is my partner" used across the app.

@@ -35,10 +35,10 @@ void main() {
     // Without this the whole file passes by listing nothing — git resolving to
     // the wrong directory would read as a spotless repository.
     expect(all.length, greaterThan(100),
-        reason: 'git ls-files returned almost nothing; these checks are blind');
+        reason: 'git ls-files returned almost nothing; these checks are blind',);
     final loose = all.where((f) => !f.contains('/')).toSet()..removeAll(allowed);
     expect(loose, isEmpty,
-        reason: 'put it in mobile/, supabase/, scripts/ or docs/: $loose');
+        reason: 'put it in mobile/, supabase/, scripts/ or docs/: $loose',);
   });
 
   test('no build artefact is tracked', () {
@@ -66,7 +66,7 @@ void main() {
     ];
     final present = foreign.where((f) => File('../$f').existsSync()).toList();
     expect(present, isEmpty,
-        reason: 'this repository ships a Flutter app: $present');
+        reason: 'this repository ships a Flutter app: $present',);
   });
 
   test('.env.example documents every key the app actually reads', () {
@@ -84,7 +84,7 @@ void main() {
     expect(keys, isNotEmpty, reason: 'no env keys parsed out of config.dart');
     final undocumented = keys.where((k) => !example.contains(k)).toList();
     expect(undocumented, isEmpty,
-        reason: 'read by config.dart, absent from .env.example: $undocumented');
+        reason: 'read by config.dart, absent from .env.example: $undocumented',);
   });
 
   test('documentation is filed, not loose', () {
@@ -100,7 +100,7 @@ void main() {
     const allowedAtDocsRoot = {'docs/REFERENCE.md', 'docs/FIELD-TEST.md'};
     expect(atDocsRoot.toSet().difference(allowedAtDocsRoot), isEmpty,
         reason: 'file it under docs/architecture, docs/guides or docs/archive: '
-            '${atDocsRoot.toSet().difference(allowedAtDocsRoot)}');
+            '${atDocsRoot.toSet().difference(allowedAtDocsRoot)}',);
     expect(Directory('../docs/archive').existsSync(), isTrue);
   });
 
@@ -127,12 +127,12 @@ void main() {
         final rel = f.path.replaceAll(r'\', '/').split('lib/').last;
         final referenced = sources.entries.any((e) =>
             e.key != f.path &&
-            (e.value.contains(rel) || e.value.contains("'$name")));
+            (e.value.contains(rel) || e.value.contains("'$name")),);
         if (!referenced) orphans.add(rel);
       }
       expect(orphans, isEmpty,
           reason: 'imported by nothing — delete it, or move a real script to '
-              'tool/: $orphans');
+              'tool/: $orphans',);
     });
 
     test('no code is commented out', () {
@@ -149,7 +149,7 @@ void main() {
           r'|[A-Za-z_]\w*\('
           r'|[A-Za-z_]\w*\s*=[^=]'
           r'|[A-Za-z_][\w.]*\.[A-Za-z_]\w*\('
-          r')');
+          ')');
       final terminator = RegExp(r'[;{},]\s*$');
 
       bool isCommentedCode(String line) {
@@ -161,10 +161,10 @@ void main() {
       // The check is worthless if it cannot recognise the thing it forbids.
       expect(isCommentedCode('      // await _pc!.setRemoteDescription(o);'),
           isTrue,
-          reason: 'the detector no longer detects anything');
+          reason: 'the detector no longer detects anything',);
       expect(isCommentedCode('      // it covers _openMedia and _routeAudio,'),
           isFalse,
-          reason: 'the detector flags ordinary prose');
+          reason: 'the detector flags ordinary prose',);
 
       final hits = <String>[];
       for (final f in dartIn('lib')) {
@@ -183,13 +183,13 @@ void main() {
       // supply-chain entry, a version constraint and a line of the resolve — it
       // should have to earn its place.
       final spec = File('pubspec.yaml').readAsStringSync();
-      final deps = RegExp(r'^dependencies:(.*?)^dev_dependencies:',
-              dotAll: true, multiLine: true)
+      final deps = RegExp('^dependencies:(.*?)^dev_dependencies:',
+              dotAll: true, multiLine: true,)
           .firstMatch(spec)
           ?.group(1);
       expect(deps, isNotNull, reason: 'could not parse the dependencies block');
 
-      final names = RegExp(r'^  ([a-z0-9_]+):', multiLine: true)
+      final names = RegExp('^  ([a-z0-9_]+):', multiLine: true)
           .allMatches(deps!)
           .map((m) => m[1]!)
           .where((n) => n != 'flutter')
@@ -218,21 +218,21 @@ void main() {
     // and one use of a package-internal member. A verification that cannot
     // fail is worse than no verification, because it is trusted.
     final r = Process.runSync('flutter', ['analyze', '--no-pub'],
-        runInShell: true);
+        runInShell: true,);
     final out = '${r.stdout}';
     final errors =
-        RegExp(r'^error - ', multiLine: true).allMatches(out).length;
+        RegExp('^error - ', multiLine: true).allMatches(out).length;
     final warnings =
-        RegExp(r'^warning - ', multiLine: true).allMatches(out).length;
+        RegExp('^warning - ', multiLine: true).allMatches(out).length;
 
     // Proves the output was actually parsed. `info` lines always exist here;
     // zero of them means analyze did not run and the counts above are noise.
-    expect(RegExp(r'^ *info - ', multiLine: true).hasMatch(out), isTrue,
-        reason: 'could not read analyzer output — this check is blind');
+    expect(RegExp('^ *info - ', multiLine: true).hasMatch(out), isTrue,
+        reason: 'could not read analyzer output — this check is blind',);
 
     expect(errors, 0, reason: 'analyzer errors:\n$out');
     expect(warnings, 0, reason: 'analyzer warnings:\n$out');
-  }, timeout: const Timeout(Duration(minutes: 4)));
+  }, timeout: const Timeout(Duration(minutes: 4)),);
 
   test('analyzer suppressions stay countable', () {
     // An `// ignore:` is a warning someone decided to keep. That can be the
@@ -247,11 +247,11 @@ void main() {
             .readAsStringSync()
             .split('\n')
             .where((l) => l.contains('// ignore:'))
-            .map((l) => '${f.uri.pathSegments.last}: ${l.trim()}'))
+            .map((l) => '${f.uri.pathSegments.last}: ${l.trim()}'),)
         .toList();
     expect(ignores.length, lessThanOrEqualTo(1),
         reason: 'each suppression needs a reason in a comment above it, and '
-            'this bound moved on purpose: $ignores');
+            'this bound moved on purpose: $ignores',);
   });
 
   test('the launcher disguise is intact', () {
@@ -261,7 +261,7 @@ void main() {
     final manifest =
         File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
     expect(manifest, contains('android:label="News"'),
-        reason: 'the launcher name is a disguise and is intentional');
+        reason: 'the launcher name is a disguise and is intentional',);
     expect(root.existsSync(), isTrue);
   });
 }

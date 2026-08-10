@@ -21,7 +21,7 @@ const moodStates = <MoodState>[
 
 MoodState moodFor(String key) =>
     moodStates.firstWhere((m) => m.key == key,
-        orElse: () => const MoodState('feeling_close', 'Feeling close', '🤍'));
+        orElse: () => const MoodState('feeling_close', 'Feeling close', '🤍'),);
 
 class IntimacyPrefs {
   const IntimacyPrefs({this.receivingEnabled = false, this.signalingEnabled = false});

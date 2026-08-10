@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/features/disguise/disguise_service.dart' show DisguiseService;
 
 /// What the app pretends to be on the user's phone.
 ///

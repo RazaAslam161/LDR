@@ -2,6 +2,7 @@
 ///
 /// Field names are camelCase in Dart and snake_case in the DB — converters
 /// live in [SupabaseRepository] so these stay clean.
+library;
 
 import 'package:miles/core/supabase_repository.dart' show SupabaseRepository;
 import 'package:miles/core/utils/json_utils.dart';
@@ -75,12 +76,12 @@ class Profile {
       wakeTime: JsonUtils.parseStringOrNull(json['wake_time']),
       sleepTime: JsonUtils.parseStringOrNull(json['sleep_time']),
       presenceStatus: _parsePresence(
-          JsonUtils.parseString(json['presence_status'], fallback: 'free')),
+          JsonUtils.parseString(json['presence_status'], fallback: 'free'),),
       createdAt: JsonUtils.parseDate(json['created_at']),
       birthDate: JsonUtils.parseStringOrNull(json['birth_date']),
       statusMessage: JsonUtils.parseStringOrNull(json['status_message']),
       gender: JsonUtils.parseStringOrNull(json['gender']),
-      genderSet: JsonUtils.parseBool(json['gender_set'], fallback: false),
+      genderSet: JsonUtils.parseBool(json['gender_set']),
     );
   }
 
@@ -196,7 +197,7 @@ class Ritual {
       id: JsonUtils.parseString(json['id']),
       coupleId: JsonUtils.parseString(json['couple_id']),
       type: _parseRitualType(
-          JsonUtils.parseString(json['type'], fallback: 'custom')),
+          JsonUtils.parseString(json['type'], fallback: 'custom'),),
       message: JsonUtils.parseStringOrNull(json['message']),
       cron: JsonUtils.parseStringOrNull(json['cron']),
       deliverAt: JsonUtils.parseDateOrNull(json['deliver_at'])?.toUtc(),

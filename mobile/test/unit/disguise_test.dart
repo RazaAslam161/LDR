@@ -14,7 +14,7 @@ void main() {
       };
       for (final d in kDisguises) {
         expect(built.contains(d.cover), isTrue,
-            reason: '${d.label} is offered but ${d.cover} has no cover screen');
+            reason: '${d.label} is offered but ${d.cover} has no cover screen',);
       }
     });
 
@@ -28,7 +28,7 @@ void main() {
       // identifier would silently target a component that does not exist.
       for (final d in kDisguises) {
         expect(RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(d.aliasId), isTrue,
-            reason: '${d.aliasId} is not a valid component-name suffix');
+            reason: '${d.aliasId} is not a valid component-name suffix',);
       }
     });
 

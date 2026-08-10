@@ -9,9 +9,9 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 
@@ -169,7 +169,7 @@ class _CouplePageState extends ConsumerState<CouplePage> {
                 child: TextButton(
                   onPressed: _loading ? null : _signOut,
                   child: const Text('Sign out',
-                      style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+                      style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
                 ),
               ),
             ],
@@ -204,7 +204,7 @@ class _ConnectView extends StatelessWidget {
         children: [
           const SizedBox(height: 40),
           Text('Connect with your partner',
-              style: Theme.of(context).textTheme.displayMedium),
+              style: Theme.of(context).textTheme.displayMedium,),
           const SizedBox(height: 8),
           const Text(
             'One of you starts your space and shares the code. '
@@ -222,10 +222,10 @@ class _ConnectView extends StatelessWidget {
                     style: TextStyle(
                         color: MilesColors.cream50,
                         fontSize: 16,
-                        fontWeight: FontWeight.w600)),
+                        fontWeight: FontWeight.w600,),),
                 const SizedBox(height: 4),
                 const Text("You'll get a code & link to send your partner.",
-                    style: TextStyle(color: MilesColors.taupe, fontSize: 13)),
+                    style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
                 const SizedBox(height: 16),
                 GlowButton(
                   label: 'Create & get a code',
@@ -245,7 +245,7 @@ class _ConnectView extends StatelessWidget {
               child: Text('or', style: TextStyle(color: MilesColors.faint)),
             ),
             Expanded(child: Divider(color: Color(0x33D9A86C))),
-          ]),
+          ],),
           const SizedBox(height: 24),
 
           LoveTextField(
@@ -259,7 +259,7 @@ class _ConnectView extends StatelessWidget {
               FilteringTextInputFormatter.allow(RegExp('[A-Z0-9]')),
             ],
             textStyle: const TextStyle(
-                color: MilesColors.cream50, fontSize: 22, letterSpacing: 6),
+                color: MilesColors.cream50, fontSize: 22, letterSpacing: 6,),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
@@ -302,12 +302,12 @@ class _InviteReveal extends StatelessWidget {
                 style: TextStyle(
                     fontSize: 12,
                     letterSpacing: 4,
-                    color: MilesColors.emberSoft)),
+                    color: MilesColors.emberSoft,),),
           ),
           const SizedBox(height: 12),
           Text('Share this with your person',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.displaySmall),
+              style: Theme.of(context).textTheme.displaySmall,),
           const SizedBox(height: 12),
           const Text(
             "They'll tap Join and enter the code — or open your link. "
@@ -325,7 +325,7 @@ class _InviteReveal extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 10,
                         letterSpacing: 3,
-                        color: MilesColors.taupe)),
+                        color: MilesColors.taupe,),),
                 const SizedBox(height: 12),
                 Text(
                   code,
@@ -339,7 +339,7 @@ class _InviteReveal extends StatelessWidget {
                   Text(
                     'Expires ${DateFormat('MMM d, h:mm a').format(expiresAt!)}',
                     style: const TextStyle(
-                        fontSize: 11, color: MilesColors.faint),
+                        fontSize: 11, color: MilesColors.faint,),
                   ),
                 ],
               ],
@@ -353,7 +353,7 @@ class _InviteReveal extends StatelessWidget {
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: code));
                     ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Copied code: $code')));
+                        SnackBar(content: Text('Copied code: $code')),);
                   },
                   icon: const Icon(Icons.copy, size: 16),
                   label: const Text('Copy code'),
@@ -364,9 +364,9 @@ class _InviteReveal extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: () {
                     Clipboard.setData(
-                        ClipboardData(text: inviteLinkFor(code)));
+                        ClipboardData(text: inviteLinkFor(code)),);
                     ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Invite link copied')));
+                        const SnackBar(content: Text('Invite link copied')),);
                   },
                   icon: const Icon(Icons.link, size: 16),
                   label: const Text('Copy link'),
@@ -378,7 +378,7 @@ class _InviteReveal extends StatelessWidget {
           GlowButton(
             label: 'Enter our space',
             color: MilesColors.blush,
-            onPressed: () => onContinue(),
+            onPressed: onContinue,
           ),
         ],
       ),

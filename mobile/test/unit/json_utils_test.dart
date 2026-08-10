@@ -69,7 +69,7 @@ void main() {
         {'v': 2},
       ];
       final out = JsonUtils.parseList<int>(
-          input, (m) => JsonUtils.parseInt(m['v']));
+          input, (m) => JsonUtils.parseInt(m['v']),);
       expect(out, [1, 2]);
     });
     test('non-list → empty', () {

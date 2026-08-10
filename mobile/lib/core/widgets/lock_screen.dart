@@ -89,13 +89,13 @@ class _LockScreenState extends State<LockScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.lock_rounded,
-                        color: MilesColors.ember, size: 52),
+                        color: MilesColors.ember, size: 52,),
                     const SizedBox(height: 14),
                     const Text('Miles is locked',
                         style: TextStyle(
                             color: MilesColors.cream50,
                             fontSize: 19,
-                            fontWeight: FontWeight.w600)),
+                            fontWeight: FontWeight.w600,),),
                     const SizedBox(height: 6),
                     Text(_message ?? 'Unlock to continue',
                         textAlign: TextAlign.center,
@@ -103,7 +103,7 @@ class _LockScreenState extends State<LockScreen> {
                             color: _message == 'Wrong PIN'
                                 ? MilesColors.blush
                                 : MilesColors.taupe,
-                            fontSize: 13)),
+                            fontSize: 13,),),
                     const SizedBox(height: 28),
                     if (!_showPin) ...[
                       if (hasBio)
@@ -111,24 +111,24 @@ class _LockScreenState extends State<LockScreen> {
                           style: FilledButton.styleFrom(
                             backgroundColor: MilesColors.ember,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 28, vertical: 14),
+                                horizontal: 28, vertical: 14,),
                           ),
                           onPressed: _busy ? null : _authenticate,
                           icon: Icon(faceIcon
                               ? Icons.face_rounded
-                              : Icons.fingerprint),
+                              : Icons.fingerprint,),
                           label: Text('Unlock with $label'),
                         ),
                       if (_hasPin)
                         TextButton(
                           onPressed: () => setState(() => _showPin = true),
                           child: const Text('Use PIN instead',
-                              style: TextStyle(color: MilesColors.gilt)),
+                              style: TextStyle(color: MilesColors.gilt),),
                         ),
                       if (!hasBio && !_hasPin)
                         FilledButton.icon(
                           style: FilledButton.styleFrom(
-                              backgroundColor: MilesColors.ember),
+                              backgroundColor: MilesColors.ember,),
                           onPressed: _busy ? null : _authenticate,
                           icon: const Icon(Icons.lock_open),
                           label: const Text('Unlock'),
@@ -148,9 +148,9 @@ class _LockScreenState extends State<LockScreen> {
                           icon: Icon(
                               faceIcon ? Icons.face_rounded : Icons.fingerprint,
                               color: MilesColors.gilt,
-                              size: 18),
+                              size: 18,),
                           label: Text('Use $label',
-                              style: const TextStyle(color: MilesColors.gilt)),
+                              style: const TextStyle(color: MilesColors.gilt),),
                         ),
                     ],
                   ],

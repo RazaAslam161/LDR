@@ -26,7 +26,7 @@ void main() {
     final loose = sqlIn(root);
     expect(loose, isEmpty,
         reason: 'DDL belongs in migrations/, one-off queries in diagnostics/: '
-            '${loose.map((f) => f.uri.pathSegments.last).join(', ')}');
+            '${loose.map((f) => f.uri.pathSegments.last).join(', ')}',);
   });
 
   test('every migration is prefixed with a 14-digit ordering key', () {
@@ -44,7 +44,7 @@ void main() {
         .map((f) => f.uri.pathSegments.last.split('_').first)
         .toList();
     expect(keys.length, keys.toSet().length,
-        reason: 'two migrations sharing a key replay in arbitrary order');
+        reason: 'two migrations sharing a key replay in arbitrary order',);
   });
 
   test('config.toml is committed', () {
@@ -66,7 +66,7 @@ void main() {
     String keyOf(String needle) {
       final f = sqlIn(migrations).firstWhere(
           (f) => f.uri.pathSegments.last.contains(needle),
-          orElse: () => throw StateError('no migration matching $needle'));
+          orElse: () => throw StateError('no migration matching $needle'),);
       return f.uri.pathSegments.last.split('_').first;
     }
 
@@ -80,23 +80,23 @@ void main() {
       // way round, the older definition wins and the leave_couple privacy wipe
       // is silently overwritten again.
       expect(keyOf('presence_server_time').compareTo(keyOf('newuser_fixes')),
-          lessThan(0));
+          lessThan(0),);
     });
 
     test('hardening precedes account_deletion', () {
       expect(keyOf('hardening_2026_08').compareTo(keyOf('account_deletion')),
-          lessThan(0));
+          lessThan(0),);
     });
 
     test('settings_and_delete precedes chat_media_cleanup', () {
       expect(
           keyOf('settings_and_delete').compareTo(keyOf('chat_media_cleanup')),
-          lessThan(0));
+          lessThan(0),);
     });
 
     test('intimacy_additions precedes intimacy_tables', () {
       expect(keyOf('intimacy_additions').compareTo(keyOf('intimacy_tables')),
-          lessThan(0));
+          lessThan(0),);
     });
   });
 
@@ -107,7 +107,7 @@ void main() {
     final all = sqlIn(migrations).map((f) => f.readAsStringSync()).join('\n');
     for (final col in ['gender', 'gender_set', 'fcm_token', 'status_message']) {
       expect(all, contains(col),
-          reason: 'profiles.$col is written by the client but created nowhere');
+          reason: 'profiles.$col is written by the client but created nowhere',);
     }
   });
 
@@ -119,13 +119,13 @@ void main() {
     for (final f in sqlIn(migrations)) {
       final src = f.readAsStringSync();
       for (final m in RegExp(r'do\s+\$\$(.*?)end\s*\$\$',
-              dotAll: true, caseSensitive: false)
+              dotAll: true, caseSensitive: false,)
           .allMatches(src)) {
         expect(RegExp(r'\$\$[^$]*(delete|update|insert|select)',
-                caseSensitive: false)
+                caseSensitive: false,)
             .hasMatch(m.group(1)!), isFalse,
             reason: '${f.uri.pathSegments.last}: a \$\$-quoted body nested '
-                'inside a do \$\$ block cannot parse — tag the outer block');
+                r'inside a do $$ block cannot parse — tag the outer block',);
       }
     }
   });
@@ -139,7 +139,7 @@ void main() {
     final sql = sqlIn(migrations).map((f) => f.readAsStringSync()).join('\n');
     final created = RegExp(
             r'create table(?:\s+if not exists)?\s+public\.(\w+)',
-            caseSensitive: false)
+            caseSensitive: false,)
         .allMatches(sql)
         .map((m) => m[1]!.toLowerCase())
         .toSet();
@@ -175,7 +175,7 @@ void main() {
       ..sort();
     expect(missing, isEmpty,
         reason: 'queried by the client, created by no migration: '
-            '${missing.map((t) => '$t (${used[t]})').join(', ')}');
+            '${missing.map((t) => '$t (${used[t]})').join(', ')}',);
   });
 
   test('functions_base_url is defined before any migration calls it', () {
@@ -186,7 +186,7 @@ void main() {
     final files = sqlIn(migrations);
     final definer = files.firstWhere(
         (f) => f.readAsStringSync().contains('create or replace function public.functions_base_url'),
-        orElse: () => throw StateError('nothing defines functions_base_url'));
+        orElse: () => throw StateError('nothing defines functions_base_url'),);
     final definerKey = definer.uri.pathSegments.last.split('_').first;
 
     for (final f in files) {
@@ -195,7 +195,7 @@ void main() {
       if (!f.readAsStringSync().contains('functions_base_url()')) continue;
       expect(name.split('_').first.compareTo(definerKey), greaterThan(0),
           reason: '$name calls functions_base_url() but replays before the '
-              'migration that defines it');
+              'migration that defines it',);
     }
   });
 
@@ -217,7 +217,7 @@ void main() {
     }
     expect(offenders, isEmpty,
         reason: 'a project URL belongs in configuration, not in a function '
-            'body: ${offenders.join(' | ')}');
+            'body: ${offenders.join(' | ')}',);
   });
 
   test('the diag_events insert names only columns the migration creates', () {
@@ -228,7 +228,7 @@ void main() {
     final sql = File('../supabase/migrations/20260601004000_diag_events.sql')
         .readAsStringSync();
     final ddl = RegExp(r'create table[^;]*?diag_events\s*\((.*?)\n\);',
-            dotAll: true, caseSensitive: false)
+            dotAll: true, caseSensitive: false,)
         .firstMatch(sql)!
         .group(1)!;
     final columns = ddl
@@ -240,7 +240,7 @@ void main() {
 
     final dart = File('lib/core/diag/diag.dart').readAsStringSync();
     final insert = RegExp(r"from\('diag_events'\)\s*\.insert\(\[(.*?)\n\s*\]\)",
-            dotAll: true)
+            dotAll: true,)
         .firstMatch(dart)!
         .group(1)!;
     final keys = RegExp(r"'(\w+)':")
@@ -250,11 +250,11 @@ void main() {
 
     expect(keys, isNotEmpty, reason: 'the insert payload could not be parsed');
     expect(keys.difference(columns), isEmpty,
-        reason: 'the client writes columns diag_events does not have');
+        reason: 'the client writes columns diag_events does not have',);
     // received_at and id are server-side; everything else must be supplied or
     // the NOT NULL constraint rejects the row.
     expect(columns.difference(keys..addAll({'id', 'received_at'})), isEmpty,
-        reason: 'diag_events has NOT NULL columns the client never sends');
+        reason: 'diag_events has NOT NULL columns the client never sends',);
   });
 
   test('every dollar-quote tag appears an even number of times', () {
@@ -270,7 +270,7 @@ void main() {
         final n = tag.allMatches(src).length;
         expect(n.isEven, isTrue,
             reason: '${f.uri.pathSegments.last}: tag $tag appears $n times — '
-                'an odd count means one is inside a comment or a string');
+                'an odd count means one is inside a comment or a string',);
       }
     }
   });
@@ -291,7 +291,7 @@ void main() {
       if (!src.contains('cron.unschedule')) continue;
       expect(src, contains('from cron.job'),
           reason: '${f.uri.pathSegments.last}: unguarded cron.unschedule '
-              'fails on any database where the job is absent');
+              'fails on any database where the job is absent',);
     }
   });
 
@@ -311,6 +311,6 @@ void main() {
             .length;
     expect(tableRevokes, greaterThan(0),
         reason: 'column revokes present ($columnRevokes) with no table-level '
-            'revoke to narrow — the column form alone is a no-op');
+            'revoke to narrow — the column form alone is a no-op',);
   });
 }

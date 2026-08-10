@@ -6,8 +6,7 @@ import 'package:miles/core/mood.dart';
 /// plain emoji glyph if the animation can't load.
 class AnimatedMood extends StatelessWidget {
   const AnimatedMood({
-    super.key,
-    required this.mood,
+    required this.mood, super.key,
     this.size = 40,
     this.repeat = true,
   });

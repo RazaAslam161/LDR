@@ -15,7 +15,7 @@ String _migration(String name) {
   final dir = Directory('../supabase/migrations');
   final f = dir.listSync().whereType<File>().firstWhere(
       (f) => f.path.endsWith('_$name.sql'),
-      orElse: () => throw StateError('no migration named $name'));
+      orElse: () => throw StateError('no migration named $name'),);
   return f.readAsStringSync();
 }
 
@@ -59,7 +59,7 @@ void main() {
       final body = codeOnly(sql);
       expect(body, contains('chat_receipts_select_member'));
       expect(body.contains('for update using'), isFalse,
-          reason: 'no direct client UPDATE path may exist on chat_receipts');
+          reason: 'no direct client UPDATE path may exist on chat_receipts',);
       expect(body, contains('grant  execute on function public.ack_read'));
     });
 
@@ -79,7 +79,7 @@ void main() {
     expect(body, contains('deliveredSeq'));
     for (final banned in ['chatLastRead', 'createdAt', 'DateTime']) {
       expect(body.contains(banned), isFalse,
-          reason: '$banned reintroduces a clock into receipt logic');
+          reason: '$banned reintroduces a clock into receipt logic',);
     }
   });
 
@@ -112,6 +112,6 @@ void main() {
     final body = codeOnly(push);
     expect(body, contains('after insert on public.messages'));
     expect(body, contains("'kind', 'message'"),
-        reason: 'a bare row is treated as a reach and rejected for no from_user');
+        reason: 'a bare row is treated as a reach and rejected for no from_user',);
   });
 }

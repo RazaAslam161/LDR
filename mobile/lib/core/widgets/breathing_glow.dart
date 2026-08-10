@@ -9,8 +9,7 @@ import 'package:miles/core/theme.dart';
 ///   BreathingGlow(color: MilesColors.blush, child: const SealOrb());
 class BreathingGlow extends StatefulWidget {
   const BreathingGlow({
-    super.key,
-    required this.child,
+    required this.child, super.key,
     this.color = MilesColors.blush,
     this.period = const Duration(seconds: 4),
     this.minScale = 0.98,

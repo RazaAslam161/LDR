@@ -36,9 +36,9 @@ void main() {
       final fn = presence.substring(presence.indexOf('clearChatPresence'));
       final body = codeOnly(fn.substring(0, fn.indexOf('});')));
       expect(body.contains('chat_last_read'), isFalse,
-          reason: 'a watermark that moves backwards un-reads read messages');
+          reason: 'a watermark that moves backwards un-reads read messages',);
       expect(body, contains('typing_in_chat'),
-          reason: '"she left the chat" belongs in its own field');
+          reason: '"she left the chat" belongs in its own field',);
     });
 
     test('"in chat now" is derived from its own field, not the watermark', () {
@@ -46,7 +46,7 @@ void main() {
       final body = codeOnly(g.substring(0, g.indexOf(';') + 1));
       expect(body, contains('typingInChat'));
       expect(body.contains('chatLastRead'), isFalse,
-          reason: 'coupling these is what forced the watermark to move back');
+          reason: 'coupling these is what forced the watermark to move back',);
     });
 
     test('seen involves no clock at all', () {
@@ -60,9 +60,9 @@ void main() {
       final fn = chat.substring(chat.indexOf('_MsgStatus _statusFor'));
       final body = codeOnly(fn.substring(0, fn.indexOf('\n  }')));
       expect(body.contains('isActivelyInChat'), isFalse,
-          reason: 'whether a message was read cannot depend on who is online');
+          reason: 'whether a message was read cannot depend on who is online',);
       expect(body.contains('chatLastRead'), isFalse,
-          reason: "comparing two devices' clocks is the bug, not the fix");
+          reason: "comparing two devices' clocks is the bug, not the fix",);
       expect(body, contains('readSeq'));
       expect(body, contains('deliveredSeq'));
     });
@@ -76,7 +76,7 @@ void main() {
       expect(tz, contains('static String deviceZone'));
       expect(welcome, contains('TzHelper.deviceZone'));
       expect(welcome.contains('DateTime.now().timeZoneName'), isFalse,
-          reason: 'an abbreviation can never match an IANA name');
+          reason: 'an abbreviation can never match an IANA name',);
     });
 
     test('it is re-checked on resume, not only at onboarding', () {
@@ -91,11 +91,11 @@ void main() {
     final fn = location.substring(location.indexOf('adoptPermissionAsDefault'));
     final body = fn.substring(0, fn.indexOf('\n  }'));
     expect(body, contains("'city'"),
-        reason: 'coarse is the polite default for something enabled for you');
+        reason: 'coarse is the polite default for something enabled for you',);
     expect(body, contains('location_mode_defaulted'),
-        reason: 'once only — after that the stored mode is the user\'s choice');
+        reason: "once only — after that the stored mode is the user's choice",);
     expect(body, contains("!= 'off'"),
-        reason: 'must never override a mode the user picked themselves');
+        reason: 'must never override a mode the user picked themselves',);
   });
 
   group('returning to the app refreshes it', () {

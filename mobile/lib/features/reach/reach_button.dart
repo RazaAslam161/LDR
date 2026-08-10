@@ -8,7 +8,7 @@ import 'package:miles/features/reach/reach_repository.dart';
 /// Big hold-to-reach button. Hold ~0.5s (prevents accidental taps) to send a
 /// Reach; 30-second cooldown afterwards (shown as the label).
 class ReachButton extends StatefulWidget {
-  const ReachButton({super.key, required this.coupleId, this.partnerName});
+  const ReachButton({required this.coupleId, super.key, this.partnerName});
   final String coupleId;
   final String? partnerName;
 
@@ -48,12 +48,12 @@ class _ReachButtonState extends State<ReachButton> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content:
-                Text('Reaching for ${widget.partnerName ?? 'them'}… 💕')));
+                Text('Reaching for ${widget.partnerName ?? 'them'}… 💕'),),);
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not reach right now.')));
+            const SnackBar(content: Text('Could not reach right now.')),);
       }
     }
     if (mounted) setState(() => _sending = false);
@@ -86,9 +86,9 @@ class _ReachButtonState extends State<ReachButton> {
               child: Center(
                 child: _sending
                     ? const CircularProgressIndicator(
-                        color: MilesColors.cream50)
+                        color: MilesColors.cream50,)
                     : const Icon(Icons.front_hand_outlined,
-                        color: MilesColors.cream50, size: 52),
+                        color: MilesColors.cream50, size: 52,),
               ),
             ),
           ),

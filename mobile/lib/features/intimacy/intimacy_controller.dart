@@ -76,12 +76,12 @@ class IntimacyController extends StateNotifier<IntimacyState> {
     required bool signaling,
   }) async {
     await IntimacyRepository.setPrefs(
-        receiving: receiving, signaling: signaling);
+        receiving: receiving, signaling: signaling,);
     if (!signaling) await IntimacyRepository.clearMine();
     state = IntimacyState(
       loading: false,
       prefs: IntimacyPrefs(
-          receivingEnabled: receiving, signalingEnabled: signaling),
+          receivingEnabled: receiving, signalingEnabled: signaling,),
       mine: signaling ? state.mine : null,
       partner: state.partner,
     );
@@ -113,5 +113,5 @@ class IntimacyController extends StateNotifier<IntimacyState> {
 
 final intimacyControllerProvider =
     StateNotifierProvider.autoDispose<IntimacyController, IntimacyState>(
-  (ref) => IntimacyController(ref),
+  IntimacyController.new,
 );

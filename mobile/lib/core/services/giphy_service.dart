@@ -58,7 +58,7 @@ class GiphyService {
         final fUrl = full?['url']?.toString();
         if (pUrl == null || fUrl == null) continue;
         out.add(
-            GiphyGif(id: e['id'].toString(), previewUrl: pUrl, fullUrl: fUrl));
+            GiphyGif(id: e['id'].toString(), previewUrl: pUrl, fullUrl: fUrl),);
       }
       return out;
     } catch (_) {

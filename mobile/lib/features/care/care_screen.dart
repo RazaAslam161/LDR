@@ -50,7 +50,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
     _myUid = session.profile?.id;
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(
-          () => CareRepository.subscribe(_coupleId!, _load));
+          () => CareRepository.subscribe(_coupleId!, _load),);
     }
     _load();
   }
@@ -69,21 +69,24 @@ class _CareScreenState extends ConsumerState<CareScreen> {
     }
     try {
       final n = await CareRepository.list(id);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _nudges = n;
         _loading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _send(String kind, String message) async {
-    final id = _coupleId, uid = _myUid;
+    final id = _coupleId;
+    final uid = _myUid;
     if (id == null || uid == null) return;
     try {
       await CareRepository.send(
-          coupleId: id, fromUser: uid, kind: kind, message: message);
+          coupleId: id, fromUser: uid, kind: kind, message: message,);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Reminder sent 💛')),
@@ -100,7 +103,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: MilesColors.surface1,
         title: const Text('Custom reminder',
-            style: TextStyle(color: MilesColors.cream50)),
+            style: TextStyle(color: MilesColors.cream50),),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -110,10 +113,10 @@ class _CareScreenState extends ConsumerState<CareScreen> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              child: const Text('Cancel'),),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('Send')),
+              child: const Text('Send'),),
         ],
       ),
     );
@@ -145,7 +148,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text('Send $partnerName a little nudge to take care.',
                     style: const TextStyle(
-                        color: MilesColors.taupe, fontSize: 12.5)),
+                        color: MilesColors.taupe, fontSize: 12.5,),),
               ),
               // Preset grid
               Padding(
@@ -160,32 +163,32 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                         onTap: () => _send(p.kind, p.message),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
+                              horizontal: 14, vertical: 10,),
                           decoration: BoxDecoration(
                             color: MilesColors.surface1,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                                color: MilesColors.gilt.withValues(alpha: 0.2)),
+                                color: MilesColors.gilt.withValues(alpha: 0.2),),
                           ),
                           child: Text('${p.emoji}  ${p.label}',
                               style: const TextStyle(
-                                  color: MilesColors.cream50, fontSize: 13)),
+                                  color: MilesColors.cream50, fontSize: 13,),),
                         ),
                       ),
                     GestureDetector(
                       onTap: _custom,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
+                            horizontal: 14, vertical: 10,),
                         decoration: BoxDecoration(
                           color: MilesColors.blush.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                              color: MilesColors.blush.withValues(alpha: 0.4)),
+                              color: MilesColors.blush.withValues(alpha: 0.4),),
                         ),
                         child: const Text('✏️  Custom',
                             style: TextStyle(
-                                color: MilesColors.cream50, fontSize: 13)),
+                                color: MilesColors.cream50, fontSize: 13,),),
                       ),
                     ),
                   ],
@@ -198,7 +201,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                     : _nudges.isEmpty
                         ? const Center(
                             child: Text('No reminders yet.',
-                                style: TextStyle(color: MilesColors.taupe)))
+                                style: TextStyle(color: MilesColors.taupe),),)
                         : ListView.separated(
                             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                             itemCount: _nudges.length,
@@ -231,7 +234,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
               children: [
                 Text(n.message,
                     style: const TextStyle(
-                        color: MilesColors.cream50, fontSize: 14)),
+                        color: MilesColors.cream50, fontSize: 14,),),
                 const SizedBox(height: 2),
                 Text(
                   mine
@@ -241,7 +244,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                       color: n.acknowledged
                           ? MilesColors.sage
                           : MilesColors.taupe,
-                      fontSize: 11),
+                      fontSize: 11,),
                 ),
               ],
             ),
@@ -261,7 +264,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text('Done ✅',
-                    style: TextStyle(color: MilesColors.cream50, fontSize: 12)),
+                    style: TextStyle(color: MilesColors.cream50, fontSize: 12),),
               ),
             ),
         ],

@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/providers.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/screen_presence.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 
 /// Presence drives what one partner believes the other is doing. A wrong value
 /// is worse than no value, so these pin the mapping that decides it.
@@ -78,7 +78,7 @@ void main() {
       // a path that does not exist, which throws.
       kJoinableRoutes.forEach((name, path) {
         expect(screenNameForPath(path), name,
-            reason: '$name -> $path does not name itself back');
+            reason: '$name -> $path does not name itself back',);
       });
     });
 
@@ -118,7 +118,7 @@ void main() {
       // the nav, joining "Chat" would silently open Breath.
       kJoinableTabs.forEach((name, index) {
         expect(kTabScreens[index], name,
-            reason: 'tab $index is ${kTabScreens[index]}, not $name');
+            reason: 'tab $index is ${kTabScreens[index]}, not $name',);
       });
     });
   });

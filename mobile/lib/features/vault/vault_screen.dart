@@ -8,7 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 /// The unlocked vault — personal notes only the owner can see. Shown by
 /// VaultGateScreen after a successful PIN/biometric unlock.
 class VaultScreen extends StatefulWidget {
-  const VaultScreen({super.key, required this.onLock});
+  const VaultScreen({required this.onLock, super.key});
   final VoidCallback onLock;
 
   @override
@@ -58,7 +58,7 @@ class _VaultScreenState extends State<VaultScreen> {
               maxLines: 8,
               style: const TextStyle(color: MilesColors.cream50),
               decoration: const InputDecoration(
-                  hintText: 'Just for you — only you can ever read this'),
+                  hintText: 'Just for you — only you can ever read this',),
             ),
             const SizedBox(height: 12),
             FilledButton(
@@ -90,14 +90,14 @@ class _VaultScreenState extends State<VaultScreen> {
     if (url != null && url.isNotEmpty) {
       try {
         ok = await launchUrl(Uri.parse(url),
-            mode: LaunchMode.externalApplication);
+            mode: LaunchMode.externalApplication,);
       } catch (_) {}
     }
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-              'Link expired — the original message has the latest version'),
+              'Link expired — the original message has the latest version',),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -111,16 +111,16 @@ class _VaultScreenState extends State<VaultScreen> {
         backgroundColor: MilesColors.surface1,
         title: const Text('Delete this?'),
         content: const Text('This permanently removes it from your vault.',
-            style: TextStyle(color: MilesColors.taupe)),
+            style: TextStyle(color: MilesColors.taupe),),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: const Text('Cancel'),),
           FilledButton(
               style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFB83A57)),
+                  backgroundColor: const Color(0xFFB83A57),),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+              child: const Text('Delete'),),
         ],
       ),
     );
@@ -165,7 +165,7 @@ class _VaultScreenState extends State<VaultScreen> {
                 color: MilesColors.gilt,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 0.5)),
+                letterSpacing: 0.5,),),
       );
 
   Widget _noteTile(VaultItem item) => GestureDetector(
@@ -183,7 +183,7 @@ class _VaultScreenState extends State<VaultScreen> {
             children: [
               Text(item.content ?? '',
                   style: const TextStyle(
-                      color: MilesColors.cream50, height: 1.4)),
+                      color: MilesColors.cream50, height: 1.4,),),
               const SizedBox(height: 8),
               Text(
                 DateFormat('MMM d, y · h:mm a').format(item.createdAt),
@@ -228,19 +228,19 @@ class _VaultScreenState extends State<VaultScreen> {
                 children: [
                   Text(title,
                       style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 14)),
+                          color: MilesColors.cream50, fontSize: 14,),),
                   const SizedBox(height: 2),
                   Text(item.mediaUrl ?? '',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: MilesColors.taupe, fontSize: 11)),
+                          color: MilesColors.taupe, fontSize: 11,),),
                 ],
               ),
             ),
             IconButton(
               icon: const Icon(Icons.open_in_new_rounded,
-                  color: MilesColors.gilt),
+                  color: MilesColors.gilt,),
               onPressed: () => _openMedia(item),
               tooltip: 'Open',
             ),

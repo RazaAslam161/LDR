@@ -33,12 +33,12 @@ class CloserLoadResult<T> {
     if (SupabaseRepository.keyWasReplaced) {
       return unreadable == 1
           ? "1 item was encrypted on your previous install and can't be opened"
-          : "$unreadable items were encrypted on your previous install and "
+          : '$unreadable items were encrypted on your previous install and '
               "can't be opened";
     }
     return unreadable == 1
         ? "1 item couldn't be opened — your partner may need to open Closer"
         : "$unreadable items couldn't be opened — your partner may need to "
-            "open Closer";
+            'open Closer';
   }
 }

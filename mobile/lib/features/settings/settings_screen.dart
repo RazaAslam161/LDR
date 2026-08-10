@@ -14,12 +14,12 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
+import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -42,7 +42,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _changeAvatar() async {
     final file = await PhotoPickerService.pickFromSheet(context,
-        shape: PhotoShape.square);
+        shape: PhotoShape.square,);
     if (file == null) return;
     final couple = ref.read(sessionProvider).couple;
     setState(() => _changingAvatar = true);
@@ -98,7 +98,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       setState(() => _appLock = true);
       _toast(bio.isEmpty
           ? 'App lock on 🔒 — unlock with your PIN'
-          : 'App lock on 🔒 — fingerprint/face or PIN');
+          : 'App lock on 🔒 — fingerprint/face or PIN',);
     } else {
       // Disabling: confirm with the PIN first.
       final ok = await showAppLockPinVerify(context);
@@ -135,7 +135,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ])
               ListTile(
                 title: Text(opt[1],
-                    style: const TextStyle(color: MilesColors.cream50)),
+                    style: const TextStyle(color: MilesColors.cream50),),
                 trailing: _locationMode == opt[0]
                     ? const Icon(Icons.check, color: MilesColors.blush)
                     : null,
@@ -186,7 +186,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _saveProfile() async {
     if (_name.text.trim().isEmpty) {
-      _toast('Your name can\'t be empty.');
+      _toast("Your name can't be empty.");
       return;
     }
     setState(() => _savingProfile = true);
@@ -217,7 +217,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ])
               ListTile(
                 title: Text(g[1],
-                    style: const TextStyle(color: MilesColors.cream50)),
+                    style: const TextStyle(color: MilesColors.cream50),),
                 onTap: () => Navigator.pop(ctx, g[0]),
               ),
           ],
@@ -259,7 +259,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('Disconnect from $partnerName?'),
         content: const Text(
           'This will unlink your accounts. Your private data and time capsules '
-          'are preserved, but you\'ll both need to re-pair to reconnect. '
+          "are preserved, but you'll both need to re-pair to reconnect. "
           'This cannot be undone.',
           style: TextStyle(color: MilesColors.taupe, height: 1.5),
         ),
@@ -270,7 +270,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFB83A57)), // passionCrimson
+                backgroundColor: const Color(0xFFB83A57),), // passionCrimson
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Yes, disconnect'),
           ),
@@ -307,10 +307,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
+                child: const Text('Cancel'),),
             FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Enable')),
+                child: const Text('Enable'),),
           ],
         ),
       );
@@ -322,7 +322,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     try {
       await SupabaseRepository.setModestMode(
-          coupleId: couple.id, enabled: !newValue);
+          coupleId: couple.id, enabled: !newValue,);
       if (newValue == true) {
         try {
           await SupabaseRepository.publishMyPublicKey();
@@ -377,7 +377,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFB83A57)),
+                backgroundColor: const Color(0xFFB83A57),),
             onPressed: controller.text.trim().toUpperCase() == 'DELETE'
                 ? () => Navigator.pop(ctx, true)
                 : null,
@@ -468,7 +468,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Gender',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               subtitle: Text(
                 profile?.gender == 'female'
                     ? 'Female'
@@ -493,7 +493,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: const TextStyle(color: MilesColors.cream50),
               ),
               subtitle: const Text('Used for the countdown & sky',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               trailing:
                   const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeTimezone,
@@ -517,7 +517,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text('Content language',
-                              style: TextStyle(color: MilesColors.cream50)),
+                              style: TextStyle(color: MilesColors.cream50),),
                           const SizedBox(height: 2),
                           Text(
                             ref.watch(contentLanguageProvider) ==
@@ -525,7 +525,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 ? 'Games and dares in English'
                                 : 'Games and dares in Roman Urdu',
                             style: const TextStyle(
-                                color: MilesColors.taupe, fontSize: 12),
+                                color: MilesColors.taupe, fontSize: 12,),
                           ),
                         ],
                       ),
@@ -544,10 +544,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('How this app looks',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               subtitle: const Text(
                   'Change the icon and name shown on your phone',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               trailing:
                   const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: () => context.push('/app/disguise'),
@@ -560,9 +560,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(_locationLabel,
-                  style: const TextStyle(color: MilesColors.cream50)),
+                  style: const TextStyle(color: MilesColors.cream50),),
               subtitle: const Text('Only your partner can ever see this',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               trailing:
                   const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: _changeLocationSharing,
@@ -572,15 +572,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
             // ── Reach alerts ─────────────────────────────────────
             const _SectionHeader(label: 'Reach alerts'),
-            ListTile(
+            const ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Full-screen alerts',
-                  style: TextStyle(color: MilesColors.cream50)),
-              subtitle: const Text(
+              title: Text('Full-screen alerts',
+                  style: TextStyle(color: MilesColors.cream50),),
+              subtitle: Text(
                   'Let your partner wake your screen when they reach for you',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+                  Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: FsiPermission.openSettings,
             ),
 
@@ -594,7 +594,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onChanged: _busy ? null : _toggleModestMode,
               activeThumbColor: MilesColors.ember,
               title: const Text('Closer (intimacy module)',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               subtitle: Text(
                 isModest
                     ? 'Hidden. Reveal for both partners.'
@@ -606,7 +606,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(_error!,
-                    style: const TextStyle(color: MilesColors.blush)),
+                    style: const TextStyle(color: MilesColors.blush),),
               ),
 
             const SizedBox(height: 28),
@@ -620,10 +620,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               activeThumbColor: MilesColors.ember,
               secondary: const Icon(Icons.fingerprint, color: MilesColors.gilt),
               title: const Text('Biometric app lock',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               subtitle: const Text(
                   'Require fingerprint / face / PIN to open Miles',
-                  style: TextStyle(fontSize: 12, color: MilesColors.taupe)),
+                  style: TextStyle(fontSize: 12, color: MilesColors.taupe),),
             ),
 
             const SizedBox(height: 28),
@@ -643,10 +643,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           Text(partner.displayName,
                               style: const TextStyle(
                                   color: MilesColors.cream50,
-                                  fontWeight: FontWeight.w600)),
+                                  fontWeight: FontWeight.w600,),),
                           Text(partner.timezone.replaceAll('_', ' '),
                               style: const TextStyle(
-                                  color: MilesColors.taupe, fontSize: 12)),
+                                  color: MilesColors.taupe, fontSize: 12,),),
                         ],
                       ),
                     ),
@@ -666,7 +666,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ] else
               const Text('Not linked yet.',
-                  style: TextStyle(color: MilesColors.taupe)),
+                  style: TextStyle(color: MilesColors.taupe),),
 
             const SizedBox(height: 28),
 
@@ -675,14 +675,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.monitor_heart_outlined,
-                  color: MilesColors.ember),
+                  color: MilesColors.ember,),
               title: const Text('Call & delivery log',
-                  style: TextStyle(color: MilesColors.cream50)),
+                  style: TextStyle(color: MilesColors.cream50),),
               subtitle: const Text(
                   'What happened during calls, messages and presence',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               trailing: const Icon(Icons.chevron_right,
-                  color: MilesColors.faint, size: 20),
+                  color: MilesColors.faint, size: 20,),
               onTap: () => context.push('/app/diagnostics'),
             ),
 
@@ -694,7 +694,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.logout, color: MilesColors.ember),
               title: const Text('Sign out',
-                  style: TextStyle(color: MilesColors.ember)),
+                  style: TextStyle(color: MilesColors.ember),),
               onTap: _signOut,
             ),
             ListTile(
@@ -702,16 +702,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               leading:
                   const Icon(Icons.delete_forever, color: Color(0xFFB83A57)),
               title: const Text('Delete account',
-                  style: TextStyle(color: Color(0xFFB83A57))),
+                  style: TextStyle(color: Color(0xFFB83A57)),),
               subtitle: const Text('Permanently erases your data',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               onTap: _busy ? null : _deleteAccount,
             ),
 
             const SizedBox(height: 40),
             const Center(
               child: Text('Miles · v0.1.0',
-                  style: TextStyle(fontSize: 11, color: MilesColors.faint)),
+                  style: TextStyle(fontSize: 11, color: MilesColors.faint),),
             ),
           ],
         ),
@@ -723,7 +723,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 /// Tappable round avatar with a camera badge (Issue 7 — profile photo, 1:1).
 class _AvatarEditor extends StatelessWidget {
   const _AvatarEditor(
-      {required this.url, required this.name, required this.busy});
+      {required this.url, required this.name, required this.busy,});
   final String? url;
   final String name;
   final bool busy;
@@ -749,13 +749,12 @@ class _AvatarEditor extends StatelessWidget {
                   ? Center(
                       child: Text(initial,
                           style: const TextStyle(
-                              color: MilesColors.cream50, fontSize: 34)))
+                              color: MilesColors.cream50, fontSize: 34,),),)
                   : NetImage(url!,
-                      fit: BoxFit.cover,
                       error: Center(
                           child: Text(initial,
                               style: const TextStyle(
-                                  color: MilesColors.cream50, fontSize: 34)))),
+                                  color: MilesColors.cream50, fontSize: 34,),),),),
         ),
         Container(
           padding: const EdgeInsets.all(6),
@@ -764,7 +763,7 @@ class _AvatarEditor extends StatelessWidget {
             color: MilesColors.blush,
           ),
           child: const Icon(Icons.camera_alt,
-              size: 15, color: MilesColors.cream50),
+              size: 15, color: MilesColors.cream50,),
         ),
       ],
     );
@@ -808,7 +807,7 @@ class _TimezonePickerState extends State<_TimezonePicker> {
     final filtered = commonTimezones
         .where((tz) => tz
             .toLowerCase()
-            .contains(_query.toLowerCase().replaceAll(' ', '_')))
+            .contains(_query.toLowerCase().replaceAll(' ', '_')),)
         .toList();
     return Padding(
       padding: EdgeInsets.only(
@@ -822,14 +821,14 @@ class _TimezonePickerState extends State<_TimezonePicker> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text('Choose your timezone',
-              style: Theme.of(context).textTheme.titleLarge),
+              style: Theme.of(context).textTheme.titleLarge,),
           const SizedBox(height: 12),
           TextField(
             autofocus: true,
             onChanged: (v) => setState(() => _query = v),
             style: const TextStyle(color: MilesColors.cream50),
             decoration: const InputDecoration(
-                hintText: 'Search a city…', prefixIcon: Icon(Icons.search)),
+                hintText: 'Search a city…', prefixIcon: Icon(Icons.search),),
           ),
           const SizedBox(height: 8),
           Flexible(
@@ -838,7 +837,7 @@ class _TimezonePickerState extends State<_TimezonePicker> {
               itemCount: filtered.length,
               itemBuilder: (_, i) => ListTile(
                 title: Text(filtered[i].replaceAll('_', ' '),
-                    style: const TextStyle(color: MilesColors.cream50)),
+                    style: const TextStyle(color: MilesColors.cream50),),
                 onTap: () => Navigator.pop(context, filtered[i]),
               ),
             ),

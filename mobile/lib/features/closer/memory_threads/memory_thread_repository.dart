@@ -1,13 +1,12 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/crypto_core.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 
 /// Lifecycle of a memory thread row. Matches the `state` text column.
 /// Spec §F9: `proposed → accepted (live) → archived`,
@@ -134,7 +133,7 @@ class MemoryThreadRepository {
   /// Live + archived threads for [coupleId]. Deleted rows are excluded.
   /// Ordered newest-first by `happened_on` so the timeline reads top-down.
   static Future<CloserLoadResult<MemoryThread>> fetchThreads(
-      String coupleId) async {
+      String coupleId,) async {
     final res = await _c
         .from('memory_threads')
         .select()
@@ -329,7 +328,7 @@ class MemoryThreadRepository {
 /// Decrypts the title of [thread] for display.
 Future<String> decryptTitle(MemoryThread thread) async {
   return CryptoCore.decryptString(thread.titlePayload(),
-      associatedData: thread.id);
+      associatedData: thread.id,);
 }
 
 /// Decrypts the optional note. Returns null if there isn't one.
@@ -337,7 +336,7 @@ Future<String?> decryptNote(MemoryThread thread) async {
   final payload = thread.notePayload();
   if (payload == null) return null;
   return CryptoCore.decryptString(payload,
-      associatedData: '${thread.id}_note');
+      associatedData: '${thread.id}_note',);
 }
 
 /// Decrypts the optional photo. Returns null if there isn't one.
@@ -345,5 +344,5 @@ Future<Uint8List?> decryptPhoto(MemoryThread thread) async {
   final payload = thread.photoPayload();
   if (payload == null) return null;
   return CryptoCore.decryptBytes(payload,
-      associatedData: '${thread.id}_photo');
+      associatedData: '${thread.id}_photo',);
 }

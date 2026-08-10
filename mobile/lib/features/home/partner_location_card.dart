@@ -17,10 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 /// "paused" state — never a stale pin presented as live.
 class PartnerLocationCard extends StatefulWidget {
   const PartnerLocationCard({
-    super.key,
-    required this.partner,
-    required this.partnerName,
-    required this.coupleId,
+    required this.partner, required this.partnerName, required this.coupleId, super.key,
     this.myLat,
     this.myLon,
   });
@@ -51,7 +48,8 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   LatLng? _animTo;
 
   void _onMoveTick() {
-    final from = _animFrom, to = _animTo;
+    final from = _animFrom;
+    final to = _animTo;
     if (from == null || to == null) return;
     final t = Curves.easeInOut.transform(_move.value);
     try {
@@ -116,7 +114,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
         lon: point.longitude,
         name: widget.partnerName,
       ),
-    ));
+    ),);
   }
 
   String _agoText(DateTime? at) {
@@ -152,7 +150,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
         child: Row(
           children: [
             const Icon(Icons.location_off_outlined,
-                color: MilesColors.taupe, size: 20),
+                color: MilesColors.taupe, size: 20,),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -189,18 +187,18 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                       '${widget.partnerName} · ${_agoText(p.locationUpdatedAt)}',
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 13),
+                          color: MilesColors.cream50, fontSize: 13,),
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.threed_rotation,
-                        color: MilesColors.gilt, size: 20),
+                        color: MilesColors.gilt, size: 20,),
                     onPressed: () => _open3D(point),
                     tooltip: 'View in 3D',
                   ),
                   IconButton(
                     icon: const Icon(Icons.my_location,
-                        color: MilesColors.gilt, size: 20),
+                        color: MilesColors.gilt, size: 20,),
                     onPressed: _recenter,
                     tooltip: 'Recenter',
                   ),
@@ -213,7 +211,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                 onTap: () => context.push('/app/location-map', extra: {
                   'coupleId': widget.coupleId,
                   'partnerName': widget.partnerName,
-                }),
+                },),
                 child: Stack(
                   children: [
                     FlutterMap(
@@ -243,7 +241,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                             TextSourceAttribution(
                               '© OpenStreetMap contributors',
                               onTap: () => launchUrl(Uri.parse(
-                                  'https://www.openstreetmap.org/copyright')),
+                                  'https://www.openstreetmap.org/copyright',),),
                             ),
                           ],
                         ),
@@ -255,7 +253,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                                   color: MilesColors.blush
                                       .withValues(alpha: 0.55),
                                   strokeWidth: 1.5,
-                                  pattern: StrokePattern.dotted(),
+                                  pattern: const StrokePattern.dotted(),
                                 ),
                               ],
                             ),
@@ -267,7 +265,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                               height: 54,
                               alignment: Alignment.bottomCenter,
                               child: _CuteMarker(
-                                  pulse: _pulse, name: widget.partnerName),
+                                  pulse: _pulse, name: widget.partnerName,),
                             ),
                             if (myPoint != null)
                               Marker(
@@ -288,15 +286,15 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                         borderRadius: BorderRadius.circular(10),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
+                              horizontal: 10, vertical: 5,),
                           color: Colors.black.withValues(alpha: 0.45),
-                          child: Row(
+                          child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.fullscreen_rounded,
-                                  color: MilesColors.cream50, size: 14),
-                              const SizedBox(width: 4),
-                              const Text(
+                              Icon(Icons.fullscreen_rounded,
+                                  color: MilesColors.cream50, size: 14,),
+                              SizedBox(width: 4),
+                              Text(
                                 'Full screen',
                                 style: TextStyle(
                                   color: MilesColors.cream50,
@@ -319,11 +317,11 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                 child: Row(
                   children: [
                     const Icon(Icons.favorite,
-                        color: MilesColors.blush, size: 14),
+                        color: MilesColors.blush, size: 14,),
                     const SizedBox(width: 8),
                     Text(dist,
                         style: const TextStyle(
-                            color: MilesColors.cream50, fontSize: 13)),
+                            color: MilesColors.cream50, fontSize: 13,),),
                   ],
                 ),
               ),
@@ -390,7 +388,7 @@ class _CuteMarker extends StatelessWidget {
                         boxShadow: [
                           BoxShadow(
                               color: MilesColors.blush.withValues(alpha: 0.6),
-                              blurRadius: 8),
+                              blurRadius: 8,),
                         ],
                       ),
                       child: Center(
@@ -398,7 +396,7 @@ class _CuteMarker extends StatelessWidget {
                             style: const TextStyle(
                                 color: MilesColors.cream50,
                                 fontSize: 12,
-                                fontWeight: FontWeight.bold)),
+                                fontWeight: FontWeight.bold,),),
                       ),
                     ),
                   ],
@@ -425,7 +423,7 @@ class _MyDot extends StatelessWidget {
         border: Border.all(color: MilesColors.cream50, width: 2),
         boxShadow: [
           BoxShadow(
-              color: MilesColors.sage.withValues(alpha: 0.5), blurRadius: 8),
+              color: MilesColors.sage.withValues(alpha: 0.5), blurRadius: 8,),
         ],
       ),
     );

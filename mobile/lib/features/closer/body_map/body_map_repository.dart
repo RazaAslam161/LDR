@@ -54,7 +54,7 @@ class BodyMapRepository {
     // and had become unreachable.
     if (partnerPub == CryptoCore.legacyPublicKey) {
       throw Exception(
-        "Partner has not published a key yet. Ask them to open Closer once.",
+        'Partner has not published a key yet. Ask them to open Closer once.',
       );
     }
     await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);

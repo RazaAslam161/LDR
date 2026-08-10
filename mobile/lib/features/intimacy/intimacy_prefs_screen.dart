@@ -42,27 +42,27 @@ class IntimacyPrefsScreen extends ConsumerWidget {
                   SwitchListTile(
                     value: prefs.receivingEnabled,
                     onChanged: (v) => ctrl.setPrefs(
-                        receiving: v, signaling: prefs.signalingEnabled),
+                        receiving: v, signaling: prefs.signalingEnabled,),
                     activeThumbColor: MilesColors.blush,
                     title: const Text('Receive their signals',
-                        style: TextStyle(color: MilesColors.cream50)),
+                        style: TextStyle(color: MilesColors.cream50),),
                     subtitle: const Text(
-                        'See it when you\'re both feeling close.',
+                        "See it when you're both feeling close.",
                         style:
-                            TextStyle(color: MilesColors.taupe, fontSize: 12.5)),
+                            TextStyle(color: MilesColors.taupe, fontSize: 12.5),),
                   ),
                   const Divider(height: 1, color: Color(0x18D9A86C)),
                   SwitchListTile(
                     value: prefs.signalingEnabled,
                     onChanged: (v) => ctrl.setPrefs(
-                        receiving: prefs.receivingEnabled, signaling: v),
+                        receiving: prefs.receivingEnabled, signaling: v,),
                     activeThumbColor: MilesColors.blush,
                     title: const Text('Send my own signals',
-                        style: TextStyle(color: MilesColors.cream50)),
+                        style: TextStyle(color: MilesColors.cream50),),
                     subtitle: const Text(
-                        'Let you reach out first when you\'re in the mood.',
+                        "Let you reach out first when you're in the mood.",
                         style:
-                            TextStyle(color: MilesColors.taupe, fontSize: 12.5)),
+                            TextStyle(color: MilesColors.taupe, fontSize: 12.5),),
                   ),
                 ],
               ),
@@ -75,7 +75,7 @@ class IntimacyPrefsScreen extends ConsumerWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                         content: Text('Intimacy layer muted. Turn it back on '
-                            'whenever you like.')),
+                            'whenever you like.'),),
                   );
                 }
               },
@@ -85,7 +85,7 @@ class IntimacyPrefsScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             const Text(
               'Muting turns off both sending and receiving, and quietly clears '
-              'any signal you\'ve left. No notice is sent to your partner.',
+              "any signal you've left. No notice is sent to your partner.",
               style: TextStyle(color: MilesColors.faint, fontSize: 12, height: 1.5),
             ),
           ],

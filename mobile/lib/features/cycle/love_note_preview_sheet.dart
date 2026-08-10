@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/theme.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
 
 /// Editable preview for a pooled love note. The (male) sender can tweak the
@@ -10,12 +10,7 @@ import 'package:miles/features/cycle/love_notes_pool.dart';
 /// hints that it came from a pool — she just receives a normal message.
 class LoveNotePreviewSheet extends StatefulWidget {
   const LoveNotePreviewSheet({
-    super.key,
-    required this.template,
-    required this.recipientName,
-    required this.onRegenerate,
-    required this.onChangeName,
-    required this.onSend,
+    required this.template, required this.recipientName, required this.onRegenerate, required this.onChangeName, required this.onSend, super.key,
   });
 
   /// Raw pooled paragraph, still holding the `{name}` placeholder.
@@ -166,7 +161,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     child: const Text('Change name',
-                        style: TextStyle(fontSize: 12)),
+                        style: TextStyle(fontSize: 12),),
                   ),
                 ],
               ),

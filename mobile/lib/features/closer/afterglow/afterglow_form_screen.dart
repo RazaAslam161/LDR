@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:miles/main.dart' show MilesApp;
 import 'package:miles/core/session_provider.dart';
 import 'package:miles/features/closer/afterglow/afterglow_screen.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/main.dart' show MilesApp;
 
 /// "Start a moment" form for Afterglow. The current partner writes their
 /// gratitude (+ optional photo); on "seal", the entry is persisted with the

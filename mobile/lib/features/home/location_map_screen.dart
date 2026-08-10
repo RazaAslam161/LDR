@@ -21,9 +21,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 class LocationMapScreen extends ConsumerStatefulWidget {
   const LocationMapScreen({
-    super.key,
-    required this.coupleId,
-    required this.partnerName,
+    required this.coupleId, required this.partnerName, super.key,
   });
 
   final String coupleId;
@@ -75,7 +73,8 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
   Timer? _myPosPoll;
 
   void _onMoveTick() {
-    final from = _animFrom, to = _animTo;
+    final from = _animFrom;
+    final to = _animTo;
     if (from == null || to == null) return;
     final t = Curves.easeInOut.transform(_move.value);
     try {
@@ -164,7 +163,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
   @override
   Widget build(BuildContext context) {
     final presence = ref.watch(partnerPresenceProvider);
-    final partner = presence?.isSharingLive == true ? presence : null;
+    final partner = presence?.isSharingLive ?? false ? presence : null;
     final partnerPoint = partner?.latitude != null && partner?.longitude != null
         ? LatLng(partner!.latitude!, partner.longitude!)
         : null;
@@ -191,9 +190,6 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
               options: MapOptions(
                 initialCenter: partnerPoint ?? myPoint ?? const LatLng(0, 0),
                 initialZoom: partnerPoint != null ? 15 : 3,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all,
-                ),
               ),
               children: [
                 TileLayer(
@@ -207,7 +203,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                     TextSourceAttribution(
                       '© OpenStreetMap contributors',
                       onTap: () => launchUrl(Uri.parse(
-                          'https://www.openstreetmap.org/copyright')),
+                          'https://www.openstreetmap.org/copyright',),),
                     ),
                   ],
                 ),
@@ -218,7 +214,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                         points: [myPoint, partnerPoint],
                         color: MilesColors.blush.withValues(alpha: 0.55),
                         strokeWidth: 1.5,
-                        pattern: StrokePattern.dotted(),
+                        pattern: const StrokePattern.dotted(),
                       ),
                     ],
                   ),
@@ -277,7 +273,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                           icon: Icons.explore_rounded,
                           onTap: () {
                             try {
-                              _map.rotate(0.0);
+                              _map.rotate(0);
                             } catch (_) {}
                           },
                         ),
@@ -323,7 +319,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
             right: 0,
             child: ClipRRect(
               borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24)),
+                  top: Radius.circular(24),),
               child: Container(
                 padding: EdgeInsets.fromLTRB(
                   20,
@@ -331,11 +327,11 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                   20,
                   MediaQuery.of(context).padding.bottom + 16,
                 ),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: MilesColors.surface1,
                   border: Border(
                     top: BorderSide(
-                        color: MilesColors.gilt, width: 0.8),
+                        color: MilesColors.gilt, width: 0.8,),
                   ),
                 ),
                 child: Column(
@@ -350,12 +346,12 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                             enabled: partnerPoint != null,
                             onTap: () async {
                               final uri = Uri.parse(
-                                  'google.navigation:q=${partnerPoint!.latitude},${partnerPoint.longitude}');
+                                  'google.navigation:q=${partnerPoint!.latitude},${partnerPoint.longitude}',);
                               if (await canLaunchUrl(uri)) {
                                 await launchUrl(uri);
                               } else {
                                 await launchUrl(Uri.parse(
-                                    'https://maps.google.com/?q=${partnerPoint.latitude},${partnerPoint.longitude}'));
+                                    'https://maps.google.com/?q=${partnerPoint.latitude},${partnerPoint.longitude}',),);
                               }
                             },
                           ),
@@ -376,7 +372,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                      content: Text('Sent your ETA 💌')),
+                                      content: Text('Sent your ETA 💌'),),
                                 );
                               }
                             },
@@ -711,7 +707,7 @@ class _PartnerMarker extends StatelessWidget {
                     shape: BoxShape.circle,
                     border: Border.all(
                         color: MilesColors.blush.withValues(alpha: opacity),
-                        width: 2),
+                        width: 2,),
                   ),
                 ),
               );
@@ -730,7 +726,7 @@ class _PartnerMarker extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                   color: MilesColors.ember.withValues(alpha: 0.5),
-                  blurRadius: 10),
+                  blurRadius: 10,),
             ],
           ),
           child: Center(

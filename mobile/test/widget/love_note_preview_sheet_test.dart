@@ -33,7 +33,7 @@ void main() {
 
   testWidgets('renders the name into the note on open', (tester) async {
     await _pump(tester,
-        template: template, name: 'Aisha', onChangeName: () async => null);
+        template: template, name: 'Aisha', onChangeName: () async => null,);
     expect(_body(tester), 'Aisha, tussi meri duniya ho');
     expect(find.textContaining('For Aisha'), findsOneWidget);
   });
@@ -41,7 +41,7 @@ void main() {
   testWidgets('backing out of the rename keeps the note and his edits',
       (tester) async {
     await _pump(tester,
-        template: template, name: 'Aisha', onChangeName: () async => null);
+        template: template, name: 'Aisha', onChangeName: () async => null,);
     await tester.enterText(find.byType(TextField), 'Aisha, I WROTE THIS');
     await tester.tap(find.text('Change name'));
     await tester.pumpAndSettle();
@@ -53,7 +53,7 @@ void main() {
   testWidgets('renaming swaps the name in place and keeps his edits',
       (tester) async {
     await _pump(tester,
-        template: template, name: 'Aisha', onChangeName: () async => 'Sara');
+        template: template, name: 'Aisha', onChangeName: () async => 'Sara',);
     await tester.enterText(find.byType(TextField), 'Aisha, I WROTE THIS');
     await tester.tap(find.text('Change name'));
     await tester.pumpAndSettle();
@@ -66,7 +66,7 @@ void main() {
       'renaming after he deleted her name re-renders, so the body can never '
       'disagree with the header', (tester) async {
     await _pump(tester,
-        template: template, name: 'Aisha', onChangeName: () async => 'Sara');
+        template: template, name: 'Aisha', onChangeName: () async => 'Sara',);
     await tester.enterText(find.byType(TextField), 'Meri jaan, tussi meri duniya ho');
     await tester.tap(find.text('Change name'));
     await tester.pumpAndSettle();
@@ -80,7 +80,7 @@ void main() {
     await _pump(tester,
         template: 'aap bohot pyaari ho',
         name: 'Aisha',
-        onChangeName: () async => 'Sara');
+        onChangeName: () async => 'Sara',);
     await tester.enterText(find.byType(TextField), 'aap bohot pyaari ho — EDITED');
     await tester.tap(find.text('Change name'));
     await tester.pumpAndSettle();

@@ -66,7 +66,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
     _channel = ManagedSubscription.start(() => SupabaseService.client
         .channel('together:${couple.id}')
         .onBroadcast(event: 'moment', callback: _onMoment)
-        .subscribe());
+        .subscribe(),);
     _load();
   }
 
@@ -162,7 +162,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
           IconButton(
             tooltip: 'Choose my avatar',
             icon: const Icon(Icons.face_retouching_natural,
-                color: MilesColors.emberSoft),
+                color: MilesColors.emberSoft,),
             onPressed: _pickAvatar,
           ),
         ],
@@ -173,7 +173,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
             children: [
               const SizedBox(height: 8),
               const Text('Tap a gesture — you both feel it.',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12.5)),
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12.5),),
               Expanded(
                 child: Stack(
                   alignment: Alignment.center,
@@ -191,7 +191,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
                       alignment: Alignment(_close ? 0.14 : 0.5, 0),
                       child: _Avatar(
                           emoji: _partnerEmoji,
-                          name: partner?.displayName ?? 'Them'),
+                          name: partner?.displayName ?? 'Them',),
                     ),
                     for (final m in _moments)
                       _MomentBurst(
@@ -215,16 +215,16 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
                         onTap: () => _send(a),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
+                              horizontal: 14, vertical: 10,),
                           decoration: BoxDecoration(
                             color: MilesColors.blush.withValues(alpha: 0.14),
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(
-                                color: MilesColors.blush.withValues(alpha: 0.4)),
+                                color: MilesColors.blush.withValues(alpha: 0.4),),
                           ),
                           child: Text('${a.emoji}  ${a.label}',
                               style: const TextStyle(
-                                  color: MilesColors.cream50, fontSize: 13)),
+                                  color: MilesColors.cream50, fontSize: 13,),),
                         ),
                       ),
                   ],
@@ -258,14 +258,14 @@ class _Avatar extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                   color: MilesColors.blush.withValues(alpha: 0.25),
-                  blurRadius: 24),
+                  blurRadius: 24,),
             ],
           ),
           child: Center(child: Text(emoji, style: const TextStyle(fontSize: 58))),
         ),
         const SizedBox(height: 8),
         Text(name,
-            style: const TextStyle(color: MilesColors.cream50, fontSize: 13)),
+            style: const TextStyle(color: MilesColors.cream50, fontSize: 13),),
       ],
     );
   }
@@ -274,7 +274,7 @@ class _Avatar extends StatelessWidget {
 /// The gesture animation: the action emoji blooms between the avatars while a
 /// few hearts drift up, then fades.
 class _MomentBurst extends StatefulWidget {
-  const _MomentBurst({super.key, required this.action, required this.onDone});
+  const _MomentBurst({required this.action, required this.onDone, super.key});
   final _Action action;
   final VoidCallback onDone;
 
@@ -322,7 +322,7 @@ class _MomentBurstState extends State<_MomentBurst>
                   child: Transform.scale(
                     scale: 0.6 + v * 1.0,
                     child: Text(widget.action.emoji,
-                        style: const TextStyle(fontSize: 72)),
+                        style: const TextStyle(fontSize: 72),),
                   ),
                 ),
               ),

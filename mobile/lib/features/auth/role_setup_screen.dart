@@ -67,7 +67,7 @@ class _RoleSetupScreenState extends ConsumerState<RoleSetupScreen> {
                         if (context.mounted) context.go('/signin');
                       },
                       child: const Text('Sign out',
-                          style: TextStyle(color: MilesColors.taupe)),
+                          style: TextStyle(color: MilesColors.taupe),),
                     ),
                   ),
                 ],
@@ -75,14 +75,14 @@ class _RoleSetupScreenState extends ConsumerState<RoleSetupScreen> {
                     style: TextStyle(
                         color: MilesColors.cream50,
                         fontSize: 26,
-                        fontWeight: FontWeight.w700)),
+                        fontWeight: FontWeight.w700,),),
                 const SizedBox(height: 10),
                 const Text(
                   'This tailors a few things for the two of you. You set your '
                   'own — your partner sets theirs.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      color: MilesColors.taupe, fontSize: 14, height: 1.4),
+                      color: MilesColors.taupe, fontSize: 14, height: 1.4,),
                 ),
                 const SizedBox(height: 36),
                 _RoleCard(
@@ -147,7 +147,7 @@ class _RoleCard extends StatelessWidget {
                   style: const TextStyle(
                       color: MilesColors.cream50,
                       fontSize: 18,
-                      fontWeight: FontWeight.w600)),
+                      fontWeight: FontWeight.w600,),),
             ),
             if (busy)
               const SizedBox(
