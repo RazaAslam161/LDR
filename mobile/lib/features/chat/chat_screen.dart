@@ -199,7 +199,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (cid == null) return;
     try {
       final url = await ChatRepository.uploadGif(cid, f);
-      _sendGifBurst(url);
+      if (url != null) _sendGifBurst(url);
     } catch (_) {}
   }
 

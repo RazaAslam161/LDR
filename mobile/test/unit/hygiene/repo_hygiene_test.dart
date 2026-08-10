@@ -365,6 +365,31 @@ void main() {
     });
   });
 
+  test('no storage object is served without authentication', () {
+    // getPublicUrl builds a /object/public/... link, which bypasses RLS
+    // entirely: no token, no expiry, no revocation. couple_media held 255 of a
+    // couple's photos that way. Every bucket is private now and every read
+    // signs, so a reappearance of this call is a bucket quietly going public
+    // again — which is exactly how it happened the first time, one convenient
+    // one-liner at a time.
+    final offenders = <String>[];
+    for (final f in Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      final lines = f.readAsStringSync().split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        final s = lines[i].trim();
+        if (s.startsWith('//') || s.startsWith('///')) continue;
+        if (s.contains('getPublicUrl')) {
+          offenders.add('${f.uri.pathSegments.last}:${i + 1}');
+        }
+      }
+    }
+    expect(offenders, isEmpty,
+        reason: 'use MediaUrls.sign / SignedImage: $offenders');
+  });
+
   test('the launcher disguise is intact', () {
     // Not cleanup-adjacent, deliberately. The label looks like a placeholder
     // somebody forgot to change, which is exactly why a well-meaning tidy-up

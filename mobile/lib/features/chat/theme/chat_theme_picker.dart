@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -33,9 +34,10 @@ class _ChatThemeSheetState extends ConsumerState<_ChatThemeSheet> {
       final uid = SupabaseService.currentUserId!;
       final path = '$uid/bg_${DateTime.now().millisecondsSinceEpoch}.jpg';
       await SupabaseService.client.storage.from('chat-bg').upload(path, file);
-      final url =
-          SupabaseService.client.storage.from('chat-bg').getPublicUrl(path);
-      await ref.read(chatThemeProvider).setCustomBackground(url);
+      final url = await MediaUrls.sign('chat-bg', path);
+      if (url != null) {
+        await ref.read(chatThemeProvider).setCustomBackground(url);
+      }
       if (mounted) Navigator.pop(context);
     } catch (_) {
       if (mounted) {

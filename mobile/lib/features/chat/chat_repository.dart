@@ -2,11 +2,13 @@ import 'dart:io';
 import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 
 /// Flip to true to log realtime channel-join status to the console (for the
 /// 2-device subscription-health test). Compile-time const → dead-code-eliminated
@@ -150,21 +152,24 @@ class Message {
   /// Hidden from this user (they chose "delete for me").
   bool isHiddenFor(String? uid) => uid != null && deletedBy.contains(uid);
 
-  /// Public URL for the image (Supabase Storage serves couple_media publicly).
-  String? get imageUrl {
-    if (imagePath == null) return null;
-    return SupabaseService.client.storage
-        .from('couple_media')
-        .getPublicUrl(imagePath!);
-  }
+  /// The image, as a signed URL from the cache MediaUrls warms on load.
+  ///
+  /// Null when not signed yet, which the bubble already renders as
+  /// "unavailable" — a placeholder for one frame, rather than a network round
+  /// trip inside build().
+  String? get imageUrl => imagePath == null
+      ? null
+      : MediaUrls.cached(chatBucket, MediaUrls.toPath(chatBucket, imagePath!));
 
-  /// Public URL for the voice note.
-  String? get voiceUrl {
-    if (voicePath == null) return null;
-    return SupabaseService.client.storage
-        .from('couple_media')
-        .getPublicUrl(voicePath!);
-  }
+  String? get voiceUrl => voicePath == null
+      ? null
+      : MediaUrls.cached(chatBucket, MediaUrls.toPath(chatBucket, voicePath!));
+
+  /// Every storage path this message needs signed before it can render.
+  Iterable<String> get mediaPaths => [
+        if (imagePath != null) MediaUrls.toPath(chatBucket, imagePath!),
+        if (voicePath != null) MediaUrls.toPath(chatBucket, voicePath!),
+      ];
 }
 
 /// All chat queries. Couple-scoped via RLS on the messages table.
@@ -197,6 +202,7 @@ class ChatRepository {
         // Skip a malformed row rather than aborting the whole catch-up.
       }
     }
+    await MediaUrls.warm(chatBucket, out.expand((m) => m.mediaPaths));
     return out;
   }
 
@@ -217,6 +223,7 @@ class ChatRepository {
         // Skip a malformed row rather than blanking the whole conversation.
       }
     }
+    await MediaUrls.warm(chatBucket, out.expand((m) => m.mediaPaths));
     return out;
   }
 
@@ -274,7 +281,7 @@ class ChatRepository {
 
     final ext = _ext(file.path) ?? 'jpg';
     final path = '$coupleId/${_randomName('img', ext)}';
-    await _c.storage.from('couple_media').upload(path, file);
+    await _c.storage.from(chatBucket).upload(path, file);
     final sw = Stopwatch()..start();
     try {
       await _c.from('messages').insert({
@@ -303,13 +310,15 @@ class ChatRepository {
     return path;
   }
 
-  /// Uploads a GIF/sticker to couple_media and returns its PUBLIC URL — no
+  /// Uploads a GIF/sticker to couple_media and returns a signed URL — no
   /// message row is inserted (used for flinging a GIF, which is ephemeral).
-  static Future<String> uploadGif(String coupleId, File file) async {
+  /// Returns a SIGNED url. Was a public one, which outlived the burst it
+  /// was sent for by exactly forever.
+  static Future<String?> uploadGif(String coupleId, File file) async {
     final ext = _ext(file.path) ?? 'gif';
     final path = '$coupleId/${_randomName('gif', ext)}';
-    await _c.storage.from('couple_media').upload(path, file);
-    return _c.storage.from('couple_media').getPublicUrl(path);
+    await _c.storage.from(chatBucket).upload(path, file);
+    return MediaUrls.sign(chatBucket, path);
   }
 
   /// Uploads a video to the PRIVATE couple_intimate bucket and inserts a
@@ -351,7 +360,7 @@ class ChatRepository {
 
     final ext = _ext(file.path) ?? 'm4a';
     final path = '$coupleId/${_randomName('voice', ext)}';
-    await _c.storage.from('couple_media').upload(path, file);
+    await _c.storage.from(chatBucket).upload(path, file);
     await _c.from('messages').insert({
       'couple_id': coupleId,
       'sender_id': uid,

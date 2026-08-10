@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -18,7 +19,7 @@ import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
-import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -54,12 +55,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await SupabaseService.client.storage
           .from('couple_media')
           .upload(path, file);
-      final url = SupabaseService.client.storage
-          .from('couple_media')
-          .getPublicUrl(path);
-      await SupabaseRepository.setAvatarUrl(url);
+      // The PATH, not a URL — couple_media is private; readers sign it.
+      await SupabaseRepository.setAvatarUrl(path);
       if (mounted) {
-        setState(() => _localAvatarUrl = url);
+        setState(() => _localAvatarUrl = path);
         _toast('Photo updated');
       }
     } catch (_) {
@@ -750,8 +749,10 @@ class _AvatarEditor extends StatelessWidget {
                       child: Text(initial,
                           style: const TextStyle(
                               color: MilesColors.cream50, fontSize: 34,),),)
-                  : NetImage(url!,
-                      error: Center(
+                  : SignedImage(
+                      bucket: chatBucket,
+                      value: url,
+                      placeholder: Center(
                           child: Text(initial,
                               style: const TextStyle(
                                   color: MilesColors.cream50, fontSize: 34,),),),),

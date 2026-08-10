@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -20,8 +21,8 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
@@ -127,10 +128,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       await SupabaseService.client.storage
           .from('couple_media')
           .upload(path, file);
-      final url = SupabaseService.client.storage
-          .from('couple_media')
-          .getPublicUrl(path);
-      await PresenceService.setCheckinPhoto(couple.id, url);
+      // The PATH, not a URL. couple_media is private now; whoever renders it
+      // signs it. A public URL stored here outlived the snap by forever.
+      await PresenceService.setCheckinPhoto(couple.id, path);
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Snap shared 📸')));
@@ -360,8 +360,10 @@ class _Avatar extends StatelessWidget {
                           color: MilesColors.cream50, fontSize: 24,),),)
               : Hero(
                   tag: 'snap-$url',
-                  child: NetImage(url,
-                      error: Center(
+                  child: SignedImage(
+                      bucket: chatBucket,
+                      value: url,
+                      placeholder: Center(
                           child: Text(initial,
                               style: const TextStyle(
                                   color: MilesColors.cream50, fontSize: 24,),),),),),
