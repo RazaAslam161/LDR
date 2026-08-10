@@ -29,18 +29,21 @@ create policy "breath_events_insert_member" on public.breath_events
 
 -- Auto-clean rows older than 1 day (run nightly).
 -- We use pg_cron if available, falling back to manual cleanup.
+-- Two bugs lived here and neither could ever have run.
+--
+--   1. The job body was quoted with a bare doubled-dollar while nested inside
+--      a doubled-dollar do block, so the inner tag terminated the outer one.
+--      Distinct tags fix it: the block is tagged do, the body job.
+--   2. cron.unschedule() RAISES when the job does not exist, so on a database
+--      that had never run this file the statement aborted before
+--      cron.schedule was reached. It is gated on cron.job now.
+--
+-- This explanation sits OUTSIDE the block on purpose: dollar quoting ignores
+-- SQL comments, so naming a tag inside the block would close it early — which
+-- is exactly how the first attempt at this fix failed.
 do $do$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    -- Two bugs lived here and neither could ever have run.
-    --
-    -- 1. The job body was quoted with a bare $$ while nested inside a do $$
-    --    block, so the inner $$ terminated the outer one: "syntax error at or
-    --    near delete". The outer block is tagged $do$ now, so the plain $$
-    --    inside it is just text.
-    -- 2. cron.unschedule() RAISES when the job does not exist, so on any
-    --    database that had never run this file the statement aborted before
-    --    reaching cron.schedule. It is guarded on the catalogue now.
     if exists (select 1 from cron.job where jobname = 'miles_breath_cleanup') then
       perform cron.unschedule('miles_breath_cleanup');
     end if;

@@ -130,6 +130,24 @@ void main() {
     }
   });
 
+  test('every dollar-quote tag appears an even number of times', () {
+    // Catches the mistake the second replay found, which the nesting check
+    // above does not: a tag named inside a COMMENT within its own block.
+    // Dollar quoting ignores SQL comments, so writing the tag in an
+    // explanatory comment closes the block early — the error then points at
+    // whatever word follows, several lines from the real cause.
+    for (final f in sqlIn(migrations)) {
+      final src = f.readAsStringSync();
+      final tags = RegExp(r'\$[a-z_]*\$').allMatches(src).map((m) => m[0]!);
+      for (final tag in tags.toSet()) {
+        final n = tag.allMatches(src).length;
+        expect(n.isEven, isTrue,
+            reason: '${f.uri.pathSegments.last}: tag $tag appears $n times — '
+                'an odd count means one is inside a comment or a string');
+      }
+    }
+  });
+
   test('cron.unschedule is guarded before it is called', () {
     // cron.unschedule RAISES when the job does not exist, so on a database
     // that has never run the file the statement aborts before scheduling
