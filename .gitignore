@@ -40,3 +40,6 @@ supabase/.temp/
 
 # Ad-hoc screenshots dropped at the repo root while debugging
 /repro.png
+
+# Local quarantine for regenerable build output pending deletion
+_trash/
