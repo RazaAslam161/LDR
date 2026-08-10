@@ -19,9 +19,13 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare v_url text := public.functions_base_url();
 begin
+  -- Unconfigured environment: skip the notification, never abort the user's
+  -- write. These are AFTER INSERT triggers on messages, reaches and nudges.
+  if v_url is null then return new; end if;
   perform net.http_post(
-    url := 'https://sopictusdonlvuezmfep.supabase.co/functions/v1/reach-notify',
+    url := v_url || '/functions/v1/reach-notify',
     body := to_jsonb(new),
     headers := jsonb_build_object('Content-Type', 'application/json')
   );

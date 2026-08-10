@@ -178,6 +178,48 @@ void main() {
             '${missing.map((t) => '$t (${used[t]})').join(', ')}');
   });
 
+  test('functions_base_url is defined before any migration calls it', () {
+    // The URL fix moved the helper to app_config so every notifier uses it
+    // from birth. That only works if app_config replays first — otherwise a
+    // fresh database fails at the first notifier with "function does not
+    // exist", and the ordering lives nowhere but in the filename.
+    final files = sqlIn(migrations);
+    final definer = files.firstWhere(
+        (f) => f.readAsStringSync().contains('create or replace function public.functions_base_url'),
+        orElse: () => throw StateError('nothing defines functions_base_url'));
+    final definerKey = definer.uri.pathSegments.last.split('_').first;
+
+    for (final f in files) {
+      final name = f.uri.pathSegments.last;
+      if (name == definer.uri.pathSegments.last) continue;
+      if (!f.readAsStringSync().contains('functions_base_url()')) continue;
+      expect(name.split('_').first.compareTo(definerKey), greaterThan(0),
+          reason: '$name calls functions_base_url() but replays before the '
+              'migration that defines it');
+    }
+  });
+
+  test('no migration hardcodes a Supabase project URL', () {
+    // Four push triggers embedded the literal production project ref, so a
+    // staging INSERT posted to production's edge function and sent real pushes
+    // to real users. A restore into a new project would keep notifying the old
+    // one. The URL is configuration; it comes from functions_base_url() now.
+    final offenders = <String>[];
+    for (final f in sqlIn(migrations)) {
+      final src = f.readAsStringSync();
+      for (final line in src.split('\n')) {
+        // The comment blocks legitimately quote example URLs.
+        if (line.trimLeft().startsWith('--')) continue;
+        if (RegExp(r'https://[a-z0-9]{20}\.supabase\.co').hasMatch(line)) {
+          offenders.add('${f.uri.pathSegments.last}: ${line.trim()}');
+        }
+      }
+    }
+    expect(offenders, isEmpty,
+        reason: 'a project URL belongs in configuration, not in a function '
+            'body: ${offenders.join(' | ')}');
+  });
+
   test('every dollar-quote tag appears an even number of times', () {
     // Catches the mistake the second replay found, which the nesting check
     // above does not: a tag named inside a COMMENT within its own block.
