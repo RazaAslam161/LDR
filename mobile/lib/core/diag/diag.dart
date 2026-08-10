@@ -34,10 +34,19 @@ class Diag {
 
   static const _enabledKey = 'diag_enabled';
 
-  /// On by default. This exists because three mechanisms are broken in the
-  /// field and off-by-default instrumentation is instrumentation that is off
-  /// on the phone that fails. Settings exposes the switch.
-  static const _enabledDefault = true;
+  /// OFF by default.
+  ///
+  /// It shipped on, because instrumentation that is off on the phone that fails
+  /// is useless — which is true for two people and ruinous for a fleet. One
+  /// couple produced 21,448 rows and 9MB in a single day; at five thousand
+  /// couples that is roughly 107 MILLION rows a day, and no retention window
+  /// makes that survivable.
+  ///
+  /// So it is opt-in now: Settings has the switch, and whoever is chasing a
+  /// bug turns it on. The disk ring still records regardless, so a user who
+  /// enables it after something went wrong keeps the last events — what is
+  /// gated is the upload, not the observation.
+  static const _enabledDefault = false;
 
   static bool _enabled = _enabledDefault;
   static bool get enabled => _enabled;
