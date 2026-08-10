@@ -2,7 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_repository.dart';
 
 /// "Pick for us" dice — consensual spontaneity. Three tiers (warm → hot);

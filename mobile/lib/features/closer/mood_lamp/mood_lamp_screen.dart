@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 
 /// Mood Lamp — pick a color; it glows on your partner's screen in real time.
 /// Pure broadcast, no persistence. Soft, ambient, no words.

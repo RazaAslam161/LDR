@@ -3,9 +3,9 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/services/server_clock.dart';
-import 'package:miles/core/supabase_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';

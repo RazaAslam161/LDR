@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/config.dart';
-import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/root_scaffold_key.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/app/config.dart';
+import 'package:miles/core/app/root_scaffold_key.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

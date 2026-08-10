@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:miles/core/feature_flags.dart';
-import 'package:miles/core/realtime_resume.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_service.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/app/feature_flags.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';

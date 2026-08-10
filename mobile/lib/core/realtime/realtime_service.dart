@@ -1,9 +1,9 @@
 import 'dart:async';
 
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/realtime_resume.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Centralised realtime access for the couple's private space.

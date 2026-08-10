@@ -74,7 +74,7 @@ void main() {
     // building at all, and it is silent: config.dart throws a StateError
     // before the first frame when a key is missing, naming the constant rather
     // than what to put in it.
-    final config = File('lib/core/config.dart').readAsStringSync();
+    final config = File('lib/core/app/config.dart').readAsStringSync();
     final example = File('.env.example').readAsStringSync();
     final keys = RegExp(r"static const \w*Key\w* = '([A-Z0-9_]+)'")
         .allMatches(config)
@@ -252,6 +252,30 @@ void main() {
     expect(ignores.length, lessThanOrEqualTo(1),
         reason: 'each suppression needs a reason in a comment above it, and '
             'this bound moved on purpose: $ignores',);
+  });
+
+  test('every source path a test names actually exists', () {
+    // Several tests assert on source text rather than behaviour, by reading a
+    // file path. Those paths are invisible to the compiler and to a rename: a
+    // restructure moved five files and two suites broke — one of them this one.
+    // Worse is the silent case, where a path that no longer exists is read
+    // inside a try or an orElse and the assertion quietly stops checking
+    // anything.
+    final referenced = <String>{};
+    for (final f in Directory('test')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      for (final m in RegExp(r"'((?:lib|\.\./supabase)/[\w./-]+\.\w+)'")
+          .allMatches(f.readAsStringSync())) {
+        referenced.add(m[1]!);
+      }
+    }
+    expect(referenced, isNotEmpty, reason: 'no source paths parsed from tests');
+    final missing = referenced.where((p) => !File(p).existsSync()).toList()
+      ..sort();
+    expect(missing, isEmpty,
+        reason: 'a test reads a file that no longer exists: $missing');
   });
 
   test('the launcher disguise is intact', () {

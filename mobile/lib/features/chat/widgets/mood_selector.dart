@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/mood.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/mood.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 
 /// A bottom sheet of mood chips. Returns the chosen [MoodData] (or null).

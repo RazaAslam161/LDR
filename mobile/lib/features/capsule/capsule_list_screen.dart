@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 

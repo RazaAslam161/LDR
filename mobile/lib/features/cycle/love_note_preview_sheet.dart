@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/supabase_repository.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/data/supabase_repository.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/love_text_field.dart';

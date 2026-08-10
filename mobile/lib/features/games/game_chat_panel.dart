@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/content_language.dart';
-import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_service.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/ui/content_language.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// A compact, real-time answer strip embedded in every game. Both partners type
 /// here and see each other's answers live (ephemeral broadcast — it's in-game

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/realtime_service.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_service.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';

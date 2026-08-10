@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/features/chat/selectable_message.dart';
+import 'package:miles/features/chat/widgets/selectable_message.dart';
 
 /// Wrapping a bubble in a GestureDetector and calling it done is wrong, and
 /// wrong in a way that source-reading review does not catch: the media bubbles

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// The gesture layer that turns a chat bubble into something selectable.
 ///

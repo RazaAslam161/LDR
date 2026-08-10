@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/supabase_service.dart';
 
 /// Ticks whenever the realtime socket (re)connects. EVERY per-screen realtime
 /// subscription listens to this and re-subscribes its channel, so sync survives

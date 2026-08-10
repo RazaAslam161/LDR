@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/presence_route_observer.dart';
-import 'package:miles/core/providers.dart';
+import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/realtime/presence_route_observer.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 
 /// The observer runs inside a live navigator, which fires its callbacks while

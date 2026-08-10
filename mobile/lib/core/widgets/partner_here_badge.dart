@@ -5,16 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/app/router.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/mood.dart';
-import 'package:miles/core/presence_route_observer.dart';
-import 'package:miles/core/providers.dart';
-import 'package:miles/core/realtime_resume.dart';
-import 'package:miles/core/router.dart';
+import 'package:miles/core/realtime/presence_route_observer.dart';
+import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/presence_service.dart';
-import 'package:miles/core/supabase_service.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/mood.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The screen the LOCAL user is currently on, and the record of what was last

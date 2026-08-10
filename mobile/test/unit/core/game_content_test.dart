@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/core/content_language.dart';
+import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/features/games/game_content.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
 

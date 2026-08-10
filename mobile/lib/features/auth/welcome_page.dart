@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/config.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/app/config.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';

@@ -1,6 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// A disk-cached network image for avatars / photos so they don't re-download
 /// every render or on app restart. (Use plain Image.network for GIFs, which

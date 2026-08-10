@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/reach/reach_repository.dart';

@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 
 /// Pre-approved category tiers for "Pick for us". Each tier carries a fixed

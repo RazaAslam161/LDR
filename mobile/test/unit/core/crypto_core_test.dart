@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/core/crypto_core.dart';
+import 'package:miles/core/data/crypto_core.dart';
 
 /// The point of this change is a rollout that encrypts new data without
 /// breaking a single existing row. These prove both halves: real AEAD when a

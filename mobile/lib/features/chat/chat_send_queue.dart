@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:uuid/uuid.dart';

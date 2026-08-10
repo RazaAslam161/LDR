@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/data/supabase_repository.dart';
 
 /// A list load that knows what it could not open.
 ///

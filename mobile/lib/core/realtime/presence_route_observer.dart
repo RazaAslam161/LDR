@@ -1,10 +1,10 @@
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/providers.dart';
-import 'package:miles/core/screen_presence.dart';
+import 'package:miles/core/realtime/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// A preset beauty/enhance filter applied to a photo after capture.
 class _Preset {

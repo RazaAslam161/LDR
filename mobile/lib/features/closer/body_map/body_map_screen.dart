@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/closer/body_map/body_map_repository.dart';
 import 'package:miles/features/closer/body_map/body_silhouette_painter.dart';
 

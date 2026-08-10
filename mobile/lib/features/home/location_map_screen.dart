@@ -15,7 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:miles/core/services/presence_service.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -369,10 +369,15 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                                 widget.coupleId,
                                 "I'm $dist away, heading your way 💕",
                               );
-                              if (mounted) {
+                              // context.mounted, not mounted: this closure runs
+                              // under a Builder, so `mounted` answers for the
+                              // State while `context` belongs to a different
+                              // element that may already be gone.
+                              if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                      content: Text('Sent your ETA 💌'),),
+                                    content: Text('Sent your ETA 💌'),
+                                  ),
                                 );
                               }
                             },

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Full-screen-intent permission (Android 14 / API 34+).

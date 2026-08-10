@@ -4,7 +4,7 @@
 /// live in [SupabaseRepository] so these stay clean.
 library;
 
-import 'package:miles/core/supabase_repository.dart' show SupabaseRepository;
+import 'package:miles/core/data/supabase_repository.dart' show SupabaseRepository;
 import 'package:miles/core/utils/json_utils.dart';
 
 enum PresenceStatus { asleep, awake, work, free, busy }

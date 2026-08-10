@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// The app's magical signature: a warm candle-glow gradient with slowly drifting
 /// embers and a faint starfield, painted with a single CustomPainter. Subtle and

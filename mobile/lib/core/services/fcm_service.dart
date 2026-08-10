@@ -1,11 +1,11 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/reach_notifications.dart';
-import 'package:miles/core/supabase_repository.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a

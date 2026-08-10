@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';
 
 /// Compose a new Fantasy Jar entry. Text is freeform; tags come from the

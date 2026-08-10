@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

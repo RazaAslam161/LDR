@@ -4,9 +4,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/crypto_core.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 

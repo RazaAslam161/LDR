@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
-import 'package:miles/core/mood.dart';
+import 'package:miles/core/ui/mood.dart';
 
 /// Renders a mood as its cute animated Noto-emoji (Lottie). Falls back to the
 /// plain emoji glyph if the animation can't load.

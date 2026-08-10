@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
-import 'package:miles/core/supabase_service.dart';
-import 'package:miles/core/theme.dart';
-import 'package:miles/features/chat/chat_theme.dart';
-import 'package:miles/features/chat/chat_theme_controller.dart';
+import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/chat/theme/chat_theme.dart';
+import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 
 Future<void> showChatThemePicker(BuildContext context) {
   return showModalBottomSheet<void>(

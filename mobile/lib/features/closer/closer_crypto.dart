@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:miles/core/crypto_core.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/supabase_repository.dart';
 
 /// XChaCha20-Poly1305 always produces a 24-byte nonce and a 16-byte Poly1305 MAC.
 const int _nonceLength = 24;

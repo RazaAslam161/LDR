@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:miles/features/chat/camera_filters.dart';
+import 'package:miles/features/chat/camera/camera_filters.dart';
 
 /// Wraps the live camera preview ([child]) in the selected filter's visual
 /// stack — colour matrix, optional blur, optional blended overlay, optional

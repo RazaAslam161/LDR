@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/main.dart' show MilesApp;
 import 'package:path_provider/path_provider.dart';
@@ -142,6 +142,17 @@ class _CapsuleFillScreenState extends ConsumerState<CapsuleFillScreen> {
     final path =
         '${dir.path}/capsule_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
     await rec.start(const RecordConfig(), path: path);
+
+    // Three awaits sit between the tap and this sheet — a permission prompt, a
+    // temp-directory lookup and starting the recorder. Leaving the screen
+    // during any of them disposes this State, and opening a sheet on a dead
+    // context throws. The recorder is already running by now, so it has to be
+    // stopped rather than abandoned.
+    if (!mounted) {
+      await rec.stop();
+      await rec.dispose();
+      return;
+    }
 
     final saved = await showModalBottomSheet<bool>(
       context: context,

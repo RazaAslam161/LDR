@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/models.dart';
+import 'package:miles/core/data/models.dart';
 import 'package:miles/features/rituals/ritual_repository.dart';
 
 /// Modal sheet for creating a new ritual.

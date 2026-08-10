@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/vault/pin_pad.dart';
 
 /// Set a new 4-digit app-lock PIN (enter, then confirm). Returns true if set.

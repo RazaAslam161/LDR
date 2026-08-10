@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/fantasy_jar/add_fantasy_screen.dart';
 import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';

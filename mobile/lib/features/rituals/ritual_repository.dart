@@ -1,5 +1,5 @@
-import 'package:miles/core/models.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/models.dart';
+import 'package:miles/core/data/supabase_service.dart';
 
 /// CRUD wrapper around the `rituals` table.
 ///

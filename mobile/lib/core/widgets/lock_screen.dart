@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/vault/pin_pad.dart';
 
 /// Full-screen lock shown over the app while [AppLock.locked] is true. Always

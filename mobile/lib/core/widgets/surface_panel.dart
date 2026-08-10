@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// Solid surfaces, replacing the former frosted-glass ones.
 ///

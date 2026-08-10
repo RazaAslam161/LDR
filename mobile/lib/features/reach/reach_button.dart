@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 
 /// Big hold-to-reach button. Hold ~0.5s (prevents accidental taps) to send a

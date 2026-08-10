@@ -1,6 +1,6 @@
-import 'package:miles/core/crypto_core.dart';
-import 'package:miles/core/models.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/models.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

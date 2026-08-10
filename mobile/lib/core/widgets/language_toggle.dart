@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:miles/core/content_language.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/content_language.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// One half of the pill: the sliding thumb, and the slot each label sits in.
 const double _slotWidth = 32;

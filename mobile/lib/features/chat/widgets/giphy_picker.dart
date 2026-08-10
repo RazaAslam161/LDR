@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/giphy_service.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// A GIPHY GIF picker. Returns the chosen GIF's URL (or null). Used to fling a
 /// GIF and to attach one in chat.

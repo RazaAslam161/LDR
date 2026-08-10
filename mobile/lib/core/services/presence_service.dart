@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/providers.dart';
-import 'package:miles/core/realtime_resume.dart';
-import 'package:miles/core/realtime_service.dart';
+import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/server_clock.dart';
-import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

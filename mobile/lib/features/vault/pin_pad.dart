@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// A 4-digit PIN pad: filled dots + number grid + backspace. Calls [onComplete]
 /// once 4 digits are entered. Bump [errorSignal] from the parent to shake +

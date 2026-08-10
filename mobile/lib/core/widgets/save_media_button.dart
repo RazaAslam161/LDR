@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// A small download icon that saves media on tap and shows brief SnackBar
 /// feedback. Reused across chat bubbles, the media viewers, and the Touch

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 
 /// Per-user cycle preferences. Sensitive health data — RLS-locked to the couple,

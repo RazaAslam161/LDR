@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
-import 'package:miles/features/chat/camera_bake.dart';
+import 'package:miles/features/chat/camera/camera_bake.dart';
 
 /// The bake sits between the shutter and the photo a partner receives. Its one
 /// promise is that a capture is never lost: whatever goes wrong, bytes come

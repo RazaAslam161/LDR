@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/core/presence_route_observer.dart';
-import 'package:miles/core/providers.dart';
-import 'package:miles/core/screen_presence.dart';
+import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/realtime/presence_route_observer.dart';
+import 'package:miles/core/realtime/screen_presence.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 
 /// Presence drives what one partner believes the other is doing. A wrong value

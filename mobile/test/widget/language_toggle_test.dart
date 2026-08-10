@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/core/content_language.dart';
+import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

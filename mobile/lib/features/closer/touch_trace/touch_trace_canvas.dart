@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/realtime_resume.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A single point on a stroke. Normalised to 0..1 so it renders correctly

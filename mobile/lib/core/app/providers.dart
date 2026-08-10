@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/models.dart';
-import 'package:miles/core/session_provider.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/models.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Granular, read-only views over the bundled [sessionProvider]. Features should

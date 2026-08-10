@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:geolocator/geolocator.dart';
-import 'package:miles/core/supabase_service.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Snapshot of the proximity check, pushed to the UI.

@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/supabase_repository.dart';
-import 'package:miles/features/chat/chat_theme.dart';
+import 'package:miles/core/data/supabase_repository.dart';
+import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Holds the user's chat theme. Loads instantly from a local cache, then syncs

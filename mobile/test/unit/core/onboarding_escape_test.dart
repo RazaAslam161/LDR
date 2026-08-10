@@ -20,7 +20,7 @@ void main() {
   final couplePage = read('lib/features/auth/couple_page.dart');
   final signIn = read('lib/features/auth/sign_in_page.dart');
   final home = read('lib/features/home/home_screen.dart');
-  final repo = read('lib/core/supabase_repository.dart');
+  final repo = read('lib/core/data/supabase_repository.dart');
 
   group('the invite code survives leaving the app', () {
     test('the couple page recovers a live invite from the server', () {

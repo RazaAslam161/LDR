@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// Pill CTA with a soft colored glow halo, a pressed-state scale, and a light
 /// haptic on tap. Glow is a colored shadow (never a hard grey one).

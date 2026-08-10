@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/router.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/app/router.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/call/call_controller.dart';
 
 /// A floating "tap to return to call" pill shown over the whole app while a

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// An intimate, softly-glowing text input. Themed fill + ember focus border
 /// (from the global InputDecorationTheme) plus a faint warm halo, with an

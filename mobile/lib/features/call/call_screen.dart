@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/session_provider.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/call/call_controller.dart';
 
 /// Whether the diagnostic readout is showing. Outside the widget so it survives

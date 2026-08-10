@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/config.dart';
-import 'package:miles/core/models.dart';
-import 'package:miles/core/providers.dart';
+import 'package:miles/core/app/config.dart';
+import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/data/models.dart';
+import 'package:miles/core/data/supabase_repository.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/presence_service.dart';
-import 'package:miles/core/supabase_repository.dart';
-import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

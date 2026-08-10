@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:url_launcher/url_launcher.dart';

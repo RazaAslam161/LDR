@@ -1,4 +1,4 @@
-import 'package:miles/core/content_language.dart';
+import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/features/games/no_repeat_bag.dart';
 import 'package:miles/features/games/truth_dare_deck.dart';
 

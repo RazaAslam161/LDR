@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/theme.dart';
+import 'package:miles/core/ui/theme.dart';
 
 /// Wraps [child] in a slow (~4s) "breathing" scale + colored-glow pulse, for
 /// focal, romantic moments — e.g. a sealed capsule waiting to be opened, or a

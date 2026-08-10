@@ -1,6 +1,6 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
-import 'package:miles/core/config.dart';
+import 'package:miles/core/app/config.dart';
 import 'package:miles/core/net/timeout_http_client.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
