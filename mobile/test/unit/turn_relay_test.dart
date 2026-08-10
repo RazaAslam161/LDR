@@ -124,11 +124,20 @@ void main() {
       expect(accept, contains('_startConnectTimeout()'));
     });
 
-    test('candidate types are logged', () {
+    test('candidate types are recorded, ours AND theirs', () {
       // ' typ host|srflx|relay' is the only line that answers whether TURN
-      // actually allocated.
-      expect(src, contains('local candidate typ='));
+      // actually allocated. It used to reach debugPrint, which reaches logcat,
+      // which reaches whichever of the two phones has a cable in it — so the
+      // one fact that decides a failed call was unavailable on the device that
+      // failed. It goes to the trace now.
+      expect(src, contains("'ice_local_candidate'"));
       expect(src, contains('onIceGatheringState'));
+
+      // The asymmetry that made this undiagnosable for months: local candidates
+      // were logged and REMOTE ones were not, so "their candidates never
+      // arrived" and "TURN never allocated here" produced an identical 35s
+      // timeout.
+      expect(src, contains("'ice_remote_candidate'"));
     });
   });
 

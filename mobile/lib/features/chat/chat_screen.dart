@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/realtime_resume.dart';
 import 'package:miles/core/root_scaffold_key.dart';
@@ -18,7 +20,6 @@ import 'package:miles/core/session_provider.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
-import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
@@ -88,6 +89,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _subscribing = false; // re-entrancy guard for _subscribe
   bool _reloadScheduled = false; // debounce flag for bulk-DELETE realtime events
 
+  /// How many times this screen has (re)joined its channels. A join that keeps
+  /// climbing is a flapping socket, which from the outside looks like nothing.
+  int _joinAttempt = 0;
+
+  /// Last traced tick per message. _statusFor runs for every bubble on every
+  /// 5s tick, and a trace that re-states 300 unchanged ticks buries the one
+  /// that actually moved.
+  final Map<String, _MsgStatus> _tracedTick = {};
+
   /// IDs of my messages that have reached 'seen'. Seen is permanent — once a
   /// message is in here it never downgrades back to delivered, even after the
   /// partner leaves the chat / goes offline (WhatsApp semantics). Only grows.
@@ -113,7 +123,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         body: body,
         kind: 'text',
         replyToId: replyId,
-      ));
+      ), source: 'local_send');
     }
     _moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
       'id': id,
@@ -147,7 +157,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       body: kind == 'text' ? payload['body']?.toString() : null,
       imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
       replyToId: payload['replyToId']?.toString(),
-    ));
+    ), source: 'broadcast');
   }
 
   void _sendGifBurst(String url) {
@@ -261,7 +271,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         localPath: s.file.path,
         sendStatus: s.status,
         replyToId: s.replyToId,
-      ));
+      ), source: 'send_queue');
     }
 
     // Anything the queue has finished with is either reconciled by the DB echo
@@ -327,8 +337,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       PresenceService.setChatLastRead(_coupleId!);
       // Android freezes the process on background, so the socket was dead the
       // whole time. Anything sent during that window exists only in Postgres.
-      unawaited(_catchUp());
-      unawaited(_refreshPartnerReceipt());
+      unawaited(_catchUp(trigger: 'resume'));
+      unawaited(_refreshPartnerReceipt(source: 'resume'));
     }
   }
 
@@ -345,16 +355,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// Tell the server we have read up to here. Idempotent and monotonic
   /// server-side, so a lost or out-of-order ack cannot un-read anything.
-  void _ackRead() {
+  void _ackRead(String trigger) {
     final seq = _maxSeq;
-    if (seq > 0) unawaited(ChatReceiptRepository.ackRead(seq));
+    if (seq > 0) {
+      unawaited(ChatReceiptRepository.ackRead(seq, trigger: trigger));
+    }
   }
 
-  Future<void> _refreshPartnerReceipt() async {
+  Future<void> _refreshPartnerReceipt({required String source}) async {
     final couple = _coupleId;
     final partnerId = ref.read(sessionProvider).partner?.id;
     if (couple == null || partnerId == null) return;
+    final prev = _partnerReceipt;
     final r = await ChatReceiptRepository.fetchPartner(couple, partnerId);
+    // prev vs next, because "the partner never acked" and "they acked and this
+    // device kept the old value" are the same stuck tick from the outside.
+    Diag.record(DiagArea.receipt, 'partner_receipt_observed',
+        corr: couple,
+        fields: {
+          'source': source,
+          'row_present': r != null,
+          'delivered_seq': r?.deliveredSeq,
+          'read_seq': r?.readSeq,
+          'prev_delivered_seq': prev?.deliveredSeq,
+          'prev_read_seq': prev?.readSeq,
+        });
     if (r != null && mounted) setState(() => _partnerReceipt = r);
   }
 
@@ -365,28 +390,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// socket that no longer existed and is never re-emitted — it was absent
   /// from the list, the screen and _ids, permanently, until the app was killed
   /// and relaunched. Rejoining a channel is not enough; the gap has to be read.
-  Future<void> _catchUp() async {
+  Future<void> _catchUp({required String trigger}) async {
     final couple = _coupleId;
     if (couple == null) return;
     try {
       final missed = await ChatRepository.fetchSince(couple, _maxSeq);
       if (!mounted || missed.isEmpty) return;
       for (final m in missed) {
-        _onIncoming(m, fromDb: true);
+        _onIncoming(m, fromDb: true, source: 'catchup');
       }
       // We have now genuinely received them; say so, and if the chat is open
       // they are also read.
-      unawaited(ChatReceiptRepository.ackDelivered(_maxSeq));
-      _ackRead();
+      unawaited(
+          ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger));
+      _ackRead(trigger);
     } catch (e) {
       debugPrint('[chat] catch-up failed: $e');
     }
   }
 
-  Future<void> _subscribe() async {
+  Future<void> _subscribe({String trigger = 'rt_resume'}) async {
     final id = _coupleId;
     if (id == null || !mounted || _subscribing) return;
     _subscribing = true;
+    final attempt = ++_joinAttempt;
     try {
       final client = SupabaseService.client;
       final old1 = _channel, old2 = _moodChannel;
@@ -412,7 +439,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       if (!mounted) return;
       _channel = ChatRepository.subscribe(
         id,
-        (m) => _onIncoming(m, fromDb: true),
+        (m) => _onIncoming(m, fromDb: true, source: 'rt_insert'),
         onDelete: _onRemoteDelete,
       );
       _moodChannel = client
@@ -421,7 +448,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
           .onBroadcast(event: 'cleared', callback: _onClearedBroadcast)
-          .subscribe();
+          // subscribe() took no status callback, so a CHANNEL_ERROR here was
+          // silent: the whole broadcast fast path — typing, the instant msg,
+          // cleared — stops and neither phone reports anything.
+          .subscribe((status, err) {
+        Diag.record(DiagArea.receipt, 'rt_channel_join', corr: id, fields: {
+          'topic_kind': 'mood_burst',
+          'status': status.name,
+          'error_class': err?.runtimeType.toString(),
+          'attempt_n': attempt,
+        });
+      });
       // Let other screens (e.g. the rapid camera) push the fast-path on THIS
       // live channel instead of creating a duplicate-topic one.
       ChatBroadcastService.active = _moodChannel;
@@ -444,16 +481,48 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               callback: (payload) {
                 final row = payload.newRecord;
                 if (row.isEmpty || !mounted) return;
-                setState(() => _partnerReceipt = ChatReceipt.fromJson(row));
+                final prev = _partnerReceipt;
+                final r = ChatReceipt.fromJson(row);
+                Diag.record(DiagArea.receipt, 'partner_receipt_observed',
+                    corr: id,
+                    fields: {
+                      'source': 'realtime',
+                      'row_present': true,
+                      'delivered_seq': r.deliveredSeq,
+                      'read_seq': r.readSeq,
+                      'prev_delivered_seq': prev?.deliveredSeq,
+                      'prev_read_seq': prev?.readSeq,
+                    });
+                setState(() => _partnerReceipt = r);
               },
             )
-            .subscribe();
+            // Same silent join as the mood channel, and worse: this is the only
+            // live path by which the sender's tick ever advances.
+            .subscribe((status, err) {
+          Diag.record(DiagArea.receipt, 'rt_channel_join', corr: id, fields: {
+            'topic_kind': 'receipts',
+            'status': status.name,
+            'error_class': err?.runtimeType.toString(),
+            'partner_id_known': true,
+            'attempt_n': attempt,
+          });
+        });
+      } else {
+        // No partner id means no receipts channel is created at all, so the
+        // tick has no live source and nothing distinguishes that from a join
+        // that failed.
+        Diag.record(DiagArea.receipt, 'rt_channel_join', corr: id, fields: {
+          'topic_kind': 'receipts',
+          'status': 'not_subscribed',
+          'partner_id_known': false,
+          'attempt_n': attempt,
+        });
       }
 
       PresenceService.setChatLastRead(id);
       // Rejoining a channel does not replay what it missed while gone.
-      await _catchUp();
-      await _refreshPartnerReceipt();
+      await _catchUp(trigger: trigger);
+      await _refreshPartnerReceipt(source: trigger);
     } finally {
       _subscribing = false;
     }
@@ -481,7 +550,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } catch (_) {
       // first-run is fine
     }
-    await _subscribe(); // single, idempotent channel-subscribe path
+    // single, idempotent channel-subscribe path
+    await _subscribe(trigger: 'chat_open');
     // Photos taken from the shell's camera tab were already uploading before
     // this screen existed — show them now rather than when they land.
     _adoptPending();
@@ -490,14 +560,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
     // the chat is open (the shell only keeps this screen alive while viewing).
     PresenceService.setChatLastRead(couple.id);
-    await _refreshPartnerReceipt();
-    _ackRead();
+    await _refreshPartnerReceipt(source: 'chat_open');
+    _ackRead('chat_open');
     _readTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
       PresenceService.setChatLastRead(couple.id);
       // Acks are cheap and idempotent (the server takes the max), so a dropped
       // one self-corrects rather than stranding a tick forever.
-      _ackRead();
+      _ackRead('read_timer');
       // A tick, not a rebuild. isTrulyOnline is freshness-gated, so a receipt
       // really can decay with nothing else changing — but a bare setState here
       // rebuilt the entire screen every 5 seconds: the full-screen background
@@ -509,27 +579,52 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // reverse:true already pins the view to the newest message — no scroll needed.
   }
 
-  void _onIncoming(Message m, {bool fromDb = false}) {
+  void _onIncoming(Message m, {bool fromDb = false, String source = 'local'}) {
     if (kRtChatDebug) {
       debugPrint('[rt] incoming id=${m.id} fromDb=$fromDb kind=${m.kind}');
     }
-    if (_ids.contains(m.id)) {
+    final isDuplicate = _ids.contains(m.id);
+    // Recorded at every exit, because the exit taken is the answer: a message
+    // that arrives by broadcast alone carries seq 0 (the Message default) and
+    // can never be acked, and only the pairing of msg_received{seq:0} with the
+    // absence of a later msg_seq_bound for the same id shows that.
+    void trace() =>
+        Diag.record(DiagArea.receipt, 'msg_received', corr: m.id, fields: {
+          'seq': m.seq,
+          'from_db': fromDb,
+          'source': source,
+          'is_mine': m.isMine(SupabaseService.currentUserId),
+          'is_duplicate': isDuplicate,
+          'chat_mounted': mounted,
+          'max_seq_after': _maxSeq,
+        });
+    if (isDuplicate) {
       // Already shown (optimistic / broadcast). When the authoritative DB row
       // arrives, adopt its SERVER timestamp + paths so ordering is correct
       // across devices and the status flips to sent.
       if (fromDb && mounted) {
         final i = _messages.indexWhere((x) => x.id == m.id);
         if (i >= 0) {
+          final wasOptimistic = _messages[i].seq <= 0;
           setState(() {
             _messages[i] = _messages[i].reconcileWith(m);
             _sortMessages();
           });
+          Diag.record(DiagArea.receipt, 'msg_seq_bound', corr: m.id, fields: {
+            'seq': m.seq,
+            'source': source,
+            'was_optimistic': wasOptimistic,
+          });
         }
       }
+      trace();
       return;
     }
     _ids.add(m.id);
-    if (!mounted) return;
+    if (!mounted) {
+      trace();
+      return;
+    }
     final mine = m.isMine(SupabaseService.currentUserId);
     // I'm viewing the chat, so the partner's new message is read immediately.
     if (!mine && _coupleId != null) {
@@ -546,6 +641,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } else {
       setState(() => _hasNewMessage = true);
     }
+    trace();
   }
 
   Future<void> _videoCall() async {
@@ -651,6 +747,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   _MsgStatus _statusFor(Message m, Presence? p) {
+    final st = _rawStatusFor(m);
+    // Only when it moves. This runs for every bubble on every 5s tick, and the
+    // one transition that matters would be lost in the restatement of 300 that
+    // did not change.
+    if (_tracedTick[m.id] != st) {
+      _tracedTick[m.id] = st;
+      Diag.record(DiagArea.receipt, 'tick_rendered', corr: m.id, fields: {
+        'msg_seq': m.seq,
+        'partner_delivered_seq': _partnerReceipt?.deliveredSeq,
+        'partner_read_seq': _partnerReceipt?.readSeq,
+        'status': st.name,
+      });
+    }
+    return st;
+  }
+
+  _MsgStatus _rawStatusFor(Message m) {
     // A message that has not reached the server has no seq and no receipt.
     if (m.seq <= 0) return _MsgStatus.sent;
     final r = _partnerReceipt;
@@ -1777,7 +1890,7 @@ class _VoicePlayer extends StatefulWidget {
 
 class _VoicePlayerState extends State<_VoicePlayer> {
   bool _playing = false;
-  StreamSubscription? _stateSub;
+  StreamSubscription<void>? _stateSub;
 
   @override
   void initState() {

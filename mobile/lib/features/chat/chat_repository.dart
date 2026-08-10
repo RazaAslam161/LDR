@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -225,14 +227,42 @@ class ChatRepository {
     if (uid == null) return;
     final trimmed = body.trim();
     if (trimmed.isEmpty) return;
-    await _c.from('messages').insert({
-      if (id != null) 'id': id,
-      'couple_id': coupleId,
-      'sender_id': uid,
-      'body': trimmed,
-      'kind': 'text',
-      if (replyToId != null) 'reply_to_id': replyToId,
-    });
+    final sw = Stopwatch()..start();
+    try {
+      // .select('seq') is here for the trace, not for the send. Acks are
+      // watermarks, so the sender's half of a receipt failure can only be
+      // joined to the recipient's ack through the server seq — and a bare
+      // insert returns nothing, so a SUCCESSFUL send told this device nothing
+      // at all. Safe to widen: messages_select_member is the same couple
+      // predicate as the insert's check, so a row this call may write is a row
+      // it may read back.
+      final rows = await _c.from('messages').insert({
+        if (id != null) 'id': id,
+        'couple_id': coupleId,
+        'sender_id': uid,
+        'body': trimmed,
+        'kind': 'text',
+        if (replyToId != null) 'reply_to_id': replyToId,
+      }).select('seq');
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+        'kind': 'text',
+        'body_len': trimmed.length,
+        'ok': true,
+        'server_seq':
+            rows.isEmpty ? null : JsonUtils.parseInt(rows.first['seq']),
+        'latency_ms': sw.elapsedMilliseconds,
+      });
+    } catch (e) {
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+        'kind': 'text',
+        'body_len': trimmed.length,
+        'ok': false,
+        'error_class': e.runtimeType.toString(),
+        'pg_code': e is PostgrestException ? e.code : null,
+        'latency_ms': sw.elapsedMilliseconds,
+      });
+      rethrow;
+    }
   }
 
   /// Uploads an image to couple_media/<coupleId>/<rand>.<ext> and inserts a
@@ -246,14 +276,31 @@ class ChatRepository {
     final ext = _ext(file.path) ?? 'jpg';
     final path = '$coupleId/${_randomName('img', ext)}';
     await _c.storage.from('couple_media').upload(path, file);
-    await _c.from('messages').insert({
-      if (id != null) 'id': id,
-      'couple_id': coupleId,
-      'sender_id': uid,
-      'image_path': path,
-      'kind': 'image',
-      if (replyToId != null) 'reply_to_id': replyToId,
-    });
+    final sw = Stopwatch()..start();
+    try {
+      await _c.from('messages').insert({
+        if (id != null) 'id': id,
+        'couple_id': coupleId,
+        'sender_id': uid,
+        'image_path': path,
+        'kind': 'image',
+        if (replyToId != null) 'reply_to_id': replyToId,
+      });
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+        'kind': 'image',
+        'ok': true,
+        'latency_ms': sw.elapsedMilliseconds,
+      });
+    } catch (e) {
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+        'kind': 'image',
+        'ok': false,
+        'error_class': e.runtimeType.toString(),
+        'pg_code': e is PostgrestException ? e.code : null,
+        'latency_ms': sw.elapsedMilliseconds,
+      });
+      rethrow;
+    }
     return path;
   }
 
@@ -348,6 +395,14 @@ class ChatRepository {
           callback: (_) => onDelete?.call(),
         )
         .subscribe((status, [error]) {
+      // kRtChatDebug is a compile-time false, so in the field this join status
+      // went nowhere: a CHANNEL_ERROR here stops every message arriving live
+      // and neither phone says anything.
+      Diag.record(DiagArea.receipt, 'rt_channel_join', corr: coupleId, fields: {
+        'topic_kind': 'messages',
+        'status': status.name,
+        'error_class': error?.runtimeType.toString(),
+      });
       if (kRtChatDebug) {
         debugPrint('[rt] messages:$coupleId join=$status err=${error ?? ''}');
       }

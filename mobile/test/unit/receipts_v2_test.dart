@@ -97,7 +97,10 @@ void main() {
     test('catch-up runs on reconnect AND on resume', () {
       // Android freezes the process on background, so the socket was dead the
       // whole time it was away.
-      expect(chat, contains('_catchUp()'));
+      // Called with a trigger now, so the trace can say WHAT caused a catch-up
+      // — the audit found ackDelivered has a single call site, and telling
+      // 'the chat was opened' from 'the socket came back' is what proves it.
+      expect(chat, contains('_catchUp(trigger:'));
       final i = chat.indexOf('didChangeAppLifecycleState');
       expect(codeOnly(chat.substring(i, i + 900)), contains('_catchUp'));
     });

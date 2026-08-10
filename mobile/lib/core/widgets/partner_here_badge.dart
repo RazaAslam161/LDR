@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/mood.dart';
 import 'package:miles/core/presence_route_observer.dart';
 import 'package:miles/core/providers.dart';
@@ -68,6 +70,16 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
         .onBroadcast(
           event: 'screen',
           callback: (payload) {
+            // Recorded before the echo guard: "the broadcast never arrived" and
+            // "it arrived shaped differently than announce() sent it" are the
+            // same silence here, and the key names are what tell them apart.
+            Diag.record(DiagArea.presence, 'presence_screen_recv', fields: {
+              'has_from_key': payload.containsKey('from'),
+              'has_screen_key': payload.containsKey('screen'),
+              'keys_n': payload.length,
+              'from_is_self': payload['from'] == myUid,
+              'screen_null': payload['screen'] == null,
+            });
             if (payload['from'] == myUid) return; // ignore our own echo
             if (mounted) state = payload['screen'] as String?;
           },

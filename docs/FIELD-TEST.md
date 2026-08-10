@@ -95,6 +95,11 @@ before this trace existed.
 Joined on `corr = hb:<app_last_active_at>`, the server-stamped instant, which is identical on both phones
 with no clock reconciliation.
 
+> **Filter the writer's rows to `is_app_activity:true` before building the matrix.** A location-only
+> write deliberately does not stamp `app_last_active_at`, so it echoes back the row's **existing** value
+> and emits `presence_write` under an older `hb:T` — as does the realtime event it triggers on the
+> partner. Counted naively, a GPS ping looks like a heartbeat that arrived twice.
+
 | Trace pattern | Cause |
 |---|---|
 | `presence_write` on B, **nothing** on A for that `corr` | The write never landed, or RLS hides the row from A. |

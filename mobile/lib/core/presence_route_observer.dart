@@ -1,6 +1,8 @@
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/providers.dart';
 import 'package:miles/core/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -95,11 +97,14 @@ class PresenceRouteObserver extends NavigatorObserver {
   /// change, so AppShell calls this directly.
   void publishActiveTab() {
     final i = _ref.read(shellTabProvider).clamp(0, kTabScreens.length - 1);
-    publish(kTabScreens[i]);
+    publish(kTabScreens[i], src: 'tab');
   }
 
   /// Publish [name] as the room this user is in, or null for "somewhere".
-  void publish(String? name) {
+  ///
+  /// [src] only labels the trace — a tab switch, a route change and a resume
+  /// arrive here identically otherwise, and the three fail differently.
+  void publish(String? name, {String src = 'route'}) {
     // Navigator observers fire while the tree is being built, and Riverpod
     // refuses a write during that phase. Deferring only when we really are
     // mid-frame keeps the common path synchronous.
@@ -109,7 +114,8 @@ class PresenceRouteObserver extends NavigatorObserver {
       // Writing now supersedes anything a flush is still holding, or that
       // stale value would land afterwards and undo this.
       _pending = name;
-      _write(name);
+      _pendingSrc = src;
+      _write(name, src);
       return;
     }
 
@@ -117,35 +123,69 @@ class PresenceRouteObserver extends NavigatorObserver {
     // redirect replaces. Keep only the last and write it once, so the order
     // they arrived in cannot matter and a stale read cannot swallow one.
     _pending = name;
+    _pendingSrc = src;
     if (_flushScheduled) return;
     _flushScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _flushScheduled = false;
-      _write(_pending);
+      _write(_pending, _pendingSrc);
     });
   }
 
   /// The room this frame ended on, waiting to be written.
   String? _pending;
+  String _pendingSrc = 'route';
   bool _flushScheduled = false;
 
-  void _write(String? name) {
+  void _write(String? name, String src) {
     // The provider is the record of what was last said — not a durable private
     // field. A field drifts the moment anything else sets the value, which is
     // exactly what used to leave a tab unpublishable after a pop.
-    if (name == _ref.read(myScreenProvider)) return;
+    if (name == _ref.read(myScreenProvider)) {
+      // The value below is set before the couple guard, so a publish made while
+      // the couple was still null writes nothing and then dedupes every later
+      // publish of that same room — permanently. deduped/has_couple/wrote_db
+      // are separate fields so that pair is readable as one sequence.
+      Diag.record(DiagArea.presence, 'presence_screen_publish', fields: {
+        'src': src,
+        'has_name': name != null,
+        'deduped': true,
+        'has_couple': _ref.read(currentCoupleProvider) != null,
+        'wrote_db': false,
+        'announced': false,
+      });
+      return;
+    }
 
     // Our own value first: it is what this device's badge compares against, and
     // it should not wait on the couple row to finish loading.
     _ref.read(myScreenProvider.notifier).state = name;
 
     final couple = _ref.read(currentCoupleProvider);
-    if (couple == null) return; // nobody to tell yet
+    if (couple == null) {
+      Diag.record(DiagArea.presence, 'presence_screen_publish', fields: {
+        'src': src,
+        'has_name': name != null,
+        'deduped': false,
+        'has_couple': false,
+        'wrote_db': false,
+        'announced': false,
+      });
+      return; // nobody to tell yet
+    }
 
     // Durable value for a partner who opens the app later...
     PresenceService.setScreen(couple.id, name);
     // ...and the instant broadcast for one who is already looking.
     _ref.read(partnerScreenProvider.notifier).announce(name);
+    Diag.record(DiagArea.presence, 'presence_screen_publish', fields: {
+      'src': src,
+      'has_name': name != null,
+      'deduped': false,
+      'has_couple': true,
+      'wrote_db': true,
+      'announced': true,
+    });
   }
 
   /// The room we were in when the app went to the background, kept so
@@ -156,7 +196,7 @@ class PresenceRouteObserver extends NavigatorObserver {
   /// a backgrounded user never reads as sitting in a room they have left.
   void clear() {
     _cleared = _ref.read(myScreenProvider);
-    _write(null);
+    _write(null, 'clear');
   }
 
   /// Puts the user back in the room they were in before the app was
@@ -169,7 +209,7 @@ class PresenceRouteObserver extends NavigatorObserver {
   void restore() {
     final room = _cleared;
     _cleared = null;
-    if (room != null) publish(room);
+    if (room != null) publish(room, src: 'restore');
   }
 }
 

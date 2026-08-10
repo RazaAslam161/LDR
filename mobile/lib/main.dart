@@ -201,11 +201,29 @@ class _MilesAppState extends ConsumerState<MilesApp>
   /// Foreground-only + best-effort (battery reasonable; a single tiny upsert).
   void _startHeartbeat() {
     _heartbeat?.cancel();
+    // A beat that found no couple wrote nothing and said nothing, so a phone
+    // whose couple never resolved produced the same empty trace as one whose
+    // timer had stopped — and the partner reads offline either way.
+    DateTime? prevBeat;
     void beat() {
       final c = ref.read(currentCoupleProvider);
+      final now = DateTime.now();
+      final prev = prevBeat;
+      Diag.record(DiagArea.presence, 'presence_heartbeat', fields: {
+        'action': c == null ? 'skip_no_couple' : 'beat',
+        'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
+        'has_couple': c != null,
+        if (prev != null)
+          'since_prev_beat_ms': now.difference(prev).inMilliseconds,
+      });
+      prevBeat = now;
       if (c != null) PresenceService.setOnline(c.id, online: true);
     }
 
+    Diag.record(DiagArea.presence, 'presence_heartbeat', fields: {
+      'action': 'start',
+      'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
+    });
     beat(); // immediate beat so we read online without waiting a cycle
     _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) => beat());
   }
@@ -435,6 +453,13 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // the mistake that leaves presence bound to null forever.
       Diag.bind(coupleId: next.couple?.id, userId: next.profile?.id);
     });
+
+    // ref.listen fires on CHANGE only, so a session that had already resolved
+    // before this widget first built would never bind and nothing would ever
+    // upload — the same shape as the presence bug being hunted, in the code
+    // added to hunt it. Diag.bind is a no-op when nothing changed.
+    final session = ref.read(sessionProvider);
+    Diag.bind(coupleId: session.couple?.id, userId: session.profile?.id);
 
     // The cover/real swap is driven by the static showRealApp notifier so the
     // lifecycle handler (and FakeNewsScreen) can flip it without setState.

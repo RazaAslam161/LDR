@@ -1,9 +1,12 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/supabase_repository.dart';
+import 'package:miles/features/chat/chat_broadcast_service.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
 /// tapped notification). The AppShell listens to [pendingReach] and shows the
@@ -137,6 +140,19 @@ class FcmService {
       return;
     }
     if (type == 'message') {
+      // This device HAD the message. Nothing below acks it, and ackDelivered
+      // has one call site — the chat screen's catch-up — so a push landing
+      // with chat_mounted=false and no receipt_ack_attempt after it is the
+      // proof that the message arrived with no ack path at all.
+      Diag.record(DiagArea.receipt, 'push_msg_received',
+          corr: m.data['message_id'] as String?,
+          fields: {
+            'app_state': 'foreground',
+            // The chat registers its live broadcast channel while mounted, so
+            // this is the same fact the fast path depends on.
+            'chat_mounted': ChatBroadcastService.active != null,
+            'has_message_id': m.data['message_id'] != null,
+          });
       // In the foreground the chat's realtime subscription already delivers
       // the message, and the catch-up fetch covers a dropped socket — so a
       // notification here would double up on a conversation the user is
