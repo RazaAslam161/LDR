@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,8 @@ import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
@@ -59,9 +62,41 @@ class _AppShellState extends ConsumerState<AppShell>
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
 
+  /// When the app last left the foreground, so a resume can tell a cover flip
+  /// from a real absence.
+  DateTime? _leftForegroundAt;
+
+  /// Below this, a socket cannot have been killed by doze — Android does not
+  /// freeze a process that was away for two seconds.
+  static const _dozeRisk = Duration(seconds: 20);
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _reconnectRealtime();
+    if (state != AppLifecycleState.resumed) {
+      _leftForegroundAt ??= DateTime.now();
+      return;
+    }
+    final away = _leftForegroundAt == null
+        ? Duration.zero
+        : DateTime.now().difference(_leftForegroundAt!);
+    _leftForegroundAt = null;
+
+    // Resetting the socket closes EVERY channel on it. A trace showed all five
+    // going down together on a resume — messages, receipts, mood_burst,
+    // presence and, worst, the call signalling channel:
+    //
+    //   rt_channel_join messages   status:closed
+    //   signal_subscribe           status:closed
+    //
+    // An offer arriving inside that window is missed outright, and this app
+    // resumes constantly because the disguise cover flips it. So the reset now
+    // happens only when the app was away long enough for doze to have actually
+    // killed the socket. A cover flip, a picker or a shade peek leaves it alone.
+    Diag.record(DiagArea.app, 'rt_resume_decision', fields: {
+      'away_ms': away.inMilliseconds,
+      'reconnected': away >= _dozeRisk,
+    });
+    if (away >= _dozeRisk) _reconnectRealtime();
   }
 
   /// Realtime sockets die silently during Android doze (no close event), so the

@@ -338,6 +338,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // Walk back into the room we left. `paused` fires for the photo picker
       // and the camera as well as a real app switch, so without this a user
       // attaching one picture goes invisible for the rest of the session.
+      _clearScreenTimer?.cancel();
       presenceRouteObserver?.restore();
       unawaited(_refreshOnResume());
     } else if (state == AppLifecycleState.paused ||
@@ -353,9 +354,26 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // closed, so a partner could be looking at "she's in the chat with me"
       // when she had put the phone down. Presence must decay to unknown, never
       // linger as a confident wrong answer.
-      presenceRouteObserver?.clear();
+      // Deferred, not immediate. The disguise cover flips this app through
+      // inactive/hidden/paused every few seconds, and a trace showed the
+      // consequence on the other phone: presence_screen_recv screen_null=true,
+      // then has_screen=false — the partner could not see which room you were
+      // in because it was being cleared faster than it was being published.
+      //
+      // A real background outlives this timer; a cover flip, a picker and the
+      // notification shade do not. The 45s freshness window still decays an
+      // abandoned screen on its own, so nothing lingers as a confident wrong
+      // answer if the process dies inside the delay.
+      _clearScreenTimer?.cancel();
+      _clearScreenTimer = Timer(const Duration(seconds: 6), () {
+        final st = WidgetsBinding.instance.lifecycleState;
+        if (st == AppLifecycleState.resumed) return;
+        presenceRouteObserver?.clear();
+      });
     }
   }
+
+  Timer? _clearScreenTimer;
 
   /// The last time a resume refresh ran, so a burst of lifecycle events — and
   /// Android sends several — costs one refresh, not five.
