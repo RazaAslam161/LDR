@@ -4,13 +4,16 @@ Written overnight, 2026-08-10. Grounded in **215 cited primary sources**, a **91
 with per-module scale risk, **8 domain architectures**, and an adversarial review that **broke all 8**
 before they were revised.
 
-Status: **all 8 domains designed, attacked and revised.** Data/ops closed all 4 of its fatal flaws;
-client closed 3 of 4 (one residue, §6).
+Status: **all 8 domains designed, attacked, revised, reconciled and repaired.**
 
-**The domains contradict each other in six specific places** — the unavoidable result of designing
-eight architectures in parallel. They are enumerated in §3a and must be reconciled before
-implementation starts. One is fatal to a sibling: the data domain's shared position allocator makes
-`messages.cseq` **sparse**, which breaks the dense-cursor invariant `messaging.md` is built on.
+Six rounds: research → inventory → design → adversarial attack (broke 8/8) → revision → cross-domain
+reconciliation → verification (found 1 fatal + 5 broken invariants) → repair. Eight cross-domain
+conflicts resolved in `RECONCILIATION.md`; the fatal and all five broken invariants closed in
+`RECONCILIATION-REPAIRS.md`.
+
+**Eight findings remain open**, listed in §6 with severity. They are documented rather than closed
+because each verification round trades one set of findings for another; a known-open issue with a
+named repair is worth more than a seventh round.
 
 ---
 
@@ -123,6 +126,24 @@ mutually exclusive plans.
 | R5 | Storage-bucket privacy was declared "another domain's problem" by messaging, push **and** presence. | `data` now owns it (§D5). Confirmed. |
 | R6 | `data` says partition `messages` at 100k users; `messaging` derives 1.46B rows/year and ~900GB at that scale. | Reconcile to the messaging figure; partition far earlier. |
 
+**Resolved. See `RECONCILIATION.md` for all eight decisions and `RECONCILIATION-REPAIRS.md` for the
+corrections the verification forced.** Two decisions are worth reading before anything else:
+
+- **R1 — one allocator row per couple, two dense counters, one row lock; chat stays *out* of
+  `couple_stream`.** Preserves messaging's density invariant *and* data's single-lock ordering, and
+  avoids ~730M extra rows/year plus a ~33% realtime billing increase at 50k users (a shared topic
+  bills 3 per event, a per-recipient topic bills 2, and realtime is 85–93% of the bill past 1k users).
+- **No backfill may order on a column the client can write.** `messages.created_at` is a `DEFAULT`,
+  not a trigger, so it is client-settable — a future-dated row would otherwise be immortal. Transport's
+  `(created_at, id)` backfill ordering is withdrawn everywhere.
+
+**A correction the verification forced, worth understanding:** the first reconciliation defined the
+production canary as *row* contiguity of `messages.cseq`. But rows leave `messages` by design — clear,
+account deletion, media cleanup — so that alarm would sit red on a healthy system, and an alarm that is
+always red is not an alarm. The canary now reads the **issued range** from the allocator row and the
+**deletion floor** from a watermark written in the same transaction as each delete, and infers neither
+from the rows themselves.
+
 **Also, a live bug in shipped SQL, not a design item:** `hardening_2026_08.sql` computes its
 column-grant list from `information_schema` **at apply time**, and `pg_dump` freezes the *result*. So
 the next `ADD COLUMN` produces a column `authenticated` cannot UPDATE — which already caused the
@@ -230,11 +251,17 @@ Stated plainly, because "it's fixed" has been said too often here.
 6. **A malicious server can withhold key wraps.** Mitigated, not eliminated.
 7. **Fantasy-jar tag matching leaks your full tag set to your partner** — overlap requires a shared
    key; anything less needs Private Set Intersection.
-8. **The client design has one unclosed fatal:** per-message delete-for-everyone on the chat stream.
-   `hide_message` and `delete_for_everyone` mutate rows the local cache has already passed its cursor
-   over, so a deletion can go unlearned. Needs a tombstone carried on the stream.
-9. **The eight domains contradict each other in six places** (§3a). Reconciliation is Stage R and must
-   happen before implementation.
+8. **Eight verification findings remain open**, none fatal. In rough priority:
+   **F14** — the anti-recurrence registry covers the six conflicts that were *found*, not their class,
+   so a future per-entity counter would pass every assertion exactly as `calls.signal_seq` did. This is
+   the one that matters: without it, F9's resolution has no mechanism behind it.
+   **F6** — `profiles.avatar_url` is a fourth rendered-URL column missed by R5's enumeration, and a
+   checked-in column list is exactly the form that rots.
+   **F8** — a repo grep is not a fleet gate on a sideloaded app with no update channel.
+   **F10** — three of the data domain's own retention entries cannot satisfy its surviving enable-gate.
+   **F12, F13, F15, F16** — assertion-shape defects; each has a named repair.
+9. **Two numbers in the plan are unmeasured**, including the typing-indicator billing multiplier, where
+   two documents price the same event on different topologies. Stage 1 exists to measure them.
 10. **Elsa's presence bug was never root-caused.** Two full audits refuted every candidate. The presence
    rebuild (F5) removes the whole class it belongs to, but I cannot claim it fixes the specific report.
 
@@ -249,7 +276,10 @@ docs/architecture/
   inventory/*.md          91 modules, per-module scale risk
   design/*.md             v1 designs + _attacks.json (31 fatal flaws)
   revised/*.md            8 hardened designs with invariants and accepted limits
-  CROSS-DOMAIN-GAPS.json  the consistency audit behind Stage R
+  CROSS-DOMAIN-GAPS.json       the consistency audit behind Stage R
+  RECONCILIATION.md            8 cross-domain decisions + shared contract + ownership map
+  RECONCILIATION-REPAIRS.md    the fatal and 5 broken invariants, closed
+  RECONCILIATION-VERIFY.json   the verification that forced those repairs
 ```
 
 Each revised design is self-contained: current state, target architecture, invariants (each stating
