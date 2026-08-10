@@ -690,7 +690,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
             ),
           ),
 
-        // 3. + 4. filter name label + bottom glass panel
+        // 3. + 4. filter name label + bottom control bar
         Align(
           alignment: Alignment.bottomCenter,
           child: Column(
@@ -1126,7 +1126,7 @@ class _VideoReview extends StatelessWidget {
         ),
         Align(
           alignment: Alignment.bottomCenter,
-          child: _GlassBar(
+          child: _CameraBar(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1349,7 +1349,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
   }
 
   Widget _reviewBar() {
-    return _GlassBar(
+    return _CameraBar(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -1373,7 +1373,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
   }
 
   Widget _annotateBar() {
-    return _GlassBar(
+    return _CameraBar(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1435,8 +1435,13 @@ class _AnnotateHostState extends State<_AnnotateHost> {
   }
 }
 
-class _GlassBar extends StatelessWidget {
-  const _GlassBar({required this.child});
+/// The camera's opaque bottom control bar.
+///
+/// Was _GlassBar, which it had not been for some time — the BackdropFilter
+/// went when the blur did, and a name that describes a look the widget no
+/// longer has is how the look comes back.
+class _CameraBar extends StatelessWidget {
+  const _CameraBar({required this.child});
   final Widget child;
 
   @override

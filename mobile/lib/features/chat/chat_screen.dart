@@ -1793,7 +1793,7 @@ class _Content extends StatelessWidget {
                     right: 6,
                     child: SurfacePanel(
                       radius: 12,
-                      color: MilesColors.glass,
+                      color: MilesColors.scrim,
                       padding: const EdgeInsets.all(4),
                       child: SaveMediaButton(
                         size: 18,
@@ -2083,7 +2083,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
             right: 6,
             child: SurfacePanel(
               radius: 12,
-              color: MilesColors.glass,
+              color: MilesColors.scrim,
               padding: const EdgeInsets.all(4),
               child: SaveMediaButton(
                 size: 18,

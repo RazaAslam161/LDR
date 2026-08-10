@@ -506,8 +506,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
           routerConfig: router,
           builder: (context, child) => Stack(
             children: [
-              // Always-present candle-glow backdrop so glassmorphism has
-              // something to blur against on every screen.
+              // Always-present candle-glow backdrop. It shows at the edges and
+              // behind transparent scaffolds; panels drawn over it are opaque.
               const EmberBackground(child: SizedBox.shrink()),
               // The routed screen, transparent so the glow shows through — or a
               // branded loading veil while the session is still initialising.
@@ -518,8 +518,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // Return-to-call pill while a call is minimised.
               // These three animate independently of the routed screen, so each
               // gets its own layer — a pulsing badge must not repaint the page
-              // beneath it. (Does NOT help the glass panels: a BackdropFilter
-              // samples through repaint boundaries.)
+              // beneath it.
               const RepaintBoundary(child: CallPill()),
               // Presence used to float here, top-centre over every screen. It
               // covered titles and buttons, interrupted whatever was being

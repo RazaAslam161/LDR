@@ -170,7 +170,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
               // Editable text area
               SurfacePanel(
                 radius: 12,
-                color: MilesColors.glassSubtle,
+                color: MilesColors.surface2,
                 padding: const EdgeInsets.all(12),
                 child: TextField(
                   controller: _ctrl,

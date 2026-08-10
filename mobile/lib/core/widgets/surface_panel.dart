@@ -14,7 +14,7 @@ import 'package:miles/core/ui/theme.dart';
 /// translucent glass resolved to over the night background, so the layout and
 /// contrast are unchanged — what is gone is the blur and the see-through.
 ///
-/// GlassAppBar, GlassCircleButton and GlassTile went with the blur: they had no
+/// The old GlassAppBar, GlassCircleButton and GlassTile went with the blur: they had no
 /// call sites left.
 class SurfacePanel extends StatelessWidget {
   const SurfacePanel({
@@ -50,7 +50,7 @@ class SurfacePanel extends StatelessWidget {
         color: bg,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(
-          color: borderColor ?? MilesColors.glassBorder,
+          color: borderColor ?? MilesColors.hairline,
           width: borderWidth,
         ),
         boxShadow: glow == null

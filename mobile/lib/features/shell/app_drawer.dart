@@ -8,7 +8,6 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 
 /// Side drawer — partner presence, sign-out, future settings.
-/// Frosted glass so the candle-glow background reads through.
 class AppDrawer extends ConsumerWidget {
   const AppDrawer({super.key});
 
@@ -18,7 +17,8 @@ class AppDrawer extends ConsumerWidget {
     final partner = session.partner;
 
     return Drawer(
-      // Transparent base + blur so the EmberBackground shows through.
+      // Transparent base so the Drawer contributes no colour of its own;
+      // the opaque panel below is what the user actually sees.
       backgroundColor: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(

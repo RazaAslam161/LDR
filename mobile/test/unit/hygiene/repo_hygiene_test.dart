@@ -278,6 +278,93 @@ void main() {
         reason: 'a test reads a file that no longer exists: $missing');
   });
 
+  group('no glassmorphism', () {
+    List<File> lib() => Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))
+        .toList();
+
+    test('nothing blurs what is behind it', () {
+      // BackdropFilter is the expensive half: the compositor reads back
+      // everything already painted behind the widget and blurs it, every
+      // frame, scaling with both sigma and area — on top of an animated
+      // background, on the cheap phones this has to stay smooth on.
+      //
+      // The camera's own filter preview is not this. It blurs an image it is
+      // given, not the screen behind it.
+      final offenders = <String>[];
+      for (final f in lib()) {
+        if (f.path.endsWith('camera_filter_painter.dart')) continue;
+        for (final line in f.readAsStringSync().split('\n')) {
+          final s = line.trim();
+          if (s.startsWith('//') || s.startsWith('///')) continue;
+          if (s.contains('BackdropFilter') || s.contains('ImageFilter.blur')) {
+            offenders.add('${f.uri.pathSegments.last}: $s');
+          }
+        }
+      }
+      expect(offenders, isEmpty, reason: 'use an opaque surface: $offenders');
+    });
+
+    test('the vocabulary is gone, so the look cannot be reached for', () {
+      // The blur was removed once already and the names outlived it —
+      // glassDecoration(), milesBlur(), four blur sigmas, a _GlassBar that had
+      // been opaque for months. A name is an invitation: the next person reads
+      // _GlassBar, sees no blur, and helpfully adds one back.
+      const banned = [
+        'glassDecoration',
+        'milesBlur',
+        'surfaceGlass',
+        'glassStrong',
+        'glassSubtle',
+        'glassEmber',
+        'glassBorder',
+        'blurSm',
+        'blurMd',
+        'blurLg',
+        'blurXl',
+      ];
+      final found = <String>[];
+      for (final f in lib()) {
+        // Code only. Explaining in a comment why a thing was removed is how
+        // the next person learns not to re-add it, so the ban is on using the
+        // names, not on naming them.
+        final code = f
+            .readAsStringSync()
+            .split('\n')
+            .where((l) => !l.trimLeft().startsWith('//'))
+            .join('\n');
+        for (final name in banned) {
+          if (RegExp('\\b$name\\b').hasMatch(code)) {
+            found.add('${f.uri.pathSegments.last}: $name');
+          }
+        }
+      }
+      expect(found, isEmpty, reason: 'removed with the blur: $found');
+    });
+
+    test('the surfaces you read text on are opaque', () {
+      // The other half, and the one that survived: translucent panels over a
+      // moving ember field. With the blur gone that is not frosted glass, it is
+      // an animation playing behind your paragraph.
+      // Only the surfaces text is read ON. A hairline border at 12% alpha is
+      // an edge, not a window, and banning it would just push people to fake
+      // one with a solid colour nobody picked.
+      final theme = File('lib/core/ui/theme.dart').readAsStringSync();
+      final translucent = RegExp(
+              r'(fillColor|backgroundColor):\s*MilesColors\.\w+'
+              r'\.withValues\(alpha:')
+          .allMatches(theme)
+          .map((m) => m[0]!)
+          .toList();
+      expect(theme, contains('fillColor'),
+          reason: 'the theme no longer parses the way this check assumes');
+      expect(translucent, isEmpty,
+          reason: 'a surface text is read on is see-through: $translucent');
+    });
+  });
+
   test('the launcher disguise is intact', () {
     // Not cleanup-adjacent, deliberately. The label looks like a placeholder
     // somebody forgot to change, which is exactly why a well-meaning tidy-up

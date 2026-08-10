@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -20,7 +18,6 @@ class MilesColors {
   static const navy800 = Color(0xFF2F1620); // surface-2: raised/input fill
   static const surface1 = Color(0xFF221017);
   static const surface2 = Color(0xFF2F1620);
-  static const surfaceGlass = Color(0x99221017); // frosted nav/overlay over blur
 
   // ─── Text (warm) ───────────────────────────────────────────────────
   static const cream50 = Color(0xFFFCEFE6); // primary
@@ -45,43 +42,20 @@ class MilesColors {
   static const coral600 = emberDeep;
   static const emerald400 = sage;
 
-  // ─── Glass / frosted surfaces ────────────────────────────────────
-  // Dark scrims, not white tints. The app is a dark theme with light cream
-  // text: a white veil at 10-16% over the animated backdrop LOWERED contrast
-  // for that text and let the embers show through the middle of a paragraph.
-  // Tinting toward `night` instead gives the text a stable, legible ground
-  // while the blur still reads as glass at the edges.
-  static const Color glass = Color(0x8C120A0C);
-  static const Color glassStrong = Color(0xB8120A0C);
-  static const Color glassSubtle = Color(0x59120A0C);
-  static const Color glassBorder = Color(0x33E8C49A);
-  static const Color glassEmber = Color(0x22E8784A);
+  // ─── Scrim + hairline ────────────────────────────────────────────
+  // What is left of the frosted-glass set, renamed for what it actually does.
+  // The rest of that vocabulary — glass, glassStrong, glassSubtle, glassEmber,
+  // glassDecoration, four blur sigmas — described a look this app no longer
+  // has, and a name is an invitation: leaving `glassDecoration()` in the theme
+  // is how the next panel gets one.
+  //
+  // [scrim] is NOT decoration. It sits under a save button that overlays a
+  // user's photo, where the icon has to stay legible against an image nobody
+  // controls. Translucency is the requirement there, not the style.
+  static const Color scrim = Color(0x8C120A0C);
 
-  // Blur is the single most expensive thing this UI does — a BackdropFilter
-  // forces the compositor to read back and blur everything behind it, and the
-  // cost scales with sigma. These were 10/20/32; at 32 the panels also washed
-  // out badly enough that content behind them competed with content on them.
-  // Lower sigma reads as cleaner glass AND costs meaningfully less per frame on
-  // the low-end phones this has to run on.
-  static const double blurSm = 6;
-  static const double blurMd = 12;
-  static const double blurLg = 18;
-  static const double blurXl = 48;
-
-  static BoxDecoration glassDecoration({
-    double radius = 18,
-    Color? color,
-    Color? borderColor,
-    double borderWidth = 0.8,
-  }) =>
-      BoxDecoration(
-        color: color ?? MilesColors.glass,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(
-          color: borderColor ?? MilesColors.glassBorder,
-          width: borderWidth,
-        ),
-      );
+  /// A one-pixel warm edge that separates a panel from what is behind it.
+  static const Color hairline = Color(0x33E8C49A);
 }
 
 /// Named gradients for the Emberlight system.
@@ -149,7 +123,9 @@ ThemeData milesDarkTheme() {
 
   return base.copyWith(
     // Transparent so the root EmberBackground (candle glow + embers) shows
-    // through, and every glass surface has something warm to blur against.
+    // through where nothing is drawn over it. Panels themselves are opaque:
+    // with the blur gone, a translucent card just let the animation run behind
+    // the text.
     scaffoldBackgroundColor: Colors.transparent,
     colorScheme: const ColorScheme.dark(
       surface: Colors.transparent,
@@ -176,8 +152,9 @@ ThemeData milesDarkTheme() {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      // Glass-tinted input fill — semi-transparent so blur reads through.
-      fillColor: MilesColors.surface2.withValues(alpha: 0.5),
+      // Opaque. Half-transparent over a moving ember field meant the text you
+      // were typing sat on top of an animation.
+      fillColor: MilesColors.surface2,
       hintStyle: const TextStyle(color: MilesColors.faint),
       labelStyle: const TextStyle(color: MilesColors.taupe),
       floatingLabelStyle: const TextStyle(color: MilesColors.gilt),
@@ -219,9 +196,10 @@ ThemeData milesDarkTheme() {
       style: TextButton.styleFrom(foregroundColor: MilesColors.emberSoft),
     ),
     cardTheme: CardThemeData(
-      // Glass card by default: semi-transparent so the ambient candle-glow
-      // background reads through it.
-      color: MilesColors.surface1.withValues(alpha: 0.7),
+      // Opaque by default. At 70% the candle-glow background animated through
+      // every card, which is what glassmorphism looks like once the blur that
+      // was smoothing it has been taken away.
+      color: MilesColors.surface1,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
@@ -229,8 +207,10 @@ ThemeData milesDarkTheme() {
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      // Translucent so the frosted-glass blur reveals what's underneath.
-      backgroundColor: MilesColors.night.withValues(alpha: 0.72),
+      // Opaque. At 72% over a moving ember field the bar shimmered while the
+      // background animated beneath it, and the labels lost contrast on the
+      // bright frames.
+      backgroundColor: MilesColors.night,
       surfaceTintColor: Colors.transparent,
       indicatorColor: MilesColors.ember.withValues(alpha: 0.18),
       elevation: 0,
@@ -261,13 +241,10 @@ ThemeData milesDarkTheme() {
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: MilesColors.surface2.withValues(alpha: 0.9),
+      backgroundColor: MilesColors.surface2,
       contentTextStyle: const TextStyle(color: MilesColors.cream50),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
   );
 }
 
-/// Small helper so widgets can blur consistently (frosted glass).
-ImageFilter milesBlur([double sigma = 18]) =>
-    ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
