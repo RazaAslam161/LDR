@@ -1,3 +1,14 @@
+> **Partly superseded by [`../CONTRACT.md`](../CONTRACT.md).** This document was written
+> before the cross-domain reconciliation. Where it disagrees with the contract, the
+> contract wins. Specifically superseded here:
+>
+> - **R2** — presence retirement — public.presence is replaced, never indexed
+> - **R3** — storage bucket privacy — decided per bucket, with expectation rows
+> - **R5** — storage URL ownership — the data domain owns it
+>
+> Reasoning: `../RECONCILIATION.md`. Corrections that verification forced:
+> `../RECONCILIATION-REPAIRS.md`.
+
 # presence (revised)
 
 ## What changed vs v1

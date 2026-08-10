@@ -102,16 +102,27 @@ anchor.
 Ordered by: what unblocks everything else → what is silently losing data today → what breaks first as
 users arrive.
 
-### Stage 0 — Make the database reproducible *(prerequisite for everything)*
+### Stage 0 — Make the database reproducible — **DONE** (repo side)
 Adopt `supabase/migrations` + `config.toml` as the single source of truth; commit the source of every
 deployed edge function; add a CI check that the repo reproduces the database. Today several columns the
 client writes exist in no SQL file, and the deployed `reach-notify` may not match the repo.
 
 **Why first:** every other stage needs staging, review and rollback. Without this, no fix is verifiable
 and no failure is diagnosable.
-**Verify:** `supabase db diff` against a fresh project is empty.
 
-### Stage R — Reconcile the domains *(before any implementation)*
+**Shipped:** `supabase/migrations/` (37 files, dependency order in the filename),
+`supabase/diagnostics/` (5 query files, never applied), `config.toml`, and 12 hygiene checks in
+`mobile/test/unit/migrations_hygiene_test.dart`. No runtime behaviour changed.
+
+**Still to do — needs your database password, so it is yours to run:**
+1. `supabase db reset` locally — proves the directory replays from empty.
+2. Replay onto a scratch project — proves it replays against real Supabase.
+3. **Only then** `supabase migration repair --status applied ...` against production.
+
+That order is not negotiable: repairing production before a clean replay is proven locks in a
+baseline that cannot be replayed, and you discover it the day you need a rebuild.
+
+### Stage R — Reconcile the domains — **DONE**
 
 Eight architectures were designed in parallel and each is internally sound. They disagree in six
 places. This stage is cheap, it is pure decision-making, and skipping it means implementing two
@@ -126,8 +137,12 @@ mutually exclusive plans.
 | R5 | Storage-bucket privacy was declared "another domain's problem" by messaging, push **and** presence. | `data` now owns it (§D5). Confirmed. |
 | R6 | `data` says partition `messages` at 100k users; `messaging` derives 1.46B rows/year and ~900GB at that scale. | Reconcile to the messaging figure; partition far earlier. |
 
-**Resolved. See `RECONCILIATION.md` for all eight decisions and `RECONCILIATION-REPAIRS.md` for the
-corrections the verification forced.** Two decisions are worth reading before anything else:
+**DONE.** The eight decisions, the shared contract and the ownership map are now consolidated in
+**[`CONTRACT.md`](CONTRACT.md)**, which is authoritative — where a domain design disagrees with it,
+the contract wins. Every `revised/*.md` carries a header naming which of its statements are
+superseded, so no reader is misled by a document that was written before reconciliation.
+`RECONCILIATION.md` holds the reasoning; `RECONCILIATION-REPAIRS.md` holds the corrections
+verification forced. Two decisions are worth reading before anything else:
 
 - **R1 — one allocator row per couple, two dense counters, one row lock; chat stays *out* of
   `couple_stream`.** Preserves messaging's density invariant *and* data's single-lock ordering, and
@@ -276,6 +291,7 @@ docs/architecture/
   inventory/*.md          91 modules, per-module scale risk
   design/*.md             v1 designs + _attacks.json (31 fatal flaws)
   revised/*.md            8 hardened designs with invariants and accepted limits
+  CONTRACT.md                  AUTHORITATIVE — decisions, shared contract, ownership map
   CROSS-DOMAIN-GAPS.json       the consistency audit behind Stage R
   RECONCILIATION.md            8 cross-domain decisions + shared contract + ownership map
   RECONCILIATION-REPAIRS.md    the fatal and 5 broken invariants, closed

@@ -1,3 +1,19 @@
+> **Partly superseded by [`../CONTRACT.md`](../CONTRACT.md).** This document was written
+> before the cross-domain reconciliation. Where it disagrees with the contract, the
+> contract wins. Specifically superseded here:
+>
+> - **R1** — position allocation — one row, two dense counters; chat stays out of couple_stream
+> - **R2** — presence retirement — public.presence is replaced, never indexed
+> - **R3** — storage bucket privacy — decided per bucket, with expectation rows
+> - **R4** — pg_cron budget — slots are allocated centrally, not per domain
+> - **R5** — storage URL ownership — the data domain owns it
+> - **R6** — messages partitioning threshold
+> - **CLIENT-F2** — chat mutation tombstones and the staged revoke/guard ordering
+> - **GRANT-LANDMINE** — the profiles column-grant landmine and its CI assertion
+>
+> Reasoning: `../RECONCILIATION.md`. Corrections that verification forced:
+> `../RECONCILIATION-REPAIRS.md`.
+
 # data (revised)
 
 ## What changed vs v1

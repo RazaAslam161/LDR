@@ -1,3 +1,15 @@
+> **Partly superseded by [`../CONTRACT.md`](../CONTRACT.md).** This document was written
+> before the cross-domain reconciliation. Where it disagrees with the contract, the
+> contract wins. Specifically superseded here:
+>
+> - **R3** — storage bucket privacy — decided per bucket, with expectation rows
+> - **R4** — pg_cron budget — slots are allocated centrally, not per domain
+> - **R5** — storage URL ownership — the data domain owns it
+> - **GRANT-LANDMINE** — the profiles column-grant landmine and its CI assertion
+>
+> Reasoning: `../RECONCILIATION.md`. Corrections that verification forced:
+> `../RECONCILIATION-REPAIRS.md`.
+
 # push (revised)
 
 ## What changed vs v1
