@@ -28,6 +28,22 @@ const SERVICE_ACCOUNT = JSON.parse(Deno.env.get("FCM_SERVICE_ACCOUNT") ?? "{}");
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
+// The shared secret the triggers send, read once per instance. Cached because
+// this runs on every push and the value only changes when an operator rotates
+// it, at which point the instance is replaced anyway.
+let _secret: string | null | undefined;
+async function notifySecret(): Promise<string | null> {
+  if (_secret !== undefined) return _secret;
+  const { data } = await admin
+    .from("app_secrets")
+    .select("value")
+    .eq("key", "NOTIFY_SHARED_SECRET")
+    .maybeSingle();
+  _secret = data?.value ?? null;
+  return _secret;
+}
+
+
 // ── base64url helpers ────────────────────────────────────────────────────────
 function b64url(bytes: Uint8Array): string {
   let bin = "";
@@ -92,6 +108,23 @@ async function getAccessToken(): Promise<string> {
 // ── handler ──────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   try {
+    // verify_jwt is off, and correctly so: every caller is a database trigger
+    // and a trigger has no JWT. That also meant this endpoint took orders from
+    // the open internet — it holds the service role, looks up whoever the body
+    // names, and pushes them a notification. On a build that disguises itself
+    // as a news app, that is a usable phishing channel.
+    //
+    // The triggers now carry a secret minted in the database. Enforced only
+    // when one is configured, so a fresh project that has not seeded it yet
+    // loses no notifications while it is being set up — an attacker cannot
+    // un-set it, so there is nothing to gain from that path.
+    const expected = await notifySecret();
+    if (expected && req.headers.get("x-notify-secret") !== expected) {
+      return new Response(JSON.stringify({ error: "forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const payload = await req.json();
     // Our triggers deliver { kind, record }. Bare rows (an older reach trigger
     // that posted to_jsonb(new) directly) still work and default to "reach".
