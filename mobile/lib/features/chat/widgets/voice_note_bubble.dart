@@ -17,6 +17,9 @@ import 'package:miles/core/widgets/save_media_button.dart';
 class VoiceNotePlayer extends ChangeNotifier {
   VoiceNotePlayer() {
     _sub = _player.playerStateStream.listen((s) {
+      // cancel() is asynchronous, so an event already in flight when the chat
+      // closes would reach a disposed ChangeNotifier and throw.
+      if (_disposed) return;
       // Reaching the end is not a pause: the note is no longer the current
       // one, so its bubble goes back to a play icon at the moment the audio
       // stops rather than sitting on a pause icon over silence.
@@ -27,6 +30,7 @@ class VoiceNotePlayer extends ChangeNotifier {
 
   final AudioPlayer _player = AudioPlayer();
   StreamSubscription<PlayerState>? _sub;
+  bool _disposed = false;
 
   /// The message whose note is loaded, or null when nothing is.
   String? _currentId;
@@ -65,6 +69,7 @@ class VoiceNotePlayer extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     unawaited(_sub?.cancel());
     unawaited(_player.dispose());
     super.dispose();
