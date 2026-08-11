@@ -353,7 +353,10 @@ void main() {
     Map<int, List<_Call?>> callsAround(String masked, List<int> at) {
       final out = <int, List<_Call?>>{};
       final open = <_Call>[];
-      final ident = RegExp(r'([A-Za-z_][\w.]*)\s*$');
+      // The trailing `<...>` matters: half these calls are generic —
+      // showModalBottomSheet<String>, showDialog<bool> — and without it the
+      // name comes back empty and the call is attributed to nothing.
+      final ident = RegExp(r'([A-Za-z_][\w.]*)\s*(<[^<>()]*>)?\s*$');
       _Call? nthOpen(int back) =>
           open.length > back ? open[open.length - 1 - back] : null;
       var next = 0;
@@ -408,6 +411,28 @@ void main() {
     // Legibility over imagery nobody controls genuinely needs translucency.
     // The exemption has to name what is behind it — "scrim" alone is a shrug.
     final overImagery = RegExp(r'//.*\bscrim over \w');
+
+    /// Surfaces that float above a page and carry text you act on. Their
+    /// backdrop is whatever the page was showing, which on this app is moving.
+    const modalSurfaces = {
+      'AlertDialog',
+      'Dialog',
+      'SimpleDialog',
+      'showModalBottomSheet',
+      'showBottomSheet',
+      'BottomSheet',
+      'Drawer',
+      'NavigationDrawer',
+      'showMenu',
+      'PopupMenuButton',
+      'DropdownMenu',
+      'MenuAnchor',
+      'SnackBar',
+    };
+    // Deliberately not surfaceTintColor: setting THAT transparent is how M3 is
+    // told to stop tinting a fill by elevation, and is the fix, not the fault.
+    final nakedFill =
+        RegExp(r'\b(color|backgroundColor)\s*:\s*Colors\.transparent\b');
 
     List<String> glassIn(String src, String label) {
       final masked = mask(src);
@@ -547,6 +572,83 @@ void main() {
               'surface2 / night, or MilesColors.tint() to keep an accent '
               'wash — or, if it genuinely sits over imagery, say so with a '
               '"// scrim over <what>" comment:\n${offenders.join('\n')}',);
+    });
+
+    /// Call sites in [src] that hand a modal surface's fill back to whatever
+    /// is behind it.
+    List<String> nakedModalIn(String src, String label) {
+      final masked = mask(src);
+      final hits = nakedFill.allMatches(masked).toList();
+      if (hits.isEmpty) return const [];
+      final around = callsAround(masked, hits.map((m) => m.start).toList());
+      final lines = src.split('\n');
+      final found = <String>[];
+      for (final m in hits) {
+        if (!modalSurfaces.contains(around[m.start]![0]?.name)) continue;
+        final n = '\n'.allMatches(src.substring(0, m.start)).length;
+        found.add('$label:${n + 1}  ${lines[n].trim()}');
+      }
+      return found;
+    }
+
+    test('no modal hands its fill back to the background', () {
+      // The half of the look the first three sweeps could not see. Everything
+      // above hunts for a translucent colour someone wrote down; this is a
+      // surface that paints NOTHING, and it reached the owner's screen twice
+      // over — as `AlertDialog(backgroundColor: Colors.transparent)` holding
+      // "Delete for everyone", and as the sheet of the same name.
+      //
+      // Colors.transparent has none of the shapes the alpha regex matches: no
+      // withValues, no ARGB literal, no Colors.black54. It is the most
+      // see-through colour in Material and it was the one spelling nothing
+      // checked for.
+      //
+      // Only modal surfaces. A transparent Scaffold or AppBar is how the
+      // ember field shows through a PAGE, and is the whole point of the
+      // design — but a dialog, a sheet, a menu or a drawer is something you
+      // read on, and behind it that same field is just an animation playing
+      // under the text.
+      final offenders = <String>[];
+      for (final f in lib()) {
+        offenders.addAll(nakedModalIn(
+            f.readAsStringSync(), f.path.replaceAll(r'\', '/'),),);
+      }
+      expect(offenders, isEmpty,
+          reason: 'a modal surface paints nothing, so the animated background '
+              'shows through it. Drop the override and let the theme fill it '
+              '(dialogTheme / bottomSheetTheme / popupMenuTheme / drawerTheme '
+              'are all opaque), or name a MilesColors fill:\n'
+              '${offenders.join('\n')}',);
+    });
+
+    test('the naked-modal detector can tell a dialog from a page', () {
+      String only(String src) => nakedModalIn(src, 'x').join('|');
+
+      // The thing itself, in both spellings the owner actually hit.
+      expect(
+          only('AlertDialog(backgroundColor: Colors.transparent, '
+              'title: Text(t))'),
+          contains('x:1'),);
+      expect(
+          only('showModalBottomSheet<String>(context: context, '
+              'backgroundColor: Colors.transparent, builder: b)'),
+          contains('x:1'),);
+      expect(only('Drawer(backgroundColor: Colors.transparent, child: c)'),
+          contains('x:1'),);
+
+      // Not the thing. A page is transparent so the ember field shows through
+      // it, which is the design; and turning M3's elevation tint off is the
+      // fix these rules are asking for, not a new offence.
+      expect(only('Scaffold(backgroundColor: Colors.transparent, body: b)'),
+          isEmpty,);
+      expect(only('AppBarTheme(backgroundColor: Colors.transparent)'), isEmpty);
+      expect(
+          only('AlertDialog(surfaceTintColor: Colors.transparent, '
+              'backgroundColor: MilesColors.surface1)'),
+          isEmpty,);
+      // A transparent NavigationBar sits inside SurfaceNavBar, which paints.
+      expect(only('NavigationBar(backgroundColor: Colors.transparent)'),
+          isEmpty,);
     });
 
     test('the glass detector can tell a panel from an edge', () {
