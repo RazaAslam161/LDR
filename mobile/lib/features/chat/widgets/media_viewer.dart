@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 
@@ -15,6 +16,8 @@ class MediaViewer extends StatelessWidget {
   final Object? heroTag;
   final String senderName;
 
+  /// [url] must be something an HTTP GET can actually fetch — a signed URL.
+  /// Use [openStored] for anything read straight out of a table.
   static void open(BuildContext context, String url,
       {Object? heroTag, String senderName = 'a message',}) {
     Navigator.of(context).push(MaterialPageRoute<void>(
@@ -22,6 +25,25 @@ class MediaViewer extends StatelessWidget {
       builder: (_) =>
           MediaViewer(imageUrl: url, heroTag: heroTag, senderName: senderName),
     ),);
+  }
+
+  /// Opens a value held in a database column: a storage path, or a legacy
+  /// `/object/public/...` URL from before the bucket closed.
+  ///
+  /// Neither shape is fetchable now that couple_media is private, and handing
+  /// one to [open] is what put a broken-image icon on a black screen when the
+  /// home check-in snap was tapped — the card beside it rendered fine, because
+  /// SignedImage signs and the tap handler did not. Signing here keeps the
+  /// two halves of the same tile reading the same column the same way.
+  ///
+  /// A value that will not sign opens nothing, matching the chat bubbles: no
+  /// URL, no viewer, rather than a black screen that says nothing went wrong.
+  static Future<void> openStored(BuildContext context, String bucket,
+      String value,
+      {Object? heroTag, String senderName = 'a message',}) async {
+    final url = await MediaUrls.sign(bucket, MediaUrls.toPath(bucket, value));
+    if (url == null || !context.mounted) return;
+    open(context, url, heroTag: heroTag, senderName: senderName);
   }
 
   @override

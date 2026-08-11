@@ -347,7 +347,8 @@ class _Avatar extends StatelessWidget {
     return GestureDetector(
       onTap: url == null
           ? null
-          : () => MediaViewer.open(context, url, heroTag: 'snap-$url'),
+          : () => MediaViewer.openStored(context, chatBucket, url,
+              heroTag: 'snap-$url',),
       child: ClipOval(
         child: Container(
           width: 64,

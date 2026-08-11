@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/call/call_controller.dart';
 
 /// Whether the diagnostic readout is showing. Outside the widget so it survives
@@ -310,14 +312,18 @@ class _Avatar extends StatelessWidget {
         ],
       ),
       clipBehavior: Clip.antiAlias,
+      // profiles.avatar_url holds a storage PATH, not a URL. Image.network on
+      // it fails silently into the initial letter, so a partner with a photo
+      // looked like a partner without one for the length of every call.
       child: url == null
           ? Center(
               child: Text(initial,
                   style: const TextStyle(
                       color: MilesColors.cream50, fontSize: 52,),),)
-          : Image.network(url!,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Center(
+          : SignedImage(
+              bucket: chatBucket,
+              value: url,
+              placeholder: Center(
                   child: Text(initial,
                       style: const TextStyle(
                           color: MilesColors.cream50, fontSize: 52,),),),),
