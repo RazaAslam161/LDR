@@ -212,7 +212,7 @@ class _ModeTile extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: selected
-                ? MilesColors.ember.withValues(alpha: 0.12)
+                ? MilesColors.tint(MilesColors.ember, 0.12)
                 : MilesColors.surface1,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(

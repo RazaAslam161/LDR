@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/data/models.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/rituals/ritual_repository.dart';
 
 /// Modal sheet for creating a new ritual.
@@ -136,7 +137,7 @@ class _CreateRitualSheetState extends State<CreateRitualSheet> {
                   vertical: 14,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0x0dFFFFFF),
+                  color: MilesColors.surface2,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: const Color(0x33F5EFE6).withValues(alpha: 0.1),

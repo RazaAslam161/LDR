@@ -181,7 +181,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 10,),
                         decoration: BoxDecoration(
-                          color: MilesColors.blush.withValues(alpha: 0.16),
+                          color: MilesColors.tint(MilesColors.blush, 0.16),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                               color: MilesColors.blush.withValues(alpha: 0.4),),
@@ -260,7 +260,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: MilesColors.sage.withValues(alpha: 0.2),
+                  color: MilesColors.tint(MilesColors.sage, 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text('Done ✅',

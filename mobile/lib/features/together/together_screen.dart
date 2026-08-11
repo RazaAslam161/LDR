@@ -218,7 +218,7 @@ class _TogetherScreenState extends ConsumerState<TogetherScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 10,),
                           decoration: BoxDecoration(
-                            color: MilesColors.blush.withValues(alpha: 0.14),
+                            color: MilesColors.tint(MilesColors.blush, 0.14),
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(
                                 color: MilesColors.blush.withValues(alpha: 0.4),),

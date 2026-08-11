@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Desire Temperature — daily private 1–10 slider.
@@ -230,7 +231,7 @@ class _DesireTempScreenState extends ConsumerState<DesireTempScreen> {
                         margin: const EdgeInsets.symmetric(horizontal: 32),
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF141B26).withValues(alpha: 0.6),
+                          color: MilesColors.surface1,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
                             color: _partnerScore != null

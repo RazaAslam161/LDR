@@ -187,7 +187,7 @@ class _FilterEditorScreenState extends State<FilterEditorScreen> {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: on
-                          ? MilesColors.ember.withValues(alpha: 0.22)
+                          ? MilesColors.tint(MilesColors.ember, 0.22)
                           : MilesColors.surface1,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(

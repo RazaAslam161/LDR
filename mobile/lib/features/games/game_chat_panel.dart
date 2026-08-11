@@ -159,7 +159,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
         constraints: const BoxConstraints(maxWidth: 250),
         decoration: BoxDecoration(
           color: m.fromMe
-              ? MilesColors.blush.withValues(alpha: 0.25)
+              ? MilesColors.tint(MilesColors.blush, 0.25)
               : MilesColors.surface2,
           borderRadius: BorderRadius.circular(12),
         ),

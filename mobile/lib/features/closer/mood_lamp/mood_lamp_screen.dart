@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Mood Lamp — pick a color; it glows on your partner's screen in real time.
@@ -228,7 +229,9 @@ class _Orb extends StatelessWidget {
           height: 140,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isOff ? const Color(0xFF141B26) : color.withValues(alpha: 0.2),
+            color: isOff
+                ? const Color(0xFF141B26)
+                : MilesColors.tint(color, 0.2, over: MilesColors.night),
             boxShadow: isOff
                 ? null
                 : [

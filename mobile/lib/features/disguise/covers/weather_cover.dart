@@ -93,6 +93,10 @@ class _WeatherCoverState extends State<WeatherCover>
                   margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
+                    // A scrim over the cover's own sky gradient. This screen
+                    // is not Miles and must not look like it — it is the
+                    // decoy a shoulder-surfer sees, and a stock weather app
+                    // washes its forecast panel over the sky exactly so.
                     color: Colors.white.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(18),
                   ),

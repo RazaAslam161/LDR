@@ -553,6 +553,8 @@ class _FreshnessChipState extends State<_FreshnessChip>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
+        // A scrim over the map tiles — the freshness label has to stay
+        // readable over roads, water and satellite alike.
         color: Colors.black.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -751,6 +753,7 @@ class _PartnerMarker extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
+              // The same scrim over the map tiles, under the marker badge.
               color: Colors.black.withValues(alpha: 0.6),
               borderRadius: BorderRadius.circular(8),
             ),

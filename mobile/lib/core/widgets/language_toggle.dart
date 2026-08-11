@@ -43,7 +43,7 @@ class LanguageToggle extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: MilesColors.cream50.withValues(alpha: 0.08),
+              color: MilesColors.surface2,
               borderRadius: BorderRadius.circular(15),
               border: Border.all(
                 color: MilesColors.cream50.withValues(alpha: 0.16),

@@ -151,6 +151,8 @@ class _AfterglowFormScreenState extends ConsumerState<AfterglowFormScreen> {
                               child: Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: const BoxDecoration(
+                                  // A scrim over the photo it sits on — the
+                                  // X has to read against any picture.
                                   color: Color(0xCC000000),
                                   shape: BoxShape.circle,
                                 ),

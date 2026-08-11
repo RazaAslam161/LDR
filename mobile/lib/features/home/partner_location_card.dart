@@ -287,6 +287,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 5,),
+                          // A scrim over the map tiles underneath.
                           color: Colors.black.withValues(alpha: 0.45),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,

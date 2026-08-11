@@ -1040,8 +1040,9 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color:
-                        t.color.withValues(alpha: _type == t.key ? 0.3 : 0.1),
+                    color: MilesColors.tint(
+                        t.color, _type == t.key ? 0.3 : 0.1,
+                        over: MilesColors.night,),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                         color: t.color
@@ -1108,7 +1109,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       borderRadius: BorderRadius.circular(16),
       child: Container(
         decoration: BoxDecoration(
-          color: MilesColors.surface1.withValues(alpha: 0.4),
+          color: MilesColors.surface1,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.18)),
         ),
@@ -1345,6 +1346,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 4,),
                           decoration: BoxDecoration(
+                            // A scrim over the body photo it is explaining —
+                            // the hint sits on the picture, not beside it.
                             color: MilesColors.night.withValues(alpha: 0.7),
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -1389,6 +1392,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 4,),
                           decoration: BoxDecoration(
+                            // Another scrim over the body photo, for the same
+                            // reason.
                             color: MilesColors.ember.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
@@ -2392,6 +2397,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
 
   Widget _camCircleBtn(IconData icon, VoidCallback onTap) {
     return Material(
+      // A scrim over the camera view these controls sit on.
       color: Colors.black26,
       shape: const CircleBorder(),
       child: InkWell(

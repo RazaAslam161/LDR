@@ -138,7 +138,7 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 7, vertical: 2,),
                             decoration: BoxDecoration(
-                              color: MilesColors.gilt.withValues(alpha: 0.2),
+                              color: MilesColors.tint(MilesColors.gilt, 0.2),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: const Text('LIVE',

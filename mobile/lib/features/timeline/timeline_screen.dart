@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/timeline/timeline_repository.dart';
 
@@ -208,7 +209,7 @@ class _StatsHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF141B26).withValues(alpha: 0.6),
+        color: MilesColors.surface1,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -364,8 +365,8 @@ class _TimelineEntry extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color:
-                                const Color(0xFFEF6F58).withValues(alpha: 0.15),
+                            color: MilesColors.tint(
+                                const Color(0xFFEF6F58), 0.15,),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text(
@@ -599,7 +600,7 @@ class _DateRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: const Color(0x0dFFFFFF),
+          color: MilesColors.surface2,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: const Color(0x33F5EFE6).withValues(alpha: 0.1),

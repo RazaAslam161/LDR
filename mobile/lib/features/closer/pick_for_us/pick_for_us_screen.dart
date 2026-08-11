@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_repository.dart';
 
 /// "Pick for us" dice — consensual spontaneity. Three tiers (warm → hot);
@@ -340,7 +341,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 20, vertical: 16,),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF141B26).withValues(alpha: 0.6),
+                      color: MilesColors.surface1,
                       borderRadius: BorderRadius.circular(20),
                       border:
                           Border.all(color: const Color(0x1aF5EFE6)),
@@ -383,6 +384,8 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 6,),
                                   decoration: BoxDecoration(
+                                    // A scrim over the card's own ember
+                                    // gradient, for the same reason.
                                     color: const Color(0xFF0B0F16)
                                         .withValues(alpha: 0.18),
                                     borderRadius: BorderRadius.circular(40),
@@ -445,7 +448,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
       decoration: BoxDecoration(
-        color: const Color(0xFF141B26).withValues(alpha: 0.6),
+        color: MilesColors.surface1,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: unlocked
@@ -481,7 +484,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFFEF6F58).withValues(alpha: 0.15),
+                color: MilesColors.tint(const Color(0xFFEF6F58), 0.15),
                 borderRadius: BorderRadius.circular(40),
               ),
               child: const Text(
@@ -497,7 +500,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFFEF6F58).withValues(alpha: 0.15),
+                color: MilesColors.tint(const Color(0xFFEF6F58), 0.15),
                 borderRadius: BorderRadius.circular(40),
               ),
               child: const Text(
@@ -513,7 +516,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFFEDE4D3).withValues(alpha: 0.08),
+                color: MilesColors.tint(const Color(0xFFEDE4D3), 0.08),
                 borderRadius: BorderRadius.circular(40),
               ),
               child: const Text(
@@ -566,7 +569,11 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF141B26).withValues(alpha: 0.4),
+        // History sat a step back from the cards above it, at 0.4 where they
+        // were 0.6. Resolved, that lands on the scaffold colour rather than
+        // the card one — flattening both to surface1 would have made a
+        // finished roll and a remembered one look the same.
+        color: MilesColors.night,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(

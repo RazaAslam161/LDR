@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/fantasy_jar/add_fantasy_screen.dart';
 import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';
@@ -285,6 +286,9 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
+                      // A scrim over the card's own ember gradient, which runs
+                      // corner to corner underneath these tags — one flat
+                      // colour would only match it in one place.
                       color: const Color(0xFF0B0F16).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(40),
                     ),
@@ -347,7 +351,8 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: const Color(0xFFEF6F58).withValues(alpha: 0.15),
+          color: MilesColors.tint(const Color(0xFFEF6F58), 0.15,
+              over: MilesColors.night,),
           borderRadius: BorderRadius.circular(16),
         ),
         child: const Icon(Icons.delete_outline, color: Color(0xFFEF6F58)),
@@ -360,7 +365,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF141B26).withValues(alpha: 0.6),
+          color: MilesColors.surface1,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: const Color(0x1aF5EFE6)),
         ),

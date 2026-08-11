@@ -40,7 +40,8 @@ class SelectableMessage extends StatelessWidget {
         onTap: selecting ? onToggle : null,
         child: ColoredBox(
           color: selected
-              ? MilesColors.ember.withValues(alpha: 0.22)
+              ? MilesColors.tint(MilesColors.ember, 0.22,
+                  over: MilesColors.night,)
               : Colors.transparent,
           child: IgnorePointer(ignoring: selecting, child: child),
         ),

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
@@ -331,7 +332,7 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF141B26).withValues(alpha: 0.6),
+        color: MilesColors.surface1,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: const Color(0xFFEF6F58).withValues(alpha: 0.18),

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -549,7 +550,7 @@ class _VaultItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF141B26).withValues(alpha: 0.6),
+      color: MilesColors.surface1,
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
         onTap: onTap,
@@ -670,8 +671,8 @@ class _VaultItemCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: ephemeral
-            ? const Color(0xFFF4937E).withValues(alpha: 0.15)
-            : const Color(0x14F5EFE6),
+            ? MilesColors.tint(const Color(0xFFF4937E), 0.15)
+            : MilesColors.surface2,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(

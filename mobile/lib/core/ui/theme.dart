@@ -56,6 +56,19 @@ class MilesColors {
 
   /// A one-pixel warm edge that separates a panel from what is behind it.
   static const Color hairline = Color(0x33E8C49A);
+
+  /// The colour an [accent] wash of [alpha] settles to once it is resolved
+  /// against the surface it sits on — opaque, and the same pixels the wash
+  /// used to produce.
+  ///
+  /// Chips carry meaning in their tint: selected, live, error, this mood and
+  /// not that one. Flattening them all to [surface2] would have thrown that
+  /// away, but leaving them translucent meant the ember field animated
+  /// through every badge on the screen. [over] defaults to the card fill
+  /// because that is where chips live; pass [night] for one sitting directly
+  /// on the scaffold.
+  static Color tint(Color accent, double alpha, {Color over = surface1}) =>
+      Color.alphaBlend(accent.withValues(alpha: alpha), over);
 }
 
 /// Named gradients for the Emberlight system.

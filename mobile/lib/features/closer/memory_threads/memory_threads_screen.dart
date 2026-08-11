@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/memory_threads/memory_pin_gate.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
@@ -264,7 +265,7 @@ class _PinGateState extends State<_PinGate> {
                     height: 60,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Color(0x14F5EFE6),
+                      color: MilesColors.surface2,
                     ),
                     alignment: Alignment.center,
                     child: Text(
@@ -657,7 +658,7 @@ class _MemoryCardState extends State<_MemoryCard> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF141B26).withValues(alpha: 0.6),
+        color: MilesColors.surface1,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: _borderColor,
@@ -729,7 +730,7 @@ class _MemoryCardState extends State<_MemoryCard> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEF6F58).withValues(alpha: 0.15),
+                    color: MilesColors.tint(const Color(0xFFEF6F58), 0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Row(
@@ -796,7 +797,7 @@ class _MemoryCardState extends State<_MemoryCard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
+        color: MilesColors.tint(color, 0.15),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
@@ -844,7 +845,7 @@ class _MemoryCardState extends State<_MemoryCard> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: const Color(0x14F5EFE6),
+          color: MilesColors.surface2,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(

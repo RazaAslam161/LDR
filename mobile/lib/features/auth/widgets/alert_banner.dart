@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:miles/core/ui/theme.dart';
+
 enum AlertTone { error, info }
 
 class AlertBanner extends StatelessWidget {
@@ -18,7 +20,7 @@ class AlertBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: MilesColors.tint(color, 0.1, over: MilesColors.night),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(message, style: TextStyle(color: color, fontSize: 13)),

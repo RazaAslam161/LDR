@@ -86,6 +86,9 @@ class CallScreen extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6,),
                       decoration: BoxDecoration(
+                        // A scrim over the remote video feed, not a panel:
+                        // these numbers have to stay readable against whatever
+                        // the other camera happens to be pointing at.
                         color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -120,6 +123,8 @@ class CallScreen extends ConsumerWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 8,),
                     decoration: BoxDecoration(
+                      // Also a scrim over the video feed — a solid banner
+                      // across a live call is worse than a legible one.
                       color: const Color(0xCC5A1A14),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: const Color(0xFFE0564B)),

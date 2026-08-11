@@ -55,7 +55,7 @@ class AppDrawer extends ConsumerWidget {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: MilesColors.surface1.withValues(alpha: 0.6),
+                      color: MilesColors.surface1,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Column(

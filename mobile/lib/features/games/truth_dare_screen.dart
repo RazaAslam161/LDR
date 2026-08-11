@@ -415,7 +415,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.25),
+                      color: MilesColors.tint(accent, 0.25),
                       borderRadius: BorderRadius.circular(30),
                     ),
                     child: Text('${card.tier.emoji}  $typeLabel',

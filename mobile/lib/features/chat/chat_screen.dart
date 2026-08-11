@@ -1503,7 +1503,11 @@ class _Bubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (repliedTo != null) _ReplyPreview(message: repliedTo!),
+                if (repliedTo != null)
+                  _ReplyPreview(
+                    message: repliedTo!,
+                    on: mine ? theme.myBubble : theme.partnerBubble,
+                  ),
                 if (message.deletedForEveryone) Text(
                         'This message was deleted',
                         style: TextStyle(
@@ -1514,6 +1518,7 @@ class _Bubble extends StatelessWidget {
                         message: message,
                         player: player,
                         textColor: theme.text,
+                        bubble: mine ? theme.myBubble : theme.partnerBubble,
                         senderName: senderName,),
               ],
             ),
@@ -1679,8 +1684,13 @@ class _BurstAnimationState extends State<_BurstAnimation>
 
 /// Small quoted preview shown at the top of a bubble that's replying.
 class _ReplyPreview extends StatelessWidget {
-  const _ReplyPreview({required this.message});
+  const _ReplyPreview({required this.message, required this.on});
   final Message message;
+
+  /// The bubble this sits inside. The quote is a shade of its host, and the
+  /// host is whichever of a dozen chat themes the couple picked — resolving
+  /// the shade here is the only way to darken it without going see-through.
+  final Color on;
 
   @override
   Widget build(BuildContext context) {
@@ -1688,7 +1698,7 @@ class _ReplyPreview extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
+        color: MilesColors.tint(Colors.black, 0.18, over: on),
         borderRadius: BorderRadius.circular(8),
         border: const Border(
           left: BorderSide(color: MilesColors.gilt, width: 3),
@@ -1711,11 +1721,17 @@ class _Content extends StatelessWidget {
     required this.message,
     required this.player,
     required this.senderName,
+    required this.bubble,
     this.textColor = MilesColors.cream50,
   });
   final Message message;
   final AudioPlayer player;
   final String senderName;
+
+  /// The fill of the bubble this is rendering inside — a dozen chat themes
+  /// pick it, and controls drawn on top have to resolve against it rather
+  /// than let a wash of white stand in for one.
+  final Color bubble;
   final Color textColor;
 
   @override
@@ -1788,6 +1804,8 @@ class _Content extends StatelessWidget {
                 if (m.sendStatus == SendStatus.sending)
                   const Positioned.fill(
                     child: ColoredBox(
+                      // A scrim over the photo itself, which stays visible
+                      // under the spinner while it uploads.
                       color: Color(0x55000000),
                       child: Center(
                         child: SizedBox(
@@ -1813,6 +1831,8 @@ class _Content extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 6,),
                         decoration: BoxDecoration(
+                          // A scrim over the photo that failed — the retry has
+                          // to read against whatever was in the frame.
                           color: const Color(0xCC1A0E12),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
@@ -1864,7 +1884,7 @@ class _Content extends StatelessWidget {
           );
         }
         return _VoicePlayer(
-            url: url, player: player, senderName: senderName,);
+            url: url, player: player, senderName: senderName, bubble: bubble,);
       case 'video':
         return _VideoBubble(message: m, senderName: senderName);
       default:
@@ -1926,10 +1946,14 @@ class _ChatBg extends StatelessWidget {
 
 class _VoicePlayer extends StatefulWidget {
   const _VoicePlayer(
-      {required this.url, required this.player, required this.senderName,});
+      {required this.url,
+      required this.player,
+      required this.senderName,
+      required this.bubble,});
   final String url;
   final AudioPlayer player;
   final String senderName;
+  final Color bubble;
 
   @override
   State<_VoicePlayer> createState() => _VoicePlayerState();
@@ -1985,7 +2009,8 @@ class _VoicePlayerState extends State<_VoicePlayer> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: MilesColors.cream50.withValues(alpha: 0.15),
+              color: MilesColors.tint(MilesColors.cream50, 0.15,
+                  over: widget.bubble,),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -2123,7 +2148,9 @@ class _VideoBubbleState extends State<_VideoBubble> {
             width: 220,
             height: 140,
             decoration: BoxDecoration(
-              color: Colors.black54,
+              // Stands in for the video frame itself while it uploads, so it
+              // is the frame's own black rather than a wash over the chat.
+              color: MilesColors.night,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Center(

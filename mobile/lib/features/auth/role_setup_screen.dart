@@ -136,7 +136,7 @@ class _RoleCard extends StatelessWidget {
               height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: color.withValues(alpha: 0.18),
+                color: MilesColors.tint(color, 0.18),
                 border: Border.all(color: color.withValues(alpha: 0.5)),
               ),
               child: Icon(icon, color: color, size: 28),

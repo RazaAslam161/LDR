@@ -653,6 +653,8 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 5,),
                     decoration: BoxDecoration(
+                      // A scrim over the live preview — the zoom level has to
+                      // read against whatever the lens is pointed at.
                       color: Colors.black.withValues(alpha: 0.45),
                       borderRadius: BorderRadius.circular(20),
                     ),
@@ -911,6 +913,8 @@ class _RoundIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
+      // A scrim over the viewfinder or the shot being reviewed — this button
+      // floats on top of both.
       color: Colors.black26,
       shape: const CircleBorder(),
       child: InkWell(
@@ -977,7 +981,7 @@ class _FilterChip extends StatelessWidget {
           width: 62,
           margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.28),
+            color: MilesColors.tint(Colors.black, 0.28),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: selected ? MilesColors.ember : Colors.transparent,
@@ -1140,6 +1144,8 @@ class _RecPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
+        // A scrim over the live preview — the elapsed time sits on the frame
+        // being recorded.
         color: Colors.black54,
         borderRadius: BorderRadius.circular(20),
       ),
@@ -1229,6 +1235,8 @@ class _VideoReview extends StatelessWidget {
         ),
         if (sending)
           Container(
+            // A scrim over the shot being reviewed — it stays visible under
+            // the spinner so you can see what is on its way.
             color: MilesColors.ember.withValues(alpha: 0.3),
             alignment: Alignment.center,
             child: const CircularProgressIndicator(color: MilesColors.cream50),
@@ -1420,6 +1428,7 @@ class _AnnotateHostState extends State<_AnnotateHost> {
 
         if (widget.sending)
           Container(
+            // The same scrim over the annotated shot underneath.
             color: MilesColors.ember.withValues(alpha: 0.3),
             alignment: Alignment.center,
             child: const CircularProgressIndicator(color: MilesColors.cream50),

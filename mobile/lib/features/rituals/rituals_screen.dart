@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/rituals/create_ritual_screen.dart';
 import 'package:miles/features/rituals/ritual_repository.dart';
@@ -188,7 +189,8 @@ class _RitualCard extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
         decoration: BoxDecoration(
-          color: const Color(0xFFE0553D).withValues(alpha: 0.15),
+          color: MilesColors.tint(const Color(0xFFE0553D), 0.15,
+              over: MilesColors.night,),
           borderRadius: BorderRadius.circular(20),
         ),
         child: const Icon(Icons.delete_outline, color: Color(0xFFE0553D)),
@@ -200,7 +202,7 @@ class _RitualCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: const Color(0xFF141B26).withValues(alpha: 0.6),
+          color: MilesColors.surface1,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -210,7 +212,7 @@ class _RitualCard extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: const Color(0xFFEF6F58).withValues(alpha: 0.15),
+                color: MilesColors.tint(const Color(0xFFEF6F58), 0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(

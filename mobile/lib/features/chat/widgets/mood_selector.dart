@@ -52,8 +52,8 @@ Future<MoodData?> showMoodSelector(BuildContext context, {String? currentKey}) {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 10,),
                             decoration: BoxDecoration(
-                              color: m.color.withValues(
-                                  alpha: currentKey == m.key ? 0.30 : 0.12,),
+                              color: MilesColors.tint(
+                                  m.color, currentKey == m.key ? 0.30 : 0.12,),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
                                 color: m.color.withValues(
