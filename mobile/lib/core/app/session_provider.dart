@@ -7,7 +7,9 @@ import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -143,6 +145,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
         partner: partner,
       );
 
+      // The couple every push on this handset is checked against. Written here
+      // rather than at sign-in because pairing, leaving and re-pairing all
+      // change it without a new session — and a stale value would either drop
+      // this couple's pushes or admit the previous one's.
+      unawaited(SessionScope.setCouple(couple?.id));
+
       if (couple == null) {
         // No couple (just left, or never paired): clear any stale presence
         // couple_id so a future partner can't inherit a dangling link. The DB
@@ -242,6 +250,14 @@ class SessionNotifier extends StateNotifier<SessionState> {
   }
 
   Future<void> signOut() async {
+    // FIRST, and here rather than at the call sites. Two of the four sign-out
+    // buttons never called it, so the handset kept a push token on the profile
+    // it was leaving: reach-notify went on addressing that couple's Reaches to
+    // this device, and the next account signed in on it received them.
+    // Unbinding the device is part of ending a session, not a courtesy the
+    // caller can forget — and it must happen while the session is still valid,
+    // because the token is cleared with an authenticated write.
+    await FcmService.forgetDevice();
     final ch = _presenceChannel;
     _presenceChannel = null;
     if (ch != null) {

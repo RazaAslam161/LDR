@@ -6,6 +6,7 @@ import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/reach_notifications.dart';
+import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
@@ -47,6 +48,11 @@ class FcmService {
   /// Call once in main() after Firebase.initializeApp. Sets up channels +
   /// handlers. Token registration is separate (registerToken, after login).
   static Future<void> init() async {
+    // Before any routing below: a cold start from a tapped notification runs
+    // long before the session resolves, and the couple guard has to know which
+    // account this handset was last signed in as or it would discard the very
+    // tap that launched the app.
+    await SessionScope.hydrate();
     await _fln.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -114,18 +120,35 @@ class FcmService {
     }
   }
 
-  /// On sign-out: drop the token so this device stops getting Reach pushes.
-  static Future<void> clearToken() async {
+  /// On sign-out: unbind this handset from the account leaving it.
+  ///
+  /// All three parts matter. The server row must stop naming this token, or
+  /// reach-notify keeps pushing that couple's private signals here. The FCM
+  /// token itself is deleted so the next account gets a fresh one rather than
+  /// inheriting the last one. And the pending notifiers are globals that
+  /// outlive a session — a Reach that arrived while the cover was up sits in
+  /// [pendingReach] until a shell mounts to drain it, which after a sign-in as
+  /// someone else means the next account's shell pops the previous account's
+  /// overlay.
+  ///
+  /// Must run while still authenticated: setFcmToken writes as the current
+  /// user, so calling this after signOut() silently does nothing.
+  static Future<void> forgetDevice() async {
+    pendingReach.value = null;
+    pendingCall.value = null;
+    pendingChat.value = null;
+    await SessionScope.setCouple(null);
     try {
       await SupabaseRepository.setFcmToken(null);
       await FirebaseMessaging.instance.deleteToken();
     } catch (e) {
-      debugPrint('FcmService.clearToken failed: $e');
+      debugPrint('FcmService.forgetDevice failed: $e');
     }
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────
   static void _onForeground(RemoteMessage m) {
+    if (!_forThisSession(m)) return;
     final type = m.data['type'];
     if (type == 'call') {
       pendingCall.value = CallTap(
@@ -140,6 +163,7 @@ class FcmService {
       showCareNotification(
         plugin: _fln,
         nudgeId: (m.data['nudge_id'] as String?) ?? '',
+        coupleId: (m.data['couple_id'] as String?) ?? '',
       );
       return;
     }
@@ -174,6 +198,7 @@ class FcmService {
   }
 
   static void _onOpenedApp(RemoteMessage m) {
+    if (!_forThisSession(m)) return;
     final type = m.data['type'];
     if (type == 'call') {
       pendingCall.value = CallTap(
@@ -190,6 +215,17 @@ class FcmService {
     );
   }
 
+  /// Whether a push belongs to the couple signed in on this handset.
+  ///
+  /// The token is the device's, not the account's, so FCM will happily deliver
+  /// a couple's Reach to a phone that has since been signed into a different
+  /// account — which is how one couple's private signal surfaced inside
+  /// another's session. Nothing else in the delivery path checks this.
+  static bool _forThisSession(RemoteMessage m) => SessionScope.allows(
+        m.data['couple_id'] as String?,
+        SessionScope.coupleId,
+      );
+
   static void _onLocalTap(NotificationResponse r) => routeFromPayload(r.payload);
 
   /// Routes a tapped local notification by the payload its poster wrote in
@@ -200,8 +236,14 @@ class FcmService {
     if (payload == null || payload.isEmpty) return;
     final parts = payload.split('|');
     final tag = parts.isNotEmpty ? parts[0] : '';
+    // Each payload ends with the couple it was posted for, so a notification
+    // still sitting in the tray from a previous account cannot be tapped into
+    // the current one. A payload without it predates this and is let through,
+    // the same way a push without couple_id is.
+    String? field(int i) => parts.length > i ? parts[i] : null;
     if (tag == 'call') {
-      // call|callId|fromName|video
+      // call|callId|fromName|video|coupleId
+      if (!SessionScope.allows(field(4), SessionScope.coupleId)) return;
       pendingCall.value = CallTap(
         parts.length > 1 ? parts[1] : '',
         parts.length > 2 ? parts[2] : 'Your partner',
@@ -210,17 +252,20 @@ class FcmService {
       return;
     }
     if (tag == 'message') {
-      // message|messageId — opens the Chat tab. Falling through to the Reach
-      // branch below is what made a plain text message pop the full-screen
-      // Reach overlay, on every build that posts a message notification.
+      // message|messageId|coupleId — opens the Chat tab. Falling through to the
+      // Reach branch below is what made a plain text message pop the
+      // full-screen Reach overlay, on every build that posts a message
+      // notification.
+      if (!SessionScope.allows(field(2), SessionScope.coupleId)) return;
       pendingChat.value = parts.length > 1 ? parts[1] : '';
       return;
     }
     if (tag == 'care') return; // care taps just open the app
-    // Untagged by construction: the Reach payload is 'reachId|fromName' and
-    // predates every tagged kind. So this is a default branch that ASSUMES
+    // Untagged by construction: the Reach payload is 'reachId|fromName|coupleId'
+    // and predates every tagged kind. So this is a default branch that ASSUMES
     // reach — any new kind must get its own branch above it, or it lands here
     // and shows the overlay with a garbage id.
+    if (!SessionScope.allows(field(2), SessionScope.coupleId)) return;
     pendingReach.value = ReachTap(
       tag,
       parts.length > 1 ? parts[1] : 'Your partner',

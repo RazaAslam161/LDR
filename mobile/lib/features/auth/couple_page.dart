@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_repository.dart';
-import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -118,11 +117,6 @@ class _CouplePageState extends ConsumerState<CouplePage> {
   /// stalled pairing into a dead account.
   Future<void> _signOut() async {
     setState(() => _loading = true);
-    try {
-      await FcmService.clearToken();
-    } catch (_) {
-      // Never block the exit on a push-token cleanup.
-    }
     await ref.read(sessionProvider.notifier).signOut();
     if (mounted) context.go('/signin');
   }

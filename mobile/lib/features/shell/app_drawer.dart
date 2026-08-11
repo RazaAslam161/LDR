@@ -1,9 +1,7 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
-import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 
@@ -222,7 +220,10 @@ class AppDrawer extends ConsumerWidget {
                 ),
                 TextButton(
                   onPressed: () async {
-                    await SupabaseRepository.signOut();
+                    // Signing out of Supabase directly first killed the session
+                    // that SessionNotifier.signOut needs to unbind this device
+                    // — the token stayed on the profile and this handset kept
+                    // receiving that couple's pushes under the next account.
                     await ref.read(sessionProvider.notifier).signOut();
                     if (context.mounted) {
                       Navigator.of(context).pop();

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/disguise/disguise_notification.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,6 +44,7 @@ Future<void> showReachNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String fromName,
   required String reachId,
+  required String coupleId,
   required bool fullScreen,
 }) async {
   // Wear this device's disguise, not the sender's and not a hardcoded one.
@@ -66,7 +68,7 @@ Future<void> showReachNotification({
     title: style.title,
     body: style.body,
     notificationDetails: NotificationDetails(android: android),
-    payload: '$reachId|$fromName',
+    payload: '$reachId|$fromName|$coupleId',
   );
 }
 
@@ -101,6 +103,7 @@ Future<void> showCallNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String fromName,
   required String callId,
+  required String coupleId,
   required bool video,
   required bool fullScreen,
 }) async {
@@ -124,7 +127,7 @@ Future<void> showCallNotification({
     title: style.title,
     body: style.body,
     notificationDetails: NotificationDetails(android: android),
-    payload: 'call|$callId|$fromName|${video ? 1 : 0}',
+    payload: 'call|$callId|$fromName|${video ? 1 : 0}|$coupleId',
   );
 }
 
@@ -162,6 +165,7 @@ AndroidNotificationChannel buildMsgChannel() =>
 Future<void> showMessageNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String messageId,
+  required String coupleId,
 }) async {
   final style = await currentNotificationStyle();
   final android = AndroidNotificationDetails(
@@ -179,7 +183,7 @@ Future<void> showMessageNotification({
     title: style.title,
     body: style.body,
     notificationDetails: NotificationDetails(android: android),
-    payload: 'message|$messageId',
+    payload: 'message|$messageId|$coupleId',
   );
 }
 
@@ -187,6 +191,7 @@ Future<void> showMessageNotification({
 Future<void> showCareNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String nudgeId,
+  required String coupleId,
 }) async {
   // The reported bug lived here: a care reminder sent to a partner running the
   // Calculator disguise arrived as a "News update".
@@ -206,7 +211,7 @@ Future<void> showCareNotification({
     title: style.title,
     body: style.body,
     notificationDetails: NotificationDetails(android: android),
-    payload: 'care|$nudgeId',
+    payload: 'care|$nudgeId|$coupleId',
   );
 }
 
@@ -221,6 +226,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (type != 'reach' && type != 'care' && type != 'call' && type != 'message') {
     return;
   }
+
+  // A push is addressed to a device token, so nothing above this line knows
+  // whether it belongs to the account currently signed in. A handset that had
+  // been signed into two accounts received the second couple's Reach inside the
+  // first couple's session. Drop it before it is ever drawn: an unwanted
+  // notification for a stranger's couple is the leak, not the tap that follows.
+  final coupleId = message.data['couple_id'] as String?;
+  if (!SessionScope.allows(coupleId, await SessionScope.readCouple())) return;
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final plugin = FlutterLocalNotificationsPlugin();
@@ -243,6 +256,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       plugin: plugin,
       fromName: (message.data['from_name'] as String?) ?? 'Your partner',
       callId: (message.data['call_id'] as String?) ?? '',
+      coupleId: coupleId ?? '',
       video: (message.data['video'] as String?) == 'true',
       fullScreen: fullScreen,
     );
@@ -254,6 +268,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await showMessageNotification(
       plugin: plugin,
       messageId: (message.data['message_id'] as String?) ?? '',
+      coupleId: coupleId ?? '',
     );
     return;
   }
@@ -263,6 +278,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await showCareNotification(
       plugin: plugin,
       nudgeId: (message.data['nudge_id'] as String?) ?? '',
+      coupleId: coupleId ?? '',
     );
     return;
   }
@@ -278,6 +294,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     plugin: plugin,
     fromName: (message.data['from_name'] as String?) ?? 'Your partner',
     reachId: (message.data['reach_id'] as String?) ?? '',
+    coupleId: coupleId ?? '',
     fullScreen: fullScreen,
   );
 }

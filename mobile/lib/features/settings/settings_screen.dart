@@ -8,7 +8,6 @@ import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
@@ -390,7 +389,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     setState(() => _busy = true);
     try {
-      await FcmService.clearToken();
       await SupabaseRepository.deleteMyAccount();
       await ref.read(sessionProvider.notifier).signOut();
       if (mounted) context.go('/signin');
@@ -403,8 +401,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _signOut() async {
-    // Drop this device's push token while still authenticated.
-    await FcmService.clearToken();
     await ref.read(sessionProvider.notifier).signOut();
     if (mounted) context.go('/signin');
   }
