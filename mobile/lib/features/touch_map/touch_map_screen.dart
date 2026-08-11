@@ -428,7 +428,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     MilesApp.systemOverlayActive = true;
     return showModalBottomSheet<String?>(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (sheetCtx) => SurfacePanel(
         radius: 24,
         padding: EdgeInsets.zero,

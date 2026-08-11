@@ -943,7 +943,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         _selection.allMine(_messages, SupabaseService.currentUserId);
     final choice = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -993,7 +992,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.transparent,
         title: const Text('Clear conversation?'),
         content: Text(
           'This will permanently delete all messages for both you and '

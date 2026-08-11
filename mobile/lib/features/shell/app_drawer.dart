@@ -15,9 +15,10 @@ class AppDrawer extends ConsumerWidget {
     final partner = session.partner;
 
     return Drawer(
-      // Transparent base so the Drawer contributes no colour of its own;
-      // the opaque panel below is what the user actually sees.
-      backgroundColor: Colors.transparent,
+      // The fill comes from drawerTheme. It used to be overridden to
+      // transparent here, which left the panel below as the only thing between
+      // the user and the animated background — one edit away from glass, for
+      // no gain, since both are surface1.
       child: Container(
         decoration: BoxDecoration(
           color: MilesColors.surface1,

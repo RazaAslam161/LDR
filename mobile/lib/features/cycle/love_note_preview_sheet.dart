@@ -34,7 +34,6 @@ class LoveNotePreviewSheet extends StatefulWidget {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (_) => LoveNotePreviewSheet(
         template: template,
         recipientName: recipientName,

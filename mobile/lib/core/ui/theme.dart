@@ -141,7 +141,16 @@ ThemeData milesDarkTheme() {
     // the text.
     scaffoldBackgroundColor: Colors.transparent,
     colorScheme: const ColorScheme.dark(
-      surface: Colors.transparent,
+      // Opaque, and this one line is where three glassmorphism sweeps went
+      // wrong. ColorScheme resolves surfaceContainerLow / surfaceContainer /
+      // surfaceContainerHigh as `?? surface`, and those three are M3's
+      // defaults behind a sheet, a menu and a dialog. While this was
+      // transparent, every modal that named no colour of its own painted
+      // nothing at all, and the ember field animated behind "Delete for
+      // everyone" — nowhere near any dialog in the source, so no amount of
+      // reading feature files could find it. A page gets its transparency
+      // from scaffoldBackgroundColor below, which no modal reads.
+      surface: MilesColors.night,
       onSurface: MilesColors.cream50,
       primary: MilesColors.ember,
       onPrimary: MilesColors.cream50,
@@ -213,6 +222,7 @@ ThemeData milesDarkTheme() {
       // every card, which is what glassmorphism looks like once the blur that
       // was smoothing it has been taken away.
       color: MilesColors.surface1,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
@@ -245,12 +255,43 @@ ThemeData milesDarkTheme() {
       color: MilesColors.gilt.withValues(alpha: 0.1),
       thickness: 1,
     ),
+    // Dialogs, sheets and menus. M3 gives each of these a fill from
+    // colorScheme.surfaceContainer* and then blends `surfaceTint` into it in
+    // proportion to elevation. Both halves of that default are the frosted
+    // look this app keeps growing back: the fill was see-through, and the tint
+    // is a second colour the palette never chose, applied by an implicit rule
+    // that gets stronger the higher the surface floats. So each one names its
+    // own fill and turns the tint off.
+    dialogTheme: const DialogThemeData(
+      backgroundColor: MilesColors.surface1,
+      surfaceTintColor: Colors.transparent,
+    ),
     bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: Colors.transparent,
+      backgroundColor: MilesColors.surface1,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
+    ),
+    popupMenuTheme: const PopupMenuThemeData(
+      color: MilesColors.surface2,
+      surfaceTintColor: Colors.transparent,
+    ),
+    menuTheme: const MenuThemeData(
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(MilesColors.surface2),
+        surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
+      ),
+    ),
+    dropdownMenuTheme: const DropdownMenuThemeData(
+      menuStyle: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(MilesColors.surface2),
+        surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
+      ),
+    ),
+    drawerTheme: const DrawerThemeData(
+      backgroundColor: MilesColors.surface1,
+      surfaceTintColor: Colors.transparent,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
