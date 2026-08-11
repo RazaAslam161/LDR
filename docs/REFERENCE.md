@@ -574,14 +574,17 @@ This area covers the app's landing dashboard ("Tethered" Home), live/coarse loca
 
 **Modes (`lib/core/services/location_service.dart`):** symmetric, opt-in, revocable. `off` (nothing shared), `city` (only a "City, Country" label — **no coordinates persisted**), `precise` (coords + accuracy + a finer reverse-geocoded label). Each user picks for their own account; either partner can turn it off any time. Foreground streaming has **no persistent notification** (the Android sticky-notification foreground-service was deliberately avoided).
 
-**Flow on Home (`_initLocation`):**
-1. Reads the user's stored mode from presence (`PresenceService.fetchMine`).
-2. **Auto-enable on first install:** if `SharedPreferences` key `location_auto_init` is unset, it sets mode to `precise` and writes it (`PresenceService.setSharingMode`). Stays on until the user taps "Turn off".
-3. If `precise`: `LocationService.startLiveSharing(couple.id)` + `BgLocationService.enable()`. If `city`: `LocationService.shareOnce`.
-4. `_refreshMyCoords` uses `Geolocator.getLastKnownPosition()` for an instant, prompt-free "you are here" used in the distance readout.
+**First run (`LocationService.onboard`, called from `AppShell._firstRunPrompts` after pairing):** location is deliberately NOT part of `PermissionsBootstrap.requestAllOnce` — that fires in the first frame of `main.dart`, before sign-up, and a cold ask is refused (and Android turns a second refusal into a permanent one). `onboard` shows a rationale naming the partner, then requests, then adopts a sharing mode. Once per **account** on the handset (`location_onboarded_<uid>`).
+
+**Flow on Home (`_startLocationUpdates`):**
+1. `LocationService.shareCurrent(couple.id)` immediately, then every 15s while Home is foreground. It reads the stored mode (`PresenceService.fetchMine`) each tick and returns a `LocationBlock` saying why it could not send.
+2. A non-`none` block renders `_LocationBlockedNotice` on Home — the state is otherwise invisible, because the map on that screen is the PARTNER's.
+3. `_refreshMyCoords` uses `Geolocator.getLastKnownPosition()` for an instant, prompt-free "you are here" used in the distance readout.
 
 **`LocationService` internals:**
-- `ensurePermission` / `blocked` wrap `Geolocator.checkPermission`/`requestPermission`. Background ("Allow all the time") is tracked separately: `hasBackgroundPermission()` checks `LocationPermission.always`; an `location_always_on` SharedPreferences flag (`isAlwaysOn`/`setAlwaysOnPref`) records the user's opt-in. Android 11+ won't grant "always" in the normal flow, so the caller routes to `openAppSettings`.
+- `check()` (never prompts) and `request()` (prompts when the OS will still show the sheet) both return a `LocationBlock`: `none`, `serviceDisabled`, `denied` or `deniedForever`. Permission is resolved **before** the service, because a granted permission with the device location switched off is a different repair on a different system page.
+- `resolve(context)` asks, and if something is still in the way explains it and opens the one page that fixes it — `Geolocator.openLocationSettings()` for `serviceDisabled`, `Geolocator.openAppSettings()` for `deniedForever`. A plain `denied` returns quietly (the user just said no); Home's notice and the Settings tile are the ways back.
+- `adoptPermissionAsDefault` sets the mode to `city` the first time the permission is actually held, once per **account** (`location_mode_defaulted_<uid>`), and never overrides a mode the user picked — including `off`.
 - `shareOnce` (city/precise one-shot) reverse-geocodes a label via `geocoding`'s `placemarkFromCoordinates`. In `city` mode it sends **only** the label (`PresenceService.setLocation(mode:'city', label:…)`), never coordinates.
 - `startLiveSharing` pushes one immediate high-accuracy fix, then streams `Geolocator.getPositionStream` with `distanceFilter: 10`, upserting each tick via `setLiveLocation`. Labels are re-geocoded only on first fix or after a ~700 m move (`_labelIfMoved`) to avoid geocoding every 10 m.
 - `stopLiveSharing` cancels the stream and `clearLiveLocation` (wipes coords, sets mode `off`) so the partner sees "paused", never a stale pin. `pauseStream` cancels the stream without changing the mode (used when Home is backgrounded / left).
@@ -663,7 +666,7 @@ There are two distinct mechanisms in `lib/features/reach/`:
 - **Supabase tables:** `presence`, `reach_events`, `reach_pulses` (inactive), `care_nudges`, `cycle_settings`, `cycle_events`; `profiles` (read for `gender`/`gender_set`, `timezone`).
 - **Realtime channels:** `presence:<coupleId>`, `reach_events:<coupleId>`, `reach:<coupleId>` (inactive), `care_nudges:<coupleId>`, `cycle_events:<coupleId>`, `home_cycle:<coupleId>`.
 - **Storage bucket:** `couple_media` (check-in snaps at `<coupleId>/checkins/…`).
-- **SharedPreferences keys:** `location_auto_init` (first-install auto-enable of precise sharing), `location_always_on` (background-sharing opt-in).
+- **SharedPreferences keys:** `location_onboarded_<uid>` (the explained first-run ask happened for this account), `location_mode_defaulted_<uid>` (sharing was defaulted to `city` once for this account). Both are per-account: a device-wide flag silently skipped the second person to sign in on a handset.
 - **Background work:** WorkManager periodic task `bgLocationUpdate` / unique `tethered-bg-location` (~15 min).
 - **External (key-less) map services:** CARTO dark basemap (2D), Esri World Imagery + AWS terrarium DEM + OpenFreeMap vector tiles via MapLibre GL JS 4.7.1 (3D); reverse geocoding via the `geocoding` plugin.
 - **RLS / security:** own-row-only writes + partner-read on `presence`; couple-scoped RLS on `reach_events`/`care_nudges`/`cycle_*`; cycle data additionally gated by the owner's `share_with_partner` flag. FCM background-wake for Reach is **stubbed/not configured** (`fcm_todo.dart`); only the foreground Reach overlay is live.

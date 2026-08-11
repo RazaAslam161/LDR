@@ -84,18 +84,57 @@ void main() {
     });
   });
 
-  test('granting location permission turns sharing on', () {
-    // The app asked for the permission and then left sharing 'off', so granting
-    // it did nothing until the user found the second switch in Settings.
-    expect(location, contains('adoptPermissionAsDefault'));
-    final fn = location.substring(location.indexOf('adoptPermissionAsDefault'));
-    final body = fn.substring(0, fn.indexOf('\n  }'));
-    expect(body, contains("'city'"),
-        reason: 'coarse is the polite default for something enabled for you',);
-    expect(body, contains('location_mode_defaulted'),
-        reason: "once only — after that the stored mode is the user's choice",);
-    expect(body, contains("!= 'off'"),
-        reason: 'must never override a mode the user picked themselves',);
+  group('the location permission and the sharing mode are two things', () {
+    test('granting the permission turns sharing on', () {
+      // The app asked for the permission and then left sharing 'off', so
+      // granting it did nothing until the user found the second switch in
+      // Settings.
+      expect(location, contains('adoptPermissionAsDefault'));
+      final fn =
+          location.substring(location.indexOf('adoptPermissionAsDefault'));
+      final body = fn.substring(0, fn.indexOf('\n  }'));
+      expect(body, contains("'city'"),
+          reason: 'coarse is the polite default for something enabled for you',);
+      expect(body, contains('location_mode_defaulted'),
+          reason: "once only — after that the stored mode is the user's choice",);
+      expect(body, contains("!= 'off'"),
+          reason: 'must never override a mode the user picked themselves',);
+    });
+
+    test('the once-only flags are per account, not per handset', () {
+      // SharedPreferences belongs to the install. Both of these were plain
+      // constants, so the SECOND person to sign in on a phone was skipped by
+      // both the first-run ask and the sharing default — they landed on a
+      // dashboard with sharing off and nothing telling them why.
+      for (final key in ['location_mode_defaulted', 'location_onboarded']) {
+        expect(location, contains("'${key}_\$uid'"),
+            reason: '$key must be scoped to the signed-in user',);
+      }
+    });
+
+    test('location is not in the cold startup permission blast', () {
+      // requestAllOnce runs in the first frame of main.dart — before sign-up,
+      // before pairing. A location request there is refused, and Android turns
+      // the second refusal into a permanent one, so the blast could burn the
+      // permission before the feature had been mentioned once.
+      final bootstrap = codeOnly(read('lib/core/services/permissions_bootstrap.dart'));
+      expect(bootstrap.contains('Permission.location'), isFalse,
+          reason: 'ask during onboarding, with a reason, not in frame one',);
+      expect(location, contains('static Future<void> onboard('),
+          reason: 'the explained first-run ask has to live somewhere',);
+    });
+
+    test('a mode that cannot be honoured is reported, never swallowed', () {
+      // shareCurrent used to return void: Home had no way to know that the
+      // 15s loop had been sending nothing for hours, so neither did the user.
+      expect(location, contains('Future<LocationBlock> shareCurrent('));
+      expect(read('lib/features/home/home_screen.dart'),
+          contains('_LocationBlockedNotice'),
+          reason: 'the one screen that shows location must show its own state',);
+      // Only the system pages can undo these two, so the app has to open them.
+      expect(location, contains('Geolocator.openLocationSettings()'));
+      expect(location, contains('Geolocator.openAppSettings()'));
+    });
   });
 
   group('returning to the app refreshes it', () {

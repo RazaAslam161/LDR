@@ -28,7 +28,8 @@ class SettingsScreen extends ConsumerStatefulWidget {
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+class _SettingsScreenState extends ConsumerState<SettingsScreen>
+    with WidgetsBindingObserver {
   final _name = TextEditingController();
   final _status = TextEditingController();
   bool _busy = false;
@@ -70,10 +71,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadLocationMode();
       _loadAppLock();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The repair for a missing location permission happens in the system
+    // settings app, and openAppSettings() returns the moment the intent is
+    // fired — not when the user comes back. Without this the tile still said
+    // "blocked" after they had just unblocked it, which is the same lie in the
+    // other direction.
+    if (state == AppLifecycleState.resumed) _loadLocationMode();
   }
 
   Future<void> _loadAppLock() async {
@@ -204,6 +216,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _name.dispose();
     _status.dispose();
     super.dispose();
