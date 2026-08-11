@@ -1,0 +1,473 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/media_urls.dart';
+import 'package:miles/core/data/models.dart';
+import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/signed_image.dart';
+import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/widgets/file_bubble.dart';
+import 'package:miles/features/chat/widgets/full_screen_video.dart';
+import 'package:miles/features/chat/widgets/media_viewer.dart';
+import 'package:miles/features/profile/shared_media_repository.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+/// The partner, and everything the two of them have sent each other.
+///
+/// Reached by tapping their name in the chat header or on Home. It takes no
+/// arguments on purpose: the couple and the partner come from the session, so
+/// there is no id travelling through a route that could still name the previous
+/// account's couple after a sign-out on the same handset.
+class PartnerProfileScreen extends ConsumerWidget {
+  const PartnerProfileScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = ref.watch(sessionProvider);
+    final partner = session.partner;
+    final couple = session.couple;
+
+    return Scaffold(
+      backgroundColor: MilesColors.night,
+      appBar: AppBar(title: const Text('Profile')),
+      body: partner == null || couple == null
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32),
+                child: Text(
+                  'Link with your partner first.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: MilesColors.taupe),
+                ),
+              ),
+            )
+          : DefaultTabController(
+              length: 3,
+              child: Column(
+                children: [
+                  _Header(partner: partner),
+                  TabBar(
+                    labelColor: MilesColors.cream50,
+                    unselectedLabelColor: MilesColors.taupe,
+                    indicatorColor: MilesColors.ember,
+                    tabs: [
+                      for (final kind in SharedMediaKind.values)
+                        Tab(text: kind.tabLabel),
+                    ],
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        for (final kind in SharedMediaKind.values)
+                          _Shelf(
+                            coupleId: couple.id,
+                            kind: kind,
+                            partnerName: partner.displayName,
+                            myUid: SupabaseService.currentUserId,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _Header extends ConsumerWidget {
+  const _Header({required this.partner});
+
+  final Profile partner;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final presence = ref.watch(partnerPresenceProvider);
+    final online = presence?.isTrulyOnline ?? false;
+    final avatar = partner.avatarUrl;
+    final status = partner.statusMessage?.trim();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+      child: Row(
+        children: [
+          GestureDetector(
+            // Their photo, full size, through the viewer every other image in
+            // the app opens in — including its save-to-vault button.
+            onTap: avatar == null
+                ? null
+                : () => MediaViewer.openStored(context, chatBucket, avatar,
+                    senderName: partner.displayName,),
+            child: _Avatar(url: avatar, name: partner.displayName),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(partner.displayName,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall,),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    if (online) ...[
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                            shape: BoxShape.circle, color: MilesColors.sage,),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      _presenceLine(presence),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: online ? MilesColors.sage : MilesColors.taupe,
+                      ),
+                    ),
+                  ],
+                ),
+                if (status != null && status.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(status,
+                      style: const TextStyle(
+                          color: MilesColors.cream100, fontSize: 13,),),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// What is actually known, rather than what would look tidy.
+  ///
+  /// `isTrulyOnline` and not the stored `is_online` flag: a force-killed app
+  /// never writes that flag false, so Home has shown partners as Online for
+  /// hours after they put the phone down. Null presence is not offline either —
+  /// it is the row not having arrived yet, and saying "Offline" for it would be
+  /// the same lie in the other direction.
+  static String _presenceLine(Presence? p) {
+    if (p == null) return 'Last seen unknown';
+    if (p.isTrulyOnline) return 'Online';
+    return p.lastSeenText ?? 'Offline';
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  const _Avatar({required this.url, required this.name});
+
+  final String? url;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
+    final letter = Center(
+      child: Text(initial,
+          style: const TextStyle(color: MilesColors.cream50, fontSize: 32),),
+    );
+    return Container(
+      width: 84,
+      height: 84,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: MilesColors.surface2,
+        border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.35), width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      // profiles.avatar_url holds a storage PATH. Image.network on it fails
+      // into the initial letter, which is why every partner with a photo looked
+      // like a partner without one for the length of every call.
+      child: url == null
+          ? letter
+          : SignedImage(bucket: chatBucket, value: url, placeholder: letter),
+    );
+  }
+}
+
+/// One tab: the couple's messages of a single [SharedMediaKind], paged.
+class _Shelf extends StatefulWidget {
+  const _Shelf({
+    required this.coupleId,
+    required this.kind,
+    required this.partnerName,
+    required this.myUid,
+  });
+
+  final String coupleId;
+  final SharedMediaKind kind;
+  final String partnerName;
+
+  /// Half of this grid is the user's own sends. Saving one to the vault labels
+  /// it with who it came from, and "Photo from <partner>" on a photo you took
+  /// yourself is the chat's own bug moved to a new screen.
+  final String? myUid;
+
+  @override
+  State<_Shelf> createState() => _ShelfState();
+}
+
+class _ShelfState extends State<_Shelf> {
+  final _items = <Message>[];
+  final _scroll = ScrollController();
+  bool _busy = false;
+  bool _end = false;
+  bool _firstLoadDone = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_maybeMore);
+    _more();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Ask a screen before the bottom, so the next page is usually already there
+  /// by the time the thumb gets to it.
+  void _maybeMore() {
+    if (!_scroll.hasClients) return;
+    final p = _scroll.position;
+    if (p.pixels > p.maxScrollExtent - 600) _more();
+  }
+
+  Future<void> _more() async {
+    if (_busy || _end) return;
+    _busy = true;
+    try {
+      final page = await SharedMediaRepository.page(
+        widget.coupleId,
+        widget.kind,
+        // The cursor is the last row's seq, never an offset: OFFSET 3000 makes
+        // the server walk 3000 rows it then throws away, and shifts under any
+        // message sent while the grid is open.
+        beforeSeq: _items.isEmpty ? null : _items.last.seq,
+      );
+      if (!mounted) return;
+      setState(() {
+        _items.addAll(page);
+        _end = page.length < SharedMediaRepository.pageSize;
+        _firstLoadDone = true;
+        _failed = false;
+      });
+    } catch (_) {
+      // A failed request must not read as an empty shelf. "No photos yet" on a
+      // couple with four hundred of them is the app lying about their history
+      // because the request timed out.
+      if (mounted) setState(() {
+        _firstLoadDone = true;
+        _failed = true;
+      });
+    } finally {
+      _busy = false;
+    }
+  }
+
+  void _retry() {
+    setState(() => _firstLoadDone = false);
+    _more();
+  }
+
+  String _senderName(Message m) =>
+      m.isMine(widget.myUid) ? 'you' : widget.partnerName;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_firstLoadDone) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_items.isEmpty) {
+      return _Notice(
+        text: _failed
+            ? "Couldn't load this. Check your connection and try again."
+            : widget.kind.emptyText,
+        onRetry: _failed ? _retry : null,
+      );
+    }
+
+    switch (widget.kind) {
+      case SharedMediaKind.media:
+        return GridView.builder(
+          controller: _scroll,
+          padding: const EdgeInsets.all(2),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: 2,
+            crossAxisSpacing: 2,
+          ),
+          itemCount: _items.length,
+          itemBuilder: (_, i) => _MediaTile(
+            message: _items[i],
+            senderName: _senderName(_items[i]),
+          ),
+        );
+      case SharedMediaKind.file:
+        return ListView.separated(
+          controller: _scroll,
+          padding: const EdgeInsets.all(16),
+          itemCount: _items.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (_, i) =>
+              FileBubble(message: _items[i], width: double.infinity),
+        );
+      case SharedMediaKind.link:
+        return ListView.separated(
+          controller: _scroll,
+          padding: const EdgeInsets.all(16),
+          itemCount: _items.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (_, i) => _LinkRow(message: _items[i]),
+        );
+    }
+  }
+}
+
+class _Notice extends StatelessWidget {
+  const _Notice({required this.text, this.onRetry});
+
+  final String text;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(text,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: MilesColors.taupe),),
+            if (onRetry != null)
+              TextButton(
+                onPressed: onRetry,
+                child: const Text('Try again',
+                    style: TextStyle(color: MilesColors.gilt),),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One square in the grid: a photo, or a video with nothing to show for itself.
+class _MediaTile extends StatelessWidget {
+  const _MediaTile({required this.message, required this.senderName});
+
+  final Message message;
+  final String senderName;
+
+  Future<void> _openVideo(BuildContext context) async {
+    // Usually already cached — the page's signing call warms couple_intimate
+    // too, so this is a map lookup rather than a round trip behind the tap.
+    final url = await ChatRepository.signedVideoUrl(message.videoPath);
+    if (url == null || !context.mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => FullScreenVideo(
+          url: url, videoPath: message.videoPath, senderName: senderName,),
+    ),);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.kind == 'video') {
+      // Videos carry no thumbnail — nothing has ever generated one, and the
+      // frames live in couple_intimate where fetching a 30MB file to draw a
+      // 120px square is exactly the download this screen must not do.
+      return GestureDetector(
+        onTap: () => _openVideo(context),
+        child: const ColoredBox(
+          color: MilesColors.night,
+          child: Center(
+            child: Icon(Icons.play_circle_outline,
+                color: MilesColors.cream50, size: 32,),
+          ),
+        ),
+      );
+    }
+
+    final url = message.imageUrl;
+    if (url == null) {
+      return const ColoredBox(color: MilesColors.surface2);
+    }
+    return GestureDetector(
+      onTap: () =>
+          MediaViewer.open(context, url, senderName: senderName),
+      child: NetImage(url),
+    );
+  }
+}
+
+class _LinkRow extends StatelessWidget {
+  const _LinkRow({required this.message});
+
+  final Message message;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = SharedMediaRepository.firstUrl(message.body);
+    if (url == null) return const SizedBox.shrink();
+    final host = Uri.tryParse(url)?.host ?? url;
+
+    return Material(
+      color: MilesColors.surface1,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => launchUrl(Uri.parse(url),
+            mode: LaunchMode.externalApplication,),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const Icon(Icons.link, color: MilesColors.gilt, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(host,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: MilesColors.cream50,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),),
+                    const SizedBox(height: 2),
+                    Text(url,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: MilesColors.taupe, fontSize: 12,),),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(DateFormat('d MMM').format(message.createdAt),
+                  style: const TextStyle(
+                      color: MilesColors.faint, fontSize: 11,),),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

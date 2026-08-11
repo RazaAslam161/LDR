@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:chewie/chewie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
@@ -37,19 +37,18 @@ import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
+import 'package:miles/features/chat/widgets/full_screen_video.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
 import 'package:miles/features/chat/widgets/selectable_message.dart';
 import 'package:miles/features/chat/widgets/typing_indicator.dart';
 import 'package:miles/features/chat/widgets/voice_note_bubble.dart';
-import 'package:miles/features/closer/secure_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 import 'package:uuid/uuid.dart';
-import 'package:video_player/video_player.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -1116,28 +1115,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               onPressed: () => rootScaffoldKey.currentState?.openDrawer(),
             ),
           ),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(partnerName ?? 'Chat',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: MilesColors.cream50,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,),),
-                  ),
-                  if (partnerMood != null) ...[
-                    const SizedBox(width: 8),
-                    AnimatedMood(mood: partnerMood, size: 20),
+          title: GestureDetector(
+            // The whole title block, not just the letters: the name and the
+            // presence line under it are one target, the way they are in every
+            // other messenger.
+            onTap: partnerName == null
+                ? null
+                : () => context.push('/app/partner'),
+            behavior: HitTestBehavior.opaque,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(partnerName ?? 'Chat',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: MilesColors.cream50,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,),),
+                    ),
+                    if (partnerMood != null) ...[
+                      const SizedBox(width: 8),
+                      AnimatedMood(mood: partnerMood, size: 20),
+                    ],
                   ],
-                ],
-              ),
-              if (partnerName != null)
-                _ChatSubtitle(presence: presence, partnerTyping: _partnerTyping),
-            ],
+                ),
+                if (partnerName != null)
+                  _ChatSubtitle(
+                      presence: presence, partnerTyping: _partnerTyping,),
+              ],
+            ),
           ),
           actions: [
             // Presence sits beside their name, where it means something, instead
@@ -2060,7 +2069,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
     }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-          builder: (_) => _FullScreenVideo(
+          builder: (_) => FullScreenVideo(
               url: url, videoPath: widget.path, senderName: widget.senderName,),),
     );
   }
@@ -2131,91 +2140,6 @@ class _VideoBubbleState extends State<_VideoBubble> {
             ),
           ),
       ],
-    );
-  }
-}
-
-/// Full-screen player with FLAG_SECURE so intimate video can't be
-/// screenshotted / screen-recorded / shown in the recents preview.
-class _FullScreenVideo extends StatefulWidget {
-  const _FullScreenVideo(
-      {required this.url, this.videoPath, this.senderName = 'a message',});
-  final String url;
-  final String? videoPath;
-  final String senderName;
-
-  @override
-  State<_FullScreenVideo> createState() => _FullScreenVideoState();
-}
-
-class _FullScreenVideoState extends State<_FullScreenVideo> {
-  VideoPlayerController? _vp;
-  ChewieController? _chewie;
-
-  @override
-  void initState() {
-    super.initState();
-    SecureScreen.setSecure();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final vp = VideoPlayerController.networkUrl(Uri.parse(widget.url));
-    try {
-      await vp.initialize();
-    } catch (_) {
-      await vp.dispose();
-      return;
-    }
-    if (!mounted) {
-      await vp.dispose();
-      return;
-    }
-    setState(() {
-      _vp = vp;
-      _chewie = ChewieController(
-        videoPlayerController: vp,
-        autoPlay: true,
-        aspectRatio: vp.value.aspectRatio == 0 ? 16 / 9 : vp.value.aspectRatio,
-      );
-    });
-  }
-
-  @override
-  void dispose() {
-    SecureScreen.clearSecure();
-    _chewie?.dispose();
-    _vp?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        leading: const BackButton(color: Colors.white),
-        actions: [
-          if (widget.videoPath != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Center(
-                child: SaveMediaButton(
-                  size: 24,
-                  color: Colors.white,
-                  onSave: () => SaveMediaService.saveVideoToVault(
-                      path: widget.videoPath!, senderName: widget.senderName,),
-                ),
-              ),
-            ),
-        ],
-      ),
-      body: Center(
-        child: _chewie == null
-            ? const CircularProgressIndicator()
-            : Chewie(controller: _chewie!),
-      ),
     );
   }
 }

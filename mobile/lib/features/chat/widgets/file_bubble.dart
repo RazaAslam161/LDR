@@ -13,9 +13,13 @@ import 'package:url_launcher/url_launcher.dart';
 /// signs on tap instead of with the page, because unlike a photo the bubble
 /// needs no URL to draw itself.
 class FileBubble extends StatefulWidget {
-  const FileBubble({required this.message, super.key});
+  const FileBubble({required this.message, super.key, this.width = 220});
 
   final Message message;
+
+  /// A bubble in the conversation is as wide as its content deserves; the same
+  /// row on the partner's profile is a list item and fills the page.
+  final double width;
 
   @override
   State<FileBubble> createState() => _FileBubbleState();
@@ -74,7 +78,7 @@ class _FileBubbleState extends State<FileBubble> {
             ? () => ChatSendQueue.instance.retry(m.id)
             : (busy ? null : _open),
         child: Container(
-          width: 220,
+          width: widget.width,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),

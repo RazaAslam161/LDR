@@ -352,18 +352,23 @@ class _PartnerStatusCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(partner.displayName,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.headlineSmall,),
-                        ),
-                        if (mood != null) ...[
-                          const SizedBox(width: 6),
-                          AnimatedMood(mood: mood, size: 20),
+                    GestureDetector(
+                      onTap: () => context.push('/app/partner'),
+                      behavior: HitTestBehavior.opaque,
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(partner.displayName,
+                                overflow: TextOverflow.ellipsis,
+                                style:
+                                    Theme.of(context).textTheme.headlineSmall,),
+                          ),
+                          if (mood != null) ...[
+                            const SizedBox(width: 6),
+                            AnimatedMood(mood: mood, size: 20),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Row(
