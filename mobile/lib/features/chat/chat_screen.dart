@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
@@ -21,6 +22,7 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
+import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
@@ -1020,7 +1022,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final partnerMood = moodByKey(presence?.currentMood);
     final themeCtrl = ref.watch(chatThemeProvider);
     final chatTheme = themeCtrl.theme;
-    final chatBgUrl = themeCtrl.bgUrl;
+    final chatBgPath = themeCtrl.bgPath;
     final one = _onlySelected;
 
     return PopScope(
@@ -1119,7 +1121,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             : Stack(
                 children: [
                   Positioned.fill(
-                      child: _ChatBg(theme: chatTheme, bgUrl: chatBgUrl),),
+                      child: _ChatBg(theme: chatTheme, bgPath: chatBgPath),),
                   Column(
                     children: [
                       // Only while selecting. It says how many, and — more
@@ -1834,21 +1836,20 @@ class _Content extends StatelessWidget {
 /// The themed chat background: a gradient/solid colour, or — for the 'custom'
 /// theme — the user's photo with a dark scrim so message text stays readable.
 class _ChatBg extends StatelessWidget {
-  const _ChatBg({required this.theme, required this.bgUrl});
+  const _ChatBg({required this.theme, required this.bgPath});
   final ChatTheme theme;
-  final String? bgUrl;
+  final String? bgPath;
 
   @override
   Widget build(BuildContext context) {
-    if (theme.isCustom && bgUrl != null) {
+    if (theme.isCustom && bgPath != null) {
       return Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(
-            bgUrl!,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) =>
-                const ColoredBox(color: MilesColors.night),
+          SignedImage(
+            bucket: chatBgBucket,
+            value: bgPath,
+            placeholder: const ColoredBox(color: MilesColors.night),
           ),
           const DecoratedBox(
             decoration: BoxDecoration(

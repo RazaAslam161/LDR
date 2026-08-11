@@ -16,22 +16,25 @@ class ChatThemeController extends ChangeNotifier {
   static const _bgKey = 'chat_bg_url';
 
   String _themeId = 'velvet';
-  String? _bgUrl;
+  String? _bgPath;
 
   String get themeId => _themeId;
-  String? get bgUrl => _bgUrl;
+
+  /// A storage path in `chat-bg`, or a legacy public URL cached by an older
+  /// build. Readers sign it — the bucket is private.
+  String? get bgPath => _bgPath;
   ChatTheme get theme => chatThemeById(_themeId);
 
   Future<void> _init() async {
     final p = await SharedPreferences.getInstance();
     _themeId = p.getString(_themeKey) ?? 'velvet';
-    _bgUrl = p.getString(_bgKey);
+    _bgPath = p.getString(_bgKey);
     notifyListeners();
     // Then reconcile with the server (cross-device).
     try {
       final remote = await SupabaseRepository.getChatTheme();
       _themeId = remote.themeId;
-      _bgUrl = remote.bgUrl;
+      _bgPath = remote.bgPath;
       await _cache();
       notifyListeners();
     } catch (_) {}
@@ -40,8 +43,8 @@ class ChatThemeController extends ChangeNotifier {
   Future<void> _cache() async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_themeKey, _themeId);
-    if (_bgUrl != null) {
-      await p.setString(_bgKey, _bgUrl!);
+    if (_bgPath != null) {
+      await p.setString(_bgKey, _bgPath!);
     } else {
       await p.remove(_bgKey);
     }
@@ -56,13 +59,13 @@ class ChatThemeController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> setCustomBackground(String url) async {
+  Future<void> setCustomBackground(String path) async {
     _themeId = 'custom';
-    _bgUrl = url;
+    _bgPath = path;
     notifyListeners();
     await _cache();
     try {
-      await SupabaseRepository.setChatTheme('custom', bgUrl: url);
+      await SupabaseRepository.setChatTheme('custom', bgPath: path);
     } catch (_) {}
   }
 }

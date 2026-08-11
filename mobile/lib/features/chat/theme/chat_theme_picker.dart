@@ -33,11 +33,13 @@ class _ChatThemeSheetState extends ConsumerState<_ChatThemeSheet> {
     try {
       final uid = SupabaseService.currentUserId!;
       final path = '$uid/bg_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      await SupabaseService.client.storage.from('chat-bg').upload(path, file);
-      final url = await MediaUrls.sign('chat-bg', path);
-      if (url != null) {
-        await ref.read(chatThemeProvider).setCustomBackground(url);
-      }
+      await SupabaseService.client.storage
+          .from(chatBgBucket)
+          .upload(path, file);
+      // The PATH, not the signed URL. Persisting the URL stored a 24h expiry
+      // in a column read for years: the background went black a day after it
+      // was chosen, on every device, with nothing to point at.
+      await ref.read(chatThemeProvider).setCustomBackground(path);
       if (mounted) Navigator.pop(context);
     } catch (_) {
       if (mounted) {

@@ -365,17 +365,22 @@ class SupabaseRepository {
   }
 
   /// Per-user chat theme (Issue 5). Each partner has their own.
-  static Future<void> setChatTheme(String themeId, {String? bgUrl}) async {
+  ///
+  /// [bgPath] is a storage path in `chat-bg`, despite the column's name. It
+  /// held a signed URL until that URL's 24h expiry started outliving the
+  /// background it pointed at; the column keeps its name because renaming it
+  /// would strand every client that has not been sideloaded again.
+  static Future<void> setChatTheme(String themeId, {String? bgPath}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     final patch = <String, dynamic>{'chat_theme_id': themeId};
-    if (themeId == 'custom') patch['chat_bg_image_url'] = bgUrl;
+    if (themeId == 'custom') patch['chat_bg_image_url'] = bgPath;
     await _c.from('profiles').update(patch).eq('id', uid);
   }
 
-  static Future<({String themeId, String? bgUrl})> getChatTheme() async {
+  static Future<({String themeId, String? bgPath})> getChatTheme() async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return (themeId: 'velvet', bgUrl: null);
+    if (uid == null) return (themeId: 'velvet', bgPath: null);
     final res = await _c
         .from('profiles')
         .select('chat_theme_id, chat_bg_image_url')
@@ -383,7 +388,7 @@ class SupabaseRepository {
         .maybeSingle();
     return (
       themeId: JsonUtils.parseString(res?['chat_theme_id'], fallback: 'velvet'),
-      bgUrl: JsonUtils.parseStringOrNull(res?['chat_bg_image_url']),
+      bgPath: JsonUtils.parseStringOrNull(res?['chat_bg_image_url']),
     );
   }
 
