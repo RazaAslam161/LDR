@@ -9,8 +9,8 @@ import 'package:flutter/scheduler.dart';
 /// every pointer move: a rebuild of the entire 1518-line camera tree, and a
 /// `setZoomLevel` platform round trip. A finger produces well over 60 moves a
 /// second, so the UI thread spent its budget rebuilding a tree whose only
-/// changed pixel was a "2.4x" label, and the channel queued calls it could not
-/// service. That is the lag.
+/// changed pixel was a "2.4x" label, and the channel was asked for more than it
+/// could service. That is the lag.
 ///
 /// So the gesture and the zoom run on separate clocks. The finger writes a
 /// TARGET, cheaply, as often as it likes. A ticker moves the applied value
@@ -18,18 +18,23 @@ import 'package:flutter/scheduler.dart';
 /// the same period. Nothing rebuilds: [value] is a [ValueListenable], so only
 /// the indicator that listens to it repaints.
 class ZoomController {
-  ZoomController({required this.apply, TickerProvider? vsync})
+  ZoomController({required this.apply, required TickerProvider vsync})
       : _vsync = vsync;
 
   /// Pushes a level to the camera. Kept injectable so the curve and the damping
   /// can be tested without a camera.
   final Future<void> Function(double level) apply;
 
-  final TickerProvider? _vsync;
+  final TickerProvider _vsync;
   Ticker? _ticker;
 
   double _min = 1;
   double _max = 1;
+
+  /// Finger travel, in logical pixels, that covers the whole range. A
+  /// calibration of the device, set once — not an argument to a method the
+  /// gesture calls sixty times a second.
+  double _span = 220;
 
   /// What the camera is actually set to. The indicator listens to this rather
   /// than to the target, so the number on screen never runs ahead of the lens.
@@ -38,6 +43,7 @@ class ZoomController {
   double _target = 1;
   double _applied = 1;
   bool _inFlight = false;
+  double? _pendingLevel;
 
   /// Where the finger was when the drag began, in normalised 0..1 curve space.
   double _dragOrigin = 0;
@@ -51,12 +57,21 @@ class ZoomController {
   /// spent on range nobody uses.
   static const _usableCeiling = 6.0;
 
-  void configure({required double min, required double max}) {
+  void configure({
+    required double min,
+    required double max,
+    double span = 220,
+  }) {
     _min = min;
-    _max = math.min(max, min * _usableCeiling);
+    // Against 1.0, not against min. A device that reports a sub-1.0 minimum is
+    // describing its ultra-wide: relative to min the ceiling would collapse to
+    // 3.6x, and the camera would open on the wide lens instead of the field of
+    // view the user framed the shot in.
+    _max = math.min(max, _usableCeiling);
     if (_max < _min) _max = _min;
-    _target = _applied = _min;
-    value.value = _min;
+    _span = span;
+    _target = _applied = 1.0.clamp(_min, _max);
+    value.value = _applied;
   }
 
   /// Call when a drag begins, so travel is measured from here rather than from
@@ -64,12 +79,11 @@ class ZoomController {
   void beginDrag() => _dragOrigin = _toCurve(_target);
 
   /// [dy] is upward finger travel in logical pixels since [beginDrag].
-  /// [span] is the distance that should cover the whole range.
   ///
   /// Cheap on purpose: one clamp and one field write. Whatever rate the
   /// platform delivers pointer moves at, this costs the same.
-  void dragBy(double dy, {double span = 220}) {
-    final t = (_dragOrigin + dy / span).clamp(0.0, 1.0);
+  void dragBy(double dy) {
+    final t = (_dragOrigin + dy / _span).clamp(0.0, 1.0);
     _target = _fromCurve(t);
     _ensureTicking();
   }
@@ -105,30 +119,35 @@ class ZoomController {
   // ── the clock ─────────────────────────────────────────────────────────────
 
   void _ensureTicking() {
-    if (_vsync == null) {
-      // No ticker (tests): apply straight through so behaviour is still
-      // observable without pumping frames.
-      _applied = _target;
-      value.value = _applied;
-      _push(_applied);
-      return;
-    }
     _ticker ??= _vsync.createTicker(_onFrame);
-    if (!_ticker!.isActive) _ticker!.start();
+    if (!_ticker!.isActive) {
+      _last = Duration.zero; // Ticker restarts elapsed from zero on start()
+      _ticker!.start();
+    }
   }
 
-  /// Exponential smoothing toward the target, once per frame.
+  /// Time constant of the smoothing, in seconds.
   ///
-  /// 0.35 per frame at 60fps closes ~90% of the gap in five frames — 80ms,
-  /// which reads as instant while still eating the jitter of a finger that is
-  /// also holding a shutter down. Higher and the platform's own latency shows
-  /// through as stepping; lower and the lens visibly lags the thumb.
-  static const _smoothing = 0.35;
+  /// A per-frame constant would not survive this fleet: the OnePlus 8 runs a
+  /// 90Hz panel and the OnePlus 7 and Vivo run 60Hz, so the same 0.35/frame
+  /// settled 1.5x faster on one phone and passed ~40% more thumb tremor
+  /// through to the lens. Deriving alpha from the frame's own dt makes the
+  /// FEEL the constant: 0.341 at 60Hz, 0.243 at 90Hz, same 40ms either way.
+  static const _tau = 0.040;
 
   /// Below this the change is invisible on screen and not worth a channel call.
   static const _epsilon = 0.005;
 
-  void _onFrame(Duration _) {
+  Duration _last = Duration.zero;
+
+  void _onFrame(Duration elapsed) {
+    // Clamped both ends. TickerMode mutes the ticker while a route sits over
+    // the camera without clearing isActive, so the frame after it pops can
+    // carry an arbitrary dt — and an unclamped alpha of ~1 is exactly the jump
+    // the smoothing exists to prevent.
+    final dt = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.001, 0.050);
+    _last = elapsed;
+
     final gap = _target - _applied;
     if (gap.abs() < _epsilon) {
       _applied = _target;
@@ -137,21 +156,43 @@ class ZoomController {
       _ticker?.stop();
       return;
     }
-    _applied += gap * _smoothing;
+    _applied += gap * (1 - math.exp(-dt / _tau));
     value.value = _applied;
     _push(_applied);
   }
 
-  /// At most one call in flight. setZoomLevel is a platform round trip; calling
-  /// it again before the last returned does not go faster, it queues — and a
-  /// queue is what turns a smooth drag into a series of jumps arriving late.
+  /// At most one call in flight, and the newest dropped level fired on release.
   ///
-  /// Dropping frames here is correct rather than lossy: the ticker is still
-  /// converging, so the next frame carries a fresher value than the one skipped.
+  /// Each setZoomLevel rebuilds the repeating capture request and CameraX
+  /// cancels the previous pending signal, so this is a rate limit matched to
+  /// the capture pipeline rather than a defence against a queue. Dropping
+  /// intermediate levels costs nothing — the ticker is still converging, so the
+  /// next sample is fresher than the one skipped — but dropping the LAST one
+  /// costs everything: the ticker stops on the same frame it makes its final
+  /// push, so a lost trailing value leaves the lens short of the target with
+  /// nothing left to correct it.
+  ///
+  /// [Future.sync] because a synchronous throw out of `setZoomLevel` would
+  /// otherwise escape into the ticker callback and wedge the gate shut for the
+  /// rest of the session. The timeout covers the same failure from the other
+  /// side: a platform reply that never arrives.
   void _push(double level) {
-    if (_inFlight) return;
+    if (_inFlight) {
+      _pendingLevel = level;
+      return;
+    }
     _inFlight = true;
-    apply(level).catchError((Object _) {}).whenComplete(() => _inFlight = false);
+    Future.sync(() => apply(level))
+        .timeout(const Duration(seconds: 1), onTimeout: () {})
+        .catchError((Object _) {})
+        .whenComplete(() {
+      _inFlight = false;
+      final pending = _pendingLevel;
+      if (pending != null) {
+        _pendingLevel = null;
+        _push(pending);
+      }
+    });
   }
 
   void dispose() {

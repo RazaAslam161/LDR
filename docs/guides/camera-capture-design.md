@@ -3,8 +3,9 @@
 Tap = photo. Press-and-hold = video. Slide the **holding** finger up/down to zoom.
 No second finger, no quality loss.
 
-Status: `ZoomController` built and tested (`lib/features/chat/camera/zoom_controller.dart`).
-Gesture wiring and tap-to-preview delivery not yet done.
+Status: shipped, except tap-to-preview delivery. `ZoomController`
+(`lib/features/chat/camera/zoom_controller.dart`, ten tests) and the gesture
+itself (`rapid_camera_screen.dart`, `_SlidingLongPress` + `_CaptureButton`).
 
 Full research output, including citations, is in the workflow result for run
 `wf_876b7439-70d`. What follows is only the load-bearing parts.
@@ -39,6 +40,13 @@ invisible: the shutter simply does nothing.
 This is the most likely reason a naive port feels broken on a OnePlus 7 or Vivo
 1908 and fine on a desk emulator. **Set `preAcceptSlopTolerance` generously
 (≈40px) explicitly.**
+
+And it cannot be set where you would look for it. `LongPressGestureRecognizer`'s
+constructor forwards `postAcceptSlopTolerance` to `super` but not
+`preAcceptSlopTolerance` (`long_press.dart:281-290`), and the field it would
+reach is `final`. The slop check reads the *getter*
+(`recognizer.dart:707-711`), so the only seam is a subclass that overrides it —
+which is what `_SlidingLongPress` is for.
 
 ## 3. Slide-off-and-keep-recording is free
 
@@ -87,31 +95,45 @@ left and fires immediately.
 
 ---
 
-## Zoom controller — already built
+## Zoom controller
 
-`lib/features/chat/camera/zoom_controller.dart`, six tests.
+`lib/features/chat/camera/zoom_controller.dart`, ten tests.
 
 - Gesture and zoom on **separate clocks**: the finger writes a target (one clamp,
   one field write); a ticker interpolates toward it once per frame.
-- **One platform call in flight.** `setZoomLevel` is a round trip; calling it
-  again before the last returns queues, and a queue is what turns a smooth drag
-  into late jumps.
+- **One platform call in flight, plus a trailing push.** Each `setZoomLevel`
+  rebuilds the repeating capture request and CameraX cancels the previous
+  pending signal, so the gate is a rate limit matched to the capture pipeline —
+  not a defence against a queue. Dropping intermediate levels costs nothing (the
+  ticker is still converging, so the next sample is fresher than the one
+  skipped); dropping the *last* one leaves the lens short of the target with
+  nothing left to correct it, so the newest dropped level is re-sent on
+  release.
 - **Geometric curve**, `zoom = min * (max/min)^t` — zoom is a ratio, not a
   distance, so equal travel must mean equal ratio or the finger races through
   1×–2× and crawls through 5×–6×.
-- **0.35/frame smoothing** — ~90% of the gap in five frames (80ms): instant to
-  the eye, still eats the jitter of a finger that is also holding the shutter.
-- **Capped at 6×.** Phones report digital maxima they cannot resolve.
+- **Smoothing by time constant, not per frame** — `alpha = 1 - e^(-dt/40ms)`.
+  A fixed 0.35/frame is 60Hz-only: IN2015 is a 90Hz panel, so it settled 1.5x
+  faster there and passed ~40% more thumb tremor through to the lens. `dt` is
+  clamped to [1ms, 50ms] so a janked or TickerMode-muted frame cannot produce
+  an alpha of ~1 and a jump.
+- **Capped at 6×**, against 1.0 rather than against the reported minimum — a
+  phone fronting its ultra-wide reports min 0.6, and a relative cap would
+  collapse the ceiling to 3.6× and open every shot on the wide lens. Phones
+  report digital maxima they cannot resolve; break-even for a 1080p capture off
+  these sensors is nearer 2×, so 6× is already generous. `_initController` logs
+  the reported range on open — read it off GM1900, IN2015 and 1908 before
+  lowering it.
 - `value` is a `ValueListenable`, so only the indicator repaints — never the
   1518-line camera tree, which is what `setState` on every pointer move was doing.
 
 ## Remaining work
 
-1. Wire `ZoomController` behind `RawGestureDetector` with an explicit
-   `LongPressGestureRecognizer` (duration ≈200ms, `preAcceptSlopTolerance` ≈40),
-   and delete the `onScaleUpdate → setState` path.
-2. Tap-to-preview delivery into chat: model flag, migration, placeholder bubble,
+1. Tap-to-preview delivery into chat: model flag, migration, placeholder bubble,
    reuse `media_viewer` + `SaveMediaService` for the explicit save.
+2. Read the logged zoom range off each of GM1900, IN2015 and 1908 — the 6× cap
+   and the sub-1.0-minimum handling are both written against claims no phone
+   here has yet confirmed.
 
 **Assumption, stated:** tap-to-preview **persists**. This is not Snapchat's
 auto-delete — the bubble hides the media behind a tap, opening shows it, saving

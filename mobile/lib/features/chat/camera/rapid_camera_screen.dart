@@ -4,8 +4,10 @@ import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -14,6 +16,7 @@ import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/chat/camera/camera_bake.dart';
 import 'package:miles/features/chat/camera/camera_filter_painter.dart';
 import 'package:miles/features/chat/camera/camera_filters.dart';
+import 'package:miles/features/chat/camera/zoom_controller.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/main.dart' show MilesApp;
 import 'package:path_provider/path_provider.dart';
@@ -47,7 +50,7 @@ class RapidCameraScreen extends StatefulWidget {
 }
 
 class _RapidCameraScreenState extends State<RapidCameraScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   CameraController? _controller;
   List<CameraDescription> _cameras = const [];
   int _cameraIndex = 0;
@@ -63,20 +66,20 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   CameraFilter _selectedFilter =
       kCameraFilters.firstWhere((f) => f.id == 'none');
 
-  // Zoom. The bounds come from the device, not from a guess — a phone with no
-  // telephoto reports max == min and pinching is then a no-op rather than a
-  // stretched, soft digital crop.
-  double _minZoom = 1, _maxZoom = 1, _zoom = 1;
+  /// Zoom. The bounds come from the device, not from a guess — a phone with no
+  /// telephoto reports max == min and the gesture is then a no-op rather than a
+  /// stretched, soft digital crop. Everything else about it — the curve, the
+  /// smoothing, the call rate — lives in [ZoomController], off the build path.
+  late final ZoomController _zoom = ZoomController(
+    vsync: this,
+    apply: (level) async {
+      await _controller?.setZoomLevel(level);
+    },
+  );
 
-  /// Zoom at the moment the pinch began, so the gesture is relative.
-  double _zoomAtGestureStart = 1;
-
-  /// setZoomLevel is a platform round trip. A pinch emits scale updates every
-  /// frame, and firing one call per update floods the channel and makes the
-  /// preview stutter — the opposite of what zoom is for. One in flight at a
-  /// time; the newest value wins.
-  bool _zoomInFlight = false;
-  double? _pendingZoom;
+  /// Applied level at the moment a pinch began, so the second finger is
+  /// relative rather than absolute.
+  double _pinchAnchor = 1;
 
   _CamState _state = _CamState.preview;
   File? _capturedFile;
@@ -202,13 +205,20 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     // supported size and initialize() does not throw. Log what we actually got,
     // because it is the number every downstream cost scales with.
     debugPrint('[camera] preview=${c.value.previewSize}');
+    double minZoom;
+    double maxZoom;
     try {
-      _minZoom = await c.getMinZoomLevel();
-      _maxZoom = await c.getMaxZoomLevel();
+      minZoom = await c.getMinZoomLevel();
+      maxZoom = await c.getMaxZoomLevel();
     } catch (_) {
-      _minZoom = _maxZoom = 1; // device would not say — treat as fixed
+      minZoom = maxZoom = 1; // device would not say — treat as fixed
     }
-    _zoom = _minZoom;
+    // Logged because it is a device claim we cannot check from here, and the
+    // whole gesture is calibrated against it: a sub-1.0 minimum means the
+    // stream is fronted by the ultra-wide, and a maximum in the tens is digital
+    // crop the sensor cannot resolve.
+    debugPrint('[camera] zoom range $minZoom..$maxZoom');
+    _zoom.configure(min: minZoom, max: maxZoom);
     setState(() => _ready = true);
   }
 
@@ -245,6 +255,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     WidgetsBinding.instance.removeObserver(this);
     _recordTimer?.cancel();
     _restoreBrightness(); // never leave the screen stuck at max brightness
+    _zoom.dispose();
     _videoPreview?.dispose();
     _controller?.dispose();
     super.dispose();
@@ -263,8 +274,8 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     await _controller?.dispose();
     _controller = null;
     _cameraIndex = (_cameraIndex + 1) % _cameras.length;
-    _zoom = 1;
-    _pendingZoom = null;
+    // The new lens reports its own bounds; _initController reconfigures and
+    // resets the level with them.
     await _initController(_cameras[_cameraIndex]); // filter is preserved
   }
 
@@ -558,37 +569,27 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     );
   }
 
-  void _onZoomStart(ScaleStartDetails _) => _zoomAtGestureStart = _zoom;
+  // ── zoom gestures ─────────────────────────────────────────────────────────
+  //
+  // Two ways in, one target. Neither calls setState: a rebuild of this tree per
+  // pointer move is what made zoom feel like it was dragging the whole screen
+  // behind it.
 
-  void _onZoomUpdate(ScaleUpdateDetails d) {
-    if (_maxZoom <= _minZoom) return; // fixed lens — nothing to do
-    final next =
-        (_zoomAtGestureStart * d.scale).clamp(_minZoom, _maxZoom);
-    if ((next - _zoom).abs() < 0.01) return;
-    setState(() => _zoom = next);
-    _applyZoom(next);
-  }
+  void _onPinchStart(ScaleStartDetails _) => _pinchAnchor = _zoom.value.value;
 
-  /// Coalescing apply: at most one platform call in flight, and whatever the
-  /// finger reached while it was busy is applied next. Dropping the
-  /// intermediate values is the point — they are already stale.
-  Future<void> _applyZoom(double value) async {
-    if (_zoomInFlight) {
-      _pendingZoom = value;
-      return;
-    }
-    _zoomInFlight = true;
-    try {
-      await _controller?.setZoomLevel(value);
-    } catch (_) {
-      // Some devices reject a level mid-switch; the next update recovers.
-    }
-    _zoomInFlight = false;
-    final queued = _pendingZoom;
-    if (queued != null) {
-      _pendingZoom = null;
-      unawaited(_applyZoom(queued));
-    }
+  void _onPinchUpdate(ScaleUpdateDetails d) =>
+      _zoom.setLevel(_pinchAnchor * d.scale);
+
+  /// The hold was accepted: video starts and the holding finger becomes the
+  /// zoom control.
+  ///
+  /// The tick is not decoration. Until the shutter's grow animation lands there
+  /// is no signal that the hold registered, and a hold that has not visibly
+  /// registered gets released — which is a 200ms video, discarded.
+  void _onHoldStart() {
+    unawaited(HapticFeedback.mediumImpact());
+    _zoom.beginDrag();
+    unawaited(_startRecording());
   }
 
   // ── preview state ─────────────────────────────────────────────────────────
@@ -621,35 +622,45 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
         // stacked above still receive their own taps.
         GestureDetector(
           behavior: HitTestBehavior.translucent,
-          onScaleStart: _onZoomStart,
-          onScaleUpdate: _onZoomUpdate,
+          onScaleStart: _onPinchStart,
+          onScaleUpdate: _onPinchUpdate,
           child: viewfinder,
         ),
 
-        // Only while it differs from 1x — a permanent badge is clutter.
-        if (_zoom > _minZoom + 0.01)
-          Positioned(
-            bottom: 150,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 5,),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text('${_zoom.toStringAsFixed(1)}x',
-                      style: const TextStyle(
-                          color: MilesColors.cream50,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,),),
-                ),
+        // The badge, and nothing else, listens to the zoom. A ValueListenable
+        // instead of setState is the whole point: during a drag this rebuilds
+        // one Text per frame rather than the camera tree, the preview and the
+        // filter strip.
+        Positioned(
+          bottom: 150,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(
+              child: ValueListenableBuilder<double>(
+                valueListenable: _zoom.value,
+                builder: (context, level, _) {
+                  // Only while it differs from 1x — a permanent badge is
+                  // clutter.
+                  if ((level - 1).abs() < 0.01) return const SizedBox.shrink();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 5,),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text('${level.toStringAsFixed(1)}x',
+                        style: const TextStyle(
+                            color: MilesColors.cream50,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,),),
+                  );
+                },
               ),
             ),
           ),
+        ),
 
         // 2. top bar (hidden while recording)
         if (_state != _CamState.recording)
@@ -728,7 +739,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
                 child: recording
                     ? const Center(
                         child: Text(
-                          'Recording… release to stop',
+                          'Recording… slide up to zoom, release to stop',
                           style: TextStyle(
                               color: MilesColors.cream100, fontSize: 12,),
                         ),
@@ -739,8 +750,9 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
               _CaptureButton(
                 recording: recording,
                 onTap: _capture,
-                onLongPressStart: _startRecording,
-                onLongPressEnd: _stopRecording,
+                onHoldStart: _onHoldStart,
+                onHoldMove: _zoom.dragBy,
+                onHoldEnd: _stopRecording,
               ),
               if (!recording)
                 const Padding(
@@ -991,57 +1003,119 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
+/// A long press for a finger that is already travelling when it matures.
+///
+/// Both settings are unreachable from where they are normally set.
+/// [LongPressGestureRecognizer] does not forward `preAcceptSlopTolerance` to
+/// [PrimaryPointerGestureRecognizer] (long_press.dart:281-290), so overriding
+/// the getter is the only seam — and left at its default it resolves to
+/// Android's touch slop, about 8 logical pixels. Drift further than that before
+/// the deadline and the press is REJECTED: no video, and no photo either,
+/// because tap rejects on the same slop. A gesture whose whole definition is
+/// "move while holding" cannot live inside 8px.
+///
+/// 500ms, the default duration, reads as a sluggish shutter; 200ms is clear of
+/// a tap and short of a wait.
+class _SlidingLongPress extends LongPressGestureRecognizer {
+  _SlidingLongPress() : super(duration: const Duration(milliseconds: 200));
+
+  @override
+  double? get preAcceptSlopTolerance => 40;
+}
+
+/// Tap = photo, hold = video, slide the holding finger up = zoom in.
+///
+/// [GestureDetector] cannot express this: it constructs its
+/// [LongPressGestureRecognizer] itself and passes only `debugOwner` and
+/// `supportedDevices`, so neither of the two settings this gesture turns is
+/// reachable through it.
 class _CaptureButton extends StatelessWidget {
   const _CaptureButton({
     required this.onTap,
-    required this.onLongPressStart,
-    required this.onLongPressEnd,
+    required this.onHoldStart,
+    required this.onHoldMove,
+    required this.onHoldEnd,
     this.recording = false,
   });
   final VoidCallback onTap;
-  final VoidCallback onLongPressStart;
-  final VoidCallback onLongPressEnd;
+  final VoidCallback onHoldStart;
+
+  /// Upward finger travel since the press, in logical pixels.
+  final ValueChanged<double> onHoldMove;
+  final VoidCallback onHoldEnd;
   final bool recording;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      onLongPressStart: (_) => onLongPressStart(),
-      onLongPressEnd: (_) => onLongPressEnd(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        width: recording ? 84 : 72,
-        height: recording ? 84 : 72,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: recording ? null : MilesGradients.cta,
-          color: recording ? MilesColors.blush : null,
-          boxShadow: [
-            BoxShadow(
-              color: recording ? MilesColors.blush : MilesColors.ember,
-              blurRadius: 16,
-            ),
-          ],
+    return RawGestureDetector(
+      // Opaque so the Stack stops here. The preview's ScaleGestureRecognizer
+      // claims a single-finger drag at 36px with no deadline to wait for, so if
+      // a pointer on the shutter ever reached it, it would win the arena before
+      // the 200ms hold matured and recording would simply never start.
+      behavior: HitTestBehavior.opaque,
+      gestures: <Type, GestureRecognizerFactory>{
+        TapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+          TapGestureRecognizer.new,
+          (r) => r.onTap = onTap,
         ),
-        child: Center(
-          child: recording
-              ? Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: MilesColors.cream50,
-                    borderRadius: BorderRadius.circular(6),
+        _SlidingLongPress:
+            GestureRecognizerFactoryWithHandlers<_SlidingLongPress>(
+          _SlidingLongPress.new,
+          // The lambdas are parenthesised because an arrow body swallows a
+          // following `..` into itself.
+          (r) => r
+            ..onLongPressStart = ((_) => onHoldStart())
+            // offsetFromOrigin, not localOffsetFromOrigin: this button grows
+            // 72→84 on record, and in local space that would make zoom
+            // sensitivity a function of the button's own animation. Upward
+            // travel is negative dy.
+            ..onLongPressMoveUpdate =
+                ((d) => onHoldMove(-d.offsetFromOrigin.dy))
+            ..onLongPressEnd = ((_) => onHoldEnd()),
+        ),
+      },
+      // RawGestureDetector announces nothing on its own, where GestureDetector
+      // wrapped its recognisers in this for free. Without it the shutter is an
+      // unlabelled blob to TalkBack.
+      child: Semantics(
+        button: true,
+        label: 'Take photo, hold for video',
+        onTap: recording ? null : onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: recording ? 84 : 72,
+          height: recording ? 84 : 72,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: recording ? null : MilesGradients.cta,
+            color: recording ? MilesColors.blush : null,
+            boxShadow: [
+              BoxShadow(
+                color: recording ? MilesColors.blush : MilesColors.ember,
+                blurRadius: 16,
+              ),
+            ],
+          ),
+          child: Center(
+            child: recording
+                ? Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: MilesColors.cream50,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  )
+                : Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: MilesColors.cream50, width: 3),
+                    ),
                   ),
-                )
-              : Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: MilesColors.cream50, width: 3),
-                  ),
-                ),
+          ),
         ),
       ),
     );
