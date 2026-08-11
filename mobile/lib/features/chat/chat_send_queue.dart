@@ -182,6 +182,18 @@ class ChatSendQueue extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Drop everything on sign-out.
+  ///
+  /// This queue is a process singleton and outlives the session that filled
+  /// it. A send accepted for one couple would otherwise still be retried under
+  /// the next account signed in on the handset — refused by RLS, but it is
+  /// that account's network and that account's battery, and the file is
+  /// somebody else's.
+  void clear() {
+    _pending.clear();
+    notifyListeners();
+  }
+
   /// Start as many accepted sends as the cap allows, oldest first.
   void _pump() {
     for (final send in _pending) {

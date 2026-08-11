@@ -122,8 +122,15 @@ class MediaUrls {
     return value;
   }
 
-  @visibleForTesting
-  static void clearForTest() => _cache.clear();
+  /// Forget every signed URL. Called on sign-out.
+  ///
+  /// This cache is device-scoped and lives as long as the process, so without
+  /// this the next account on the handset inherits a map of live 24-hour URLs
+  /// to the previous couple's objects. Nothing in the app looks a path up
+  /// without a row that names it, so it is not reachable today — but "not
+  /// reachable today" is what the FCM token was, and the account after it got
+  /// that couple's Reaches.
+  static void clear() => _cache.clear();
 
   @visibleForTesting
   static void seedForTest(String bucket, String path, String url) =>

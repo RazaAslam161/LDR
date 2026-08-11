@@ -19,7 +19,7 @@ void main() {
   const signed = 'https://abc.supabase.co/storage/v1/object/sign/'
       'couple_media/$path?token=xyz';
 
-  setUp(MediaUrls.clearForTest);
+  setUp(MediaUrls.clear);
 
   /// A tap target that actually paints. A bare SizedBox has nothing to hit-test
   /// against, so the tap lands on nothing and the assertions pass vacuously.

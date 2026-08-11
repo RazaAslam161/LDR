@@ -7,7 +7,7 @@ import 'package:miles/core/data/media_urls.dart';
 /// way to revoke it. These pin the two things that have to be right for the
 /// bucket to close without breaking what is already stored.
 void main() {
-  setUp(MediaUrls.clearForTest);
+  setUp(MediaUrls.clear);
 
   group('toPath', () {
     test('leaves a plain storage path alone', () {
