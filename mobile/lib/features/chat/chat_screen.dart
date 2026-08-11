@@ -37,7 +37,6 @@ import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
-import 'package:miles/features/chat/widgets/full_screen_video.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
@@ -1834,9 +1833,11 @@ class _Content extends StatelessWidget {
                 ),
               );
         return GestureDetector(
+          // The PATH, not the URL it is currently signed as: the viewer holds
+          // this for as long as it is open and a token dies in a day.
           onTap: url == null
               ? null
-              : () => MediaViewer.open(context, url,
+              : () => MediaViewer.openStored(context, chatBucket, m.imagePath!,
                   heroTag: url, senderName: senderName,),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
@@ -2054,10 +2055,16 @@ class _VideoBubble extends StatefulWidget {
 class _VideoBubbleState extends State<_VideoBubble> {
   bool _loading = false;
 
+  /// One viewer for everything. A second full-screen player would be a second
+  /// place FLAG_SECURE has to be remembered, and couple_intimate is the one
+  /// bucket in this app that exists to stop a screenshot.
   Future<void> _open() async {
-    if (widget.path == null) return;
+    final path = widget.path;
+    if (path == null) return;
     setState(() => _loading = true);
-    final url = await ChatRepository.signedVideoUrl(widget.path);
+    // Not for the URL — the viewer signs. This is the "is it actually there"
+    // check the bubble already made, and the snackbar it already showed.
+    final url = await ChatRepository.signedVideoUrl(path);
     if (!mounted) return;
     setState(() => _loading = false);
     if (url == null) {
@@ -2065,11 +2072,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
           .showSnackBar(const SnackBar(content: Text('Video unavailable')));
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-          builder: (_) => FullScreenVideo(
-              url: url, videoPath: widget.path, senderName: widget.senderName,),),
-    );
+    await MediaViewer.openStored(context, intimateBucket, path,
+        isVideo: true, senderName: widget.senderName,);
   }
 
   @override

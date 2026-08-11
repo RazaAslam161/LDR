@@ -5,15 +5,15 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/media/media_source.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
-import 'package:miles/features/chat/widgets/full_screen_video.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/profile/shared_media_repository.dart';
+import 'package:miles/features/profile/shared_media_window.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// The partner, and everything the two of them have sent each other.
@@ -217,23 +217,26 @@ class _Shelf extends StatefulWidget {
 }
 
 class _ShelfState extends State<_Shelf> {
-  final _items = <Message>[];
   final _scroll = ScrollController();
-  bool _busy = false;
-  bool _end = false;
-  bool _firstLoadDone = false;
-  bool _failed = false;
+  late final SharedMediaWindow _window = SharedMediaWindow(
+    fetch: (beforeSeq) => SharedMediaRepository.page(
+        widget.coupleId, widget.kind, beforeSeq: beforeSeq,),
+    pageSize: SharedMediaRepository.pageSize,
+    partnerName: widget.partnerName,
+    myUid: widget.myUid,
+  );
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_maybeMore);
-    _more();
+    _window.extend();
   }
 
   @override
   void dispose() {
     _scroll.dispose();
+    _window.dispose();
     super.dispose();
   }
 
@@ -242,97 +245,72 @@ class _ShelfState extends State<_Shelf> {
   void _maybeMore() {
     if (!_scroll.hasClients) return;
     final p = _scroll.position;
-    if (p.pixels > p.maxScrollExtent - 600) _more();
+    if (p.pixels > p.maxScrollExtent - 600) _window.extend();
   }
-
-  Future<void> _more() async {
-    if (_busy || _end) return;
-    _busy = true;
-    try {
-      final page = await SharedMediaRepository.page(
-        widget.coupleId,
-        widget.kind,
-        // The cursor is the last row's seq, never an offset: OFFSET 3000 makes
-        // the server walk 3000 rows it then throws away, and shifts under any
-        // message sent while the grid is open.
-        beforeSeq: _items.isEmpty ? null : _items.last.seq,
-      );
-      if (!mounted) return;
-      setState(() {
-        _items.addAll(page);
-        _end = page.length < SharedMediaRepository.pageSize;
-        _firstLoadDone = true;
-        _failed = false;
-      });
-    } catch (_) {
-      // A failed request must not read as an empty shelf. "No photos yet" on a
-      // couple with four hundred of them is the app lying about their history
-      // because the request timed out.
-      if (mounted) setState(() {
-        _firstLoadDone = true;
-        _failed = true;
-      });
-    } finally {
-      _busy = false;
-    }
-  }
-
-  void _retry() {
-    setState(() => _firstLoadDone = false);
-    _more();
-  }
-
-  String _senderName(Message m) =>
-      m.isMine(widget.myUid) ? 'you' : widget.partnerName;
 
   @override
   Widget build(BuildContext context) {
-    if (!_firstLoadDone) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_items.isEmpty) {
-      return _Notice(
-        text: _failed
-            ? "Couldn't load this. Check your connection and try again."
-            : widget.kind.emptyText,
-        onRetry: _failed ? _retry : null,
-      );
-    }
+    return ListenableBuilder(
+      listenable: _window,
+      builder: (context, _) {
+        if (!_window.loadedOnce) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final messages = _window.messages;
+        if (messages.isEmpty) {
+          return _Notice(
+            text: _window.failed
+                ? "Couldn't load this. Check your connection and try again."
+                : widget.kind.emptyText,
+            onRetry: _window.failed ? _window.retry : null,
+          );
+        }
 
-    switch (widget.kind) {
-      case SharedMediaKind.media:
-        return GridView.builder(
-          controller: _scroll,
-          padding: const EdgeInsets.all(2),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            mainAxisSpacing: 2,
-            crossAxisSpacing: 2,
-          ),
-          itemCount: _items.length,
-          itemBuilder: (_, i) => _MediaTile(
-            message: _items[i],
-            senderName: _senderName(_items[i]),
-          ),
-        );
-      case SharedMediaKind.file:
-        return ListView.separated(
-          controller: _scroll,
-          padding: const EdgeInsets.all(16),
-          itemCount: _items.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (_, i) =>
-              FileBubble(message: _items[i], width: double.infinity),
-        );
-      case SharedMediaKind.link:
-        return ListView.separated(
-          controller: _scroll,
-          padding: const EdgeInsets.all(16),
-          itemCount: _items.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (_, i) => _LinkRow(message: _items[i]),
-        );
-    }
+        switch (widget.kind) {
+          case SharedMediaKind.media:
+            // The tile's real extent, handed to the decoder. Without it a
+            // 3000×4000 upload is decoded at full size into a 120dp square —
+            // about 48MB a tile, so two of them blow the 100MiB image cache
+            // and the rest of the scroll is permanent re-decode churn. The
+            // pager shares that cache, so this is the grid's bill and the
+            // viewer's.
+            final side = (MediaQuery.sizeOf(context).width - 8) / 3;
+            return GridView.builder(
+              controller: _scroll,
+              padding: const EdgeInsets.all(2),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 2,
+                crossAxisSpacing: 2,
+              ),
+              itemCount: _window.length,
+              itemBuilder: (_, i) => _MediaTile(
+                item: _window.itemAt(i),
+                side: side,
+                onTap: () =>
+                    MediaViewer.open(context, _window, index: i),
+              ),
+            );
+          case SharedMediaKind.file:
+            return ListView.separated(
+              controller: _scroll,
+              padding: const EdgeInsets.all(16),
+              itemCount: messages.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) =>
+                  FileBubble(message: messages[i], width: double.infinity),
+            );
+          case SharedMediaKind.link:
+            return ListView.separated(
+              controller: _scroll,
+              padding: const EdgeInsets.all(16),
+              itemCount: messages.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) => _LinkRow(message: messages[i]),
+            );
+        }
+      },
+    );
   }
 }
 
@@ -368,30 +346,24 @@ class _Notice extends StatelessWidget {
 
 /// One square in the grid: a photo, or a video with nothing to show for itself.
 class _MediaTile extends StatelessWidget {
-  const _MediaTile({required this.message, required this.senderName});
+  const _MediaTile({
+    required this.item,
+    required this.side,
+    required this.onTap,
+  });
 
-  final Message message;
-  final String senderName;
-
-  Future<void> _openVideo(BuildContext context) async {
-    // Usually already cached — the page's signing call warms couple_intimate
-    // too, so this is a map lookup rather than a round trip behind the tap.
-    final url = await ChatRepository.signedVideoUrl(message.videoPath);
-    if (url == null || !context.mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => FullScreenVideo(
-          url: url, videoPath: message.videoPath, senderName: senderName,),
-    ),);
-  }
+  final MediaItem item;
+  final double side;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    if (message.kind == 'video') {
+    if (item.isVideo) {
       // Videos carry no thumbnail — nothing has ever generated one, and the
       // frames live in couple_intimate where fetching a 30MB file to draw a
       // 120px square is exactly the download this screen must not do.
       return GestureDetector(
-        onTap: () => _openVideo(context),
+        onTap: onTap,
         child: const ColoredBox(
           color: MilesColors.night,
           child: Center(
@@ -402,14 +374,17 @@ class _MediaTile extends StatelessWidget {
       );
     }
 
-    final url = message.imageUrl;
-    if (url == null) {
-      return const ColoredBox(color: MilesColors.surface2);
-    }
     return GestureDetector(
-      onTap: () =>
-          MediaViewer.open(context, url, senderName: senderName),
-      child: NetImage(url),
+      onTap: onTap,
+      child: Hero(
+        tag: item.heroTag,
+        // Through SignedImage rather than the cache directly: a token lives 24
+        // hours and a shelf this long outlives one, so a tile that could only
+        // read what the page load happened to sign is a grey square from the
+        // day after until the app is killed.
+        child: SignedImage(
+            bucket: item.bucket, value: item.path, width: side, height: side,),
+      ),
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/data/media_urls.dart';
@@ -50,20 +51,52 @@ void main() {
     expect(tester.widget<NetImage>(find.byType(NetImage)).url, signed);
   });
 
-  testWidgets('tapping through to the viewer signs the stored path',
+  testWidgets('tapping through to the viewer carries the stored path',
       (tester) async {
     // The bug exactly: the viewer was handed 'fc1c8a3a/checkins/…jpg' as if it
     // were a URL. Image.network on that resolves to nothing and paints the
     // broken-image icon on the viewer's black backdrop.
+    //
+    // The viewer takes the PATH now and signs for itself, which is also what
+    // lets it sign AGAIN when a 24-hour token dies while it is open.
     MediaUrls.seedForTest(chatBucket, path, signed);
     await tester.pumpWidget(
         tapper((c) => MediaViewer.openStored(c, chatBucket, path)),);
 
     await tester.tap(find.byKey(const Key('tap')));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: the page's placeholder is a CircularProgressIndicator
+    // and there is no cache manager under a widget test to ever resolve it, so
+    // settling here waits for a frame that never stops being scheduled.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
 
-    expect(
-        tester.widget<MediaViewer>(find.byType(MediaViewer)).imageUrl, signed,);
+    final item =
+        tester.widget<MediaViewer>(find.byType(MediaViewer)).source.itemAt(0);
+    expect(item.bucket, chatBucket);
+    expect(item.path, path);
+    expect(item.cacheKey, '$chatBucket/$path');
+  });
+
+  testWidgets('the page renders the signed URL, keyed by the path',
+      (tester) async {
+    MediaUrls.seedForTest(chatBucket, path, signed);
+    await tester.pumpWidget(
+        tapper((c) => MediaViewer.openStored(c, chatBucket, path)),);
+
+    await tester.tap(find.byKey(const Key('tap')));
+    // Not pumpAndSettle: the page's placeholder is a CircularProgressIndicator
+    // and there is no cache manager under a widget test to ever resolve it, so
+    // settling here waits for a frame that never stops being scheduled.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    final image =
+        tester.widget<CachedNetworkImage>(find.byType(CachedNetworkImage));
+    expect(image.imageUrl, signed);
+    // Not the URL: the token in it rotates every 24h, so a URL-keyed cache
+    // re-downloads the whole library the next day and fills the disk with
+    // duplicates of bytes it already had.
+    expect(image.cacheKey, '$chatBucket/$path');
   });
 
   testWidgets('a legacy public URL is signed rather than fetched',
@@ -77,9 +110,14 @@ void main() {
         tapper((c) => MediaViewer.openStored(c, chatBucket, legacy)),);
 
     await tester.tap(find.byKey(const Key('tap')));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: the page's placeholder is a CircularProgressIndicator
+    // and there is no cache manager under a widget test to ever resolve it, so
+    // settling here waits for a frame that never stops being scheduled.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
 
     expect(
-        tester.widget<MediaViewer>(find.byType(MediaViewer)).imageUrl, signed,);
+        tester.widget<MediaViewer>(find.byType(MediaViewer)).source.itemAt(0).path,
+        path,);
   });
 }

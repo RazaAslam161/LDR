@@ -42,6 +42,7 @@ class SignedImage extends StatefulWidget {
 
 class _SignedImageState extends State<SignedImage> {
   String? _url;
+  String? _path;
 
   @override
   void initState() {
@@ -64,6 +65,7 @@ class _SignedImageState extends State<SignedImage> {
       return;
     }
     final path = MediaUrls.toPath(widget.bucket, v);
+    _path = path;
     final cached = MediaUrls.cached(widget.bucket, path);
     if (cached != null) {
       if (mounted) setState(() => _url = cached);
@@ -84,7 +86,13 @@ class _SignedImageState extends State<SignedImage> {
             child: const ColoredBox(color: MilesColors.surface2),
           );
     }
+    // Keyed by the path this signed, not by the URL it signed to. The token in
+    // that URL rotates every 24h, so a URL-keyed cache re-downloads the whole
+    // library the next day and fills the disk with copies of bytes it has.
     return NetImage(url,
-        fit: widget.fit, width: widget.width, height: widget.height,);
+        fit: widget.fit,
+        width: widget.width,
+        height: widget.height,
+        cacheKey: '${widget.bucket}/$_path',);
   }
 }

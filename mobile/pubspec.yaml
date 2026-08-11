@@ -93,6 +93,11 @@ dependencies:
   xml: ^7.0.1
   uuid: ^4.5.3
   cached_network_image: ^3.4.1
+  # Direct because the media pager warms the FILE for the pages two and three
+  # swipes out — the same singleton and the same cache key
+  # CachedNetworkImage reads. Only ever present transitively before, which is
+  # a version this app does not control.
+  flutter_cache_manager: ^3.4.1
   screen_brightness: ^2.1.11
   google_mlkit_subject_segmentation: ^0.0.3
   google_mlkit_pose_detection: ^0.14.1

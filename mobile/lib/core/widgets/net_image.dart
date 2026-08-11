@@ -13,6 +13,7 @@ class NetImage extends StatelessWidget {
     this.width,
     this.height,
     this.error,
+    this.cacheKey,
   });
 
   final String url;
@@ -20,6 +21,14 @@ class NetImage extends StatelessWidget {
   final double? width;
   final double? height;
   final Widget? error;
+
+  /// What to file these bytes under, when [url] is a signed URL.
+  ///
+  /// Without it the cache is keyed by a URL with an expiring token in it, so
+  /// every image in the app re-downloads the day after it was first seen and
+  /// the disk fills with copies of bytes it already has. Pass
+  /// `'<bucket>/<path>'` — the path is stable, the URL is not.
+  final String? cacheKey;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +41,7 @@ class NetImage extends StatelessWidget {
     final h = height;
     return CachedNetworkImage(
       imageUrl: url,
+      cacheKey: cacheKey,
       fit: fit,
       width: w,
       height: h,

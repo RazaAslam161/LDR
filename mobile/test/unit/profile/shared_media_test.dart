@@ -137,7 +137,10 @@ void main() {
     test('a failed load is not drawn as an empty shelf', () {
       // "No photos or videos yet." on a couple with four hundred of them,
       // because the request timed out, is the app inventing their history.
-      expect(screen, contains('_failed'));
+      // The flag lives on the window the grid and the pager share now, which
+      // is also what makes it survivable: retry refills the same list both are
+      // reading.
+      expect(screen, contains('_window.failed'));
       expect(screen, contains('Try again'));
     });
 

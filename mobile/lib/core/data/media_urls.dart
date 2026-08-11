@@ -96,6 +96,19 @@ class MediaUrls {
     }
   }
 
+  /// Sign again from scratch, discarding whatever is cached.
+  ///
+  /// [cached] only declines a URL it can see is nearly expired. A token can
+  /// stop working before that: the object was re-uploaded, the project's JWT
+  /// secret was rotated, or this handset's clock is simply wrong, and a phone
+  /// that is an hour fast hands out URLs it believes are fresh and the server
+  /// believes are dead. That is a 403 the viewer has to be able to recover
+  /// from, and it cannot while the dead URL stays in the map.
+  static Future<String?> refresh(String bucket, String path) {
+    _cache.remove(_key(bucket, path));
+    return sign(bucket, path);
+  }
+
   /// The storage path inside [bucket] for a value that may be a path or a
   /// legacy URL of either shape.
   ///
