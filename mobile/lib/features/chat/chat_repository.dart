@@ -36,7 +36,6 @@ class Message {
     this.videoPath,
     this.replyToId,
     this.kind = 'text',
-    this.previewGated = false,
     this.deletedForEveryone = false,
     this.deletedBy = const [],
     this.localPath,
@@ -53,7 +52,6 @@ class Message {
         videoPath: JsonUtils.parseStringOrNull(j['video_path']),
         replyToId: JsonUtils.parseStringOrNull(j['reply_to_id']),
         kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
-        previewGated: JsonUtils.parseBool(j['preview_gated']),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
         seq: JsonUtils.parseInt(j['seq']),
         deletedForEveryone: JsonUtils.parseBool(j['deleted_for_everyone']),
@@ -85,7 +83,6 @@ class Message {
         videoPath: videoPath,
         replyToId: replyToId,
         kind: kind,
-        previewGated: previewGated,
         deletedForEveryone: deletedForEveryone,
         deletedBy: deletedBy,
         localPath: localPath ?? this.localPath,
@@ -105,7 +102,6 @@ class Message {
         videoPath: server.videoPath,
         replyToId: server.replyToId,
         kind: server.kind,
-        previewGated: server.previewGated,
         deletedForEveryone: server.deletedForEveryone,
         deletedBy: server.deletedBy,
         localPath: localPath,
@@ -128,12 +124,6 @@ class Message {
   final String? videoPath;
   final String? replyToId;
   final String kind;
-
-  /// Captured in-app, so the bubble shows a tap-to-view placeholder instead of
-  /// the media. The message persists either way — this hides it, it does not
-  /// expire it. False for anything picked from the gallery, and for every row
-  /// that predates the column.
-  final bool previewGated;
 
   /// A short preview of a message for quote-replies.
   String previewText() {
@@ -285,7 +275,7 @@ class ChatRepository {
   /// message row of kind='image'. Returns the storage path (so callers can
   /// broadcast the fast-path 'msg'), or null if there's no signed-in user.
   static Future<String?> sendImage(String coupleId, File file,
-      {String? replyToId, String? id, bool previewGated = false,}) async {
+      {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
 
@@ -300,10 +290,6 @@ class ChatRepository {
         'sender_id': uid,
         'image_path': path,
         'kind': 'image',
-        // Only named when true: a client that reaches a database without the
-        // column still sends gallery photos, because PostgREST rejects the
-        // whole insert (PGRST204) for one unknown column.
-        if (previewGated) 'preview_gated': true,
         if (replyToId != null) 'reply_to_id': replyToId,
       });
       Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
@@ -343,7 +329,7 @@ class ChatRepository {
   /// every video the queue sent appeared twice — invisible while videos went
   /// one at a time, obvious the moment a pick of twelve does.
   static Future<void> sendVideo(String coupleId, File file,
-      {String? replyToId, String? id, bool previewGated = false,}) async {
+      {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -356,7 +342,6 @@ class ChatRepository {
       'sender_id': uid,
       'video_path': path,
       'kind': 'video',
-      if (previewGated) 'preview_gated': true,
       if (replyToId != null) 'reply_to_id': replyToId,
     });
   }

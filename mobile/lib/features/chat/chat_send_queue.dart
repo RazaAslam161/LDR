@@ -18,7 +18,6 @@ class PendingSend {
     required this.file,
     required this.kind,
     this.replyToId,
-    this.previewGated = false,
     this.status = SendStatus.sending,
   });
 
@@ -31,12 +30,6 @@ class PendingSend {
   /// bubble.
   final String kind;
   final String? replyToId;
-
-  /// Set for a capture, clear for a gallery pick. Carried here as well as in
-  /// the insert because the chat builds the optimistic bubble from this — the
-  /// sender's own screen must gate it from the first frame, not once the row
-  /// comes back.
-  final bool previewGated;
 
   SendStatus status;
 }
@@ -88,12 +81,11 @@ class ChatSendQueue extends ChangeNotifier {
   /// Accept a photo and start uploading. Returns immediately — the caller is
   /// expected to dismiss its screen on the next line.
   String enqueueImage(String coupleId, File file,
-          {String? replyToId, String? id, bool previewGated = false,}) =>
-      _enqueue(coupleId, file, 'image', replyToId, id, previewGated);
+          {String? replyToId, String? id,}) =>
+      _enqueue(coupleId, file, 'image', replyToId, id);
 
-  String enqueueVideo(String coupleId, File file,
-          {String? replyToId, bool previewGated = false,}) =>
-      _enqueue(coupleId, file, 'video', replyToId, null, previewGated);
+  String enqueueVideo(String coupleId, File file, {String? replyToId}) =>
+      _enqueue(coupleId, file, 'video', replyToId, null);
 
   /// Accept a whole gallery pick at once, in the order it was picked.
   ///
@@ -131,7 +123,6 @@ class ChatSendQueue extends ChangeNotifier {
     String kind,
     String? replyToId,
     String? id,
-    bool previewGated,
   ) {
     final send = PendingSend(
       id: id ?? _uuid.v4(),
@@ -139,7 +130,6 @@ class ChatSendQueue extends ChangeNotifier {
       file: file,
       kind: kind,
       replyToId: replyToId,
-      previewGated: previewGated,
     );
     _pending.add(send);
     notifyListeners();
@@ -198,9 +188,7 @@ class ChatSendQueue extends ChangeNotifier {
   static Future<void> _upload(PendingSend send) async {
     if (send.kind == 'video') {
       await ChatRepository.sendVideo(send.coupleId, send.file,
-          id: send.id,
-          replyToId: send.replyToId,
-          previewGated: send.previewGated,);
+          id: send.id, replyToId: send.replyToId,);
       return;
     }
     final path = await ChatRepository.sendImage(
@@ -208,7 +196,6 @@ class ChatSendQueue extends ChangeNotifier {
       send.file,
       id: send.id,
       replyToId: send.replyToId,
-      previewGated: send.previewGated,
     );
     // Fast-path the photo to the partner's chat if it happens to be open.
     final myUid = SupabaseService.currentUserId;
@@ -218,7 +205,6 @@ class ChatSendQueue extends ChangeNotifier {
         senderId: myUid,
         imagePath: path,
         replyToId: send.replyToId,
-        previewGated: send.previewGated,
       );
     }
   }

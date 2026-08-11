@@ -27,7 +27,6 @@ class ChatBroadcastService {
     required String senderId,
     required String imagePath,
     String? replyToId,
-    bool previewGated = false,
   }) {
     active?.sendBroadcastMessage(
       event: 'msg',
@@ -36,31 +35,23 @@ class ChatBroadcastService {
         senderId: senderId,
         imagePath: imagePath,
         replyToId: replyToId,
-        previewGated: previewGated,
       ),
     );
   }
 
   /// The 'msg' payload, apart from the send so both halves can be tested
   /// against each other.
-  ///
-  /// The gate has to survive this hop, not just the database one: the partner
-  /// renders from this map for the second or two before the Postgres echo
-  /// lands, so a payload that dropped the flag would put a snap on their
-  /// screen inline for exactly that long.
   static Map<String, dynamic> imagePayload({
     required String id,
     required String senderId,
     required String imagePath,
     String? replyToId,
-    bool previewGated = false,
   }) =>
       {
         'id': id,
         'sender': senderId,
         'kind': 'image',
         'imagePath': imagePath,
-        'previewGated': previewGated,
         'createdAt': DateTime.now().toUtc().toIso8601String(),
         'replyToId': replyToId,
       };
@@ -81,7 +72,6 @@ class ChatBroadcastService {
       kind: kind,
       body: kind == 'text' ? payload['body']?.toString() : null,
       imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
-      previewGated: payload['previewGated'] == true,
       replyToId: payload['replyToId']?.toString(),
     );
   }

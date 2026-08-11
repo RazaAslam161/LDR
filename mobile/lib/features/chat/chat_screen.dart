@@ -36,7 +36,6 @@ import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
-import 'package:miles/features/chat/widgets/gated_media_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
@@ -269,7 +268,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         senderId: myUid,
         createdAt: DateTime.now(),
         kind: s.kind,
-        previewGated: s.previewGated,
         localPath: s.file.path,
         sendStatus: s.status,
         replyToId: s.replyToId,
@@ -1741,17 +1739,6 @@ class _Content extends StatelessWidget {
       case 'image':
         final local = m.localPath;
         final url = m.imageUrl;
-        if (m.previewGated) {
-          return GatedMediaBubble(
-            message: m,
-            onRetry: () => ChatSendQueue.instance.retry(m.id),
-            // No hero: a shared-element flight from this tile would animate
-            // the photo out of a bubble that is meant to show nothing of it.
-            onTap: url == null
-                ? null
-                : () => MediaViewer.open(context, url, senderName: senderName),
-          );
-        }
         if (local == null && url == null) {
           return const Padding(
             padding: EdgeInsets.all(8),
@@ -2124,15 +2111,6 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
   @override
   Widget build(BuildContext context) {
-    // A gated video shows the placeholder and no save shortcut: saving a snap
-    // is a choice made after opening it, in the player.
-    if (widget.message.previewGated) {
-      return GatedMediaBubble(
-        message: widget.message,
-        busy: _loading,
-        onTap: widget.path == null ? null : _open,
-      );
-    }
     // An outgoing video has no thumbnail and no signed URL yet, so without
     // these it sat as a black tile with a play button that did nothing — for
     // as long as the upload took, and forever if it failed.

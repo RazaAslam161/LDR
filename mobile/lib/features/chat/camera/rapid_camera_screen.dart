@@ -539,18 +539,12 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     // behind a full-screen veil for as long as the network took, and a failure
     // lost the photo outright. The queue owns it from here, so it survives this
     // screen closing — and the chat shows the bubble immediately either way.
-    // previewGated: everything shot here is a snap, so it lands as a tap-to-view
-    // bubble on both screens. A photo attached from the gallery goes through
-    // ChatInputBar instead and stays inline — the user chose that picture as a
-    // picture, not as something to be opened.
     if (_capturedIsVideo) {
       // Video → private couple_intimate bucket + kind:'video'. The partner's
       // chat renders it from the postgres echo (no image fast-path broadcast).
-      ChatSendQueue.instance
-          .enqueueVideo(widget.coupleId, file, previewGated: true);
+      ChatSendQueue.instance.enqueueVideo(widget.coupleId, file);
     } else {
-      ChatSendQueue.instance
-          .enqueueImage(widget.coupleId, file, previewGated: true);
+      ChatSendQueue.instance.enqueueImage(widget.coupleId, file);
     }
     widget.onSent?.call();
     Navigator.pop(context);
