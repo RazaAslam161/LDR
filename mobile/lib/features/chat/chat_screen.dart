@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
@@ -41,6 +40,7 @@ import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
 import 'package:miles/features/chat/widgets/selectable_message.dart';
 import 'package:miles/features/chat/widgets/typing_indicator.dart';
+import 'package:miles/features/chat/widgets/voice_note_bubble.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -313,7 +313,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   // Voice recorder
   final _audioRecorder = AudioRecorder();
-  final _player = AudioPlayer();
+  final _voice = VoiceNotePlayer();
 
   @override
   void initState() {
@@ -580,10 +580,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // reverse:true already pins the view to the newest message — no scroll needed.
   }
 
+  /// Sign what a live message needs before its bubble asks for it.
+  ///
+  /// fetch() and fetchSince() warm a whole page in one round trip, but a
+  /// message arriving over realtime or the broadcast fast path has been
+  /// through neither: nothing is cached for its path, so voiceUrl/imageUrl
+  /// answer null and the bubble renders the "unavailable" placeholder. It sat
+  /// there until something re-fetched the page — a resume, or the chat being
+  /// reopened. That is the voice note that "shows unavailable for a while
+  /// before delivering", and it hit the SENDER too, who has no local file for
+  /// a recording the way they do for a photo.
+  Future<void> _warmMedia(Message m) async {
+    if (m.mediaPaths.isEmpty && m.intimatePaths.isEmpty) return;
+    await ChatRepository.warmMedia([m]);
+    if (mounted) setState(() {});
+  }
+
   void _onIncoming(Message m, {bool fromDb = false, String source = 'local'}) {
     if (kRtChatDebug) {
       debugPrint('[rt] incoming id=${m.id} fromDb=$fromDb kind=${m.kind}');
     }
+    unawaited(_warmMedia(m));
     final isDuplicate = _ids.contains(m.id);
     // Recorded at every exit, because the exit taken is the answer: a message
     // that arrives by broadcast alone carries seq 0 (the Message default) and
@@ -1042,7 +1059,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (c2 != null) client.removeChannel(c2);
     _scroll.dispose();
     _audioRecorder.dispose();
-    _player.dispose();
+    _voice.dispose();
     super.dispose();
   }
 
@@ -1299,7 +1316,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                     mine: m.isMine(uid),
                                                     showDateHeader: showTime,
                                                     repliedTo: _byId(m.replyToId),
-                                                    player: _player,
+                                                    voice: _voice,
                                                     theme: chatTheme,
                                                     senderName: m.isMine(uid)
                                                         ? 'you'
@@ -1435,7 +1452,7 @@ class _Bubble extends StatelessWidget {
     required this.message,
     required this.mine,
     required this.showDateHeader,
-    required this.player,
+    required this.voice,
     required this.theme,
     required this.senderName,
     required this.tick,
@@ -1446,7 +1463,7 @@ class _Bubble extends StatelessWidget {
   final Message message;
   final bool mine;
   final bool showDateHeader;
-  final AudioPlayer player;
+  final VoiceNotePlayer voice;
   final ChatTheme theme;
   final String senderName;
   final Message? repliedTo;
@@ -1514,7 +1531,7 @@ class _Bubble extends StatelessWidget {
                             fontSize: 14,),
                       ) else _Content(
                         message: message,
-                        player: player,
+                        voice: voice,
                         textColor: theme.text,
                         bubble: mine ? theme.myBubble : theme.partnerBubble,
                         senderName: senderName,),
@@ -1717,13 +1734,13 @@ class _ReplyPreview extends StatelessWidget {
 class _Content extends StatelessWidget {
   const _Content({
     required this.message,
-    required this.player,
+    required this.voice,
     required this.senderName,
     required this.bubble,
     this.textColor = MilesColors.cream50,
   });
   final Message message;
-  final AudioPlayer player;
+  final VoiceNotePlayer voice;
   final String senderName;
 
   /// The fill of the bubble this is rendering inside — a dozen chat themes
@@ -1731,6 +1748,20 @@ class _Content extends StatelessWidget {
   /// than let a wash of white stand in for one.
   final Color bubble;
   final Color textColor;
+
+  /// Toggle this note, and say so if it will not open.
+  static Future<void> _play(BuildContext context, VoiceNotePlayer voice,
+      String id, String url,) async {
+    try {
+      await voice.toggle(id, url);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not play voice note.')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1870,8 +1901,19 @@ class _Content extends StatelessWidget {
                 style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           );
         }
-        return _VoicePlayer(
-            url: url, player: player, senderName: senderName, bubble: bubble,);
+        // Rebuilt on every player change so the icon follows THIS note. The
+        // listen is here rather than around the whole list: a note playing
+        // must not rebuild three hundred bubbles.
+        return ListenableBuilder(
+          listenable: voice,
+          builder: (context, _) => VoiceNoteBubble(
+            url: url,
+            playing: voice.isPlaying(m.id),
+            onToggle: () => _play(context, voice, m.id, url),
+            senderName: senderName,
+            bubble: bubble,
+          ),
+        );
       case 'video':
         return _VideoBubble(message: m, senderName: senderName);
       default:
@@ -1927,111 +1969,6 @@ class _ChatBg extends StatelessWidget {
               : theme.bg,
         ),
       ),
-    );
-  }
-}
-
-class _VoicePlayer extends StatefulWidget {
-  const _VoicePlayer(
-      {required this.url,
-      required this.player,
-      required this.senderName,
-      required this.bubble,});
-  final String url;
-  final AudioPlayer player;
-  final String senderName;
-  final Color bubble;
-
-  @override
-  State<_VoicePlayer> createState() => _VoicePlayerState();
-}
-
-class _VoicePlayerState extends State<_VoicePlayer> {
-  bool _playing = false;
-  StreamSubscription<void>? _stateSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _stateSub = widget.player.playerStateStream.listen((state) {
-      final playing =
-          state.processingState != ProcessingState.completed && state.playing;
-      if (playing != _playing) {
-        if (mounted) setState(() => _playing = playing);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _stateSub?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _toggle() async {
-    try {
-      if (_playing) {
-        await widget.player.pause();
-      } else {
-        await widget.player.setUrl(widget.url);
-        await widget.player.play();
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not play voice note.')),
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: _toggle,
-          child: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: MilesColors.tint(MilesColors.cream50, 0.15,
-                  over: widget.bubble,),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: MilesColors.cream50,
-              size: 22,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Pseudo-waveform (visual only)
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(
-            18,
-            (i) => Container(
-              margin: const EdgeInsets.symmetric(horizontal: 1),
-              width: 2.5,
-              height: 8 + ((i * 7) % 18).toDouble(),
-              decoration: BoxDecoration(
-                color: MilesColors.cream50.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        SaveMediaButton(
-          size: 16,
-          color: MilesColors.taupe,
-          onSave: () => SaveMediaService.saveVoiceToVault(
-              url: widget.url, senderName: widget.senderName,),
-        ),
-      ],
     );
   }
 }

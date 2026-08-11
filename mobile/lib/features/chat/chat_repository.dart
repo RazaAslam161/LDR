@@ -165,10 +165,15 @@ class Message {
       ? null
       : MediaUrls.cached(chatBucket, MediaUrls.toPath(chatBucket, voicePath!));
 
-  /// Every storage path this message needs signed before it can render.
+  /// Every couple_media path this message needs signed before it can render.
   Iterable<String> get mediaPaths => [
         if (imagePath != null) MediaUrls.toPath(chatBucket, imagePath!),
         if (voicePath != null) MediaUrls.toPath(chatBucket, voicePath!),
+      ];
+
+  /// The same, for the private bucket video lives in.
+  Iterable<String> get intimatePaths => [
+        if (videoPath != null) MediaUrls.toPath(intimateBucket, videoPath!),
       ];
 }
 
@@ -202,7 +207,7 @@ class ChatRepository {
         // Skip a malformed row rather than aborting the whole catch-up.
       }
     }
-    await MediaUrls.warm(chatBucket, out.expand((m) => m.mediaPaths));
+    await warmMedia(out);
     return out;
   }
 
@@ -223,9 +228,21 @@ class ChatRepository {
         // Skip a malformed row rather than blanking the whole conversation.
       }
     }
-    await MediaUrls.warm(chatBucket, out.expand((m) => m.mediaPaths));
+    await warmMedia(out);
     return out;
   }
+
+  /// Sign everything a page of messages will render — one round trip per
+  /// bucket, whatever the page holds.
+  ///
+  /// Video is signed here too, and not on tap. Waiting for a fresh
+  /// createSignedUrl before the player can even start opening is the whole of
+  /// "tap-to-open media is slow": a full request/response on a phone uplink
+  /// between the finger coming off the glass and anything happening.
+  static Future<void> warmMedia(Iterable<Message> messages) => Future.wait([
+        MediaUrls.warm(chatBucket, messages.expand((m) => m.mediaPaths)),
+        MediaUrls.warm(intimateBucket, messages.expand((m) => m.intimatePaths)),
+      ]);
 
   static Future<void> sendText(String coupleId, String body,
       {String? replyToId, String? id,}) async {
@@ -335,7 +352,7 @@ class ChatRepository {
 
     final ext = _ext(file.path) ?? 'mp4';
     final path = '$coupleId/${_randomName('vid', ext)}';
-    await _c.storage.from('couple_intimate').upload(path, file);
+    await _c.storage.from(intimateBucket).upload(path, file);
     await _c.from('messages').insert({
       if (id != null) 'id': id,
       'couple_id': coupleId,
@@ -346,17 +363,11 @@ class ChatRepository {
     });
   }
 
-  /// A short-lived signed URL for a private video (couple_intimate bucket).
-  static Future<String?> signedVideoUrl(String? path) async {
-    if (path == null) return null;
-    try {
-      return await _c.storage
-          .from('couple_intimate')
-          .createSignedUrl(path, 60 * 60);
-    } catch (_) {
-      return null;
-    }
-  }
+  /// A signed URL for a private video. Served from the cache [warmMedia]
+  /// filled when the page loaded, so opening one is usually not a round trip.
+  static Future<String?> signedVideoUrl(String? path) => path == null
+      ? Future.value()
+      : MediaUrls.sign(intimateBucket, MediaUrls.toPath(intimateBucket, path));
 
   /// Uploads a voice note and inserts a message row of kind='voice'.
   static Future<void> sendVoice(String coupleId, File file,

@@ -8,6 +8,9 @@ const chatBucket = 'couple_media';
 /// The per-user custom chat background. Private for the same reason.
 const chatBgBucket = 'chat-bg';
 
+/// Chat video and Touch body photos. Private since it was written.
+const intimateBucket = 'couple_intimate';
+
 /// Signed URLs for private storage, cached so rendering stays synchronous.
 ///
 /// `couple_media` held 255 of a couple's photos in a PUBLIC bucket. Its RLS was
