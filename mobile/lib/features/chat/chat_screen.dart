@@ -15,6 +15,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/ui/mood.dart';
@@ -227,6 +228,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void _sendImageFast(String coupleId, File f) {
     ChatSendQueue.instance
         .enqueueImage(coupleId, f, replyToId: _takeReplyId());
+    _adoptPending();
+  }
+
+  /// Send a whole gallery pick — photos and videos together.
+  ///
+  /// Nothing is awaited and nothing is re-encoded: all of it is on screen as
+  /// bubbles on this frame, and the queue uploads a few at a time behind them.
+  /// A failure belongs to its own item, which keeps its file and its retry.
+  void _sendMediaBatch(String coupleId, List<PickedMedia> items) {
+    if (items.isEmpty) return;
+    ChatSendQueue.instance.enqueueAll(coupleId, items,
+        replyToId: _takeReplyId(),);
     _adoptPending();
   }
 
@@ -1308,7 +1321,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         replyingTo: _replyingTo,
                         onCancelReply: _cancelReply,
                         onSendText: (t) => _sendTextFast(couple.id, t),
-                        onSendImage: (f) async => _sendImageFast(couple.id, f),
+                        onSendMedia: (items) =>
+                            _sendMediaBatch(couple.id, items),
                         onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
                             replyToId: _takeReplyId(),),
                         onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
@@ -2061,10 +2075,17 @@ class _VideoBubbleState extends State<_VideoBubble> {
         onTap: widget.path == null ? null : _open,
       );
     }
+    // An outgoing video has no thumbnail and no signed URL yet, so without
+    // these it sat as a black tile with a play button that did nothing — for
+    // as long as the upload took, and forever if it failed.
+    final sending = widget.message.sendStatus == SendStatus.sending;
+    final failed = widget.message.sendStatus == SendStatus.failed;
     return Stack(
       children: [
         GestureDetector(
-          onTap: _loading ? null : _open,
+          onTap: failed
+              ? () => ChatSendQueue.instance.retry(widget.message.id)
+              : ((_loading || sending) ? null : _open),
           child: Container(
             width: 220,
             height: 140,
@@ -2073,21 +2094,33 @@ class _VideoBubbleState extends State<_VideoBubble> {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Center(
-              child: _loading
+              child: _loading || sending
                   ? const SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(strokeWidth: 2),)
                   : Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                          shape: BoxShape.circle, color: MilesColors.blush,),
-                      child: const Icon(Icons.play_arrow,
-                          color: MilesColors.cream50, size: 30,),
+                      decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: failed
+                              ? MilesColors.ember
+                              : MilesColors.blush,),
+                      child: Icon(
+                          failed ? Icons.refresh_rounded : Icons.play_arrow,
+                          color: MilesColors.cream50,
+                          size: 30,),
                     ),
             ),
           ),
         ),
+        if (failed)
+          const Positioned(
+            left: 8,
+            bottom: 8,
+            child: Text("Didn't send · tap to retry",
+                style: TextStyle(color: MilesColors.ember, fontSize: 11),),
+          ),
         if (widget.path != null)
           Positioned(
             bottom: 6,

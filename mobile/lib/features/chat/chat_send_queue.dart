@@ -7,6 +7,9 @@ import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:uuid/uuid.dart';
 
+/// One upload+insert — the real one, or a fake in a test.
+typedef SendOne = Future<void> Function(PendingSend send);
+
 /// A send that has been accepted from the user but has not landed yet.
 class PendingSend {
   PendingSend({
@@ -56,7 +59,28 @@ class ChatSendQueue extends ChangeNotifier {
 
   static const _uuid = Uuid();
 
+  /// How many uploads actually move at once.
+  ///
+  /// A 50-item gallery pick is the case this bounds. Firing all 50 puts fifty
+  /// TLS handshakes and fifty bodies on one phone uplink: every one of them
+  /// crawls, so the FIRST photo lands about as late as the fiftieth and the
+  /// chat looks frozen. Serial is the other failure — item 50 waits on 49
+  /// uploads. A few at a time keeps the link saturated and lets the early
+  /// bubbles resolve while the rest queue.
+  static const _maxInFlight = 3;
+
   final List<PendingSend> _pending = [];
+
+  /// Ids currently uploading, as opposed to merely accepted. Both look like
+  /// [SendStatus.sending] to the chat — a queued item shows the same spinner —
+  /// so the distinction cannot be read off the status.
+  final Set<String> _inFlight = {};
+
+  /// The upload itself. Swappable because nothing that matters here — the cap,
+  /// one item failing without touching the others — is observable through a
+  /// path that can only ever fail (no Supabase) or only ever succeed.
+  @visibleForTesting
+  SendOne? uploader;
 
   /// Sends still in flight or failed, oldest first.
   List<PendingSend> get pending => List.unmodifiable(_pending);
@@ -70,6 +94,36 @@ class ChatSendQueue extends ChangeNotifier {
   String enqueueVideo(String coupleId, File file,
           {String? replyToId, bool previewGated = false,}) =>
       _enqueue(coupleId, file, 'video', replyToId, null, previewGated);
+
+  /// Accept a whole gallery pick at once, in the order it was picked.
+  ///
+  /// Every item is pending — and so already a bubble — before a single byte
+  /// moves; [_maxInFlight] of them upload at a time. Listeners are told once
+  /// rather than once per item, so 50 photos are one rebuild of the chat and
+  /// not fifty.
+  List<String> enqueueAll(
+    String coupleId,
+    List<({File file, bool isVideo})> items, {
+    String? replyToId,
+  }) {
+    final ids = <String>[];
+    for (final (i, item) in items.indexed) {
+      final send = PendingSend(
+        id: _uuid.v4(),
+        coupleId: coupleId,
+        file: item.file,
+        kind: item.isVideo ? 'video' : 'image',
+        // The reply belongs to the first item only. Twelve photos each quoting
+        // the same message is twelve copies of it down the conversation.
+        replyToId: i == 0 ? replyToId : null,
+      );
+      _pending.add(send);
+      ids.add(send.id);
+    }
+    notifyListeners();
+    _pump();
+    return ids;
+  }
 
   String _enqueue(
     String coupleId,
@@ -89,7 +143,7 @@ class ChatSendQueue extends ChangeNotifier {
     );
     _pending.add(send);
     notifyListeners();
-    unawaited(_run(send));
+    _pump();
     return send.id;
   }
 
@@ -99,7 +153,7 @@ class ChatSendQueue extends ChangeNotifier {
     if (send == null || send.status != SendStatus.failed) return;
     send.status = SendStatus.sending;
     notifyListeners();
-    unawaited(_run(send));
+    _pump();
   }
 
   /// Give up on a failed send and forget it.
@@ -108,31 +162,21 @@ class ChatSendQueue extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Start as many accepted sends as the cap allows, oldest first.
+  void _pump() {
+    for (final send in _pending) {
+      if (_inFlight.length >= _maxInFlight) return;
+      if (send.status != SendStatus.sending || _inFlight.contains(send.id)) {
+        continue;
+      }
+      _inFlight.add(send.id);
+      unawaited(_run(send));
+    }
+  }
+
   Future<void> _run(PendingSend send) async {
     try {
-      if (send.kind == 'video') {
-        await ChatRepository.sendVideo(send.coupleId, send.file,
-            replyToId: send.replyToId, previewGated: send.previewGated,);
-      } else {
-        final path = await ChatRepository.sendImage(
-          send.coupleId,
-          send.file,
-          id: send.id,
-          replyToId: send.replyToId,
-          previewGated: send.previewGated,
-        );
-        // Fast-path the photo to the partner's chat if it happens to be open.
-        final myUid = SupabaseService.currentUserId;
-        if (path != null && myUid != null) {
-          ChatBroadcastService.broadcastImage(
-            id: send.id,
-            senderId: myUid,
-            imagePath: path,
-            replyToId: send.replyToId,
-            previewGated: send.previewGated,
-          );
-        }
-      }
+      await (uploader ?? _upload)(send);
       // Landed. The DB echo carries the same id, so the chat reconciles the
       // optimistic bubble rather than showing it twice.
       _pending.removeWhere((s) => s.id == send.id);
@@ -141,8 +185,41 @@ class ChatSendQueue extends ChangeNotifier {
       debugPrint('[send] ${send.kind} ${send.id} failed: $e');
       // Kept, not dropped: a failed photo used to disappear with no way to try
       // again. It stays in the list as failed so the chat can offer a retry.
+      // One item failing is one item — the rest of a batch keeps going.
       send.status = SendStatus.failed;
       notifyListeners();
+    } finally {
+      _inFlight.remove(send.id);
+      // A slot just freed up; the next item in the batch takes it.
+      _pump();
+    }
+  }
+
+  static Future<void> _upload(PendingSend send) async {
+    if (send.kind == 'video') {
+      await ChatRepository.sendVideo(send.coupleId, send.file,
+          id: send.id,
+          replyToId: send.replyToId,
+          previewGated: send.previewGated,);
+      return;
+    }
+    final path = await ChatRepository.sendImage(
+      send.coupleId,
+      send.file,
+      id: send.id,
+      replyToId: send.replyToId,
+      previewGated: send.previewGated,
+    );
+    // Fast-path the photo to the partner's chat if it happens to be open.
+    final myUid = SupabaseService.currentUserId;
+    if (path != null && myUid != null) {
+      ChatBroadcastService.broadcastImage(
+        id: send.id,
+        senderId: myUid,
+        imagePath: path,
+        replyToId: send.replyToId,
+        previewGated: send.previewGated,
+      );
     }
   }
 }

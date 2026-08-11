@@ -337,8 +337,13 @@ class ChatRepository {
 
   /// Uploads a video to the PRIVATE couple_intimate bucket and inserts a
   /// message of kind='video'. Served via short-lived signed URLs (couple-only).
+  ///
+  /// [id] is the optimistic bubble's id. Without it the server minted its own
+  /// and the DB echo could not be matched to the bubble already on screen, so
+  /// every video the queue sent appeared twice — invisible while videos went
+  /// one at a time, obvious the moment a pick of twelve does.
   static Future<void> sendVideo(String coupleId, File file,
-      {String? replyToId, bool previewGated = false,}) async {
+      {String? replyToId, String? id, bool previewGated = false,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
@@ -346,6 +351,7 @@ class ChatRepository {
     final path = '$coupleId/${_randomName('vid', ext)}';
     await _c.storage.from('couple_intimate').upload(path, file);
     await _c.from('messages').insert({
+      if (id != null) 'id': id,
       'couple_id': coupleId,
       'sender_id': uid,
       'video_path': path,

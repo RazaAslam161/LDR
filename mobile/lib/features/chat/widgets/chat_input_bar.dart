@@ -13,7 +13,7 @@ import 'package:record/record.dart';
 /// Chat input bar with three actions: text, image attach, hold-to-record voice.
 class ChatInputBar extends StatefulWidget {
   const ChatInputBar({
-    required this.coupleId, required this.onSendText, required this.onSendImage, required this.onSendVoice, required this.onSendVideo, required this.onFlingGif, required this.onPickGif, super.key,
+    required this.coupleId, required this.onSendText, required this.onSendMedia, required this.onSendVoice, required this.onSendVideo, required this.onFlingGif, required this.onPickGif, super.key,
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
@@ -22,7 +22,11 @@ class ChatInputBar extends StatefulWidget {
 
   final String coupleId;
   final Future<void> Function(String text) onSendText;
-  final Future<void> Function(File image) onSendImage;
+
+  /// A whole gallery pick — photos and videos together, in pick order. Not a
+  /// Future: these are handed to the send queue and are on screen before the
+  /// first upload starts, so there is nothing here to wait on.
+  final void Function(List<PickedMedia> items) onSendMedia;
   final Future<void> Function(File voice) onSendVoice;
   final Future<void> Function(File video) onSendVideo;
 
@@ -130,30 +134,28 @@ class _ChatInputBarState extends State<ChatInputBar> {
     },);
   }
 
-  Future<void> _pickFromGallery() => _pickAndSend(ImageSource.gallery);
-
-  Future<void> _pickAndSend(ImageSource source) async {
+  /// Photos and videos, many at a time, straight into the conversation.
+  ///
+  /// No _sending spinner on purpose: the pick returns and the bubbles are
+  /// already there. A spinner would be claiming the user is waiting on
+  /// something they are not.
+  Future<void> _pickMedia() async {
     try {
-      // Crop / adjust / enhance / compress before sending.
-      final file = await PhotoPickerService.pick(
-          source: source, enhanceContext: context,);
-      if (file == null) return;
-      setState(() => _sending = true);
-      await widget.onSendImage(file);
+      final items = await PhotoPickerService.pickMedia();
+      if (items.isEmpty) return;
+      widget.onSendMedia(items);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not attach that photo.')),
+          const SnackBar(content: Text('Could not attach that.')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
   }
 
-  Future<void> _pickAndSendVideo(ImageSource source) async {
+  Future<void> _recordVideo() async {
     try {
-      final file = await PhotoPickerService.pickVideo(source: source);
+      final file = await PhotoPickerService.pickVideo(source: ImageSource.camera);
       if (file == null) return;
       setState(() => _sending = true);
       await widget.onSendVideo(file);
@@ -202,13 +204,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
             },
           ),
           ListTile(
-            leading:
-                const Icon(Icons.photo_outlined, color: MilesColors.cream50),
-            title: const Text('Gallery',
+            leading: const Icon(Icons.photo_library_outlined,
+                color: MilesColors.cream50,),
+            title: const Text('Photos & videos',
                 style: TextStyle(color: MilesColors.cream50),),
+            subtitle: const Text('Pick as many as you like — up to 50',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 11.5),),
             onTap: () {
               Navigator.pop(context);
-              _pickFromGallery();
+              _pickMedia();
             },
           ),
           ListTile(
@@ -218,17 +222,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 style: TextStyle(color: MilesColors.cream50),),
             onTap: () {
               Navigator.pop(context);
-              _pickAndSendVideo(ImageSource.camera);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.video_library_outlined,
-                color: MilesColors.emberSoft,),
-            title: const Text('Video from gallery',
-                style: TextStyle(color: MilesColors.cream50),),
-            onTap: () {
-              Navigator.pop(context);
-              _pickAndSendVideo(ImageSource.gallery);
+              _recordVideo();
             },
           ),
           const SizedBox(height: 8),

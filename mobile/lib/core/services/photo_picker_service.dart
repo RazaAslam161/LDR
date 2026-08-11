@@ -10,6 +10,11 @@ import 'package:miles/main.dart' show MilesApp;
 /// Crop shape for [PhotoPickerService.pick].
 enum PhotoShape { square, free }
 
+/// One item out of a multi-pick, tagged. Photos and videos go to different
+/// buckets and become different message kinds, and the picker hands them back
+/// interleaved in whatever order the user tapped them.
+typedef PickedMedia = ({File file, bool isVideo});
+
 /// One reusable pick → crop/adjust → compress pipeline for every photo surface
 /// (avatar, check-in snap, chat photo). Output is ≤1200px JPEG (~quality 80).
 class PhotoPickerService {
@@ -81,6 +86,46 @@ class PhotoPickerService {
       return edited ?? file;
     }
     return file;
+  }
+
+  /// Photos AND videos in one pick, up to [limit] items, untouched.
+  ///
+  /// No crop, no enhance, no maxWidth/imageQuality: those re-encode, and the
+  /// chat sends what the user picked. The old flow was one item at a time
+  /// through a ratio step and a filter step, and picking a dozen holiday
+  /// photos meant running it a dozen times.
+  static Future<List<PickedMedia>> pickMedia({int limit = 50}) async {
+    MilesApp.systemOverlayActive = true;
+    try {
+      final picked = await _picker.pickMultipleMedia(limit: limit);
+      // The plugin documents `limit` as advisory — a platform that cannot
+      // enforce it ignores it — so the cap is applied here too rather than
+      // trusting the gallery to have honoured it.
+      return [
+        for (final x in picked.take(limit))
+          (file: File(x.path), isVideo: isVideoPick(x.path, x.mimeType)),
+      ];
+    } finally {
+      MilesApp.systemOverlayActive = false;
+    }
+  }
+
+  /// Whether a picked item is a video.
+  ///
+  /// Get this wrong and the file is uploaded to the photo bucket and inserted
+  /// as kind='image', which renders forever as a broken picture — the message
+  /// is not recoverable afterwards, so it is worth being deliberate about.
+  /// Extension first: image_picker copies into the app cache keeping it, while
+  /// mimeType is routinely null on Android.
+  @visibleForTesting
+  static bool isVideoPick(String path, String? mimeType) {
+    const videoExts = {'mp4', 'mov', 'm4v', '3gp', 'webm', 'mkv', 'avi'};
+    const imageExts = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'};
+    final dot = path.lastIndexOf('.');
+    final ext = dot < 0 ? '' : path.substring(dot + 1).toLowerCase();
+    if (videoExts.contains(ext)) return true;
+    if (imageExts.contains(ext)) return false;
+    return (mimeType ?? '').toLowerCase().startsWith('video/');
   }
 
   /// Pick (or record) a video — no crop. Capped at 5 minutes to bound size.
