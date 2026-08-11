@@ -36,6 +36,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _error;
   bool _seeded = false;
   String _locationMode = 'off';
+  LocationBlock _locationBlock = LocationBlock.none;
   bool _appLock = false;
   bool _changingAvatar = false;
   String? _localAvatarUrl;
@@ -111,8 +112,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     final mine = await PresenceService.fetchMine(couple.id);
+    final block = await LocationService.check();
     if (mounted) {
-      setState(() => _locationMode = mine?.locationSharingMode ?? 'off');
+      setState(() {
+        _locationMode = mine?.locationSharingMode ?? 'off';
+        _locationBlock = block;
+      });
+    }
+  }
+
+  /// Tapping the tile while it is complaining repairs the permission instead of
+  /// re-opening the mode picker — the mode is not what is wrong.
+  Future<void> _fixLocationSharing() async {
+    final couple = ref.read(sessionProvider).couple;
+    if (couple == null) return;
+    final block = await LocationService.resolve(context);
+    if (mounted) setState(() => _locationBlock = block);
+    if (block == LocationBlock.none) {
+      await LocationService.shareOnce(couple.id, _locationMode);
     }
   }
 
@@ -146,7 +163,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mode == null) return;
     if (mode == 'off') {
       await PresenceService.setSharingMode(couple.id, 'off');
+      if (mounted) setState(() => _locationBlock = LocationBlock.none);
     } else {
+      // Written first and unconditionally. The mode used to be a side effect of
+      // a successful fix, so choosing "City only" without permission left the
+      // server on the old mode while this screen showed the new one.
+      await PresenceService.setSharingMode(couple.id, mode);
+      if (!mounted) return;
+      // Picking a mode IS the request to share, so a handset that is not
+      // allowing it has to say so here rather than do nothing.
+      final block = await LocationService.resolve(context);
+      if (mounted) setState(() => _locationBlock = block);
       // Push one fix now; Home's foreground loop keeps it fresh while open.
       await LocationService.shareOnce(couple.id, mode);
     }
@@ -161,6 +188,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       : _locationMode == 'city'
           ? 'City only'
           : 'Precise location';
+
+  /// The gap between what the mode claims and what the handset allows, in the
+  /// user's words. Null when there is no gap.
+  String? get _locationProblem => _locationMode == 'off'
+      ? null
+      : switch (_locationBlock) {
+          LocationBlock.none => null,
+          LocationBlock.serviceDisabled =>
+            "Your phone's location is switched off — tap to fix",
+          LocationBlock.denied => "You haven't allowed location yet — tap to fix",
+          LocationBlock.deniedForever =>
+            'Location is blocked for this app — tap to fix',
+        };
 
   @override
   void dispose() {
@@ -556,11 +596,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               contentPadding: EdgeInsets.zero,
               title: Text(_locationLabel,
                   style: const TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text('Only your partner can ever see this',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
+              subtitle: Text(
+                _locationProblem ?? 'Only your partner can ever see this',
+                style: TextStyle(
+                  color: _locationProblem == null
+                      ? MilesColors.taupe
+                      : MilesColors.ember,
+                  fontSize: 12,
+                ),
+              ),
               trailing:
                   const Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: _changeLocationSharing,
+              onTap: _locationProblem == null
+                  ? _changeLocationSharing
+                  : _fixLocationSharing,
             ),
 
             const SizedBox(height: 28),

@@ -46,6 +46,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   double? _myLon;
   Timer? _locationTimer;
 
+  /// Why this user's own sharing is producing nothing. Sharing 'off' reports
+  /// [LocationBlock.none] — the notice is only for the contradiction, where the
+  /// mode says sharing and the handset says no.
+  LocationBlock _block = LocationBlock.none;
+
   @override
   void initState() {
     super.initState();
@@ -82,13 +87,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     await _refreshMyCoords();
     // One immediate push so the partner sees a fresh position without waiting.
-    await LocationService.shareCurrent(couple.id);
+    _noteBlock(await LocationService.shareCurrent(couple.id));
 
     _locationTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
       if (!mounted) return;
-      await LocationService.shareCurrent(couple.id);
+      _noteBlock(await LocationService.shareCurrent(couple.id));
       await _refreshMyCoords();
     });
+  }
+
+  /// [shareCurrent] already read the saved mode and the OS state to decide
+  /// whether it could send, so its verdict is free — asking again here would
+  /// mean a second presence fetch every 15 seconds for every user.
+  void _noteBlock(LocationBlock block) {
+    if (mounted && block != _block) setState(() => _block = block);
+  }
+
+  /// Tapping the notice. The repair depends on what is missing, so the service
+  /// decides: re-ask, or open the system page that is the only way back.
+  Future<void> _fixLocation() async {
+    final block = await LocationService.resolve(context);
+    _noteBlock(block);
+    final couple = ref.read(currentCoupleProvider);
+    if (block == LocationBlock.none && couple != null) {
+      _noteBlock(await LocationService.shareCurrent(couple.id));
+    }
   }
 
   /// My own coords (for the distance readout) — last-known is instant + prompt-free.
@@ -194,6 +217,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   onShareSnap: _shareSnap,
                 ),
                 const SizedBox(height: 16),
+                if (_block != LocationBlock.none) ...[
+                  _LocationBlockedNotice(block: _block, onFix: _fixLocation),
+                  const SizedBox(height: 16),
+                ],
                 PartnerLocationCard(
                   partner: presence,
                   partnerName: partner.displayName,
@@ -213,6 +240,70 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Sharing is on and nothing is being sent. Shown on Home rather than only in
+/// Settings, because the state is invisible from the inside: the map on this
+/// screen is the PARTNER's, so a user whose own permission is missing sees a
+/// perfectly normal dashboard while their partner sees nothing at all.
+class _LocationBlockedNotice extends StatelessWidget {
+  const _LocationBlockedNotice({required this.block, required this.onFix});
+
+  final LocationBlock block;
+  final VoidCallback onFix;
+
+  @override
+  Widget build(BuildContext context) {
+    final (String text, String action) = switch (block) {
+      LocationBlock.serviceDisabled => (
+          "Location sharing is on, but your phone's location is switched off, "
+              'so your partner sees nothing.',
+          'Turn it on',
+        ),
+      LocationBlock.deniedForever => (
+          'Location sharing is on, but this app is not allowed to read your '
+              'location, so your partner sees nothing.',
+          'Allow it',
+        ),
+      LocationBlock.denied || LocationBlock.none => (
+          "Location sharing is on, but you haven't allowed location yet, so "
+              'your partner sees nothing.',
+          'Allow it',
+        ),
+    };
+
+    return SurfacePanel(
+      color: MilesColors.tint(MilesColors.ember, 0.12),
+      borderColor: MilesColors.ember,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.location_disabled,
+                  color: MilesColors.ember, size: 20,),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(text,
+                    style: const TextStyle(
+                        color: MilesColors.cream50, fontSize: 13, height: 1.4,),),
+              ),
+            ],
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onFix,
+              child: Text(action,
+                  style: const TextStyle(color: MilesColors.gilt),),
+            ),
+          ),
+        ],
       ),
     );
   }

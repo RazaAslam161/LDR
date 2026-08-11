@@ -164,13 +164,6 @@ class _AppShellState extends ConsumerState<AppShell>
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
     // Register this device for push now that we're past login + pairing.
     FcmService.registerToken();
-    // One-time, dismissible full-screen-alert prompt (Android 14+).
-    final partnerName =
-        ref.read(sessionProvider).partner?.displayName ?? 'your partner';
-    FsiPermission.promptIfNeeded(context, partnerName);
-    // Offer the launcher disguise once, after pairing — the point at which the
-    // app has something worth hiding. Skipped forever once answered either way.
-    _offerDisguiseOnce();
     // A push may have been tapped before the listener attached.
     _onPendingReach();
     _onPendingCall();
@@ -178,13 +171,29 @@ class _AppShellState extends ConsumerState<AppShell>
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
     presenceRouteObserver?.publishActiveTab();
-    // Granting the OS location permission used to change nothing: the app-level
-    // sharing mode stayed 'off' and the partner's Home stayed empty until the
-    // user found the second switch in Settings. Runs once, ever.
-    final myCouple = ref.read(sessionProvider).couple;
-    if (myCouple != null) {
-      LocationService.adoptPermissionAsDefault(myCouple.id);
-    }
+    _firstRunPrompts(couple.id);
+  }
+
+  /// The one-time onboarding prompts, in sequence.
+  ///
+  /// Fired in parallel they land on top of one another and the user dismisses
+  /// whichever is in front — which is how a permission ask gets refused without
+  /// ever being read. The location one is last because it is the only one that
+  /// leads to a system dialog we cannot draw over.
+  Future<void> _firstRunPrompts(String coupleId) async {
+    // The launcher disguise, at the point the app first has something worth
+    // hiding. Skipped forever once answered either way.
+    await _offerDisguiseOnce();
+    if (!mounted) return;
+    final partnerName =
+        ref.read(sessionProvider).partner?.displayName ?? 'your partner';
+    // One-time, dismissible full-screen-alert prompt (Android 14+).
+    await FsiPermission.promptIfNeeded(context, partnerName);
+    if (!mounted) return;
+    // Location is not requested at startup any more, so this is where a fresh
+    // install is asked — explained first, and followed by the sharing mode so
+    // that granting it actually shows the partner something.
+    await LocationService.onboard(context, coupleId, partnerName);
   }
 
   void _onReach(ReachEvent e) {

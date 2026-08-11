@@ -178,12 +178,19 @@ class CallController extends ChangeNotifier {
       Diag.record(DiagArea.call, 'invite_inserted', corr: _callId);
     } catch (e) {
       // `catch (_) {}` before. This insert is what fires the push that rings a
-      // closed app, and the policy on call_invites is FOR ALL USING
-      // (couple_id = current_user_couple_id()) — which Postgres also applies as
-      // the INSERT check — so a stale _coupleId rejects it outright. The caller
-      // then waits the full 35s and tears down with no reason to show.
+      // closed app, so when it fails the caller waits the full 35s and tears
+      // down with no reason to show.
+      //
+      // The class alone is not a diagnosis, and recording only the class cost a
+      // field test: a fresh couple failed here six times out of six, and an RLS
+      // denial (42501), a stale PostgREST schema cache (PGRST204) and a
+      // duplicate id are one indistinguishable "PostgrestException" without the
+      // code. Same two fields as msg_insert_result, so both write paths read
+      // alike.
       Diag.record(DiagArea.call, 'invite_failed', corr: _callId, fields: {
         'error': e.runtimeType.toString(),
+        'pg_code': e is PostgrestException ? e.code : null,
+        'pg_msg': e is PostgrestException ? e.message : null,
       },);
     }
   }
@@ -215,8 +222,11 @@ class CallController extends ChangeNotifier {
       // The whole FCM ring path, silent. An RLS denial or a deleted row here
       // means the phone buzzed and then nothing happened — which the user
       // reports as a missed call, not as an error.
-      Diag.record(DiagArea.call, 'pending_call_failed',
-          corr: callId, fields: {'error': e.runtimeType.toString()},);
+      Diag.record(DiagArea.call, 'pending_call_failed', corr: callId, fields: {
+        'error': e.runtimeType.toString(),
+        'pg_code': e is PostgrestException ? e.code : null,
+        'pg_msg': e is PostgrestException ? e.message : null,
+      },);
     }
   }
 
