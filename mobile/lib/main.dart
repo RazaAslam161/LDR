@@ -450,6 +450,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
     EmergencyLockService.dispose();
     _stopHeartbeat();
     _sub?.cancel();
+    // Fires up to 6s after a pause and touches presenceRouteObserver. Left
+    // pending it outlives the state that owns it, and a widget test that
+    // disposes the tree fails on the timer rather than on what it was testing.
+    _clearScreenTimer?.cancel();
     super.dispose();
   }
 

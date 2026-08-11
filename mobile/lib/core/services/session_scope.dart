@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Which couple this handset is currently signed in as.
@@ -36,12 +37,25 @@ class SessionScope {
   /// launched the app would be discarded as foreign — the guard would break the
   /// exact case it exists to protect.
   static Future<void> hydrate() async {
-    _coupleId ??= await readCouple();
+    final stored = await readCouple();
+    // Not `_coupleId ??=`. main() does not await FcmService.init(), so this
+    // races the session load, and null is BOTH "not loaded yet" and "resolved
+    // to no couple" — so `??=` would let a signed-out start overwrite itself
+    // with the previous account's stored couple and admit that couple's pushes.
+    if (_resolved) return;
+    _resolved = true;
+    _coupleId = stored;
   }
+
+  /// Whether anything has established the live couple yet, so [hydrate] knows
+  /// a null it is about to overwrite is genuinely "unset" and not "no couple".
+  static bool _resolved = false;
 
   /// Called whenever the session resolves a couple (sign-in, pairing, resume).
   static Future<void> setCouple(String? id) async {
-    if (_coupleId == id) return;
+    final first = !_resolved;
+    _resolved = true;
+    if (_coupleId == id && !first) return;
     _coupleId = id;
     final prefs = await SharedPreferences.getInstance();
     if (id == null) {
@@ -49,6 +63,15 @@ class SessionScope {
     } else {
       await prefs.setString(_coupleKey, id);
     }
+  }
+
+  /// Back to the state a freshly launched process is in. A cold start is the
+  /// only thing [hydrate] is for, and in a test process the statics have
+  /// already been resolved by whatever ran before.
+  @visibleForTesting
+  static void resetForTest() {
+    _coupleId = null;
+    _resolved = false;
   }
 
   /// Read from the background isolate, which cannot see [_coupleId].

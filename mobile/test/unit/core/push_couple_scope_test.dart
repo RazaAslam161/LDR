@@ -24,7 +24,25 @@ void main() {
     pendingReach.value = null;
     pendingCall.value = null;
     pendingChat.value = null;
+    SessionScope.resetForTest();
     await SessionScope.setCouple(mine);
+  });
+
+  test('a signed-out start does not inherit the last account from prefs', () async {
+    // main() does not await FcmService.init(), so hydrate() races the session
+    // load. When the session resolves to NO couple first, hydrate must not then
+    // overwrite that with the couple prefs still names — null is both "not
+    // loaded yet" and "signed out", and reading it as the former re-admits the
+    // previous account's pushes on a handset nobody is signed into.
+    SessionScope.resetForTest();
+    SharedPreferences.setMockInitialValues({'active_couple_id': theirs});
+
+    await SessionScope.setCouple(null);
+    await SessionScope.hydrate();
+
+    expect(SessionScope.coupleId, isNull);
+    FcmService.routeFromPayload('reach-9|Alice|$theirs');
+    expect(pendingReach.value, isNull);
   });
 
   group('a tapped notification belonging to another couple is discarded', () {
@@ -86,9 +104,9 @@ void main() {
   });
 
   test('the stored couple survives a cold start, before the session loads', () async {
-    // Sign out, then hand the process a prefs store that still names the
-    // couple — which is exactly the state a relaunch starts in.
-    await SessionScope.setCouple(null);
+    // A relaunch, not a sign-out: nothing in the process has resolved a couple
+    // yet, and prefs still name the one this handset was last signed in as.
+    SessionScope.resetForTest();
     SharedPreferences.setMockInitialValues({'active_couple_id': mine});
     await SessionScope.hydrate();
 

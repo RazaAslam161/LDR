@@ -127,34 +127,25 @@ left and fires immediately.
 - `value` is a `ValueListenable`, so only the indicator repaints — never the
   1518-line camera tree, which is what `setState` on every pointer move was doing.
 
-## Tap-to-preview delivery
+## Tap-to-preview delivery — REMOVED
 
-`messages.preview_gated` (boolean, default false — migration
-`20260601005200_preview_gated_media.sql`). A column rather than a fifth `kind`:
-the media is still an image or a video at the same path, opened by the same
-viewer, and every client branch switches on `kind`, so a new one would have to
-be taught in each place that 'snap' means image.
+A capture was briefly delivered as "tap to view" rather than as the picture
+itself. It was reverted on the owner's instruction ("just completly remove the
+tap to open feature from the app"): `GatedMediaBubble`, `previewGated` through
+`PendingSend`/`ChatSendQueue`/`ChatRepository`/`ChatBroadcastService`, and the
+two gated bubble builders in `chat_screen` are all gone. A capture enqueues a
+plain photo or video and renders inline in the bubble. Do not reintroduce the
+vocabulary without reading that revert first.
 
-Set only where a capture becomes a message — `RapidCameraScreen._send()`, via
-`ChatSendQueue`. A gallery pick goes through `ChatInputBar` and stays inline: the
-user chose that picture as a picture.
-
-`GatedMediaBubble` renders it. It is handed the whole message, path included, and
-paints none of it — no thumbnail, no blur-hash, and a fixed width, because an
-aspect ratio is a hint too. Tapping opens `MediaViewer` (photo) or the existing
-full-screen player (video), where `SaveMediaService` is the explicit save. The
-message stays in the conversation, gated, after it has been opened.
-
-The flag also travels on the broadcast fast path
-(`ChatBroadcastService.imagePayload`/`messageFrom`). Without it the partner would
-see the snap inline for the second before the Postgres echo replaced it.
+`messages.preview_gated` (migration `20260601005200_preview_gated_media.sql`)
+is the one part that stayed, and it stays UNREAD AND UNWRITTEN. Dropping it is
+not safe: every sideloaded build already in the field still names the column in
+its insert, and PostgREST rejects the whole insert with PGRST204 for one unknown
+column — so the drop would stop those phones sending photos at all, and this
+fleet has no update channel to repair them with.
 
 ## Remaining work
 
 1. Read the logged zoom range off each of GM1900, IN2015 and 1908 — the 6× cap
    and the sub-1.0-minimum handling are both written against claims no phone
    here has yet confirmed.
-
-**Assumption, stated:** tap-to-preview **persists**. This is not Snapchat's
-auto-delete — the bubble hides the media behind a tap, opening shows it, saving
-is a separate action, and the message stays in the conversation.
