@@ -32,6 +32,7 @@ import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
+import 'package:miles/features/chat/widgets/gated_media_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
@@ -140,22 +141,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// A text message pushed by the partner over broadcast — shown immediately,
   /// then deduped when the slower postgres echo arrives (same id).
   void _onMsgBroadcast(Map<String, dynamic> payload) {
-    final id = payload['id']?.toString();
-    final sender = payload['sender']?.toString();
-    if (id == null || sender == null) return;
-    final created =
-        DateTime.tryParse(payload['createdAt']?.toString() ?? '')?.toLocal() ??
-            DateTime.now();
-    final kind = payload['kind']?.toString() ?? 'text';
-    _onIncoming(Message(
-      id: id,
-      senderId: sender,
-      createdAt: created,
-      kind: kind,
-      body: kind == 'text' ? payload['body']?.toString() : null,
-      imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
-      replyToId: payload['replyToId']?.toString(),
-    ), source: 'broadcast',);
+    final m = ChatBroadcastService.messageFrom(payload);
+    if (m != null) _onIncoming(m, source: 'broadcast');
   }
 
   void _sendGifBurst(String url) {
@@ -266,6 +253,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         senderId: myUid,
         createdAt: DateTime.now(),
         kind: s.kind,
+        previewGated: s.previewGated,
         localPath: s.file.path,
         sendStatus: s.status,
         replyToId: s.replyToId,
@@ -1688,6 +1676,17 @@ class _Content extends StatelessWidget {
       case 'image':
         final local = m.localPath;
         final url = m.imageUrl;
+        if (m.previewGated) {
+          return GatedMediaBubble(
+            message: m,
+            onRetry: () => ChatSendQueue.instance.retry(m.id),
+            // No hero: a shared-element flight from this tile would animate
+            // the photo out of a bubble that is meant to show nothing of it.
+            onTap: url == null
+                ? null
+                : () => MediaViewer.open(context, url, senderName: senderName),
+          );
+        }
         if (local == null && url == null) {
           return const Padding(
             padding: EdgeInsets.all(8),
@@ -1818,7 +1817,7 @@ class _Content extends StatelessWidget {
         return _VoicePlayer(
             url: url, player: player, senderName: senderName,);
       case 'video':
-        return _VideoBubble(path: m.videoPath, senderName: senderName);
+        return _VideoBubble(message: m, senderName: senderName);
       default:
         return Text(
           m.body ?? '',
@@ -2019,9 +2018,11 @@ class _NewMessageChip extends StatelessWidget {
 
 /// Tap-to-play thumbnail for a private video message → full-screen player.
 class _VideoBubble extends StatefulWidget {
-  const _VideoBubble({required this.path, required this.senderName});
-  final String? path;
+  const _VideoBubble({required this.message, required this.senderName});
+  final Message message;
   final String senderName;
+
+  String? get path => message.videoPath;
 
   @override
   State<_VideoBubble> createState() => _VideoBubbleState();
@@ -2050,6 +2051,15 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
   @override
   Widget build(BuildContext context) {
+    // A gated video shows the placeholder and no save shortcut: saving a snap
+    // is a choice made after opening it, in the player.
+    if (widget.message.previewGated) {
+      return GatedMediaBubble(
+        message: widget.message,
+        busy: _loading,
+        onTap: widget.path == null ? null : _open,
+      );
+    }
     return Stack(
       children: [
         GestureDetector(

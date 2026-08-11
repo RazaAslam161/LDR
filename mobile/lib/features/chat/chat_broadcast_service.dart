@@ -1,3 +1,4 @@
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Lets screens OTHER than the chat (e.g. the rapid camera) push the chat's
@@ -26,17 +27,62 @@ class ChatBroadcastService {
     required String senderId,
     required String imagePath,
     String? replyToId,
+    bool previewGated = false,
   }) {
     active?.sendBroadcastMessage(
       event: 'msg',
-      payload: {
+      payload: imagePayload(
+        id: id,
+        senderId: senderId,
+        imagePath: imagePath,
+        replyToId: replyToId,
+        previewGated: previewGated,
+      ),
+    );
+  }
+
+  /// The 'msg' payload, apart from the send so both halves can be tested
+  /// against each other.
+  ///
+  /// The gate has to survive this hop, not just the database one: the partner
+  /// renders from this map for the second or two before the Postgres echo
+  /// lands, so a payload that dropped the flag would put a snap on their
+  /// screen inline for exactly that long.
+  static Map<String, dynamic> imagePayload({
+    required String id,
+    required String senderId,
+    required String imagePath,
+    String? replyToId,
+    bool previewGated = false,
+  }) =>
+      {
         'id': id,
         'sender': senderId,
         'kind': 'image',
         'imagePath': imagePath,
+        'previewGated': previewGated,
         'createdAt': DateTime.now().toUtc().toIso8601String(),
         'replyToId': replyToId,
-      },
+      };
+
+  /// The receiving half of [imagePayload]. Null when the payload names no
+  /// message, which the chat treats as nothing to show.
+  static Message? messageFrom(Map<String, dynamic> payload) {
+    final id = payload['id']?.toString();
+    final sender = payload['sender']?.toString();
+    if (id == null || sender == null) return null;
+    final kind = payload['kind']?.toString() ?? 'text';
+    return Message(
+      id: id,
+      senderId: sender,
+      createdAt:
+          DateTime.tryParse(payload['createdAt']?.toString() ?? '')?.toLocal() ??
+              DateTime.now(),
+      kind: kind,
+      body: kind == 'text' ? payload['body']?.toString() : null,
+      imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
+      previewGated: payload['previewGated'] == true,
+      replyToId: payload['replyToId']?.toString(),
     );
   }
 }

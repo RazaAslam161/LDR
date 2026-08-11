@@ -3,7 +3,7 @@
 Tap = photo. Press-and-hold = video. Slide the **holding** finger up/down to zoom.
 No second finger, no quality loss.
 
-Status: shipped, except tap-to-preview delivery. `ZoomController`
+Status: shipped, delivery included. `ZoomController`
 (`lib/features/chat/camera/zoom_controller.dart`, ten tests) and the gesture
 itself (`rapid_camera_screen.dart`, `_SlidingLongPress` + `_CaptureButton`).
 
@@ -127,11 +127,31 @@ left and fires immediately.
 - `value` is a `ValueListenable`, so only the indicator repaints — never the
   1518-line camera tree, which is what `setState` on every pointer move was doing.
 
+## Tap-to-preview delivery
+
+`messages.preview_gated` (boolean, default false — migration
+`20260601005200_preview_gated_media.sql`). A column rather than a fifth `kind`:
+the media is still an image or a video at the same path, opened by the same
+viewer, and every client branch switches on `kind`, so a new one would have to
+be taught in each place that 'snap' means image.
+
+Set only where a capture becomes a message — `RapidCameraScreen._send()`, via
+`ChatSendQueue`. A gallery pick goes through `ChatInputBar` and stays inline: the
+user chose that picture as a picture.
+
+`GatedMediaBubble` renders it. It is handed the whole message, path included, and
+paints none of it — no thumbnail, no blur-hash, and a fixed width, because an
+aspect ratio is a hint too. Tapping opens `MediaViewer` (photo) or the existing
+full-screen player (video), where `SaveMediaService` is the explicit save. The
+message stays in the conversation, gated, after it has been opened.
+
+The flag also travels on the broadcast fast path
+(`ChatBroadcastService.imagePayload`/`messageFrom`). Without it the partner would
+see the snap inline for the second before the Postgres echo replaced it.
+
 ## Remaining work
 
-1. Tap-to-preview delivery into chat: model flag, migration, placeholder bubble,
-   reuse `media_viewer` + `SaveMediaService` for the explicit save.
-2. Read the logged zoom range off each of GM1900, IN2015 and 1908 — the 6× cap
+1. Read the logged zoom range off each of GM1900, IN2015 and 1908 — the 6× cap
    and the sub-1.0-minimum handling are both written against claims no phone
    here has yet confirmed.
 
