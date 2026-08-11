@@ -2,6 +2,15 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+/// One open bracket while walking a source file: what it was called, and the
+/// span it turned out to cover.
+class _Call {
+  _Call(this.name, this.start);
+  final String name;
+  final int start;
+  int end = 0;
+}
+
 /// The repository's shape, asserted rather than remembered.
 ///
 /// This exists because the repo had drifted into three products in one folder:
@@ -285,6 +294,173 @@ void main() {
         .where((f) => f.path.endsWith('.dart'))
         .toList();
 
+    /// [src] with every comment and string literal replaced by spaces of the
+    /// same length, so offsets still line up with the original. The paren walk
+    /// below counts brackets, and both a `(` inside a sentence and a
+    /// commented-out widget will unbalance it — which does not throw, it
+    /// silently attributes every later match to the wrong constructor.
+    String mask(String src) {
+      final b = StringBuffer();
+      var i = 0;
+      while (i < src.length) {
+        final two = i + 1 < src.length ? src.substring(i, i + 2) : '';
+        if (two == '//') {
+          while (i < src.length && src[i] != '\n') {
+            b.write(' ');
+            i++;
+          }
+        } else if (two == '/*') {
+          b.write('  ');
+          i += 2;
+          while (i < src.length &&
+              !(i + 1 < src.length && src.substring(i, i + 2) == '*/')) {
+            b.write(src[i] == '\n' ? '\n' : ' ');
+            i++;
+          }
+          if (i < src.length) {
+            b.write('  ');
+            i += 2;
+          }
+        } else if (src[i] == "'" || src[i] == '"') {
+          final q = src.startsWith(src[i] * 3, i) ? src[i] * 3 : src[i];
+          b.write(' ' * q.length);
+          i += q.length;
+          while (i < src.length && !src.startsWith(q, i)) {
+            if (src[i] == r'\' && i + 2 < src.length) {
+              b.write('  ');
+              i += 2;
+              continue;
+            }
+            b.write(src[i] == '\n' ? '\n' : ' ');
+            i++;
+          }
+          if (i < src.length) {
+            b.write(' ' * q.length);
+            i += q.length;
+          }
+        } else {
+          b.write(src[i]);
+          i++;
+        }
+      }
+      return b.toString();
+    }
+
+    /// For each offset in [at], the call whose argument list encloses it and
+    /// the call enclosing that one. `color:` means an edge inside
+    /// `Border.all(...)`, a shadow inside `BoxShadow(...)` and a fill inside
+    /// `BoxDecoration(...)`; nothing but the enclosing call distinguishes them.
+    Map<int, List<_Call?>> callsAround(String masked, List<int> at) {
+      final out = <int, List<_Call?>>{};
+      final open = <_Call>[];
+      final ident = RegExp(r'([A-Za-z_][\w.]*)\s*$');
+      _Call? nthOpen(int back) =>
+          open.length > back ? open[open.length - 1 - back] : null;
+      var next = 0;
+      for (var i = 0; i < masked.length; i++) {
+        while (next < at.length && at[next] <= i) {
+          out[at[next]] = [nthOpen(0), nthOpen(1)];
+          next++;
+        }
+        final c = masked[i];
+        if (c == '(' || c == '[' || c == '{') {
+          final from = i < 80 ? 0 : i - 80;
+          final named = c != '('
+              ? ''
+              : ident.firstMatch(masked.substring(from, i))?.group(1) ?? '';
+          open.add(_Call(named, i));
+        } else if ((c == ')' || c == ']' || c == '}') && open.isNotEmpty) {
+          open.removeLast().end = i;
+        }
+      }
+      for (final c in open) {
+        c.end = masked.length;
+      }
+      for (; next < at.length; next++) {
+        out[at[next]] = [null, null];
+      }
+      return out;
+    }
+
+    /// Widgets that paint a fill themselves, and the decoration objects that
+    /// describe one for the widget above them.
+    const paints = {
+      'Container',
+      'ColoredBox',
+      'DecoratedBox',
+      'Material',
+      'Card',
+      'Ink',
+      // This app's own panel. Its default is opaque, but the `color:` it
+      // accepts paints the same full-bleed fill as any of the above.
+      'SurfacePanel',
+    };
+    const describes = {'BoxDecoration', 'ShapeDecoration'};
+    final holdsContent = RegExp(r'\bchild(ren)?\s*:');
+    // withValues/withOpacity, an ARGB literal whose alpha byte is not FF,
+    // or one of Material's pre-diluted constants — Colors.black54 is a
+    // wash with a friendlier name, and leaving it out would put this rule
+    // one find-and-replace away from meaning nothing.
+    final seeThrough = RegExp(r'\b(color|backgroundColor|fillColor)\s*:'
+        r'\s*[^,;]*?(\.withValues\s*\(\s*alpha:|\.withOpacity\s*\(|'
+        r'Color\s*\(\s*0x(?!(FF|ff))[0-9a-fA-F]{2}|'
+        r'Colors\.(black|white)\d)');
+    // Legibility over imagery nobody controls genuinely needs translucency.
+    // The exemption has to name what is behind it — "scrim" alone is a shrug.
+    final overImagery = RegExp(r'//.*\bscrim over \w');
+
+    List<String> glassIn(String src, String label) {
+      final masked = mask(src);
+      // Any drift here shifts every offset and quietly points the whole check
+      // at the wrong constructors.
+      expect(masked.length, src.length, reason: 'mask() moved $label');
+      final hits = seeThrough.allMatches(masked).toList();
+      if (hits.isEmpty) return const [];
+      final around = callsAround(masked, hits.map((m) => m.start).toList());
+      final lines = src.split('\n');
+
+      final found = <String>[];
+      for (final m in hits) {
+        final owner = around[m.start]![0];
+        final name = owner?.name ?? '';
+        final key = m[1]!;
+
+        // Which call actually paints this fill — the one holding the property,
+        // or the widget the decoration belongs to.
+        final _Call? painter;
+        if (key != 'color') {
+          painter = owner; // backgroundColor / fillColor is always a surface
+        } else if (describes.contains(name)) {
+          painter = around[m.start]![1];
+        } else if (paints.contains(name)) {
+          painter = owner;
+        } else {
+          continue; // an edge, a shadow, an icon, a letterform
+        }
+
+        // A fill with nothing on it is a rule, a dot, a halo or a swatch — not
+        // a surface anyone reads.
+        if (key == 'color' &&
+            painter != null &&
+            !holdsContent.hasMatch(masked.substring(painter.start, painter.end))) {
+          continue;
+        }
+
+        // The whole comment block above the property, not just the line
+        // directly above it: an explanation worth writing runs to three or
+        // four lines, and the phrase lands on the first of them.
+        final n = '\n'.allMatches(src.substring(0, m.start)).length;
+        var explained = overImagery.hasMatch(lines[n]);
+        for (var k = n - 1; k >= 0 && lines[k].trimLeft().startsWith('//');
+            k--) {
+          explained = explained || overImagery.hasMatch(lines[k]);
+        }
+        if (explained) continue;
+        found.add('$label:${n + 1}  ${lines[n].trim()}');
+      }
+      return found;
+    }
+
     test('nothing blurs what is behind it', () {
       // BackdropFilter is the expensive half: the compositor reads back
       // everything already painted behind the widget and blurs it, every
@@ -348,20 +524,87 @@ void main() {
       // The other half, and the one that survived: translucent panels over a
       // moving ember field. With the blur gone that is not frosted glass, it is
       // an animation playing behind your paragraph.
-      // Only the surfaces text is read ON. A hairline border at 12% alpha is
-      // an edge, not a window, and banning it would just push people to fake
-      // one with a solid colour nobody picked.
-      final theme = File('lib/core/ui/theme.dart').readAsStringSync();
-      final translucent = RegExp(
-              r'(fillColor|backgroundColor):\s*MilesColors\.\w+'
-              r'\.withValues\(alpha:')
-          .allMatches(theme)
-          .map((m) => m[0]!)
-          .toList();
-      expect(theme, contains('fillColor'),
-          reason: 'the theme no longer parses the way this check assumes');
-      expect(translucent, isEmpty,
-          reason: 'a surface text is read on is see-through: $translucent');
+      //
+      // This check used to read lib/core/ui/theme.dart and nothing else, so it
+      // went green twice while 65 translucent panels sat in lib/features. The
+      // theme was never where the glass was.
+      //
+      // Alpha is not banned, because most alpha in this app is right: borders,
+      // shadows, gradients, glows, a 2px rule, a dimmer behind a modal, and a
+      // scrim that keeps a caption legible over a photograph nobody controls.
+      // Banning it outright would only teach the next person to write
+      // Color(0x99...) instead. What is banned is narrower and is the thing
+      // that actually hurt: a SURFACE — a fill with content sitting on it —
+      // that you can see the background through.
+      final offenders = <String>[];
+      for (final f in lib()) {
+        offenders.addAll(glassIn(f.readAsStringSync(),
+            f.path.replaceAll(r'\', '/'),),);
+      }
+      expect(offenders, isEmpty,
+          reason: 'a surface content is read on is see-through. Resolve the '
+              'tint against the surface it sits on — MilesColors.surface1 / '
+              'surface2 / night, or MilesColors.tint() to keep an accent '
+              'wash — or, if it genuinely sits over imagery, say so with a '
+              '"// scrim over <what>" comment:\n${offenders.join('\n')}',);
+    });
+
+    test('the glass detector can tell a panel from an edge', () {
+      // A check that goes green after a cleanup proves nothing; it has to be
+      // able to fail. Every line here is a distinction the rule turns on, and
+      // each one was a false positive or a false negative while it was being
+      // written.
+      String only(String src) => glassIn(src, 'x').join('|');
+
+      // The thing itself: a panel with content on it, see-through.
+      expect(
+          only('Container(decoration: BoxDecoration(color: '
+              'C.withValues(alpha: 0.6)), child: Text(t))'),
+          contains('x:1'),);
+      // ...and reached the other way round, with a raw ARGB literal. If this
+      // one is missed the ban is one search-and-replace from useless.
+      expect(only('Material(color: Color(0x99120A0C), child: Text(t))'),
+          contains('x:1'),);
+      // ...or spelled the way Material spells it. Colors.black is a
+      // colour; Colors.black54 is a hole in the panel.
+      expect(only('Container(color: Colors.black54, child: Text(t))'),
+          contains('x:1'),);
+      expect(only('Container(color: Colors.black, child: Text(t))'),
+          isEmpty,);
+
+      // Not the thing: an edge, a shadow, a letterform, a 2px rule with
+      // nothing on it, and a caption over a photograph that says so.
+      expect(only('BoxDecoration(border: Border.all(color: '
+          'C.withValues(alpha: 0.2)))'), isEmpty,);
+      expect(only('BoxDecoration(boxShadow: [BoxShadow(color: '
+          'C.withValues(alpha: 0.4))])'), isEmpty,);
+      expect(only('Text(s, style: TextStyle(color: Color(0x99F5EFE6)))'),
+          isEmpty,);
+      expect(only('Container(height: 2, color: Color(0x33F5EFE6))'), isEmpty);
+      expect(
+          only('Container(color: Color(0x8C120A0C), // scrim over the map\n'
+              '  child: Text(t),)'),
+          isEmpty,);
+      // The reason is usually longer than the line it sits above.
+      expect(
+          only('Container(\n  // A scrim over the map, because the label has\n'
+              '  // to read against roads and water alike.\n'
+              '  color: Color(0x8C120A0C),\n  child: Text(t),)'),
+          isEmpty,);
+      // The exemption has to name what is behind it, or it is just a way to
+      // spell "ignore".
+      expect(
+          only('Container(color: Color(0x8C120A0C), // scrim\n'
+              '  child: Text(t),)'),
+          contains('x:1'),);
+
+      // Commented-out and quoted code is not code. Both used to shift every
+      // offset after them and mis-attribute the next real match.
+      expect(only('// Container(color: Color(0x99120A0C), child: Text(t))'),
+          isEmpty,);
+      expect(only("Text(') (', style: TextStyle(color: C)); "
+          'Container(decoration: BoxDecoration(color: '
+          'C.withValues(alpha: 0.6)), child: Text(t))'), contains('x:1'),);
     });
   });
 
