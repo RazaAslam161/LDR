@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -778,6 +779,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
 
+  /// What there is to copy off a message, empty when there is nothing.
+  ///
+  /// Only the body. previewText() would happily hand back '📷 Photo' for a
+  /// picture, and pasting that into another app is worse than the copy button
+  /// not being there.
+  static String _copyableText(Message m) => (m.body ?? '').trim();
+
+  Future<void> _copyMessage(Message m) async {
+    final text = _copyableText(m);
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied'),
+        backgroundColor: MilesColors.sage,
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   /// Saves an image or video message to the private vault, with brief feedback.
   Future<void> _saveMessageMedia(Message m) async {
     final uid = SupabaseService.currentUserId;
@@ -1164,6 +1187,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   ),
                                   const Spacer(),
                                   if (one != null) ...[
+                                    if (_copyableText(one).isNotEmpty)
+                                      IconButton(
+                                        tooltip: 'Copy text',
+                                        icon: const Icon(Icons.copy_rounded,
+                                            color: MilesColors.cream50,),
+                                        onPressed: () {
+                                          _clearSelection();
+                                          _copyMessage(one);
+                                        },
+                                      ),
                                     IconButton(
                                       tooltip: 'Reply',
                                       icon: const Icon(Icons.reply,

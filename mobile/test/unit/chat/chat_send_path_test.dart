@@ -35,4 +35,24 @@ void main() {
       expect(chat, contains('ChatSendQueue.instance.enqueueAll'));
     });
   });
+
+  group('a message can be copied', () {
+    test('copy hangs off the existing selection, not a new gesture', () {
+      // Long-press already opens the selection bar, which is where reply and
+      // save live. A second long-press meaning something else would be a
+      // second way to do the same thing.
+      final at = chat.indexOf(r'${_selection.length} selected');
+      expect(at, greaterThan(-1), reason: 'the selection bar should exist');
+      expect(chat.substring(at, at + 1400), contains('_copyMessage(one)'));
+    });
+
+    test('what lands on the clipboard is the message, not a label', () {
+      // previewText() answers '📷 Photo' for a picture, and pasting that into
+      // another app is worse than the button not being there.
+      expect(chat, contains('Clipboard.setData'));
+      expect(chat, contains("static String _copyableText(Message m) => (m.body ?? '').trim();"));
+      expect(chat, contains('if (_copyableText(one).isNotEmpty)'),
+          reason: 'the button has to be hidden where there is nothing to copy',);
+    });
+  });
 }
