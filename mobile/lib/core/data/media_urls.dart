@@ -11,6 +11,11 @@ const chatBgBucket = 'chat-bg';
 /// Chat video and Touch body photos. Private since it was written.
 const intimateBucket = 'couple_intimate';
 
+/// Documents sent in chat. Separate from [chatBucket] because that bucket's
+/// allowed_mime_types is a whitelist of images and audio, and a PDF has no
+/// business forcing it open for the photographs.
+const filesBucket = 'couple_files';
+
 /// Signed URLs for private storage, cached so rendering stays synchronous.
 ///
 /// `couple_media` held 255 of a couple's photos in a PUBLIC bucket. Its RLS was

@@ -15,6 +15,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/save_media_service.dart';
@@ -35,6 +36,7 @@ import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
+import 'package:miles/features/chat/widgets/file_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
@@ -243,6 +245,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _adoptPending();
   }
 
+  void _sendDocuments(String coupleId, List<PickedDocument> docs) {
+    if (docs.isEmpty) return;
+    ChatSendQueue.instance.enqueueFiles(
+      coupleId,
+      [for (final d in docs) (file: d.file, name: d.name)],
+      replyToId: _takeReplyId(),
+    );
+    _adoptPending();
+  }
+
   /// Mirror the queue's pending sends into the message list.
   ///
   /// Called on mount and whenever the queue changes, so a photo taken from the
@@ -268,6 +280,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         senderId: myUid,
         createdAt: DateTime.now(),
         kind: s.kind,
+        // A document has no thumbnail, so its bubble is the name — which is
+        // what the row will carry once it lands.
+        body: s.fileName,
         localPath: s.file.path,
         sendStatus: s.status,
         replyToId: s.replyToId,
@@ -1371,6 +1386,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         onSendText: (t) => _sendTextFast(couple.id, t),
                         onSendMedia: (items) =>
                             _sendMediaBatch(couple.id, items),
+                        onSendFiles: (docs) =>
+                            _sendDocuments(couple.id, docs),
                         onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
                             replyToId: _takeReplyId(),),
                         onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
@@ -1916,6 +1933,8 @@ class _Content extends StatelessWidget {
         );
       case 'video':
         return _VideoBubble(message: m, senderName: senderName);
+      case 'file':
+        return FileBubble(message: m);
       default:
         return Text(
           m.body ?? '',

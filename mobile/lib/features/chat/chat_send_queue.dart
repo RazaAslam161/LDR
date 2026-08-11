@@ -18,6 +18,7 @@ class PendingSend {
     required this.file,
     required this.kind,
     this.replyToId,
+    this.fileName,
     this.status = SendStatus.sending,
   });
 
@@ -25,11 +26,16 @@ class PendingSend {
   final String coupleId;
   final File file;
 
-  /// 'image' or 'video'. Voice notes still go straight through the repository —
-  /// they are recorded in the chat, where the user is already looking at the
-  /// bubble.
+  /// 'image', 'video' or 'file'. Voice notes still go straight through the
+  /// repository — they are recorded in the chat, where the user is already
+  /// looking at the bubble.
   final String kind;
   final String? replyToId;
+
+  /// What a document is called. Set for kind 'file' and null otherwise: the
+  /// document provider caches under a name of its own, so the path cannot be
+  /// asked afterwards.
+  final String? fileName;
 
   SendStatus status;
 }
@@ -86,6 +92,30 @@ class ChatSendQueue extends ChangeNotifier {
 
   String enqueueVideo(String coupleId, File file, {String? replyToId}) =>
       _enqueue(coupleId, file, 'video', replyToId, null);
+
+  /// Accept a whole document pick at once, in the order it was picked.
+  List<String> enqueueFiles(
+    String coupleId,
+    List<({File file, String name})> docs, {
+    String? replyToId,
+  }) {
+    final ids = <String>[];
+    for (final (i, doc) in docs.indexed) {
+      final send = PendingSend(
+        id: _uuid.v4(),
+        coupleId: coupleId,
+        file: doc.file,
+        kind: 'file',
+        fileName: doc.name,
+        replyToId: i == 0 ? replyToId : null,
+      );
+      _pending.add(send);
+      ids.add(send.id);
+    }
+    notifyListeners();
+    _pump();
+    return ids;
+  }
 
   /// Accept a whole gallery pick at once, in the order it was picked.
   ///
@@ -186,6 +216,12 @@ class ChatSendQueue extends ChangeNotifier {
   }
 
   static Future<void> _upload(PendingSend send) async {
+    if (send.kind == 'file') {
+      await ChatRepository.sendFile(
+          send.coupleId, send.file, send.fileName ?? 'file',
+          id: send.id, replyToId: send.replyToId,);
+      return;
+    }
     if (send.kind == 'video') {
       await ChatRepository.sendVideo(send.coupleId, send.file,
           id: send.id, replyToId: send.replyToId,);

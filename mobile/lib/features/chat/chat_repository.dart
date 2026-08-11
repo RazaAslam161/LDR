@@ -17,11 +17,12 @@ const bool kRtChatDebug = false;
 
 /// A single chat message between the two partners.
 ///
-/// [kind] is one of: 'text', 'image', 'voice', 'video'.
+/// [kind] is one of: 'text', 'image', 'voice', 'video', 'file'.
 /// - text: [body] holds the message
 /// - image: [imagePath] is the storage path; the public URL is derived
 /// - voice: [voicePath] is the storage path; client plays it back
 /// - video: [videoPath] is in the PRIVATE couple_intimate bucket (signed URL)
+/// - file: [filePath] is in couple_files; [body] is the file's NAME
 /// Delivery state for an outgoing message shown optimistically.
 enum SendStatus { sent, sending, failed }
 
@@ -34,6 +35,8 @@ class Message {
     this.imagePath,
     this.voicePath,
     this.videoPath,
+    this.filePath,
+    this.fileSize,
     this.replyToId,
     this.kind = 'text',
     this.deletedForEveryone = false,
@@ -50,6 +53,8 @@ class Message {
         imagePath: JsonUtils.parseStringOrNull(j['image_path']),
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
         videoPath: JsonUtils.parseStringOrNull(j['video_path']),
+        filePath: JsonUtils.parseStringOrNull(j['file_path']),
+        fileSize: j['file_size'] == null ? null : JsonUtils.parseInt(j['file_size']),
         replyToId: JsonUtils.parseStringOrNull(j['reply_to_id']),
         kind: JsonUtils.parseString(j['kind'], fallback: 'text'),
         createdAt: JsonUtils.parseDate(j['created_at']).toLocal(),
@@ -81,6 +86,8 @@ class Message {
         imagePath: imagePath,
         voicePath: voicePath,
         videoPath: videoPath,
+        filePath: filePath,
+        fileSize: fileSize,
         replyToId: replyToId,
         kind: kind,
         deletedForEveryone: deletedForEveryone,
@@ -100,6 +107,8 @@ class Message {
         imagePath: server.imagePath,
         voicePath: server.voicePath,
         videoPath: server.videoPath,
+        filePath: server.filePath,
+        fileSize: server.fileSize,
         replyToId: server.replyToId,
         kind: server.kind,
         deletedForEveryone: server.deletedForEveryone,
@@ -122,6 +131,12 @@ class Message {
   final String? imagePath;
   final String? voicePath;
   final String? videoPath;
+
+  /// couple_files object name. [body] carries the file's display name, so a
+  /// build that predates this column still shows what was sent instead of an
+  /// empty bubble — this fleet has no update channel.
+  final String? filePath;
+  final int? fileSize;
   final String? replyToId;
   final String kind;
 
@@ -135,6 +150,8 @@ class Message {
         return '🎙️ Voice note';
       case 'video':
         return '🎬 Video';
+      case 'file':
+        return '📎 ${(body ?? 'File').trim()}';
       default:
         final b = (body ?? '').trim();
         return b.isEmpty
@@ -368,6 +385,43 @@ class ChatRepository {
   static Future<String?> signedVideoUrl(String? path) => path == null
       ? Future.value()
       : MediaUrls.sign(intimateBucket, MediaUrls.toPath(intimateBucket, path));
+
+  /// Uploads a document to couple_files and inserts a message of kind='file'.
+  ///
+  /// Its own bucket, not couple_media: that one's allowed_mime_types is a
+  /// whitelist of images and audio, and widening it for a PDF would widen it
+  /// for every photo in the conversation.
+  ///
+  /// [name] comes from the picker, not from the path. The document provider
+  /// hands back a cached copy under a name of its own, and "what is this
+  /// file called" is the only thing the bubble has to show.
+  static Future<void> sendFile(String coupleId, File file, String name,
+      {String? replyToId, String? id,}) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+
+    final ext = _ext(name) ?? _ext(file.path) ?? 'bin';
+    final path = '$coupleId/${_randomName('file', ext)}';
+    await _c.storage.from(filesBucket).upload(path, file);
+    await _c.from('messages').insert({
+      if (id != null) 'id': id,
+      'couple_id': coupleId,
+      'sender_id': uid,
+      'file_path': path,
+      'file_size': await file.length(),
+      // The name goes in body so an older client renders it as text rather
+      // than an empty bubble it has no case for.
+      'body': name,
+      'kind': 'file',
+      if (replyToId != null) 'reply_to_id': replyToId,
+    });
+  }
+
+  /// A signed URL for a document, minted on demand — file bubbles render a
+  /// name and a size, so unlike a photo there is nothing to pre-sign for.
+  static Future<String?> signedFileUrl(String? path) => path == null
+      ? Future.value()
+      : MediaUrls.sign(filesBucket, MediaUrls.toPath(filesBucket, path));
 
   /// Uploads a voice note and inserts a message row of kind='voice'.
   static Future<void> sendVoice(String coupleId, File file,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
@@ -13,7 +14,7 @@ import 'package:record/record.dart';
 /// Chat input bar with three actions: text, image attach, hold-to-record voice.
 class ChatInputBar extends StatefulWidget {
   const ChatInputBar({
-    required this.coupleId, required this.onSendText, required this.onSendMedia, required this.onSendVoice, required this.onSendVideo, required this.onFlingGif, required this.onPickGif, super.key,
+    required this.coupleId, required this.onSendText, required this.onSendMedia, required this.onSendFiles, required this.onSendVoice, required this.onSendVideo, required this.onFlingGif, required this.onPickGif, super.key,
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
@@ -27,6 +28,10 @@ class ChatInputBar extends StatefulWidget {
   /// Future: these are handed to the send queue and are on screen before the
   /// first upload starts, so there is nothing here to wait on.
   final void Function(List<PickedMedia> items) onSendMedia;
+
+  /// A whole document pick. Same contract as [onSendMedia]: handed to the send
+  /// queue, on screen before the first byte moves.
+  final void Function(List<PickedDocument> docs) onSendFiles;
   final Future<void> Function(File voice) onSendVoice;
   final Future<void> Function(File video) onSendVideo;
 
@@ -153,6 +158,36 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  /// Documents, through the storage provider rather than the gallery.
+  ///
+  /// The size check is here rather than left to the upload: couple_files
+  /// rejects anything over its limit with a storage error, which reaches the
+  /// user as a bubble that says "didn't send" and no reason at all.
+  Future<void> _pickDocuments() async {
+    try {
+      final docs = await DocumentPickerService.pick();
+      if (docs.isEmpty) return;
+      final small = docs
+          .where((d) => d.size <= DocumentPickerService.maxBytes)
+          .toList();
+      if (small.length != docs.length && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Files over '
+                  '${DocumentPickerService.formatBytes(DocumentPickerService.maxBytes)}'
+                  ' were skipped.',),),
+        );
+      }
+      if (small.isNotEmpty) widget.onSendFiles(small);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not attach that file.')),
+        );
+      }
+    }
+  }
+
   Future<void> _recordVideo() async {
     try {
       final file = await PhotoPickerService.pickVideo(source: ImageSource.camera);
@@ -223,6 +258,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
             onTap: () {
               Navigator.pop(context);
               _recordVideo();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.attach_file,
+                color: MilesColors.cream50,),
+            title: const Text('Document',
+                style: TextStyle(color: MilesColors.cream50),),
+            subtitle: const Text('PDFs, docs, anything on the phone',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 11.5),),
+            onTap: () {
+              Navigator.pop(context);
+              _pickDocuments();
             },
           ),
           const SizedBox(height: 8),
