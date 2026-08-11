@@ -211,6 +211,25 @@ void main() {
     );
   });
 
+  testWidgets('a date picker hides what is behind it', (tester) async {
+    // Not covered by dialogTheme — DatePickerDialog reads datePickerTheme and
+    // then colorScheme.surfaceContainerHigh. It is also on the path a brand
+    // new account walks on its first screen, asking for a birthday, which is
+    // exactly the kind of surface an already-paired test couple never opens.
+    await expectHidesBackground(
+      tester,
+      'date picker',
+      tree: app,
+      open: route((c) => showDatePicker(
+            context: c,
+            initialDate: DateTime(2024, 6),
+            firstDate: DateTime(2000),
+            lastDate: DateTime(2030),
+          ),),
+      locate: painted(DatePickerDialog),
+    );
+  });
+
   testWidgets('a drawer hides what is behind it', (tester) async {
     await expectHidesBackground(
       tester,

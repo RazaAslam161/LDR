@@ -151,6 +151,16 @@ ThemeData milesDarkTheme() {
       // reading feature files could find it. A page gets its transparency
       // from scaffoldBackgroundColor below, which no modal reads.
       surface: MilesColors.night,
+      // Named rather than left to `?? surface`, so a surface this theme has
+      // no entry for — a date picker, a time picker, whatever M3 adds next —
+      // lands on the panel colour instead of the page colour and reads as a
+      // panel. Falling back to `night` would be opaque but flat against the
+      // scaffold it floats over.
+      surfaceContainerLowest: MilesColors.night,
+      surfaceContainerLow: MilesColors.surface1,
+      surfaceContainer: MilesColors.surface1,
+      surfaceContainerHigh: MilesColors.surface1,
+      surfaceContainerHighest: MilesColors.surface2,
       onSurface: MilesColors.cream50,
       primary: MilesColors.ember,
       onPrimary: MilesColors.cream50,
