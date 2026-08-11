@@ -20,8 +20,10 @@ class ChatThemeController extends ChangeNotifier {
 
   String get themeId => _themeId;
 
-  /// A storage path in `chat-bg`, or a legacy public URL cached by an older
-  /// build. Readers sign it — the bucket is private.
+  /// A storage path in `chat-bg`, or the signed URL an older build stored
+  /// here. Readers put both through `MediaUrls.toPath` and sign the result —
+  /// the bucket is private, and that stored token expired a day after it was
+  /// written.
   String? get bgPath => _bgPath;
   ChatTheme get theme => chatThemeById(_themeId);
 

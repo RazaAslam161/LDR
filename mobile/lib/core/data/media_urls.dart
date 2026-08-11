@@ -88,17 +88,30 @@ class MediaUrls {
     }
   }
 
-  /// The storage path inside [bucket] for a value that may be either a path or
-  /// a legacy public URL.
+  /// The storage path inside [bucket] for a value that may be a path or a
+  /// legacy URL of either shape.
   ///
   /// Rows written before the bucket was closed hold a full
   /// `.../object/public/<bucket>/<path>` URL. Those stop resolving the moment
   /// the bucket goes private, so every read goes through here.
+  ///
+  /// `/object/sign/` is the other half of that, and it is not hypothetical:
+  /// the custom chat background persisted the SIGNED url, so every couple who
+  /// ever picked one has a token in their profile row rather than a path. The
+  /// token has long since expired, and there is no update channel to migrate
+  /// them off it — miss this shape and the only way back to a background is to
+  /// pick it again. The query string carries that dead token, so it is dropped
+  /// rather than pasted onto the object name.
   static String toPath(String bucket, String value) {
-    final marker = '/object/public/$bucket/';
-    final i = value.indexOf(marker);
-    if (i < 0) return value;
-    return Uri.decodeComponent(value.substring(i + marker.length));
+    for (final kind in const ['public', 'sign']) {
+      final marker = '/object/$kind/$bucket/';
+      final i = value.indexOf(marker);
+      if (i < 0) continue;
+      final rest = value.substring(i + marker.length);
+      final q = rest.indexOf('?');
+      return Uri.decodeComponent(q < 0 ? rest : rest.substring(0, q));
+    }
+    return value;
   }
 
   @visibleForTesting

@@ -29,6 +29,23 @@ void main() {
       expect(MediaUrls.toPath('couple_media', url), 'fc1c8a3a/my snap.jpg');
     });
 
+    test('recovers the path from a legacy signed URL', () {
+      // The custom chat background stored the signed URL, not the path. Every
+      // couple who picked one before that was fixed has a token in their
+      // profile row, and no build will ever be pushed to them to migrate it.
+      const url = 'https://abc.supabase.co/storage/v1/object/sign/'
+          'chat-bg/uid/bg_1758.jpg?token=eyJhbGciOi.J9.abc-_123';
+      expect(MediaUrls.toPath('chat-bg', url), 'uid/bg_1758.jpg');
+    });
+
+    test('drops the query string rather than signing it as a name', () {
+      // The token is dead by now; carried into the path it just becomes an
+      // object that does not exist, which fails the same way but silently.
+      const url = 'https://abc.supabase.co/storage/v1/object/public/'
+          'couple_media/fc1c8a3a/img_1.jpg?download=1';
+      expect(MediaUrls.toPath('couple_media', url), 'fc1c8a3a/img_1.jpg');
+    });
+
     test('does not confuse one bucket for another', () {
       // A chat-bg URL passed with the couple_media bucket must not be sliced at
       // the wrong marker and turned into a path that resolves to nothing.

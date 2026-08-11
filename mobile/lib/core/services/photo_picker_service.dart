@@ -15,8 +15,10 @@ enum PhotoShape { square, free }
 /// interleaved in whatever order the user tapped them.
 typedef PickedMedia = ({File file, bool isVideo});
 
-/// One reusable pick → crop/adjust → compress pipeline for every photo surface
-/// (avatar, check-in snap, chat photo). Output is ≤1200px JPEG (~quality 80).
+/// Picking photos and videos. Two paths on purpose: [pick] crops and compresses
+/// to a ≤1200px JPEG for the surfaces that need a bounded, framed image (avatar,
+/// check-in snap, chat background), while [pickMedia] hands chat what the user
+/// actually picked, untouched.
 class PhotoPickerService {
   PhotoPickerService._();
 
