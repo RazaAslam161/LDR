@@ -227,14 +227,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   // A push is addressed to a device token, so nothing above this line knows
   // whether it belongs to the account currently signed in. A handset that had
   // been signed into two accounts received the second couple's Reach inside the
   // first couple's session. Drop it before it is ever drawn: an unwanted
   // notification for a stranger's couple is the leak, not the tap that follows.
+  //
+  // Read here rather than first thing, so this isolate touches a plugin channel
+  // in the same order it already does for 'fsi_can_use' below — an unproven
+  // ordering that threw would take out every notification for everyone, which
+  // is a worse failure than the one being fixed.
   final coupleId = message.data['couple_id'] as String?;
   if (!SessionScope.allows(coupleId, await SessionScope.readCouple())) return;
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final plugin = FlutterLocalNotificationsPlugin();
   await plugin.initialize(
