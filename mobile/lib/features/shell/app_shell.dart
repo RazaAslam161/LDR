@@ -43,6 +43,9 @@ class _AppShellState extends ConsumerState<AppShell>
   final Set<String> _shownReach = {};
   CallState _lastCallState = CallState.idle;
 
+  /// Nav index of the Chat destination (Home, Chat, Camera, Touch, [Closer]).
+  static const int _chatTab = 1;
+
   // Bottom-nav bodies. The Camera tab (nav index 2) is a push with no body, so
   // it is intentionally absent here. Indices map past it in build().
   static const List<Widget> _screens = <Widget>[
@@ -58,6 +61,7 @@ class _AppShellState extends ConsumerState<AppShell>
     WidgetsBinding.instance.addObserver(this);
     pendingReach.addListener(_onPendingReach);
     pendingCall.addListener(_onPendingCall);
+    pendingChat.addListener(_onPendingChat);
     realtimeResumed.addListener(_rearmAlwaysOn);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
@@ -170,6 +174,7 @@ class _AppShellState extends ConsumerState<AppShell>
     // A push may have been tapped before the listener attached.
     _onPendingReach();
     _onPendingCall();
+    _onPendingChat();
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
     presenceRouteObserver?.publishActiveTab();
@@ -210,6 +215,16 @@ class _AppShellState extends ConsumerState<AppShell>
         .handlePendingCall(tap.callId, tap.fromName, tap.video);
   }
 
+  /// A tapped message notification. Selects the Chat tab, which is also what
+  /// acks delivery — the catch-up fetch there is the only ack path a push has.
+  void _onPendingChat() {
+    if (pendingChat.value == null) return;
+    pendingChat.value = null;
+    if (!mounted) return;
+    ref.read(shellTabProvider.notifier).state = _chatTab;
+    presenceRouteObserver?.publishActiveTab();
+  }
+
   /// Single entry point for the overlay — de-duped by reach id so the realtime
   /// and push paths never double-show the same Reach.
   void _showReach(String reachId, String partnerName) {
@@ -230,6 +245,7 @@ class _AppShellState extends ConsumerState<AppShell>
     WidgetsBinding.instance.removeObserver(this);
     pendingReach.removeListener(_onPendingReach);
     pendingCall.removeListener(_onPendingCall);
+    pendingChat.removeListener(_onPendingChat);
     realtimeResumed.removeListener(_rearmAlwaysOn);
     final ch = _reachChannel;
     _reachChannel = null;

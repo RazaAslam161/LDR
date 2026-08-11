@@ -30,6 +30,10 @@ class CallTap {
 
 final ValueNotifier<CallTap?> pendingCall = ValueNotifier<CallTap?>(null);
 
+/// A tapped message notification: the AppShell selects the Chat tab. Holds the
+/// message id only so a trace can tie the tap back to the push that caused it.
+final ValueNotifier<String?> pendingChat = ValueNotifier<String?>(null);
+
 /// Wires Firebase Messaging: permission, token lifecycle, the local-notification
 /// channel, and the foreground / tapped-notification handlers.
 ///
@@ -55,10 +59,10 @@ class FcmService {
     await android?.createNotificationChannel(buildCareChannel());
     await android?.createNotificationChannel(buildCallChannel());
 
-    // Cold start via a tapped Reach notification.
+    // Cold start via a tapped notification of any kind.
     final launch = await _fln.getNotificationAppLaunchDetails();
     if (launch?.didNotificationLaunchApp ?? false) {
-      _routeFromPayload(launch!.notificationResponse?.payload);
+      routeFromPayload(launch!.notificationResponse?.payload);
     }
 
     FirebaseMessaging.onMessage.listen(_onForeground);
@@ -186,10 +190,13 @@ class FcmService {
     );
   }
 
-  static void _onLocalTap(NotificationResponse r) =>
-      _routeFromPayload(r.payload);
+  static void _onLocalTap(NotificationResponse r) => routeFromPayload(r.payload);
 
-  static void _routeFromPayload(String? payload) {
+  /// Routes a tapped local notification by the payload its poster wrote in
+  /// reach_notifications.dart. Both halves live on the same device, so this is
+  /// the only place they have to agree — and the only place a test can reach.
+  @visibleForTesting
+  static void routeFromPayload(String? payload) {
     if (payload == null || payload.isEmpty) return;
     final parts = payload.split('|');
     final tag = parts.isNotEmpty ? parts[0] : '';
@@ -202,7 +209,18 @@ class FcmService {
       );
       return;
     }
+    if (tag == 'message') {
+      // message|messageId — opens the Chat tab. Falling through to the Reach
+      // branch below is what made a plain text message pop the full-screen
+      // Reach overlay, on every build that posts a message notification.
+      pendingChat.value = parts.length > 1 ? parts[1] : '';
+      return;
+    }
     if (tag == 'care') return; // care taps just open the app
+    // Untagged by construction: the Reach payload is 'reachId|fromName' and
+    // predates every tagged kind. So this is a default branch that ASSUMES
+    // reach — any new kind must get its own branch above it, or it lands here
+    // and shows the overlay with a garbage id.
     pendingReach.value = ReachTap(
       tag,
       parts.length > 1 ? parts[1] : 'Your partner',
