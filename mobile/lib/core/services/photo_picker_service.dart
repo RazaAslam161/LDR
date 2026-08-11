@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image_picker_android/image_picker_android.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/photo/filter_editor_screen.dart';
 import 'package:miles/main.dart' show MilesApp;
@@ -24,6 +26,25 @@ class PhotoPickerService {
 
   static final ImagePicker _picker = ImagePicker();
 
+  /// Point the plugin at Android's system Photo Picker.
+  ///
+  /// image_picker_android defaults useAndroidPhotoPicker to FALSE, and with it
+  /// false every gallery entry point fires `Intent.ACTION_GET_CONTENT` — the
+  /// document provider. That is the whole of "sending multiple pics and videos
+  /// takes me to the phone drive or file manager": browsing folders for your
+  /// own photos, with no video thumbnails and no multi-select worth the name.
+  /// True fires `PickVisualMedia` instead, which IS the gallery, and which
+  /// androidx falls back off gracefully on devices too old to have it.
+  ///
+  /// Called from each entry point rather than from main(): a picker that opens
+  /// the wrong app is not a thing to leave depending on a bootstrap line
+  /// somebody may reorder. Assignment is idempotent and the platform instance
+  /// is a singleton.
+  static void _useSystemGallery() {
+    final impl = ImagePickerPlatform.instance;
+    if (impl is ImagePickerAndroid) impl.useAndroidPhotoPicker = true;
+  }
+
   /// Returns a cropped + compressed file, or null if the user cancels.
   /// Pass [enhanceContext] to offer the beauty-filter step after cropping.
   static Future<File?> pick({
@@ -31,6 +52,7 @@ class PhotoPickerService {
     PhotoShape shape = PhotoShape.free,
     BuildContext? enhanceContext,
   }) async {
+    _useSystemGallery();
     // Guard the News cover for the WHOLE flow: pickImage, the native crop UI
     // (UCrop), and the enhance step are all system/heavy overlays that bounce
     // the app through inactive/paused. Cleared in finally on every exit path.
@@ -97,6 +119,7 @@ class PhotoPickerService {
   /// through a ratio step and a filter step, and picking a dozen holiday
   /// photos meant running it a dozen times.
   static Future<List<PickedMedia>> pickMedia({int limit = 50}) async {
+    _useSystemGallery();
     MilesApp.systemOverlayActive = true;
     try {
       final picked = await _picker.pickMultipleMedia(limit: limit);
@@ -132,6 +155,7 @@ class PhotoPickerService {
 
   /// Pick (or record) a video — no crop. Capped at 5 minutes to bound size.
   static Future<File?> pickVideo({required ImageSource source}) async {
+    _useSystemGallery();
     MilesApp.systemOverlayActive = true;
     try {
       final x = await _picker.pickVideo(

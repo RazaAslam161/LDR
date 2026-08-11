@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 
@@ -45,5 +47,18 @@ void main() {
     expect(PhotoPickerService.isVideoPick('/cache/1000012', null), isFalse);
     expect(PhotoPickerService.isVideoPick('/cache/blob.dat', 'application/octet-stream'),
         isFalse,);
+  });
+
+  test('every picker entry point asks for the gallery, not a file browser', () {
+    // Which Android intent gets fired is decided by one bool inside a plugin,
+    // and no widget test can see it: the plugin defaults it to false, which is
+    // ACTION_GET_CONTENT — the document provider. "sending multiple pics and
+    // videos takes me to the phone drive or file manager" was that default.
+    final src =
+        File('lib/core/services/photo_picker_service.dart').readAsStringSync();
+    expect(src, contains('impl.useAndroidPhotoPicker = true'));
+    // One missed entry point is one action that still opens the file manager.
+    expect('_useSystemGallery();'.allMatches(src).length, 3,
+        reason: 'pick, pickMedia and pickVideo each open a system picker',);
   });
 }

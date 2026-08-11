@@ -52,6 +52,11 @@ dependencies:
 
   # ─── File picking (chat photos + Vault) ──────────────────────
   image_picker: ^1.1.2
+  # Direct so PhotoPickerService can reach ImagePickerAndroid and turn the
+  # Android system Photo Picker ON. Left at the plugin's default the multi-pick
+  # opens the DOCUMENT provider — the file manager — instead of the gallery.
+  image_picker_android: ^0.8.12
+  image_picker_platform_interface: ^2.10.0
 
   # ─── Voice notes (record + playback in chat) ─────────────────
   record: ^7.1.0
