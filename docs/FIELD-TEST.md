@@ -64,12 +64,16 @@ before this trace existed.
 
 | Trace pattern | Cause |
 |---|---|
-| `init` with `has_couple:false` | The controller never bound. Calling is dead for the whole process, with no retry. Not a network problem. |
-| `signal_subscribe` with `status` other than `subscribed` | The signalling channel is not receiving. Nothing will move regardless of TURN. |
+| `init` with `has_couple:false` | The couple had not resolved yet. Harmless on its own now — the binding is driven by the session, so a later `init` with `action:bind` must follow. If none does, calling is dead for the process. |
+| `init` with `rebind:true` | A different account (or the partner) signed in on this handset. Every row before it belongs to the previous couple. |
+| `signal_subscribe` with `topic` naming a couple that is **not** the one in `init` | The controller is signing on a couple it no longer belongs to. The private-channel policy on `realtime.messages` denies it, so nothing moves in either direction — and `invite_failed` will carry `pg_code:42501` for the same reason. |
+| `signal_subscribe` with `status` other than `subscribed` | The signalling channel is not receiving. Nothing will move regardless of TURN. `attempt` counts the retries; if it climbs and never reaches `subscribed`, the topic is being refused, not merely flaky. |
+| `call_no_channel` / `accept_no_channel` | The call was refused before it started because signalling was not live within 5s. The user was told. Nothing after this is a WebRTC problem. |
+| `relay_wait` with `cold:true, relay:false` | A device with nothing cached spent its whole budget and still has no relay — this call cannot use TURN at all, because `iceServers` are read once at `pc_created`. Check `turn_fetch` in the same window. |
 | `signal_dropped_no_channel` | The signal was discarded before it reached the wire. Look at what `rt_resubscribe` was doing at the same instant. |
 | `signal_sent` on A, **no** `signal_received` on B | Sent and not delivered — realtime fan-out, not WebRTC. |
 | No `signal_received` **and** no `invite_inserted` | B was never told at all, by either path. |
-| `invite_failed` | The durable offer never landed, so a closed phone cannot ring. Check the error class — an RLS denial means a stale `couple_id`. |
+| `invite_failed` | The durable offer never landed, so a closed phone cannot ring. `pg_code:42501` with a `couple` that is not the signed-in user's couple is a stale binding; `42501` with the right couple is a policy problem. |
 | `offer_dropped_busy` | B's state machine was stuck non-idle. B is silently unreachable and looks healthy. |
 | `connect_timeout` with all `remote_*` at 0 | Their candidates never arrived. Signalling, not TURN. |
 | `connect_timeout` with `local_relay:0` | TURN never allocated on this side. Check `turn_fetch` and `pc_created.relay_servers`. |

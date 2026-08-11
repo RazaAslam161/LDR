@@ -85,6 +85,14 @@ class CallController extends ChangeNotifier {
 
   bool _subscribingChan = false;
 
+  /// Whether the last subscribe actually reached SUBSCRIBED. Every offer,
+  /// answer and candidate rides this one channel, so this is the difference
+  /// between a call that can happen and one that sits on "Calling…" for 35
+  /// seconds and then reads as a network fault.
+  bool _chanLive = false;
+  int _subscribeAttempt = 0;
+  Timer? _resubscribeTimer;
+
   /// (Re)subscribe `call:<coupleId>` cleanly — Pattern A: await removeChannel(old)
   /// before re-creating, so a reconnect never leaves a duplicate-topic channel
   /// joined-but-dead (which would silently drop incoming offer/answer/ice/hangup).
@@ -92,6 +100,8 @@ class CallController extends ChangeNotifier {
     final id = _coupleId;
     if (id == null || _subscribingChan) return;
     _subscribingChan = true;
+    _resubscribeTimer?.cancel();
+    _chanLive = false;
     try {
       final old = _chan;
       _chan = null;
@@ -100,6 +110,7 @@ class CallController extends ChangeNotifier {
           await SupabaseService.client.removeChannel(old);
         } catch (_) {}
       }
+      final topic = 'call:$id';
       // The status was thrown away here. Every signal this app sends goes over
       // this one channel, so a subscribe that lands in CHANNEL_ERROR or
       // TIMED_OUT means no offer, no answer, no ICE and no hangup ever moves —
@@ -107,17 +118,79 @@ class CallController extends ChangeNotifier {
       // 35s timeout looking exactly like a network problem, which is where two
       // months of diagnosis went.
       _chan = SupabaseService.client
-          .channel('call:$id', opts: RealtimeChannelConfig(private: true))
+          .channel(topic, opts: RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'signal', callback: _onSignal)
           .subscribe((status, err) {
+        // A subscribe callback outlives the channel that owns it: after a
+        // rebind the PREVIOUS couple's channel still reports, and letting it
+        // write _chanLive is how a dead topic passes for a live one.
+        if (id != _coupleId) return;
+        final live = status == RealtimeSubscribeStatus.subscribed;
+        _chanLive = live;
+        // The topic, because it is the one link a failing trace could not read:
+        // a channelError on the couple you LEFT and one on your own couple are
+        // the same row otherwise, and they are different bugs. The channel is
+        // private, so the topic is what the RLS policy on realtime.messages is
+        // actually judging.
         Diag.record(DiagArea.call, 'signal_subscribe', corr: _callId, fields: {
           'status': status.name,
+          'topic': topic,
+          'attempt': _subscribeAttempt,
           if (err != null) 'error': err.runtimeType.toString(),
         },);
+        if (live) {
+          _subscribeAttempt = 0;
+        } else {
+          _scheduleResubscribe();
+        }
       });
     } finally {
       _subscribingChan = false;
     }
+  }
+
+  /// A refused subscribe used to sit dead for the life of the process: nothing
+  /// retried it, and every later call spent its full timeout sending into a
+  /// channel the server had already closed. Backed off, because the denial can
+  /// be permanent (a wrong topic) and a tight loop on it is a reconnect storm.
+  void _scheduleResubscribe() {
+    if (_coupleId == null) return;
+    _resubscribeTimer?.cancel();
+    final delay = Duration(seconds: 1 << _subscribeAttempt.clamp(0, 4));
+    _subscribeAttempt++;
+    _resubscribeTimer = Timer(delay, () {
+      if (!_chanLive) unawaited(_subscribeChannel());
+    });
+  }
+
+  /// Wait, briefly, for signalling to be live before a call is allowed to
+  /// depend on it. Bounded: someone is holding the phone.
+  Future<bool> _ensureChannel() async {
+    if (_chanLive) return true;
+    // Nothing to subscribe to. Waiting out the budget would only delay the
+    // message.
+    if (_coupleId == null) return false;
+    _subscribeAttempt = 0;
+    await _subscribeChannel();
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (!_chanLive && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    return _chanLive;
+  }
+
+  /// Refuse a call that has nowhere to signal, and say so.
+  ///
+  /// Placing it anyway is what produced 228 sends that went nowhere, six
+  /// invites refused, and a 35s wait that told the user nothing.
+  void _failWithoutChannel(String event) {
+    Diag.record(DiagArea.call, event, corr: _callId, fields: {
+      'couple': _coupleId,
+      'attempt': _subscribeAttempt,
+    },);
+    _lastError = 'Calling is not connected right now. '
+        'Check your connection and try again in a moment.';
+    unawaited(_teardown(CallState.ended));
   }
 
   /// If the peer connection doesn't connect within a window, stop hanging on
@@ -141,6 +214,13 @@ class CallController extends ChangeNotifier {
           'remote_set': _remoteSet,
           'turn_error': turnError == null,
         },);
+        // The screen pops itself the moment state returns to idle, so a call
+        // that ran the full 35 seconds and died used to leave nothing at all
+        // behind — the same blank as a call that was simply declined.
+        _lastError = _remoteCandTypes.isEmpty
+            ? 'Your partner never answered — their app may be closed.'
+            : 'Could not connect the call. One of you may be on a network '
+                'that blocks calls.';
         _send('hangup', {});
         _teardown(CallState.ended);
       }
@@ -189,6 +269,11 @@ class CallController extends ChangeNotifier {
       // alike.
       Diag.record(DiagArea.call, 'invite_failed', corr: _callId, fields: {
         'error': e.runtimeType.toString(),
+        // Which couple the row was written FOR. A 42501 here is the RLS policy
+        // saying this is not your couple — unreadable without knowing which
+        // couple was tried, and that is precisely how a controller holding the
+        // previous account's id stayed invisible.
+        'couple': couple,
         'pg_code': e is PostgrestException ? e.code : null,
         'pg_msg': e is PostgrestException ? e.message : null,
       },);
@@ -456,12 +541,27 @@ class CallController extends ChangeNotifier {
   /// This used to retry unbounded, twice, at 15s each, in front of createOffer
   /// — 45s before the callee's phone rang, against the caller's own 35s
   /// timeout. The call was mathematically guaranteed to fail. A call is worth
-  /// waiting ~3s for; past that the offer goes out with whatever is known and
-  /// relay candidates arrive by trickle, which is how ICE is designed to work.
-  static Future<void> _ensureRelay({
-    Duration budget = const Duration(seconds: 3),
-  }) async {
+  /// waiting a few seconds for; past that the offer goes out with whatever is
+  /// known and relay candidates arrive by trickle, which is how ICE is
+  /// designed to work.
+  ///
+  /// Except that trickle is a half-truth here, and the half that is false is
+  /// the one a NEW device lands on: `iceServers` are read once, when the peer
+  /// connection is constructed, and `setConfiguration` is called nowhere in
+  /// this file — so credentials that arrive after `_createPc` cannot join this
+  /// call at all. A phone with a warm cache loses nothing by a short budget; a
+  /// phone with an empty one loses its relay for the whole call, and a fresh
+  /// install is exactly the phone with an empty one, fetching from a cold edge
+  /// function on mobile data. So the wait is longer when there is nothing to
+  /// fall back on — bounded at 10s, which still leaves 25 of the callee's 35.
+  static const _warmRelayBudget = Duration(seconds: 3);
+  static const _coldRelayBudget = Duration(seconds: 10);
+
+  static Future<void> _ensureRelay() async {
     if (_cachedTurn.any(_isRelay)) return;
+    final cold = _cachedTurn.isEmpty;
+    final Duration budget = cold ? _coldRelayBudget : _warmRelayBudget;
+    final startedAt = DateTime.now();
     // A person pressing Call outranks the backoff. The backoff exists to stop
     // BACKGROUND refreshes hammering a broken function; applied here it made
     // one failed warm-up at launch abort every call for the next 60 seconds
@@ -472,10 +572,20 @@ class CallController extends ChangeNotifier {
       await _sharedTurnFetch().timeout(budget);
     } on TimeoutException {
       debugPrint('[turn] relay warm-up exceeded ${budget.inSeconds}s — '
-          'proceeding, candidates can still trickle in');
+          'proceeding without a relay on this call');
     } catch (e) {
       debugPrint('[turn] relay warm-up failed: $e');
     }
+    // How long the person waited, and whether the wait bought a relay. On a
+    // first-ever call this is the difference between "TURN is misconfigured"
+    // and "the fetch was slower than the budget", which look identical from
+    // the pc_created row alone.
+    Diag.record(DiagArea.call, 'relay_wait', fields: {
+      'cold': cold,
+      'budget_ms': budget.inMilliseconds,
+      'ms': DateTime.now().difference(startedAt).inMilliseconds,
+      'relay': relayAvailable,
+    },);
   }
 
   /// Refreshes credentials WITHOUT blocking anything. Called at init and on
@@ -522,38 +632,76 @@ class CallController extends ChangeNotifier {
 
   bool _inited = false;
 
-  /// Subscribe to the couple's call channel so incoming offers ring this device.
+  /// Process-scoped setup: the renderers and the relay cache. Nothing here
+  /// depends on WHO is signed in — that is [bindSession], which runs again
+  /// every time it changes.
   Future<void> init() async {
     if (_inited) return;
     _inited = true;
     await localRenderer.initialize();
     await remoteRenderer.initialize();
-    final session = _ref.read(sessionProvider);
-    final couple = session.couple;
-    _myUid = session.profile?.id;
-    // _inited is already true above, and _coupleId is assigned nowhere else in
-    // this file — so returning here leaves this controller permanently unable to
-    // subscribe or send, for the rest of the process, with no retry and nothing
-    // logged. Whether that actually happens depends on whether the session had
-    // resolved by the first read of callControllerProvider, which is a race.
-    // This event is how a field test tells "calls never work on my phone" from
-    // "calls failed this once".
-    Diag.record(DiagArea.call, 'init', fields: {
-      'has_couple': couple != null,
-      'has_uid': _myUid != null,
-    },);
-    if (couple == null) return;
-    _coupleId = couple.id;
-    await _subscribeChannel();
     // Disk first so a call placed seconds after launch already has a relay,
     // then refresh in the background. Never awaited on a call path.
     await loadCachedTurn();
     warmRelay();
   }
 
+  /// Point signalling at the account that is signed in NOW.
+  ///
+  /// This used to happen once, inside `init()`, behind an `if (_inited) return`
+  /// — and `_coupleId` was assigned nowhere else in the file. Two consequences,
+  /// both fatal and both silent. A first read that beat the couple resolving
+  /// left the controller unable to subscribe or send for the rest of the
+  /// process. And signing out and back in as a different account kept the
+  /// PREVIOUS couple: the channel stayed `call:<old couple>`, which the private
+  /// -channel policy on realtime.messages denies, so no signal moved in either
+  /// direction; and every durable invite carried the old couple_id and the old
+  /// caller_id, so `call_invites` refused it 42501. Both halves of calling,
+  /// dead, from one stale field.
+  Future<void> bindSession(SessionState s) async {
+    final coupleId = s.couple?.id;
+    final userId = s.profile?.id;
+    final action = callBindingFor(
+      authenticated: s.isAuthenticated,
+      coupleId: coupleId,
+      userId: userId,
+      boundCoupleId: _coupleId,
+      boundUserId: _myUid,
+    );
+    if (action == CallBinding.unchanged) return;
+    // Kept from the original init(): this event is how a field test tells
+    // "calls never work on my phone" from "calls failed this once".
+    Diag.record(DiagArea.call, 'init', fields: {
+      'action': action.name,
+      'has_couple': coupleId != null,
+      'has_uid': userId != null,
+      'rebind': _coupleId != null && _coupleId != coupleId,
+    },);
+    if (state != CallState.idle) await _teardown(CallState.ended);
+    _resubscribeTimer?.cancel();
+    _subscribeAttempt = 0;
+    _chanLive = false;
+    final old = _chan;
+    _chan = null;
+    _coupleId = coupleId;
+    _myUid = userId;
+    if (old != null) {
+      try {
+        await SupabaseService.client.removeChannel(old);
+      } catch (_) {}
+    }
+    if (action == CallBinding.clear) return;
+    await _subscribeChannel();
+    warmRelay();
+  }
+
   // ── Outgoing ──────────────────────────────────────────────────────────────
   Future<void> startCall({bool video = true}) async {
-    if (state != CallState.idle || _coupleId == null) return;
+    // The `|| _coupleId == null` that used to be here made the Call button do
+    // nothing at all — no state change, no row, no message — on exactly the
+    // devices where the binding had gone wrong. An unbound controller now fails
+    // through the channel gate below, which says so out loud.
+    if (state != CallState.idle) return;
     isCaller = true;
     isVideo = video;
     camOn = video;
@@ -571,8 +719,16 @@ class CallController extends ChangeNotifier {
       'video': video,
       'relay_known': relayKnown,
       'chan': _chan != null,
+      'chan_live': _chanLive,
     },);
     _setState(CallState.calling);
+    // Before the camera even opens. An offer that cannot be signalled is not a
+    // call: without this the app sent an offer and 37 candidates into a channel
+    // the server had refused, then blamed the network 35 seconds later.
+    if (!await _ensureChannel()) {
+      _failWithoutChannel('call_no_channel');
+      return;
+    }
     try {
       await _openMedia(video: video);
       await _routeAudio();
@@ -657,7 +813,15 @@ class CallController extends ChangeNotifier {
       'video': isVideo,
       'relay_known': relayKnown,
       'chan': _chan != null,
+      'chan_live': _chanLive,
     },);
+    // The answer and every candidate this side gathers ride the same channel.
+    // Answering without it is a phone that rings, is picked up, and connects to
+    // nothing — reported as "the call never worked", never as an error.
+    if (!await _ensureChannel()) {
+      _failWithoutChannel('accept_no_channel');
+      return;
+    }
     try {
       await _openMedia(video: isVideo);
       await _routeAudio();
@@ -1132,6 +1296,8 @@ class CallController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _resubscribeTimer?.cancel();
+    _connectTimer?.cancel();
     final ch = _chan;
     _chan = null;
     if (ch != null) SupabaseService.client.removeChannel(ch);
@@ -1143,8 +1309,50 @@ class CallController extends ChangeNotifier {
   }
 }
 
+/// What a session change means for call signalling.
+enum CallBinding { unchanged, bind, clear }
+
+/// Pure, and deliberately outside the controller: the controller cannot be
+/// constructed under test (RTCVideoRenderer needs the platform plugin) and this
+/// decision is the part that was wrong.
+CallBinding callBindingFor({
+  required bool authenticated,
+  required String? coupleId,
+  required String? userId,
+  required String? boundCoupleId,
+  required String? boundUserId,
+}) {
+  // Signed out. Whoever signs in on this handset next must not inherit the
+  // topic, the couple_id or the caller_id of the account that left.
+  if (!authenticated) {
+    return boundCoupleId == null && boundUserId == null
+        ? CallBinding.unchanged
+        : CallBinding.clear;
+  }
+  // The couple resolves late on a fresh account and goes null again on every
+  // resume (see main.dart). A transient null is NOT a sign-out and must not
+  // drop the channel a live call is signalling on.
+  if (coupleId == null) return CallBinding.unchanged;
+  // The user id matters on its own: both members of a couple share the couple
+  // id, so a partner signing in on this phone changes only _myUid — which is
+  // the caller_id every invite is written with, and the filter that decides
+  // which broadcasts are our own echo.
+  if (coupleId == boundCoupleId && userId == boundUserId) {
+    return CallBinding.unchanged;
+  }
+  return CallBinding.bind;
+}
+
 final callControllerProvider = ChangeNotifierProvider<CallController>((ref) {
   final c = CallController(ref);
   c.init();
+  // Not read once. The couple resolves asynchronously, so a read that wins that
+  // race used to disable calling for the whole process, and a second account
+  // signed in on the same handset used to keep the first one's couple.
+  ref.listen<SessionState>(
+    sessionProvider,
+    (_, next) => c.bindSession(next),
+    fireImmediately: true,
+  );
   return c;
 });
