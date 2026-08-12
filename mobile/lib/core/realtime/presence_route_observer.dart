@@ -313,6 +313,21 @@ String? screenNameForPath(String path) {
     '/couple',
     '/role-setup',
     '/app/rapid-camera', // a capture action, not somewhere you linger
+    // A call is not a room either, and publishing it was a presence oracle in
+    // both directions. The CALLER pushes /call at CallState.calling, which is
+    // set before the offer is sent and up to ~15s before it on a cold relay
+    // (call_controller.dart:724 vs :756) — so the callee's Home could read "In
+    // Call" before the phone rang, and still read it when the ring never
+    // arrived. The CALLEE pushes it at CallState.ringing (:803), before accept
+    // or decline, and decline() never retracts it: declining told the caller
+    // the app was open and the ring was seen, which is precisely what a call
+    // attempt must not reveal.
+    //
+    // Note this is the publish side only. 'Call' was already refused by the
+    // JOIN allowlist (kJoinableRoutes), and that asymmetry — an explicit
+    // allowlist for joining, an implicit allow-everything for publishing — is
+    // why this went unnoticed.
+    '/call',
     // The tab shell. WHICH tab is not derivable from the path, so
     // PresenceRouteObserver answers that one from the selected index.
     '/app',

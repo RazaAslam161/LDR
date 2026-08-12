@@ -2,6 +2,7 @@ import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// All Supabase queries go through here so the screens stay thin.
@@ -394,14 +395,33 @@ class SupabaseRepository {
 
   /// Persists (or clears) this device's FCM push token on the user's profile.
   /// Pass null on sign-out so stale devices stop receiving Reach pushes.
+  ///
+  /// Skips the write when the token has not changed, which is almost always.
+  /// registerToken() runs on EVERY resume (main.dart:328) and this wrote
+  /// unconditionally, so `fcm_token_updated_at` was a durable, second-resolution
+  /// record of the last time this app came to the foreground — and fetchPartner
+  /// selects every column, so the partner held it. Ringing someone refreshed it,
+  /// which made it a presence oracle that outlived the 45s freshness window
+  /// entirely: call at 3am, see nothing on screen, read the timestamp after.
+  ///
+  /// The last-written value is kept on the device rather than read back, so the
+  /// common path costs no round trip at all.
   static Future<void> setFcmToken(String? token) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'fcm_token_written:$uid';
+    if (token != null && prefs.getString(key) == token) return;
     await _c.from('profiles').update({
       'fcm_token': token,
       'fcm_token_updated_at':
           token == null ? null : DateTime.now().toUtc().toIso8601String(),
     }).eq('id', uid);
+    if (token == null) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setString(key, token);
+    }
   }
 
   /// A Postgres function returning a single composite row comes back as either

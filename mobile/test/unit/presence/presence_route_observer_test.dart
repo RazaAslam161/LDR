@@ -62,13 +62,23 @@ void main() {
         '/app/timeline', '/app/location-map', '/app/closer/touch-trace',
         '/app/closer/mood-lamp', '/app/closer/desire', '/app/closer/vault',
         '/app/closer/afterglow', '/app/closer/fantasy-jar',
-        '/app/closer/body-map', '/app/closer/pick-for-us', '/call',
+        '/app/closer/body-map', '/app/closer/pick-for-us',
       ];
       for (final r in realRoutes) {
         final name = screenNameForPath(r);
         expect(name, isNotNull, reason: '$r would leave presence stale');
         expect(name, isNotEmpty);
       }
+    });
+
+    test('a call is not a room — it publishes nothing', () {
+      // This test used to require the opposite: '/call' sat in the list above,
+      // pinning a presence oracle in place. Publishing it told the partner "In
+      // Call" on Home, from BOTH sides — the caller before the offer was even
+      // sent, and the callee before they had accepted or declined, so declining
+      // still announced that the ring had been seen. A call attempt must not
+      // create presence information about either party.
+      expect(screenNameForPath('/call'), isNull);
     });
   });
 

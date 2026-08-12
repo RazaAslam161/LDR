@@ -8,6 +8,7 @@ import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
+import 'package:miles/main.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
 /// tapped notification). The AppShell listens to [pendingReach] and shows the
@@ -23,10 +24,26 @@ final ValueNotifier<ReachTap?> pendingReach = ValueNotifier<ReachTap?>(null);
 /// An incoming call to ring — from a foreground push, a tapped full-screen
 /// notification, or a cold start. The AppShell hands this to the CallController.
 class CallTap {
-  const CallTap(this.callId, this.fromName, this.video);
+  const CallTap(this.callId, this.fromName, this.video,
+      {required this.fromTap,});
   final String callId;
   final String fromName;
   final bool video;
+
+  /// Whether the user actually chose to come here.
+  ///
+  /// True only when this ring arrived through a notification the user tapped,
+  /// or a cold start from one. False when it arrived on [FcmService._onForeground]
+  /// — which fires with the app already running, having posted no notification
+  /// at all, so nothing was shown and nothing was tapped.
+  ///
+  /// [CoverGate] refuses to open on a ring that was not tapped. Without that,
+  /// a partner pressing Call replaces the cover the user is looking at with the
+  /// call screen — their avatar and real name — within a frame, unprompted;
+  /// and with an app lock enrolled it raises a biometric prompt the user did
+  /// not initiate. The app sits on the cover after every background
+  /// (main.dart:269-271), so that is the ordinary case, not the rare one.
+  final bool fromTap;
 }
 
 final ValueNotifier<CallTap?> pendingCall = ValueNotifier<CallTap?>(null);
@@ -158,11 +175,28 @@ class FcmService {
     if (!_forThisSession(m)) return;
     final type = m.data['type'];
     if (type == 'call') {
+      // fromTap: false — onMessage fires with the app already running and posts
+      // no notification, so nothing was shown and nothing was tapped. The shell
+      // still rings when the real app is visible; CoverGate refuses to open on
+      // this, so a partner cannot replace the cover the user is looking at.
       pendingCall.value = CallTap(
         (m.data['call_id'] as String?) ?? '',
         (m.data['from_name'] as String?) ?? 'Your partner',
         (m.data['video'] as String?) == 'true',
+        fromTap: false,
       );
+      // The cover is up, so the ring has no visible surface at all unless one
+      // is posted here — the background isolate never ran.
+      if (!MilesApp.showRealApp.value) {
+        showCallNotification(
+          plugin: _fln,
+          callId: (m.data['call_id'] as String?) ?? '',
+          fromName: (m.data['from_name'] as String?) ?? '',
+          coupleId: (m.data['couple_id'] as String?) ?? '',
+          video: (m.data['video'] as String?) == 'true',
+          fullScreen: false,
+        );
+      }
       return;
     }
     if (type == 'care') {
@@ -212,6 +246,7 @@ class FcmService {
         (m.data['call_id'] as String?) ?? '',
         (m.data['from_name'] as String?) ?? 'Your partner',
         (m.data['video'] as String?) == 'true',
+        fromTap: true,
       );
       return;
     }
@@ -255,6 +290,7 @@ class FcmService {
         parts.length > 1 ? parts[1] : '',
         parts.length > 2 ? parts[2] : 'Your partner',
         !(parts.length > 3) || parts[3] == '1',
+        fromTap: true,
       );
       return;
     }

@@ -62,8 +62,23 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
   /// tapping a call notification, but nothing about this app is revealed until
   /// they pass the same biometric as always. A shoulder-surfer sees the cover
   /// and a nameless system prompt, exactly as before.
+  ///
+  /// That premise only holds when the ring was actually tapped, and it was not
+  /// checked. A push arriving while the app is foregrounded goes to
+  /// FcmService._onForeground, which posts no notification at all — so on a
+  /// handset sitting on its cover (where this app lands after every background,
+  /// main.dart:269-271) the partner pressing Call used to replace the cover
+  /// with the call screen, showing their avatar and real name, within a frame
+  /// and with nothing tapped. With a lock enrolled it was quieter and still
+  /// wrong: a biometric prompt raised by the other person, not by the user.
+  ///
+  /// So the door opens only on [CallTap.fromTap]. An untapped ring is left for
+  /// the notification _onForeground posts instead; the shell's own listener is
+  /// independent of this gate, so a ring arriving while the real app is already
+  /// visible still reaches the controller unchanged.
   void openForPendingCall() {
-    if (_entering || pendingCall.value == null) return;
+    final tap = pendingCall.value;
+    if (_entering || tap == null || !tap.fromTap) return;
     runEntryGate(forCall: true);
   }
 
