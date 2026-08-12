@@ -228,7 +228,11 @@ class CallController extends ChangeNotifier {
   }
 
   /// Store the offer durably so a CLOSED callee can still answer; the insert
-  /// trigger fires the FCM ring (call-notify).
+  /// trigger fires the FCM ring.
+  ///
+  /// That trigger is `notify_call`, and it POSTs to reach-notify — not to the
+  /// call-notify function this comment used to name. call-notify was deployed
+  /// once, wired to nothing, and left running unauthenticated for a year.
   Future<void> _insertInvite(String offerSdp, bool video) async {
     final couple = _coupleId;
     final me = _myUid;
