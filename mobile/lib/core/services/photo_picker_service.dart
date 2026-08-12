@@ -1,13 +1,14 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:miles/core/media/media_normalize.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/photo/filter_editor_screen.dart';
 import 'package:miles/main.dart' show MilesApp;
+
 
 /// Crop shape for [PhotoPickerService.pick].
 enum PhotoShape { square, free }
@@ -112,13 +113,27 @@ class PhotoPickerService {
     return file;
   }
 
-  /// Photos AND videos in one pick, up to [limit] items, untouched.
+  /// Extensions dropped by the most recent [pickMedia] because this device has
+  /// no codec for them. Read once by the caller and cleared.
+  static final Set<String> _rejected = <String>{};
+
+  /// Drains the formats the last pick could not convert, so the UI can name
+  /// them. Empty is the normal case.
+  static List<String> takeRejectedFormats() {
+    final out = _rejected.toList()..sort();
+    _rejected.clear();
+    return out;
+  }
+
+  /// Photos AND videos in one pick, up to [limit] items.
   ///
-  /// No crop, no enhance, no maxWidth/imageQuality: those re-encode, and the
-  /// chat sends what the user picked. The old flow was one item at a time
-  /// through a ratio step and a filter step, and picking a dozen holiday
-  /// photos meant running it a dozen times.
+  /// No crop and no enhance: chat sends what the user picked. Formats this app
+  /// can already store and paint are passed through byte-for-byte; only the
+  /// ones that would otherwise be rejected — HEIC from an iPhone, DNG from a
+  /// ProRAW capture — are converted, and [takeRejectedFormats] names anything
+  /// even the platform could not decode.
   static Future<List<PickedMedia>> pickMedia({int limit = 50}) async {
+    _rejected.clear();
     _useSystemGallery();
     MilesApp.systemOverlayActive = true;
     try {
@@ -126,10 +141,28 @@ class PhotoPickerService {
       // The plugin documents `limit` as advisory — a platform that cannot
       // enforce it ignores it — so the cap is applied here too rather than
       // trusting the gallery to have honoured it.
-      return [
-        for (final x in picked.take(limit))
-          (file: File(x.path), isVideo: isVideoPick(x.path, x.mimeType)),
-      ];
+      final out = <PickedMedia>[];
+      for (final x in picked.take(limit)) {
+        final isVideo = isVideoPick(x.path, x.mimeType);
+        if (isVideo) {
+          out.add((file: File(x.path), isVideo: true));
+          continue;
+        }
+        // A photo from an iPhone is HEIC and a ProRAW capture is DNG. Neither
+        // is accepted by the bucket, decodable by the thumbnailer, or paintable
+        // by Flutter — so picking one used to end at "unable to send" with
+        // nothing to say why. Anything the app already handles passes straight
+        // through untouched; only the formats that would otherwise fail are
+        // converted. A file this device has no codec for is dropped here and
+        // reported by name rather than failing silently at upload.
+        final ready = await MediaNormalize.toSendable(File(x.path));
+        if (ready == null) {
+          _rejected.add(MediaNormalize.extensionOf(x.path));
+          continue;
+        }
+        out.add((file: ready, isVideo: false));
+      }
+      return out;
     } finally {
       MilesApp.systemOverlayActive = false;
     }

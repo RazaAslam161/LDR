@@ -147,6 +147,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Future<void> _pickMedia() async {
     try {
       final items = await PhotoPickerService.pickMedia();
+      // Anything the platform had no codec for at all. Named, because "unable
+      // to send" with no reason is what sent the user looking for the bug.
+      final skipped = PhotoPickerService.takeRejectedFormats();
+      if (skipped.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              skipped.length == 1
+                  ? "This phone can't read .${skipped.first} files"
+                  : "This phone can't read these: "
+                      '${skipped.map((e) => '.$e').join(', ')}',
+            ),
+          ),
+        );
+      }
       if (items.isEmpty) return;
       widget.onSendMedia(items);
     } catch (_) {
