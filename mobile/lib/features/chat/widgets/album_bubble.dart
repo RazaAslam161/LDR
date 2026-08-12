@@ -122,13 +122,25 @@ class _AlbumTile extends StatelessWidget {
     // Optimistic sends paint the file off the disk, so a pick of twenty is a
     // full grid the instant it is accepted rather than twenty grey squares
     // filling in as the uploads land.
+    // A grid tile is ~148dp at most and often ~100. Neither branch bounded its
+    // decode, so a pick of twenty put twenty full-sensor images through the
+    // decoder at once on the sender's phone, and the receiver decoded whatever
+    // the original happened to be. Once a thumbnail exists the object IS the
+    // bound and NetImage shares one decode across every surface showing it.
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    const tileEdge = 160.0;
     final Widget image = local != null
         ? Image.file(File(local),
             fit: BoxFit.cover,
+            cacheWidth: (tileEdge * dpr).round(),
             errorBuilder: (_, __, ___) =>
                 const ColoredBox(color: MilesColors.surface2),)
         : url != null
-            ? NetImage(url, cacheKey: m.tileCacheKey)
+            ? NetImage(url,
+                width: tileEdge,
+                height: tileEdge,
+                cacheKey: m.tileCacheKey,
+                thumb: m.hasThumb,)
             : const ColoredBox(color: MilesColors.surface2);
 
     return GestureDetector(

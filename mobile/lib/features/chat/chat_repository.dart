@@ -223,6 +223,13 @@ class Message {
   ///
   /// A video has no paintable bytes of its own, so without a poster frame it
   /// resolves to null and the tile draws its placeholder rather than a hole.
+  /// A GIF or animated WebP, which must not go through CachedNetworkImage —
+  /// some cache configurations hand back a single frame and the animation dies.
+  bool get isAnimated {
+    final p = imagePath?.toLowerCase();
+    return p != null && (p.endsWith('.gif') || p.endsWith('.webp'));
+  }
+
   (String, String)? get _tileObject {
     if (kind == 'video') {
       final t = videoThumbPath;

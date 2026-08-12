@@ -1,0 +1,17 @@
+-- Both partners pressing "create and get a code" is the ordinary mistake, not
+-- an exotic one: nothing tells either of them who goes first. Since
+-- create_pairing_invite now mints the couple, both taps succeed and each ends
+-- up holding a couple of one. Whoever gives way and redeems the other's code
+-- leaves theirs behind with no members and, until it expires, a live invite a
+-- third party could still redeem to land alone in an empty couple.
+--
+-- The cleanup is guarded on EMPTINESS, not on member count. Every child table
+-- cascades from couples and production holds member-less couples with real
+-- history (36066c94 has 63 messages), so "delete any couple with no members"
+-- would take a conversation with it the first time someone left a couple and
+-- later redeemed an invite. An orphaned row costs nothing; a deleted
+-- conversation is unrecoverable.
+--
+-- Paired with the client change that gives the code screen a way back to the
+-- join form — without it the user cannot reach this path at all without
+-- signing out.

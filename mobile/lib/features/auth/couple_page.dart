@@ -121,6 +121,22 @@ class _CouplePageState extends ConsumerState<CouplePage> {
     if (mounted) context.go('/signin');
   }
 
+  /// Back to the join form after a code has already been minted.
+  ///
+  /// If both partners press "create and get a code" — which is the obvious
+  /// thing to do when neither has been told who goes first — they each end up
+  /// holding their own code on a screen whose only actions are copy, copy and
+  /// enter. Neither can type the other's code without signing out. Whoever
+  /// gives way lands back here; redeem_pairing_invite moves them onto their
+  /// partner's couple and retires the one they were holding.
+  void _useTheirCode() {
+    setState(() {
+      _createdCode = null;
+      _expiresAt = null;
+      _error = null;
+    });
+  }
+
   Future<void> _enterApp() async {
     await ref.read(sessionProvider.notifier).loadProfile();
     if (mounted) context.go('/app');
@@ -145,6 +161,7 @@ class _CouplePageState extends ConsumerState<CouplePage> {
                         code: _createdCode!,
                         expiresAt: _expiresAt,
                         onContinue: _enterApp,
+                        onUseTheirCode: _useTheirCode,
                       )
                     : _ConnectView(
                         codeController: _code,
@@ -276,12 +293,14 @@ class _InviteReveal extends StatelessWidget {
   const _InviteReveal({
     required this.code,
     required this.onContinue,
+    required this.onUseTheirCode,
     this.expiresAt,
   });
 
   final String code;
   final DateTime? expiresAt;
   final Future<void> Function() onContinue;
+  final VoidCallback onUseTheirCode;
 
   @override
   Widget build(BuildContext context) {
@@ -373,6 +392,14 @@ class _InviteReveal extends StatelessWidget {
             label: 'Enter our space',
             color: MilesColors.blush,
             onPressed: onContinue,
+          ),
+          const SizedBox(height: 4),
+          TextButton(
+            onPressed: onUseTheirCode,
+            child: const Text(
+              'They already have a code? Enter it instead',
+              style: TextStyle(color: MilesColors.taupe, fontSize: 13),
+            ),
           ),
         ],
       ),

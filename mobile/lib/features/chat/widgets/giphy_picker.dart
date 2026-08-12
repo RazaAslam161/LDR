@@ -152,6 +152,8 @@ class _GiphySheetState extends State<_GiphySheet> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image.network(
+              // A 3-col grid of animated GIFs, every frame at source resolution.
+              cacheWidth: 250,
               g.previewUrl,
               fit: BoxFit.cover,
               loadingBuilder: (_, child, p) =>

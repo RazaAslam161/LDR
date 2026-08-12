@@ -14,6 +14,7 @@ class NetImage extends StatelessWidget {
     this.height,
     this.error,
     this.cacheKey,
+    this.thumb = false,
   });
 
   final String url;
@@ -30,6 +31,16 @@ class NetImage extends StatelessWidget {
   /// `'<bucket>/<path>'` — the path is stable, the URL is not.
   final String? cacheKey;
 
+  /// True when [url] points at a thumbnail — an object already small enough
+  /// that bounding its decode buys nothing.
+  ///
+  /// It costs something, though, so this is not merely an optimisation.
+  /// memCacheWidth becomes part of the ResizeImage key, so the same thumbnail
+  /// requested at five slightly different box sizes is five decodes of one
+  /// file. Left unbounded, the chat bubble, the album tile, the profile tile
+  /// and the viewer's placeholder all share a single decoded image.
+  final bool thumb;
+
   @override
   Widget build(BuildContext context) {
     // Decode at display size, not source size. `width`/`height` are layout-only
@@ -37,14 +48,15 @@ class NetImage extends StatelessWidget {
     // avatar, which is what fills the image cache and forces re-decodes on the
     // raster thread while scrolling. Only hinted when the caller gave a bound.
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final w = width;
-    final h = height;
+    // A thumbnail IS the bound; see [thumb].
+    final w = thumb ? null : width;
+    final h = thumb ? null : height;
     return CachedNetworkImage(
       imageUrl: url,
       cacheKey: cacheKey,
       fit: fit,
-      width: w,
-      height: h,
+      width: width,
+      height: height,
       memCacheWidth: (w != null && w.isFinite) ? (w * dpr).round() : null,
       memCacheHeight: (h != null && h.isFinite) ? (h * dpr).round() : null,
       fadeInDuration: const Duration(milliseconds: 150),

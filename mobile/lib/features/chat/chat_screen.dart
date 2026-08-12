@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +21,7 @@ import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/ui/mood.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
+import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/signed_image.dart';
@@ -51,6 +51,7 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Presence;
 import 'package:uuid/uuid.dart';
+
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -1760,6 +1761,12 @@ class _BurstAnimationState extends State<_BurstAnimation>
                     widget.gifUrl!,
                     width: 160,
                     height: 160,
+                    // Layout-only without this. fullUrl is downsized_medium at
+                    // best and `original` at worst — several MB, at source
+                    // resolution, decoding a frame every ~25ms for the 5.2s the
+                    // burst is held, Positioned.fill, on both phones, during
+                    // exactly the scroll this is meant to feel smooth in.
+                    cacheWidth: 320,
                     fit: BoxFit.cover,
                   ),
                 )
@@ -1902,36 +1909,43 @@ class _Content extends StatelessWidget {
         }
         // Optimistic: render the local file instantly while it uploads; the
         // partner (no localPath) gets the network image.
+        // The single most-rendered image in the app, and it was the slowest
+        // widget available. Image.network has NO disk cache, so every photo
+        // re-downloaded on every cold start; `width: 220` is layout only, so a
+        // 3000x4000 upload decoded at full resolution — ~48MB of RAM — into a
+        // 220dp slot; and Flutter's in-memory cache was keyed on a signed URL
+        // whose token rotates daily, so it re-downloaded every morning too.
+        // NetImage disk-caches under the stable storage path and bounds the
+        // decode. A single photo never gets an album_id
+        // (chat_send_queue.dart:145), so this is the common case, not the rare
+        // one — the album grid was already on this path and this bubble was not.
+        final tile = m.tileUrl;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
         final Widget img = local != null
             ? Image.file(File(local),
                 width: 220,
+                // Layout-only without this: the sender's own phone decoded the
+                // full-sensor file it had just picked.
+                cacheWidth: (220 * dpr).round(),
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) =>
                     const SizedBox(width: 220, height: 140),)
-            : Image.network(
-                url!,
-                width: 220,
-                fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) => progress == null
-                    ? child
-                    : const SizedBox(
-                        width: 220,
-                        height: 140,
-                        child: Center(
-                          child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                      ),
-                errorBuilder: (_, __, ___) => const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('📷 could not load',
-                      style:
-                          TextStyle(color: MilesColors.cream50, fontSize: 14),),
-                ),
-              );
+            : m.isAnimated
+                // Stays Image.network: some CachedNetworkImage configurations
+                // hand back one frame and the animation dies. cacheWidth is
+                // independent of which loader is used.
+                ? Image.network(url!,
+                    width: 220,
+                    cacheWidth: (220 * dpr).round(),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox(
+                        width: 220, height: 140,),)
+                : NetImage(
+                    tile ?? url!,
+                    width: 220,
+                    cacheKey: m.tileCacheKey,
+                    thumb: m.hasThumb,
+                  );
         return GestureDetector(
           // The PATH, not the URL it is currently signed as: the viewer holds
           // this for as long as it is open and a token dies in a day.
@@ -1940,7 +1954,17 @@ class _Content extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             child: Stack(
               children: [
-                if (url != null) Hero(tag: url, child: img) else img,
+                if (url != null)
+                  Hero(
+                    // The viewer tags its pages '<bucket>/<path>'
+                    // (media_source.dart). This was the raw signed URL, so the
+                    // tags never matched and the flight silently did not happen.
+                    tag: '$chatBucket/'
+                        '${MediaUrls.toPath(chatBucket, m.imagePath ?? '')}',
+                    child: img,
+                  )
+                else
+                  img,
                 if (m.sendStatus == SendStatus.sending)
                   const Positioned.fill(
                     child: ColoredBox(
@@ -2180,6 +2204,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
     // as long as the upload took, and forever if it failed.
     final sending = widget.message.sendStatus == SendStatus.sending;
     final failed = widget.message.sendStatus == SendStatus.failed;
+    final poster = sending ? null : widget.message.tileUrl;
     return Stack(
       children: [
         GestureDetector(
@@ -2195,7 +2220,25 @@ class _VideoBubbleState extends State<_VideoBubble> {
               color: MilesColors.night,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Center(
+            // The poster frame is extracted on send, uploaded beside the video
+            // and warmed with the page (chat_repository) — and then the bubble
+            // painted a black rectangle over it and never read it. A video in
+            // the conversation was indistinguishable from a video that failed.
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (poster != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: NetImage(
+                      poster,
+                      width: 220,
+                      height: 140,
+                      cacheKey: widget.message.tileCacheKey,
+                      thumb: true,
+                    ),
+                  ),
+                Center(
               child: _loading || sending
                   ? const SizedBox(
                       width: 24,
@@ -2213,6 +2256,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
                           color: MilesColors.cream50,
                           size: 30,),
                     ),
+                ),
+              ],
             ),
           ),
         ),
