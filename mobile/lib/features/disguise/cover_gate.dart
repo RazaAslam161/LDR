@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
@@ -31,16 +32,21 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
   @override
   void initState() {
     super.initState();
-    // Every cover watches for a call, so none of them has to remember to.
+    // Every cover watches for a call and for an auth link, so none of them has
+    // to remember to.
     pendingCall.addListener(openForPendingCall);
-    // The notification may have been tapped before this cover was built.
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => openForPendingCall());
+    pendingAuthLink.addListener(openForAuthLink);
+    // Either may have arrived before this cover was built.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      openForPendingCall();
+      openForAuthLink();
+    });
   }
 
   @override
   void dispose() {
     pendingCall.removeListener(openForPendingCall);
+    pendingAuthLink.removeListener(openForAuthLink);
     super.dispose();
   }
 
@@ -59,6 +65,23 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
   void openForPendingCall() {
     if (_entering || pendingCall.value == null) return;
     runEntryGate(forCall: true);
+  }
+
+  /// Open the door for an email confirmation or password-reset link.
+  ///
+  /// The same hole as [openForPendingCall], reached a different way. Reading
+  /// the mail backgrounds this app, which drops it to the cover; tapping the
+  /// link wakes it there. supabase_flutter redeems the token off that link and
+  /// the session goes valid — behind a calculator, with nothing on screen to
+  /// say so and, for a reset, no /new-password route in existence to push.
+  ///
+  /// Consumed on the first attempt rather than on success, so a failed
+  /// biometric returns to the cover instead of re-prompting on every rebuild.
+  /// The hidden trigger still works; the intent was one-shot.
+  void openForAuthLink() {
+    if (_entering || !pendingAuthLink.value) return;
+    pendingAuthLink.value = false;
+    runEntryGate();
   }
 
   /// Runs gates 2 and 3. Call from whatever hidden trigger the cover provides.

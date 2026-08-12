@@ -413,11 +413,22 @@ class _MilesAppState extends ConsumerState<MilesApp>
   /// asynchronous: by the time it fires the user is already sitting on
   /// whichever route the funnel chose, and only a push moves them.
   void _watchPasswordRecovery() {
-    passwordRecovery.addListener(() {
-      if (!passwordRecovery.value || !mounted) return;
-      passwordRecovery.value = false;
-      ref.read(routerProvider).go('/new-password');
-    });
+    passwordRecovery.addListener(_routeToNewPassword);
+    // The event usually lands while the cover is still up, so the flip to the
+    // real app is the second chance to act on it.
+    MilesApp.showRealApp.addListener(_routeToNewPassword);
+  }
+
+  /// The router only exists while the real app is on screen — below that, the
+  /// cover has replaced the whole widget tree. A recovery event arriving behind
+  /// it must be HELD rather than consumed: clearing the flag to push a route
+  /// nobody is rendering drops the user into the app still not knowing their
+  /// password, with nothing left to route on.
+  void _routeToNewPassword() {
+    if (!passwordRecovery.value || !mounted) return;
+    if (!MilesApp.showRealApp.value) return;
+    passwordRecovery.value = false;
+    ref.read(routerProvider).go('/new-password');
   }
 
   Future<void> _initDeepLinks() async {
@@ -432,11 +443,17 @@ class _MilesAppState extends ConsumerState<MilesApp>
   /// the pairing screen (the router gates auth/onboarding from there).
   ///
   /// tethered://auth-callback (email confirmation, password recovery) needs no
-  /// handling here: supabase_flutter parses the tokens off the incoming link
-  /// itself and emits the auth event. Recovery is routed from the
-  /// onAuthStateChange listener below.
+  /// token handling here: supabase_flutter parses those off the incoming link
+  /// itself and emits the auth event. What it cannot do is get the app out from
+  /// behind the cover, which is exactly where opening the inbox left it — so
+  /// that half is ours. See [pendingAuthLink].
   void _handleLink(Uri uri) {
-    if (uri.scheme != 'tethered' || uri.host != 'join') return;
+    if (uri.scheme != 'tethered') return;
+    if (uri.host == 'auth-callback') {
+      pendingAuthLink.value = true;
+      return;
+    }
+    if (uri.host != 'join') return;
     final code = uri.queryParameters['code'];
     if (code == null || code.isEmpty) return;
     ref.read(pendingInviteCodeProvider.notifier).state = code.toUpperCase();
@@ -446,6 +463,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    passwordRecovery.removeListener(_routeToNewPassword);
+    MilesApp.showRealApp.removeListener(_routeToNewPassword);
     _volumeChannel.setMethodCallHandler(null);
     EmergencyLockService.dispose();
     _stopHeartbeat();
