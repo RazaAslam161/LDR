@@ -2,11 +2,8 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/fake_news/rss_service.dart';
-import 'package:miles/features/intro/intro_splash_screen.dart';
-import 'package:miles/main.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Clean Google-News-style light palette — intentionally NOTHING like Miles.
@@ -40,7 +37,7 @@ class FakeNewsScreen extends StatefulWidget {
 }
 
 class _FakeNewsScreenState extends State<FakeNewsScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, CoverGate<FakeNewsScreen> {
   List<RssArticle> _articles = [];
   bool _loading = true;
   bool _hasError = false;
@@ -52,11 +49,6 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
   // Entry 2 — long-press (2.5s) on the Local nav item.
   Timer? _localHoldTimer;
   bool _localTriggered = false;
-
-  // Re-entrancy guard: only one entry flow (auth → splash → reveal) at a time,
-  // so two triggers firing close together can't stack a second splash or
-  // double-fire onAuthenticated.
-  bool _entering = false;
 
   // Search + section state.
   final TextEditingController _searchController = TextEditingController();
@@ -70,24 +62,11 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
     WidgetsBinding.instance.addObserver(this);
     _resetEntryState();
     _loadNews();
-    // A closed app woken by a call has no router, no shell and no call route —
-    // only this cover. Without letting the call open the door, an incoming call
-    // is invisible and unanswerable. The lock still stands; only the hidden
-    // trigger is skipped, and only because the user tapped a call notification.
-    pendingCall.addListener(_openForPendingCall);
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _openForPendingCall());
-  }
-
-  void _openForPendingCall() {
-    if (_entering || pendingCall.value == null) return;
-    _triggerEntry(forCall: true);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    pendingCall.removeListener(_openForPendingCall);
     _localHoldTimer?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -153,45 +132,8 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
     }
   }
 
-  // ── The single authentication gate ─────────────────────────────────────────
-  Future<void> _triggerEntry({bool forCall = false}) async {
-    if (_entering) return; // one entry flow at a time
-    _entering = true;
-    try {
-      // Silent: no toast, no ripple, no loader. authInProgress guards the
-      // biometric prompt's own `inactive` state from resetting the cover
-      // beneath it. If the app-lock isn't set up, entry is granted immediately.
-      MilesApp.authInProgress = true;
-      final enabled = await AppLock.isEnabled();
-      final passed = !enabled || await AppLock.authenticate();
-      MilesApp.authInProgress = false;
-
-      if (!passed) return; // wrong biometric/PIN → stay on news, no error
-      if (!mounted) return;
-
-      // Cinematic reveal: fade the wordmark up over the news screen, then hand
-      // control to the real app once it finishes (or the user taps). Skipped
-      // when answering a call — 1.2s of branding against a ringing caller is
-      // the wrong trade.
-      if (!forCall) {
-        await Navigator.of(context).push(
-          PageRouteBuilder<void>(
-            pageBuilder: (_, __, ___) => IntroSplashScreen(
-              onComplete: () => Navigator.of(context).pop(),
-            ),
-            transitionsBuilder: (_, anim, __, child) =>
-                FadeTransition(opacity: anim, child: child),
-          ),
-        );
-      }
-
-      if (mounted) widget.onAuthenticated();
-    } finally {
-      // Always clear both guards, even on early return / error.
-      MilesApp.authInProgress = false;
-      _entering = false;
-    }
-  }
+  @override
+  void onCoverUnlocked() => widget.onAuthenticated();
 
   // ── Entry 1: 5 logo taps within 3 seconds ─────────────────────────────────
   void _onLogoTap() {
@@ -206,7 +148,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
     if (_logoTapCount >= 5) {
       _logoTapCount = 0;
       _firstLogoTap = null;
-      _triggerEntry();
+      runEntryGate();
     }
   }
 
@@ -218,7 +160,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
     _localHoldTimer?.cancel();
     _localHoldTimer = Timer(const Duration(milliseconds: 2500), () {
       _localTriggered = true;
-      _triggerEntry();
+      runEntryGate();
     });
   }
 

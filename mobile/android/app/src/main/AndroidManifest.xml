@@ -9,11 +9,16 @@
     <!-- Coarse location for the Time Capsule "when you're together" proximity unlock -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <!-- Opt-in always-on (background) location sharing — foreground-service backed,
-         mutual + consensual, with a persistent notification (anti-stalkerware). -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- No ACCESS_BACKGROUND_LOCATION / FOREGROUND_SERVICE_LOCATION. They were
+         declared for an always-on location-sharing feature that was never built:
+         location_service.dart says in its own doc comment that sharing is
+         foreground-only, and the one startService call
+         (call_foreground.dart) requests the microphone type alone. Background
+         location is the most alarming line Android shows in an app's permission
+         list, which is a poor thing for an app whose whole design goal is being
+         unremarkable. Re-add them WITH the service type below if the feature is
+         ever actually written. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Keep a voice/video call alive when the app is backgrounded -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- A video call runs the camera from a foreground service. Without the
@@ -282,7 +287,7 @@
              Warning: do not change the service name. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="location|microphone|camera"
+            android:foregroundServiceType="microphone|camera"
             android:exported="false"
             android:stopWithTask="true" />
     </application>

@@ -73,7 +73,6 @@ class Diag {
   static String? _coupleId;
   static String? _userId;
 
-  static Timer? _flushTimer;
   static bool _flushing = false;
   static File? _file;
 
@@ -81,34 +80,37 @@ class Diag {
   /// failed call plus the minutes around it, and small enough to paste.
   static const _fileMaxBytes = 1024 * 1024;
 
+  /// Retires diagnostics on this handset.
+  ///
+  /// The switch and the viewer are gone from Settings, so there is no longer a
+  /// way to turn recording off — which makes leaving it on a trap rather than a
+  /// feature. Two things therefore have to happen here rather than simply not
+  /// reading the flag:
+  ///
+  /// - The stored `diag_enabled` is cleared. It gated the UPLOAD, and it is
+  ///   true right now on any handset where it was ever switched on. Without
+  ///   this, upgrading removes the off switch and leaves the uploads running
+  ///   forever.
+  /// - `diag.ndjson` is deleted. The disk ring wrote on every run regardless of
+  ///   the flag, so a file of call, presence and chat traces is sitting in the
+  ///   documents directory of every install. Nothing can read it now, and an
+  ///   unreadable record of who called whom and when is exactly what this app
+  ///   is supposed not to keep.
+  ///
+  /// [record] is left in place at its ~117 call sites and does nothing. Ripping
+  /// those out is a mechanical change worth doing on its own, not one to make
+  /// in the same commit as a release build.
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _enabled = prefs.getBool(_enabledKey) ?? _enabledDefault;
+      await prefs.remove(_enabledKey);
       final dir = await getApplicationDocumentsDirectory();
-      _file = File('${dir.path}/diag.ndjson');
-      _flushTimer ??=
-          Timer.periodic(const Duration(seconds: 3), (_) => unawaited(flush()));
+      final stale = File('${dir.path}/diag.ndjson');
+      if (stale.existsSync()) await stale.delete();
     } catch (e) {
-      // Diagnostics failing to start must never stop the app starting.
-      debugPrint('[diag] init failed: $e');
+      // Diagnostics failing to retire must never stop the app starting.
+      debugPrint('[diag] retire failed: $e');
     }
-    record(DiagArea.app, 'session_start', fields: {
-      'session': sessionId,
-      'debug': kDebugMode,
-    },);
-  }
-
-  static Future<void> setEnabled(bool v) async {
-    _enabled = v;
-    record(DiagArea.app, v ? 'diag_on' : 'diag_off');
-    if (!v) {
-      _pendingUpload.clear();
-      _pendingDisk.clear();
-    }
-    try {
-      await (await SharedPreferences.getInstance()).setBool(_enabledKey, v);
-    } catch (_) {}
   }
 
   /// Uploads cannot start until the session resolves, because the row needs a

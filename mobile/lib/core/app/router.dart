@@ -42,7 +42,6 @@ import 'package:miles/features/intimacy/intimacy_screen.dart';
 import 'package:miles/features/profile/partner_profile_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
-import 'package:miles/features/settings/diag_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
@@ -159,10 +158,6 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/partner',
         builder: (context, state) => const PartnerProfileScreen(),
-      ),
-      GoRoute(
-        path: '/app/diagnostics',
-        builder: (context, state) => const DiagScreen(),
       ),
       GoRoute(
         path: '/app/disguise',
