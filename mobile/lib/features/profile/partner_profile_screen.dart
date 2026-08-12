@@ -358,10 +358,11 @@ class _MediaTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (item.isVideo) {
-      // Videos carry no thumbnail — nothing has ever generated one, and the
-      // frames live in couple_intimate where fetching a 30MB file to draw a
-      // 120px square is exactly the download this screen must not do.
+    // Videos sent before poster frames existed still have nothing a grid can
+    // paint — the file is in couple_intimate and fetching 30MB to draw a 120px
+    // square is exactly the download this screen must not do. Ones sent since
+    // carry a thumbnail and render like any other tile.
+    if (item.isVideo && item.thumbPath == null) {
       return GestureDetector(
         onTap: onTap,
         child: const ColoredBox(
@@ -382,8 +383,25 @@ class _MediaTile extends StatelessWidget {
         // hours and a shelf this long outlives one, so a tile that could only
         // read what the page load happened to sign is a grey square from the
         // day after until the app is killed.
-        child: SignedImage(
-            bucket: item.bucket, value: item.path, width: side, height: side,),
+        //
+        // tilePath, not path: the thumbnail when there is one. This grid used
+        // to pull the full original for every square — thirty of them, at
+        // several megabytes each, to fill one screen of 120px tiles.
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            SignedImage(
+                bucket: item.bucket,
+                value: item.tilePath,
+                width: side,
+                height: side,),
+            if (item.isVideo)
+              const Center(
+                child: Icon(Icons.play_circle_outline,
+                    color: Colors.white, size: 32,),
+              ),
+          ],
+        ),
       ),
     );
   }

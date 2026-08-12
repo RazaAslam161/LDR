@@ -126,12 +126,17 @@ class SharedMediaWindow extends MediaSource {
       return path == null
           ? null
           : MediaItem.stored(intimateBucket, path,
-              isVideo: true, senderName: sender, sentAt: m.createdAt,);
+              thumbPath: m.videoThumbPath,
+              isVideo: true,
+              senderName: sender,
+              sentAt: m.createdAt,);
     }
     final path = m.imagePath;
     return path == null
         ? null
         : MediaItem.stored(chatBucket, path,
-            senderName: sender, sentAt: m.createdAt,);
+            thumbPath: m.imageThumbPath,
+            senderName: sender,
+            sentAt: m.createdAt,);
   }
 }

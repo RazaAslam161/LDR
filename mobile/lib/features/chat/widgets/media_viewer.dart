@@ -8,6 +8,7 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/media_source.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
+import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/chat/widgets/video_surface.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 
@@ -293,14 +294,25 @@ class _MediaViewerState extends State<MediaViewer>
             child: _Chrome(
               visible: _chrome,
               item: current,
+              source: widget.source,
               position: index,
               total: count,
               onSave: () => _save(current),
+              onJump: _jumpTo,
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Jump straight to a thumbnail the user tapped in the strip.
+  ///
+  /// Not animateToPage: across four hundred items that scrolls the whole set
+  /// past the viewport, building and tearing down every page on the way.
+  void _jumpTo(int i) {
+    if (i == _index || !_pages.hasClients) return;
+    _pages.jumpToPage(i);
   }
 
   Widget _buildPage(int i, int index) {
@@ -524,16 +536,24 @@ class _Chrome extends StatelessWidget {
   const _Chrome({
     required this.visible,
     required this.item,
+    required this.source,
     required this.position,
     required this.total,
     required this.onSave,
+    required this.onJump,
   });
 
   final bool visible;
   final MediaItem item;
+
+  /// The whole set, for the filmstrip — which needs every item, not just the
+  /// one being shown.
+  final MediaSource source;
+
   final int position;
   final int total;
   final Future<bool> Function() onSave;
+  final void Function(int) onJump;
 
   @override
   Widget build(BuildContext context) {
@@ -594,18 +614,137 @@ class _Chrome extends StatelessWidget {
               ),
               child: SafeArea(
                 top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-                  child: Text(
-                    caption,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (total > 1)
+                      _Filmstrip(
+                        source: source,
+                        index: position,
+                        onJump: onJump,
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+                      child: Text(
+                        caption,
+                        textAlign: TextAlign.center,
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The strip of thumbnails under the photo.
+///
+/// "3 of 412" tells you where you are and nothing about what is around you, and
+/// a set that size is not something anyone swipes through one page at a time.
+/// This is only affordable because tiles paint from the thumbnail objects — the
+/// same bytes the grid and the chat bubble already downloaded, so scrubbing a
+/// long set costs nothing new.
+class _Filmstrip extends StatefulWidget {
+  const _Filmstrip({
+    required this.source,
+    required this.index,
+    required this.onJump,
+  });
+
+  final MediaSource source;
+  final int index;
+  final void Function(int) onJump;
+
+  @override
+  State<_Filmstrip> createState() => _FilmstripState();
+}
+
+class _FilmstripState extends State<_Filmstrip> {
+  static const _thumb = 46.0;
+  static const _gap = 4.0;
+  static const _height = 56.0;
+
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void didUpdateWidget(_Filmstrip old) {
+    super.didUpdateWidget(old);
+    if (old.index != widget.index) _centre();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Keep the current thumbnail under the photo it belongs to. Without this the
+  /// strip stays where it was and the marker walks off the edge of it.
+  void _centre() {
+    if (!_scroll.hasClients) return;
+    final viewport = _scroll.position.viewportDimension;
+    final target = widget.index * (_thumb + _gap) - (viewport - _thumb) / 2;
+    _scroll.animateTo(
+      target.clamp(0, _scroll.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: _height,
+      child: ListView.separated(
+        controller: _scroll,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: widget.source.length,
+        separatorBuilder: (_, __) => const SizedBox(width: _gap),
+        itemBuilder: (_, i) {
+          final item = widget.source.itemAt(i);
+          final current = i == widget.index;
+          return GestureDetector(
+            onTap: () => widget.onJump(i),
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: _thumb,
+                height: current ? _thumb : _thumb - 8,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  border: current
+                      ? Border.all(color: Colors.white, width: 2)
+                      : null,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      SignedImage(
+                          bucket: item.bucket,
+                          value: item.tilePath,
+                          width: _thumb,
+                          height: _thumb,),
+                      if (item.isVideo)
+                        const Center(
+                          child: Icon(Icons.play_arrow_rounded,
+                              color: Colors.white, size: 18,),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

@@ -12,6 +12,7 @@ class MediaItem {
   const MediaItem({
     required this.bucket,
     required this.path,
+    this.thumbPath,
     this.isVideo = false,
     this.senderName = 'a message',
     this.sentAt,
@@ -23,6 +24,7 @@ class MediaItem {
   factory MediaItem.stored(
     String bucket,
     String value, {
+    String? thumbPath,
     bool isVideo = false,
     String senderName = 'a message',
     DateTime? sentAt,
@@ -31,6 +33,7 @@ class MediaItem {
       MediaItem(
         bucket: bucket,
         path: MediaUrls.toPath(bucket, value),
+        thumbPath: thumbPath,
         isVideo: isVideo,
         senderName: senderName,
         sentAt: sentAt,
@@ -39,7 +42,20 @@ class MediaItem {
 
   final String bucket;
   final String path;
+
+  /// The small sibling object, in the same [bucket], or null for anything
+  /// written before thumbnails existed.
+  final String? thumbPath;
+
   final bool isVideo;
+
+  /// What a TILE paints. The pager always reads [path] — it is the one place
+  /// the full resolution is actually wanted.
+  String get tilePath => thumbPath ?? path;
+
+  /// Files a tile's bytes separately from the original's, so a grid and a
+  /// viewer of the same photo do not fight over one cache entry.
+  String get tileCacheKey => '$bucket/$tilePath';
 
   /// Whose it is, for the vault label a save writes.
   final String senderName;

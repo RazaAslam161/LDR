@@ -54,6 +54,7 @@ class ChatMediaSource extends MediaSource {
     return MediaItem.stored(
       isVideo ? intimateBucket : chatBucket,
       raw ?? '',
+      thumbPath: isVideo ? m.videoThumbPath : m.imageThumbPath,
       isVideo: isVideo,
       senderName: senderNameFor(m),
       sentAt: m.createdAt,
