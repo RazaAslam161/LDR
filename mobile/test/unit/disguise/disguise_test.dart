@@ -182,5 +182,23 @@ void main() {
                 'missing $missing',);
       }
     });
+
+    test('no door hangs off typing, which is ordinary use everywhere', () {
+      // The News cover opened the gate when `home` was submitted in its search
+      // box. Searching a news reader for "home" is something a person does on
+      // purpose, so the door was reachable by using the app as intended — and
+      // what it produced was a biometric prompt in front of whoever was
+      // holding the phone. Nothing a user types may be a door, in any cover.
+      for (final entry in _coverSources.entries) {
+        final code = _code(File(entry.value).readAsStringSync());
+        for (final m
+            in RegExp(r'on(?:Submitted|Changed|Editing\w*):\s*([A-Za-z_]\w*)')
+                .allMatches(code)) {
+          expect(_reachesGate(m.group(1)!, code), isFalse,
+              reason: '${entry.key} opens the entry gate from ${m.group(1)} — '
+                  'a text callback the user reaches by typing',);
+        }
+      }
+    });
   });
 }

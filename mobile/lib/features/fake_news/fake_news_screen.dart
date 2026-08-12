@@ -17,11 +17,19 @@ const _textMuted = Color(0xFF70757A);
 const _accent = Color(0xFF1A73E8);
 const _divider = Color(0xFFE0E0E0);
 
-/// A convincing fake "News" reader shown on cold start. Three hidden triggers
-/// (5 quick logo taps, the secret search word, a 2.5s long-press on the Local
-/// nav item) run the biometric gate; on success [onAuthenticated] swaps the
-/// whole app over to the real Miles experience. Everything else behaves like
-/// a real news app (live RSS, external article links, pull-to-refresh).
+/// A convincing fake "News" reader shown on cold start. Two hidden triggers
+/// (5 quick logo taps, a 2.5s hold on the Local nav item) run the biometric
+/// gate; on success [onAuthenticated] swaps the whole app over to the real
+/// Miles experience. Everything else behaves like a real news app (live RSS,
+/// external article links, pull-to-refresh).
+///
+/// Two doors that used to exist here are gone, because both were reachable by
+/// ordinary use of a news app — which is the one thing an entry gesture may not
+/// be. Submitting `home` in the search box opened the gate, and searching a
+/// news reader for "home" is something a person does on purpose; a plain
+/// long-press on the **Local** section tab opened it too, and long-pressing a
+/// tab to see whether it has a menu is a reflex. Either one put a biometric
+/// prompt in front of whoever was holding the phone.
 class FakeNewsScreen extends StatefulWidget {
   const FakeNewsScreen({required this.onAuthenticated, super.key});
 
@@ -41,7 +49,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
   int _logoTapCount = 0;
   DateTime? _firstLogoTap;
 
-  // Entry 3 — long-press (2.5s) on the Local nav item.
+  // Entry 2 — long-press (2.5s) on the Local nav item.
   Timer? _localHoldTimer;
   bool _localTriggered = false;
 
@@ -202,18 +210,9 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
     }
   }
 
-  // ── Entry 2: secret search word ───────────────────────────────────────────
-  void _onSearchSubmitted(String value) {
-    if (value.trim().toLowerCase() == 'home') {
-      _searchController.clear();
-      setState(() => _query = '');
-      _triggerEntry();
-      return;
-    }
-    setState(() => _query = value.trim());
-  }
+  void _onSearchSubmitted(String value) => setState(() => _query = value.trim());
 
-  // ── Entry 3: long-press (2.5s) on the Local nav item ──────────────────────
+  // ── Entry 2: long-press (2.5s) on the Local nav item ──────────────────────
   void _localHoldStart() {
     _localTriggered = false;
     _localHoldTimer?.cancel();
@@ -393,8 +392,6 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
               label: labels[i],
               selected: _section == i,
               onTap: () => setState(() => _section = i),
-              // The Local category tab is also a hidden trigger.
-              onLongPress: i == 2 ? _triggerEntry : null,
             ),
         ],
       ),
@@ -477,7 +474,7 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
               selected: _section == 1,
               onTap: () => setState(() => _section = 1),
             ),
-            // Local — rightmost. A 2.5s press here is Entry 3.
+            // Local — rightmost. A 2.5s press here is Entry 2.
             _NavItem(
               icon: Icons.location_on_outlined,
               activeIcon: Icons.location_on,
@@ -546,19 +543,16 @@ class _SectionTab extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
-    this.onLongPress,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),

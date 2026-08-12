@@ -32,9 +32,15 @@ those five.
 | **Level** | Sand tile, spirit level | Live bubble level + compass | Hold the angle readout with the phone lying flat |
 | **Device Info** | Indigo tile, bar chart | Live device and storage statistics | Hold the battery ring |
 
-The News cover has two spare doors as well, kept from the original design:
-typing `home` into its search box, and a 2.5-second press on the **Local** item
-in the bottom bar.
+The News cover keeps one spare door from the original design: a 2.5-second
+press on the **Local** item in the bottom bar. A tap there navigates, as it
+looks like it will; only a deliberate hold does anything else.
+
+Two other News doors were removed for failing the rule below. Submitting `home`
+in the search box opened the gate — but searching a news reader for "home" is
+something a person does on purpose. A plain long-press on the **Local** section
+tab opened it too, and long-pressing a tab to check for a menu is a reflex.
+Both put a biometric prompt in front of whoever was holding the phone.
 
 ## Why every gesture has the same shape
 
