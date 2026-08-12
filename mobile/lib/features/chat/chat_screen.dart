@@ -564,13 +564,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _coupleId = couple.id;
     _clearedBefore = await _loadClearedBefore(couple.id);
     try {
-      final msgs = await ChatRepository.fetch(couple.id);
+      // warm: false — signing is a round trip per bucket and nothing below
+      // paints a bubble. The spinner used to cover the fetch AND the signing
+      // AND the subscribe AND two receipt refreshes, so the conversation was
+      // withheld until every one of them had returned.
+      final msgs = await ChatRepository.fetch(couple.id, warm: false);
       _messages.addAll(msgs);
       _sortMessages();
       _ids.addAll(msgs.map((m) => m.id));
     } catch (_) {
       // first-run is fine
     }
+    // Paint here. Everything after this point is network work the list does not
+    // need in order to show text, and text is most of a conversation.
+    if (mounted) setState(() => _loading = false);
+    unawaited(ChatRepository.warmMedia(List.of(_messages)).then((_) {
+      if (mounted) setState(() {});
+    }));
     // single, idempotent channel-subscribe path
     await _subscribe(trigger: 'chat_open');
     // Photos taken from the shell's camera tab were already uploading before
@@ -596,7 +606,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // messages, all to repaint a few 10px ticks. Only the ticks listen now.
       _receiptTick.value++;
     });
-    if (mounted) setState(() => _loading = false);
     // reverse:true already pins the view to the newest message — no scroll needed.
   }
 
@@ -1586,7 +1595,7 @@ class _Bubble extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Center(
               child: Text(
-                DateFormat('EEEE, MMM d').format(message.createdAt),
+                _dayHeaderFormat.format(message.createdAt),
                 style: const TextStyle(fontSize: 11, color: MilesColors.faint),
               ),
             ),
@@ -1599,7 +1608,7 @@ class _Bubble extends StatelessWidget {
                 ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
                 : const EdgeInsets.all(4),
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.74,
+              maxWidth: MediaQuery.sizeOf(context).width * 0.74,
             ),
             decoration: BoxDecoration(
               color: mine ? theme.myBubble : theme.partnerBubble,
@@ -1652,7 +1661,7 @@ class _Bubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                DateFormat('h:mm a').format(message.createdAt),
+                _bubbleTimeFormat.format(message.createdAt),
                 style: const TextStyle(fontSize: 10, color: MilesColors.faint),
               ),
               if (mine && status != null) ...[
@@ -1799,6 +1808,12 @@ class _BurstAnimationState extends State<_BurstAnimation>
     );
   }
 }
+
+/// Built once, not per bubble per build. Constructing a DateFormat costs
+/// ~23.6us against ~0.9us for a cached one, and a 300-message conversation
+/// paid it twice per visible row on every rebuild.
+final DateFormat _dayHeaderFormat = DateFormat('EEEE, MMM d');
+final DateFormat _bubbleTimeFormat = DateFormat('h:mm a');
 
 /// Small quoted preview shown at the top of a bubble that's replying.
 class _ReplyPreview extends StatelessWidget {

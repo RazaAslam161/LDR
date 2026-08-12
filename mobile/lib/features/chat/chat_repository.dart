@@ -302,7 +302,16 @@ class ChatRepository {
 
   /// Messages newest-first (descending by server `created_at`). Pairs with a
   /// `reverse: true` ListView so the newest message sits at the bottom.
-  static Future<List<Message>> fetch(String coupleId) async {
+  /// The newest 300 messages.
+  ///
+  /// [warm] signs every media object the page will render before returning.
+  /// That is one round trip per bucket and it is worth waiting for when the
+  /// caller is about to render off-screen — but the chat screen holds a
+  /// full-screen spinner until this future completes, so it passes false and
+  /// warms after painting. Bubbles already render their "unavailable"
+  /// placeholder for the frames before a path resolves (see [_tileUrl]), which
+  /// is the contract that makes deferring safe.
+  static Future<List<Message>> fetch(String coupleId, {bool warm = true}) async {
     final res = await _c
         .from('messages')
         .select()
@@ -317,7 +326,7 @@ class ChatRepository {
         // Skip a malformed row rather than blanking the whole conversation.
       }
     }
-    await warmMedia(out);
+    if (warm) await warmMedia(out);
     return out;
   }
 
