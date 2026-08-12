@@ -85,6 +85,23 @@ const String kCallChannelDesc = 'Incoming voice notifications';
 const String kCallServiceChannelName = 'Ongoing call';
 const String kCallServiceChannelDesc = 'Shown while a call is in progress.';
 
+// ── The Timer cover's countdown ──────────────────────────────────────────────
+// Created lazily by the Timer disguise itself, so a phone wearing any other
+// identity never lists a channel its cover could not explain. The strings live
+// here with the rest so the disguise guard test in
+// test/unit/disguise/disguise_notification_test.dart sees them.
+const String kTimerChannelId = 'timer_channel';
+const String kTimerChannelName = 'Timers';
+const String kTimerChannelDesc = 'When a countdown finishes';
+
+AndroidNotificationChannel buildTimerChannel() =>
+    const AndroidNotificationChannel(
+      kTimerChannelId,
+      kTimerChannelName,
+      description: kTimerChannelDesc,
+      importance: Importance.high,
+    );
+
 Int64List callVibrationPattern() =>
     Int64List.fromList(<int>[0, 800, 600, 800, 600, 800]);
 

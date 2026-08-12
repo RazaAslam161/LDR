@@ -24,6 +24,23 @@ enum DisguiseCover {
 
   /// A local weather panel.
   weather,
+
+  /// A unit and currency converter. Output-only: there is no list, no history
+  /// and nothing that could belong to a person.
+  convert,
+
+  /// A voice recorder with an empty library.
+  recorder,
+
+  /// A stopwatch and countdown timer. No content at all, not even an empty
+  /// list.
+  timer,
+
+  /// A bubble level and compass, driven by the device's own sensors.
+  level,
+
+  /// A read-only wall of device and storage statistics.
+  device,
 }
 
 @immutable
@@ -32,6 +49,7 @@ class DisguiseProfile {
     required this.aliasId,
     required this.label,
     required this.blurb,
+    required this.entry,
     required this.icon,
     required this.tint,
     required this.cover,
@@ -47,6 +65,13 @@ class DisguiseProfile {
   /// One line shown in the picker.
   final String blurb;
 
+  /// The hidden gesture that opens the real app from behind this cover.
+  ///
+  /// Shown in the picker, and the source of the table in
+  /// docs/guides/disguises.md. Nothing else will remind the user which gesture
+  /// they chose, and a forgotten door is an app they cannot open.
+  final String entry;
+
   /// Picker-only preview glyph; the real launcher icon lives in res/.
   final IconData icon;
   final Color tint;
@@ -59,38 +84,96 @@ class DisguiseProfile {
 ///
 /// `news` stays first and is the default so that existing installs — which are
 /// already running the News alias — keep the identity they were installed with.
+///
+/// THE SHAPE EVERY ENTRY GESTURE SHARES, because a fifth pattern is a fifth
+/// thing to get wrong: **hold an inert control while the app is in its resting
+/// state.** A tap on that control is either the app's normal action or nothing
+/// at all; the hold is only meaningful in a state a real user has no reason to
+/// be in. Nothing on screen ever hints that a hold does anything, and a hold
+/// that misses the state does nothing at all — no error, no ripple, no signal
+/// that someone was close.
 const List<DisguiseProfile> kDisguises = [
   DisguiseProfile(
     aliasId: 'News',
     label: 'News',
     blurb: 'A headlines reader. Blends in on any home screen.',
+    entry: 'Five taps on the masthead mark, top left.',
     icon: Icons.article_outlined,
-    tint: Color(0xFF1A73E8),
+    tint: Color(0xFFB3261E),
     cover: DisguiseCover.news,
   ),
   DisguiseProfile(
     aliasId: 'Calculator',
     label: 'Calculator',
     blurb: 'A working calculator. Nobody opens it twice.',
+    entry: 'Hold = while the display reads 0 and nothing is pending.',
     icon: Icons.calculate_outlined,
-    tint: Color(0xFF5F6368),
+    tint: Color(0xFF3C4043),
     cover: DisguiseCover.calculator,
   ),
   DisguiseProfile(
     aliasId: 'Notes',
     label: 'Notes',
     blurb: 'A notepad that really keeps notes.',
+    entry: 'Hold the empty-state artwork, which only shows with no notes.',
     icon: Icons.sticky_note_2_outlined,
-    tint: Color(0xFFF4B400),
+    tint: Color(0xFFE65100),
     cover: DisguiseCover.notes,
   ),
   DisguiseProfile(
     aliasId: 'Weather',
     label: 'Weather',
     blurb: 'A local forecast, stable through the day.',
+    entry: "Hold today's big temperature reading.",
     icon: Icons.wb_sunny_outlined,
-    tint: Color(0xFF4285F4),
+    tint: Color(0xFF1565C0),
     cover: DisguiseCover.weather,
+  ),
+  DisguiseProfile(
+    aliasId: 'Convert',
+    label: 'Convert',
+    blurb: 'Units and currency. Output only — nothing to browse.',
+    entry: 'Hold the swap arrows with both sides on the same unit and the '
+        'amount empty.',
+    icon: Icons.swap_horiz_rounded,
+    tint: Color(0xFF0F766E),
+    cover: DisguiseCover.convert,
+  ),
+  DisguiseProfile(
+    aliasId: 'Recorder',
+    label: 'Recorder',
+    blurb: 'A voice recorder. An empty one raises no questions.',
+    entry: 'Hold the 00:00 readout before recording anything.',
+    icon: Icons.mic_none_rounded,
+    tint: Color(0xFF2A2830),
+    cover: DisguiseCover.recorder,
+  ),
+  DisguiseProfile(
+    aliasId: 'Timer',
+    label: 'Timer',
+    blurb: 'A stopwatch and countdown. No content whatsoever.',
+    entry: 'Hold Lap with the stopwatch stopped at 00:00.00.',
+    icon: Icons.timer_outlined,
+    tint: Color(0xFF2E7D32),
+    cover: DisguiseCover.timer,
+  ),
+  DisguiseProfile(
+    aliasId: 'Level',
+    label: 'Level',
+    blurb: 'A spirit level and compass. Alive the moment you tilt it.',
+    entry: 'Hold the angle readout with the phone lying flat.',
+    icon: Icons.straighten_rounded,
+    tint: Color(0xFFB06A12),
+    cover: DisguiseCover.level,
+  ),
+  DisguiseProfile(
+    aliasId: 'Device',
+    label: 'Device Info',
+    blurb: "The phone's own numbers. Boring is the product.",
+    entry: 'Hold the battery ring.',
+    icon: Icons.bar_chart_rounded,
+    tint: Color(0xFF3730A3),
+    cover: DisguiseCover.device,
   ),
 ];
 

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon backgrounds. Stock-app palettes so the icons read as system
-     apps rather than as something bespoke sitting next to them. -->
-<resources>
-    <color name="disguise_calc_bg">#FF202124</color>
-    <color name="disguise_notes_bg">#FFFFFFFF</color>
-    <color name="disguise_weather_bg">#FF1A73E8</color>
-</resources>

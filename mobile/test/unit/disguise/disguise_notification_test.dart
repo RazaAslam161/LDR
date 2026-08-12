@@ -27,6 +27,7 @@ void main() {
             aliasId: 'X',
             label: 'X',
             blurb: '',
+            entry: '',
             icon: kDefaultDisguise.icon,
             tint: kDefaultDisguise.tint,
             cover: cover,
@@ -83,6 +84,7 @@ void main() {
             aliasId: 'X',
             label: 'X',
             blurb: '',
+            entry: '',
             icon: kDefaultDisguise.icon,
             tint: kDefaultDisguise.tint,
             cover: cover,
@@ -134,6 +136,9 @@ void main() {
       // call_foreground.dart, out of this test's sight, and shipped the real
       // app name into Android's notification settings.
       'call_service': [kCallServiceChannelName, kCallServiceChannelDesc],
+      // Created only by the Timer cover, but it is listed in the same place as
+      // the rest once it exists.
+      'timer': [kTimerChannelName, kTimerChannelDesc],
     };
 
     test('no channel name or description reveals the app', () {

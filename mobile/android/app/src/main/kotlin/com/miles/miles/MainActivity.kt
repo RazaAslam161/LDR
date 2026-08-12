@@ -1,13 +1,21 @@
 package com.miles.miles
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.os.StatFs
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -129,6 +137,28 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
+        // Everything the "Device Info" disguise shows that Dart cannot reach.
+        // No new package and no new permission: battery is a sticky broadcast,
+        // storage is StatFs, memory is ActivityManager, and the network kind
+        // needs ACCESS_NETWORK_STATE, which this app already holds.
+        //
+        // Every value is the handset's own live state, which is what makes that
+        // cover self-verifying — there is nothing here to fabricate.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/device_stats")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "read" -> try {
+                        result.success(deviceStats())
+                    } catch (e: Exception) {
+                        // The Dart side renders a full screen without us; a
+                        // cover that shows an error dialog is a cover that
+                        // gets looked at twice.
+                        result.error("stats_failed", e.message, null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // Full-screen-intent permission (Android 14 / API 34+). Below 34 it's
         // implicitly granted; from 34 the user must allow it in system settings.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/fsi")
@@ -155,5 +185,44 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun deviceStats(): Map<String, Any?> {
+        val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+
+        val storage = StatFs(Environment.getDataDirectory().path)
+        val memory = ActivityManager.MemoryInfo()
+        getSystemService(ActivityManager::class.java).getMemoryInfo(memory)
+
+        return mapOf(
+            "batteryPercent" to if (level >= 0 && scale > 0) level * 100 / scale else -1,
+            "charging" to (status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL),
+            "storageTotal" to storage.totalBytes,
+            "storageFree" to storage.availableBytes,
+            "ramTotal" to memory.totalMem,
+            "ramFree" to memory.availMem,
+            "uptimeMs" to SystemClock.elapsedRealtime(),
+            "model" to Build.MODEL,
+            "manufacturer" to Build.MANUFACTURER,
+            "androidRelease" to Build.VERSION.RELEASE,
+            "sdkInt" to Build.VERSION.SDK_INT,
+            "buildId" to Build.DISPLAY,
+            "network" to networkKind()
+        )
+    }
+
+    private fun networkKind(): String {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return "Unknown"
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "Offline"
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            else -> "Connected"
+        }
     }
 }

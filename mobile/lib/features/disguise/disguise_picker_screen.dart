@@ -116,7 +116,10 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
               child: Text(
                 'Your home screen may take a moment to refresh, and the app can '
                 'close as the icon changes. That is Android doing the swap — '
-                'open it again from the new icon.',
+                'open it again from the new icon.\n\n'
+                "Android's own Settings › Apps list keeps calling this app "
+                '"News" whichever disguise you pick. That name is fixed when '
+                'the app is installed and no app can change it afterwards.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   fontSize: 11.5,
@@ -215,6 +218,18 @@ class _DisguiseTile extends StatelessWidget {
                       style: GoogleFonts.inter(
                         fontSize: 11.5,
                         color: MilesColors.taupe,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // The one thing nothing else will remind you of. A disguise
+                    // whose door you cannot remember is an app you cannot open.
+                    Text(
+                      'Way in — ${profile.entry}',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        height: 1.4,
+                        fontWeight: FontWeight.w500,
+                        color: MilesColors.blush,
                       ),
                     ),
                   ],

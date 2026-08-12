@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:miles/features/disguise/covers/calculator_cover.dart';
+import 'package:miles/features/disguise/covers/convert_cover.dart';
+import 'package:miles/features/disguise/covers/device_info_cover.dart';
+import 'package:miles/features/disguise/covers/level_cover.dart';
 import 'package:miles/features/disguise/covers/notes_cover.dart';
+import 'package:miles/features/disguise/covers/recorder_cover.dart';
+import 'package:miles/features/disguise/covers/timer_cover.dart';
 import 'package:miles/features/disguise/covers/weather_cover.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
@@ -61,6 +66,16 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost> {
         NotesCover(onAuthenticated: widget.onAuthenticated),
       DisguiseCover.weather =>
         WeatherCover(onAuthenticated: widget.onAuthenticated),
+      DisguiseCover.convert =>
+        ConvertCover(onAuthenticated: widget.onAuthenticated),
+      DisguiseCover.recorder =>
+        RecorderCover(onAuthenticated: widget.onAuthenticated),
+      DisguiseCover.timer =>
+        TimerCover(onAuthenticated: widget.onAuthenticated),
+      DisguiseCover.level =>
+        LevelCover(onAuthenticated: widget.onAuthenticated),
+      DisguiseCover.device =>
+        DeviceInfoCover(onAuthenticated: widget.onAuthenticated),
       DisguiseCover.news =>
         FakeNewsScreen(onAuthenticated: widget.onAuthenticated),
     };

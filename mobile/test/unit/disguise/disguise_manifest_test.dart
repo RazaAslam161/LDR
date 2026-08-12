@@ -130,6 +130,29 @@ void main() {
     }
   });
 
+  test('no launcher shortcuts are declared', () {
+    // The launcher long-press popup is a surface the disguise does not control:
+    // a static or dynamic shortcut would list a real feature of this app under
+    // whatever the icon claims to be — "New note" on a spirit level. There are
+    // none, and this is the check that keeps it that way when a plugin
+    // helpfully adds one.
+    expect(manifest.contains('android.app.shortcuts'), isFalse,
+        reason: 'a shortcut names a feature the cover cannot explain',);
+    expect(File('android/app/src/main/res/xml/shortcuts.xml').existsSync(),
+        isFalse,);
+  });
+
+  test('the application label is the default disguise, never the real name', () {
+    // Android shows THIS in Settings > Apps, and it cannot be changed at
+    // runtime — the aliases only rename the launcher entry. It must therefore
+    // be a disguise, and the picker tells the user it stays put.
+    final application =
+        RegExp(r'<application[^>]*>', dotAll: true).firstMatch(manifest);
+    expect(application, isNotNull);
+    expect(application!.group(0)!,
+        contains('android:label="${kDefaultDisguise.label}"'),);
+  });
+
   test('each offered disguise declares a launcher label and icon', () {
     for (final d in kDisguises) {
       final block = aliasBlock(d.aliasId).firstMatch(manifest)!.group(0)!;

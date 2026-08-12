@@ -494,46 +494,51 @@ class _FakeNewsScreenState extends State<FakeNewsScreen>
   }
 }
 
-/// Recreated "G + colored news lines" logo — reads as a news app, not Miles.
+/// The masthead mark, and the first hidden door (five taps).
+///
+/// It used to be a letterform in one company's brand colour beside bars in
+/// three more of that company's exact hexes — a counterfeit of a mark people
+/// know by heart, which is both a trademark problem and a worse disguise: a
+/// familiar logo drawn slightly wrong is far more likely to be looked at twice
+/// than an unremarkable one nobody recognises.
+///
+/// This is the same article-card mark the launcher icon draws, so the icon on
+/// the home screen and the masthead inside agree.
 class _NewsLogo extends StatelessWidget {
   const _NewsLogo();
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 32,
-      height: 32,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: const Color(0xFFB3261E),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('G',
-              style: TextStyle(
-                  color: _accent,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  height: 1,),),
-          const SizedBox(width: 2),
-          Column(
-            mainAxisSize: MainAxisSize.min,
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _bar(13, const Color(0xFF4285F4)),
-              const SizedBox(height: 2.5),
-              _bar(13, const Color(0xFFEA4335)),
-              const SizedBox(height: 2.5),
-              _bar(9, const Color(0xFFFBBC05)),
+              Container(width: 7, height: 7, color: Colors.white),
+              const SizedBox(width: 2),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [_bar(9), const SizedBox(height: 2), _bar(6)],
+              ),
             ],
           ),
+          _bar(18),
         ],
       ),
     );
   }
 
-  Widget _bar(double w, Color c) => Container(
-        width: w,
-        height: 2.5,
-        decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(1)),
-      );
+  Widget _bar(double w) => Container(width: w, height: 2, color: Colors.white);
 }
 
 class _SectionTab extends StatelessWidget {

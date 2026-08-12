@@ -39,10 +39,14 @@ class DisguiseNotificationStyle {
 /// curiosity is a notification that gets opened by the wrong person.
 DisguiseNotificationStyle notificationStyleFor(DisguiseProfile profile) {
   return switch (profile.cover) {
+    // Not @mipmap/ic_launcher: Android masks a small icon to its alpha
+    // channel, and the launcher tile is opaque edge to edge — it arrived as a
+    // solid white square in the status bar, which is a thing no shipped app
+    // does and the first thing an eye catches.
     DisguiseCover.news => const DisguiseNotificationStyle(
         title: 'News update',
         body: 'New stories available',
-        smallIcon: '@mipmap/ic_launcher',
+        smallIcon: '@drawable/ic_notif_news',
       ),
     DisguiseCover.calculator => const DisguiseNotificationStyle(
         title: 'Calculator',
@@ -58,6 +62,31 @@ DisguiseNotificationStyle notificationStyleFor(DisguiseProfile profile) {
         title: 'Weather',
         body: 'Forecast updated',
         smallIcon: '@drawable/ic_notif_weather',
+      ),
+    DisguiseCover.convert => const DisguiseNotificationStyle(
+        title: 'Convert',
+        body: 'Reference rates refreshed',
+        smallIcon: '@drawable/ic_notif_convert',
+      ),
+    DisguiseCover.recorder => const DisguiseNotificationStyle(
+        title: 'Recorder',
+        body: 'Recording saved',
+        smallIcon: '@drawable/ic_notif_recorder',
+      ),
+    DisguiseCover.timer => const DisguiseNotificationStyle(
+        title: 'Timer finished',
+        body: 'Tap to open',
+        smallIcon: '@drawable/ic_notif_timer',
+      ),
+    DisguiseCover.level => const DisguiseNotificationStyle(
+        title: 'Level',
+        body: 'Calibration needed',
+        smallIcon: '@drawable/ic_notif_level',
+      ),
+    DisguiseCover.device => const DisguiseNotificationStyle(
+        title: 'Device Info',
+        body: 'Storage is filling up',
+        smallIcon: '@drawable/ic_notif_device',
       ),
   };
 }

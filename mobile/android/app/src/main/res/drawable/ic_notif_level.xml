@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification small icon. Android masks it to its alpha channel, so this is
+     a white silhouette with real holes — never a copy of the colour launcher
+     tile, which masks down to a solid square. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M4.6,8.6h14.8a3.4,3.4 0 0 1 0,6.8h-14.8a3.4,3.4 0 0 1 0,-6.8z M5.4,10.4a1.6,1.6 0 0 0 0,3.2h13.2a1.6,1.6 0 0 0 0,-3.2z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M13.4,10.4a1.6,1.6 0 1 1 0,3.2a1.6,1.6 0 1 1 0,-3.2z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M9.4,10.2h0.9v3.6h-0.9z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M16.4,10.2h0.9v3.6h-0.9z" />
+</vector>
