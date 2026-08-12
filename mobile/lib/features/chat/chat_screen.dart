@@ -28,13 +28,16 @@ import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
+import 'package:miles/features/chat/chat_media_source.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/chat/media_album.dart';
 import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
+import 'package:miles/features/chat/widgets/album_bubble.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
@@ -284,6 +287,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         localPath: s.file.path,
         sendStatus: s.status,
         replyToId: s.replyToId,
+        // Carried onto the optimistic bubble so a pick of twenty is ONE grid
+        // while it uploads, not twenty bubbles that collapse into a grid the
+        // moment the last row lands.
+        albumId: s.albumId,
       ), source: 'send_queue',);
     }
 
@@ -891,7 +898,46 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     setState(() => _selection.toggle(m));
   }
 
+  /// Selecting an album selects everything in it.
+  ///
+  /// An album is one bubble but many rows, and a delete that took only the one
+  /// the tap resolved to would leave the other nineteen photos of a send behind
+  /// as a smaller grid — which reads as the delete having failed.
+  void _toggleSelectedRow(ChatRow row) {
+    if (!row.isAlbum) return _toggleSelected(row.newest.id);
+    final on = _selection.contains(row.newest.id);
+    setState(() {
+      for (final m in row.items) {
+        if (_selection.contains(m.id) == on) _selection.toggle(m);
+      }
+    });
+  }
+
   void _clearSelection() => setState(_selection.clear);
+
+  /// Open the pager on [tapped], inside every photo and video the conversation
+  /// has — not just the one that was touched.
+  ///
+  /// The set is built here rather than in the bubble because this holds the
+  /// loaded conversation, and [ChatMediaSource] can page back past it.
+  void _openMedia(Message tapped, String partnerName) {
+    final coupleId = _coupleId;
+    if (coupleId == null) return;
+    final uid = SupabaseService.currentUserId;
+    final media = _messages
+        .where((m) =>
+            (m.kind == 'image' || m.kind == 'video') &&
+            !m.deletedForEveryone &&
+            !m.isHiddenFor(uid),)
+        .toList();
+    if (media.isEmpty) return;
+    final source = ChatMediaSource(
+      coupleId: coupleId,
+      seed: media,
+      senderNameFor: (m) => m.isMine(uid) ? 'you' : partnerName,
+    );
+    MediaViewer.open(context, source, index: source.indexOf(tapped));
+  }
 
   /// Reply and Save act on a single message, so they only appear when exactly
   /// one is picked.
@@ -1286,6 +1332,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                     if (visible.isEmpty) {
                                       return const _EmptyChat();
                                     }
+                                    // Media sent together collapses into one
+                                    // row here, so the list builds grids rather
+                                    // than one full-width bubble per photo.
+                                    final rows = MediaAlbums.rows(visible);
                                     return Stack(
                                       children: [
                                         ListView.builder(
@@ -1293,17 +1343,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                           reverse: true,
                                           padding: const EdgeInsets.fromLTRB(
                                               16, 12, 16, 12,),
-                                          itemCount: visible.length,
+                                          itemCount: rows.length,
                                           itemBuilder: (_, i) {
-                                            final m = visible[i];
+                                            final row = rows[i];
+                                            final m = row.newest;
                                             // Descending list: the older neighbour is
                                             // i+1, so a date header marks the oldest
                                             // message of each day (top of the group).
+                                            // Compared against this row's OLDEST,
+                                            // since an album can straddle midnight.
                                             final showTime =
-                                                i == visible.length - 1 ||
+                                                i == rows.length - 1 ||
                                                     !DateUtils.isSameDay(
-                                                        visible[i + 1].createdAt,
-                                                        m.createdAt,);
+                                                        rows[i + 1]
+                                                            .newest
+                                                            .createdAt,
+                                                        row.oldest.createdAt,);
                                             return Dismissible(
                                                 key: ValueKey('rpl-${m.id}'),
                                                 direction:
@@ -1331,9 +1386,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                   selected:
                                                       _selection.contains(m.id),
                                                   onToggle: () =>
-                                                      _toggleSelected(m.id),
+                                                      _toggleSelectedRow(row),
                                                   child: _Bubble(
                                                     message: m,
+                                                    album:
+                                                        row.isAlbum ? row : null,
+                                                    onOpenMedia: (t) =>
+                                                        _openMedia(
+                                                            t,
+                                                            partnerName ??
+                                                                'your partner',),
                                                     mine: m.isMine(uid),
                                                     showDateHeader: showTime,
                                                     repliedTo: _byId(m.replyToId),
@@ -1479,6 +1541,8 @@ class _Bubble extends StatelessWidget {
     required this.theme,
     required this.senderName,
     required this.tick,
+    required this.onOpenMedia,
+    this.album,
     this.repliedTo,
     this.status,
   });
@@ -1490,6 +1554,18 @@ class _Bubble extends StatelessWidget {
   final ChatTheme theme;
   final String senderName;
   final Message? repliedTo;
+
+  /// Set when this bubble stands for a whole send rather than one photo. The
+  /// grid replaces the single-photo body; everything around it — the reply
+  /// quote, the timestamp, the tick — is the bubble's as usual.
+  final ChatRow? album;
+
+  /// Opens the pager on a specific message of the conversation's media.
+  ///
+  /// The bubble does not build the set: it belongs to the screen, which holds
+  /// the loaded conversation and can page further back than any one bubble
+  /// knows about.
+  final void Function(Message) onOpenMedia;
 
   /// Evaluated lazily on every tick, because a receipt decays with the clock:
   /// isTrulyOnline is freshness-gated, so the same message yields a different
@@ -1552,12 +1628,16 @@ class _Bubble extends StatelessWidget {
                             color: theme.text,
                             fontStyle: FontStyle.italic,
                             fontSize: 14,),
+                      ) else if (album != null) AlbumBubble(
+                        row: album!,
+                        onOpen: (i) => onOpenMedia(album!.items[i]),
                       ) else _Content(
                         message: message,
                         voice: voice,
                         textColor: theme.text,
                         bubble: mine ? theme.myBubble : theme.partnerBubble,
-                        senderName: senderName,),
+                        senderName: senderName,
+                        onOpenMedia: onOpenMedia,),
               ],
             ),
           ),
@@ -1760,11 +1840,16 @@ class _Content extends StatelessWidget {
     required this.voice,
     required this.senderName,
     required this.bubble,
+    required this.onOpenMedia,
     this.textColor = MilesColors.cream50,
   });
   final Message message;
   final VoiceNotePlayer voice;
   final String senderName;
+
+  /// Opens the pager on this message, inside the conversation's whole media
+  /// set. Replaces the single-path open that gave a photo no neighbours.
+  final void Function(Message) onOpenMedia;
 
   /// The fill of the bubble this is rendering inside — a dozen chat themes
   /// pick it, and controls drawn on top have to resolve against it rather
@@ -1835,10 +1920,7 @@ class _Content extends StatelessWidget {
         return GestureDetector(
           // The PATH, not the URL it is currently signed as: the viewer holds
           // this for as long as it is open and a token dies in a day.
-          onTap: url == null
-              ? null
-              : () => MediaViewer.openStored(context, chatBucket, m.imagePath!,
-                  heroTag: url, senderName: senderName,),
+          onTap: url == null ? null : () => onOpenMedia(m),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: Stack(

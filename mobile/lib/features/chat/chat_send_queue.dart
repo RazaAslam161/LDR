@@ -19,12 +19,22 @@ class PendingSend {
     required this.kind,
     this.replyToId,
     this.fileName,
+    this.albumId,
     this.status = SendStatus.sending,
   });
 
   final String id;
   final String coupleId;
   final File file;
+
+  /// The pick this item came from, shared by every item in it.
+  ///
+  /// Minted here rather than derived later from timestamps because the upload
+  /// order is not the pick order and the spread is not small: [_maxInFlight]
+  /// items move at a time, so a pick of twelve photos and one long video has
+  /// the video landing a minute after the first photo. Any time window loose
+  /// enough to hold that together also swallows whatever was sent next.
+  final String? albumId;
 
   /// 'image', 'video' or 'file'. Voice notes still go straight through the
   /// repository — they are recorded in the chat, where the user is already
@@ -129,6 +139,10 @@ class ChatSendQueue extends ChangeNotifier {
     String? replyToId,
   }) {
     final ids = <String>[];
+    // One id for the whole pick, and only when there is actually a group to
+    // name: a single photo is not an album, and stamping it as one would make
+    // the list build a one-tile grid instead of the photo bubble it should be.
+    final albumId = items.length > 1 ? _uuid.v4() : null;
     for (final (i, item) in items.indexed) {
       final send = PendingSend(
         id: _uuid.v4(),
@@ -138,6 +152,7 @@ class ChatSendQueue extends ChangeNotifier {
         // The reply belongs to the first item only. Twelve photos each quoting
         // the same message is twelve copies of it down the conversation.
         replyToId: i == 0 ? replyToId : null,
+        albumId: albumId,
       );
       _pending.add(send);
       ids.add(send.id);
@@ -236,7 +251,7 @@ class ChatSendQueue extends ChangeNotifier {
     }
     if (send.kind == 'video') {
       await ChatRepository.sendVideo(send.coupleId, send.file,
-          id: send.id, replyToId: send.replyToId,);
+          id: send.id, replyToId: send.replyToId, albumId: send.albumId,);
       return;
     }
     final path = await ChatRepository.sendImage(
@@ -244,6 +259,7 @@ class ChatSendQueue extends ChangeNotifier {
       send.file,
       id: send.id,
       replyToId: send.replyToId,
+      albumId: send.albumId,
     );
     // Fast-path the photo to the partner's chat if it happens to be open.
     final myUid = SupabaseService.currentUserId;

@@ -6,6 +6,7 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
+import 'package:miles/core/media/thumbnails.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -44,6 +45,8 @@ class Message {
     this.localPath,
     this.sendStatus = SendStatus.sent,
     this.seq = 0,
+    this.albumId,
+    this.hasThumb = false,
   });
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -63,6 +66,8 @@ class Message {
         deletedBy: j['deleted_by'] is List
             ? (j['deleted_by'] as List).map((e) => e.toString()).toList()
             : const [],
+        albumId: JsonUtils.parseStringOrNull(j['album_id']),
+        hasThumb: JsonUtils.parseBool(j['has_thumb']),
       );
 
   /// Server-assigned monotonic order. Receipts compare THIS, never a clock:
@@ -94,6 +99,8 @@ class Message {
         deletedBy: deletedBy,
         localPath: localPath ?? this.localPath,
         sendStatus: sendStatus ?? this.sendStatus,
+        albumId: albumId,
+        hasThumb: hasThumb,
       );
 
   /// Adopt the authoritative server row (its created_at fixes cross-device
@@ -123,6 +130,11 @@ class Message {
         // a non-zero _maxSeq); total for a brand-new couple, whose first
         // conversation has none.
         seq: server.seq,
+        // Both are the server's to state. The optimistic bubble was built
+        // before the thumbnail had finished uploading, so its own hasThumb is
+        // stale by construction and would keep the tile on the original.
+        albumId: server.albumId,
+        hasThumb: server.hasThumb,
       );
 
   final String id;
@@ -139,6 +151,30 @@ class Message {
   final int? fileSize;
   final String? replyToId;
   final String kind;
+
+  /// Which multi-select send this arrived in, or null.
+  ///
+  /// Null covers two permanent cases, not one transitional one: a single send,
+  /// and anything from a build older than the column — this fleet is sideloaded
+  /// and has no update channel, so those keep arriving indefinitely. The list
+  /// falls back to grouping by sender and time whenever this is absent.
+  final String? albumId;
+
+  /// A thumbnail sibling exists for this row's media.
+  ///
+  /// False on everything written before the pipeline, which renders from the
+  /// original exactly as it always did.
+  final bool hasThumb;
+
+  /// The thumbnail's path in [chatBucket], if there is one to read.
+  String? get imageThumbPath => !hasThumb || imagePath == null
+      ? null
+      : Thumbnails.pathFor(MediaUrls.toPath(chatBucket, imagePath!));
+
+  /// The poster frame's path in [intimateBucket], if there is one.
+  String? get videoThumbPath => !hasThumb || videoPath == null
+      ? null
+      : Thumbnails.pathFor(MediaUrls.toPath(intimateBucket, videoPath!));
 
   /// A short preview of a message for quote-replies.
   String previewText() {
@@ -182,15 +218,51 @@ class Message {
       ? null
       : MediaUrls.cached(chatBucket, MediaUrls.toPath(chatBucket, voicePath!));
 
+  /// The bucket and path a small tile should paint — thumbnail if this row has
+  /// one, original if it does not.
+  ///
+  /// A video has no paintable bytes of its own, so without a poster frame it
+  /// resolves to null and the tile draws its placeholder rather than a hole.
+  (String, String)? get _tileObject {
+    if (kind == 'video') {
+      final t = videoThumbPath;
+      return t == null ? null : (intimateBucket, t);
+    }
+    final t = imageThumbPath;
+    if (t != null) return (chatBucket, t);
+    final p = imagePath;
+    return p == null ? null : (chatBucket, MediaUrls.toPath(chatBucket, p));
+  }
+
+  /// Signed URL for [_tileObject], from the cache warmMedia filled.
+  String? get tileUrl {
+    final o = _tileObject;
+    return o == null ? null : MediaUrls.cached(o.$1, o.$2);
+  }
+
+  /// What the disk cache files a tile's bytes under. Keyed by path, never by
+  /// the signed URL — that token rotates daily and would re-download the whole
+  /// grid every morning.
+  String? get tileCacheKey {
+    final o = _tileObject;
+    return o == null ? null : '${o.$1}/${o.$2}';
+  }
+
   /// Every couple_media path this message needs signed before it can render.
   Iterable<String> get mediaPaths => [
         if (imagePath != null) MediaUrls.toPath(chatBucket, imagePath!),
         if (voicePath != null) MediaUrls.toPath(chatBucket, voicePath!),
+        // The thumbnail is what the LIST paints, so it has to be in the same
+        // one-request warm as the original. Signed on tap instead, every tile
+        // in an album would wait on its own round trip and the grid would fill
+        // in one square at a time — the thing the thumbnails were for.
+        if (imageThumbPath != null) imageThumbPath!,
       ];
 
   /// The same, for the private bucket video lives in.
   Iterable<String> get intimatePaths => [
         if (videoPath != null) MediaUrls.toPath(intimateBucket, videoPath!),
+        if (videoThumbPath != null) videoThumbPath!,
       ];
 }
 
@@ -309,13 +381,18 @@ class ChatRepository {
   /// message row of kind='image'. Returns the storage path (so callers can
   /// broadcast the fast-path 'msg'), or null if there's no signed-in user.
   static Future<String?> sendImage(String coupleId, File file,
-      {String? replyToId, String? id,}) async {
+      {String? replyToId, String? id, String? albumId,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
 
     final ext = _ext(file.path) ?? 'jpg';
     final path = '$coupleId/${_randomName('img', ext)}';
+    // Started before the upload is awaited, not after: the decode runs in an
+    // isolate while the original is on the wire, so the thumbnail costs the
+    // send almost nothing.
+    final pending = Thumbnails.forImage(file);
     await _c.storage.from(chatBucket).upload(path, file);
+    final hasThumb = await _putThumb(chatBucket, path, await pending);
     final sw = Stopwatch()..start();
     try {
       await _c.from('messages').insert({
@@ -325,6 +402,8 @@ class ChatRepository {
         'image_path': path,
         'kind': 'image',
         if (replyToId != null) 'reply_to_id': replyToId,
+        if (albumId != null) 'album_id': albumId,
+        'has_thumb': hasThumb,
       });
       Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
         'kind': 'image',
@@ -363,13 +442,15 @@ class ChatRepository {
   /// every video the queue sent appeared twice — invisible while videos went
   /// one at a time, obvious the moment a pick of twelve does.
   static Future<void> sendVideo(String coupleId, File file,
-      {String? replyToId, String? id,}) async {
+      {String? replyToId, String? id, String? albumId,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
     final ext = _ext(file.path) ?? 'mp4';
     final path = '$coupleId/${_randomName('vid', ext)}';
+    final pending = Thumbnails.forVideo(file);
     await _c.storage.from(intimateBucket).upload(path, file);
+    final hasThumb = await _putThumb(intimateBucket, path, await pending);
     await _c.from('messages').insert({
       if (id != null) 'id': id,
       'couple_id': coupleId,
@@ -377,7 +458,32 @@ class ChatRepository {
       'video_path': path,
       'kind': 'video',
       if (replyToId != null) 'reply_to_id': replyToId,
+      if (albumId != null) 'album_id': albumId,
+      'has_thumb': hasThumb,
     });
+  }
+
+  /// Upload [bytes] as the thumbnail beside [originalPath]. Answers whether the
+  /// row may claim one.
+  ///
+  /// Every failure answers false rather than throwing. A thumbnail is an
+  /// optimisation, and losing the photo because the small copy of it did not
+  /// upload would be a bad trade — the row simply renders from the original,
+  /// which is what every row written before this pipeline already does.
+  static Future<bool> _putThumb(
+      String bucket, String originalPath, Uint8List? bytes,) async {
+    if (bytes == null) return false;
+    try {
+      await _c.storage.from(bucket).uploadBinary(
+            Thumbnails.pathFor(originalPath),
+            bytes,
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
+      return true;
+    } catch (e) {
+      debugPrint('[thumb] upload failed for $bucket: ${e.runtimeType}');
+      return false;
+    }
   }
 
   /// A signed URL for a private video. Served from the cache [warmMedia]
