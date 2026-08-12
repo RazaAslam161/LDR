@@ -755,7 +755,7 @@ class CallController extends ChangeNotifier {
       await _pc!.setLocalDescription(offer);
       _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
       unawaited(_insertInvite(offer.sdp ?? '', video)); // durable → FCM rings a closed app
-      await CallForegroundService.start(peerName ?? 'Partner');
+      await CallForegroundService.start();
       _startConnectTimeout();
     } catch (e) {
       // e.g. camera/mic permission denied — don't hang on "Calling…".
@@ -844,7 +844,7 @@ class CallController extends ChangeNotifier {
       // foreground service outlived a call that did not exist.
       _startConnectTimeout();
       _pendingOffer = null;
-      await CallForegroundService.start(peerName ?? 'Partner');
+      await CallForegroundService.start();
     } catch (e) {
       // `catch (_)` before: the exception was bound and dropped. It covers
       // _openMedia (permissions, camera in use by another app), _routeAudio,

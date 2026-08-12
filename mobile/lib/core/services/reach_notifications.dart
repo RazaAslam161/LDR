@@ -14,10 +14,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 // When your partner reaches for you" announced the entire product to anyone who
 // opened the settings of what looked like a calculator.
 //
-// Kept deliberately generic and channel IDs kept stable: a channel's name is
-// fixed once created, so disguise-specific names would need the channels
-// deleted and rebuilt on every switch, and any notification posted in that
-// window would be lost.
+// Kept deliberately generic and channel IDs kept stable: disguise-specific
+// names would need the channels deleted and rebuilt on every switch, and any
+// notification posted in that window would be lost.
+//
+// Renaming one later is not uniform, which is why kCallServiceChannelId exists.
+// Android updates an existing channel's name and description when it is created
+// again, so the channels built here through flutter_local_notifications correct
+// themselves on the next cold start. flutter_foreground_task's own channel does
+// not: ForegroundService.kt guards with
+// `if (nm.getNotificationChannel(channelId) == null)` and so never renames one.
+// That channel can only be corrected by moving to a new id and deleting the old.
 const String kReachChannelId = 'reach_channel';
 const String kReachChannelName = 'Alerts';
 const String kReachChannelDesc = 'Time-sensitive alerts';
@@ -74,16 +81,30 @@ Future<void> showReachNotification({
 
 // ── Incoming calls ───────────────────────────────────────────────────────────
 const String kCallChannelId = 'call_channel';
-const String kCallChannelName = 'Voice';
-const String kCallChannelDesc = 'Incoming voice notifications';
+const String kCallChannelName = 'Priority alerts';
+const String kCallChannelDesc = 'Time-sensitive updates';
 
 /// The foreground-service channel for a call that is already running. Lives
 /// here rather than beside its only caller so the disguise guard test in
 /// test/unit/disguise_notification_test.dart sees it — it was hardcoded in
 /// call_foreground.dart and shipped the real app name straight into Android's
 /// notification settings, under the disguised launcher label.
-const String kCallServiceChannelName = 'Ongoing call';
-const String kCallServiceChannelDesc = 'Shown while a call is in progress.';
+///
+/// The id moved off 'call_service' because the name behind it was "Ongoing
+/// call", described as "Shown while a call is in progress" — a calling feature,
+/// announced permanently in the settings of what claims to be a news app, to
+/// anyone who looked. flutter_foreground_task will not rename a channel it
+/// already made (see the note at the top of this file), so the only way to
+/// retire that wording on a handset that has already placed one call is a new
+/// id plus [kLegacyCallServiceChannelId] being deleted.
+const String kCallServiceChannelId = 'background_activity';
+const String kCallServiceChannelName = 'Background activity';
+const String kCallServiceChannelDesc = 'Keeps tasks running while the app works';
+
+/// The pre-0.1.0+10 foreground-service channel, deleted on start so its
+/// "Ongoing call" name stops being listed. Recreating this id would restore the
+/// old name, so nothing may ever post to it again.
+const String kLegacyCallServiceChannelId = 'call_service';
 
 // ── The Timer cover's countdown ──────────────────────────────────────────────
 // Created lazily by the Timer disguise itself, so a phone wearing any other

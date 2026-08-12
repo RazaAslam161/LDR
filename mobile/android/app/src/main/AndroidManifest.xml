@@ -253,6 +253,23 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="reach_channel" />
 
+        <!-- Small icons for the call foreground service, one per disguise.
+             flutter_foreground_task resolves its icon through a manifest
+             meta-data name rather than a resource string, so every cover needs
+             an entry here; DisguiseNotificationStyle.iconMetaData derives the
+             name from the drawable, so these must stay named after them.
+             Without an entry the plugin falls back to @mipmap/ic_launcher,
+             which masks down to a solid white square in the status bar. -->
+        <meta-data android:name="ic_notif_news" android:resource="@drawable/ic_notif_news" />
+        <meta-data android:name="ic_notif_calculator" android:resource="@drawable/ic_notif_calculator" />
+        <meta-data android:name="ic_notif_notes" android:resource="@drawable/ic_notif_notes" />
+        <meta-data android:name="ic_notif_weather" android:resource="@drawable/ic_notif_weather" />
+        <meta-data android:name="ic_notif_convert" android:resource="@drawable/ic_notif_convert" />
+        <meta-data android:name="ic_notif_recorder" android:resource="@drawable/ic_notif_recorder" />
+        <meta-data android:name="ic_notif_timer" android:resource="@drawable/ic_notif_timer" />
+        <meta-data android:name="ic_notif_level" android:resource="@drawable/ic_notif_level" />
+        <meta-data android:name="ic_notif_device" android:resource="@drawable/ic_notif_device" />
+
         <!-- image_cropper (uCrop) photo crop/adjust activity -->
         <activity
             android:name="com.yalantis.ucrop.UCropActivity"

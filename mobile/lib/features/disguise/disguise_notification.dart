@@ -33,6 +33,16 @@ class DisguiseNotificationStyle {
   /// The ticker (spoken by accessibility services, and shown on older Android).
   /// Same text as the title so the two can never disagree.
   String get ticker => title;
+
+  /// The AndroidManifest `<meta-data>` name holding this cover's small icon.
+  ///
+  /// flutter_foreground_task cannot take a resource name the way
+  /// flutter_local_notifications does — it resolves the icon through a manifest
+  /// meta-data entry instead. Derived from [smallIcon] rather than listed
+  /// separately so a new cover cannot arrive with one of the two set and not
+  /// the other; the manifest entries are named after the drawables for the same
+  /// reason.
+  String get iconMetaData => smallIcon.replaceFirst('@drawable/', '');
 }
 
 /// Copy + icon for each cover. Deliberately dull: a notification that invites

@@ -16,6 +16,14 @@ const _tells = [
   'couple',
   'love',
   'intimacy',
+  // A news app does not place calls. These were missing, which is how the
+  // channel "Voice / Incoming voice notifications" and the foreground service's
+  // "Ongoing call / Shown while a call is in progress" both passed this test
+  // while being listed, permanently, in the settings of the disguised app.
+  'call',
+  'voice',
+  'ringing',
+  'dial',
 ];
 
 void main() {
@@ -108,6 +116,37 @@ void main() {
       }
     });
 
+    test('every cover has a manifest meta-data entry for its small icon', () {
+      // The call foreground service cannot take a resource name — the plugin
+      // resolves its icon through a manifest <meta-data> entry. A cover with no
+      // entry falls back to @mipmap/ic_launcher, which Android masks to its
+      // alpha channel: a solid white square in the status bar, wearing the News
+      // tile whatever cover is on. Nothing in analyze or a build catches it.
+      final manifest =
+          File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+      for (final cover in DisguiseCover.values) {
+        final style = notificationStyleFor(
+          DisguiseProfile(
+            aliasId: 'X',
+            label: 'X',
+            blurb: '',
+            entry: '',
+            icon: kDefaultDisguise.icon,
+            tint: kDefaultDisguise.tint,
+            cover: cover,
+          ),
+        );
+        expect(style.iconMetaData, isNot(startsWith('@')),
+            reason: 'a meta-data name is not a resource reference',);
+        expect(
+          manifest.contains('android:name="${style.iconMetaData}"'),
+          isTrue,
+          reason: '$cover needs <meta-data android:name="${style.iconMetaData}" '
+              'android:resource="${style.smallIcon}" /> in AndroidManifest.xml',
+        );
+      }
+    });
+
     test('notification icons are protected from the resource shrinker', () {
       // They are named only from Dart, so the shrinker cannot see them.
       final keep = File('android/app/src/main/res/raw/keep.xml');
@@ -135,7 +174,7 @@ void main() {
       // The call foreground service. Its strings used to live inline in
       // call_foreground.dart, out of this test's sight, and shipped the real
       // app name into Android's notification settings.
-      'call_service': [kCallServiceChannelName, kCallServiceChannelDesc],
+      'background_activity': [kCallServiceChannelName, kCallServiceChannelDesc],
       // Created only by the Timer cover, but it is listed in the same place as
       // the rest once it exists.
       'timer': [kTimerChannelName, kTimerChannelDesc],
@@ -153,12 +192,22 @@ void main() {
     });
 
     test('channel ids stay stable', () {
-      // A channel's name is fixed at creation. If the ids ever became
-      // disguise-specific, switching would have to delete and rebuild them and
-      // any notification posted in that window would be lost.
+      // If the ids ever became disguise-specific, switching would have to
+      // delete and rebuild them and any notification posted in that window
+      // would be lost.
       expect(kReachChannelId, 'reach_channel');
       expect(kCallChannelId, 'call_channel');
       expect(kCareChannelId, 'care_channel');
+    });
+
+    test('the retired call-service channel is never posted to again', () {
+      // flutter_foreground_task will not rename a channel it already created,
+      // so 'call_service' is stuck reading "Ongoing call" forever on any
+      // handset that placed a call before this was fixed. It is deleted on
+      // start; recreating the id would restore that name from Android's own
+      // record of the deleted channel.
+      expect(kCallServiceChannelId, isNot(kLegacyCallServiceChannelId));
+      expect(kLegacyCallServiceChannelId, 'call_service');
     });
   });
 }

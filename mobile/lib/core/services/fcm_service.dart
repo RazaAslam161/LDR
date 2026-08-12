@@ -64,6 +64,13 @@ class FcmService {
     await android?.createNotificationChannel(buildReachChannel());
     await android?.createNotificationChannel(buildCareChannel());
     await android?.createNotificationChannel(buildCallChannel());
+    // Retires the "Ongoing call / Shown while a call is in progress" channel,
+    // which stayed listed in Android's notification settings on any handset
+    // that had ever placed a call. The service posts to kCallServiceChannelId
+    // now; this id must never be created again or the old name comes back.
+    await android?.deleteNotificationChannel(
+      channelId: kLegacyCallServiceChannelId,
+    );
 
     // Cold start via a tapped notification of any kind.
     final launch = await _fln.getNotificationAppLaunchDetails();
