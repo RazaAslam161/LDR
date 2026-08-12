@@ -106,6 +106,20 @@ async function getAccessToken(): Promise<string> {
 }
 
 // ── handler ──────────────────────────────────────────────────────────────────
+// Every outcome answers identically.
+//
+// The caller's own client can read this endpoint's effects, so a body that
+// distinguishes "sent" from "no recipient token" from an FCM error is a
+// reachability oracle wearing a JSON hat. The trigger is fire-and-forget
+// (net.http_post from an AFTER INSERT) and reads none of this; the detail that
+// used to be here goes to the log and to push_failures, where only the service
+// role can see it.
+const OK = () =>
+  new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
 Deno.serve(async (req) => {
   try {
     // verify_jwt is off, and correctly so: every caller is a database trigger
@@ -176,7 +190,7 @@ Deno.serve(async (req) => {
       : await recipientQuery.eq("couple_id", coupleId).neq("id", fromUser).limit(1);
     const recipient = recipients?.[0];
     if (!recipient?.fcm_token) {
-      return new Response(JSON.stringify({ skipped: "no recipient token" }), { status: 200 });
+      return OK();
     }
 
     const { data: sender } = await admin
@@ -195,7 +209,12 @@ Deno.serve(async (req) => {
         // fcm_service.dart / firebaseMessagingBackgroundHandler read.
         data: {
           type: kind,
-          from_name: fromName,
+          // Omitted for calls. Nothing renders it — the ring wears the
+          // receiving device's disguise and is built there — so for a call it
+          // was the partner's real display name travelling through Google in
+          // cleartext to be thrown away. The client already falls back when it
+          // is absent. Reach/care/message still carry it; those paths read it.
+          ...(kind === "call" ? {} : { from_name: fromName }),
           couple_id: coupleId,
           ...(kind === "reach" ? { reach_id: rowId } : {}),
           ...(kind === "care" ? { nudge_id: rowId } : {}),
@@ -232,22 +251,32 @@ Deno.serve(async (req) => {
 
     if (!fcmRes.ok) {
       const errText = await fcmRes.text();
-      // Stale/unregistered token → clear it so we stop trying.
-      if (
-        fcmRes.status === 404 ||
+      // A dead token is recorded, NOT nulled on the profile.
+      //
+      // profiles is selected whole by the partner's own client
+      // (supabase_repository.fetchPartner does .select()), so nulling fcm_token
+      // here let the caller watch it go non-null -> null as a direct
+      // consequence of their own call: "their app has been uninstalled,
+      // reinstalled or cleared", delivered on demand, one call at a time.
+      // push_failures is service-role only. The client re-registers its token
+      // on every resume, which is what actually heals a stale one.
+      const dead = fcmRes.status === 404 ||
         errText.includes("UNREGISTERED") ||
-        errText.includes("NOT_FOUND")
-      ) {
-        await admin.from("profiles").update({ fcm_token: null }).eq("id", recipient.id);
-      }
+        errText.includes("NOT_FOUND");
+      await admin.from("push_failures").insert({
+        user_id: recipient.id,
+        kind,
+        status: fcmRes.status,
+        reason: dead ? "unregistered" : "send_failed",
+      });
       console.error("FCM send failed", fcmRes.status, errText);
       // 200 so the webhook doesn't retry-storm; we've logged + cleaned up.
-      return new Response(JSON.stringify({ error: errText }), { status: 200 });
+      return OK();
     }
 
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return OK();
   } catch (e) {
     console.error("reach-notify error", e);
-    return new Response(JSON.stringify({ error: String(e) }), { status: 200 });
+    return OK();
   }
 });
