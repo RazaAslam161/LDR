@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
@@ -225,6 +226,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   partner: presence,
                   partnerName: partner.displayName,
                   coupleId: couple.id,
+                  partnerProfile: partner,
+                  myTimezone: ref.watch(sessionProvider).profile?.timezone,
                   myLat: _myLat,
                   myLon: _myLon,
                 ),

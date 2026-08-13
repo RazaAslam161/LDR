@@ -1,14 +1,16 @@
 import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:miles/core/data/models.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/features/home/partner_sentence.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 
 /// Live partner location on the dashboard. Shows an OpenStreetMap (no API key)
 /// with the partner's marker that animates to each new fix, "updated Xs ago",
@@ -17,6 +19,8 @@ import 'package:url_launcher/url_launcher.dart';
 class PartnerLocationCard extends StatefulWidget {
   const PartnerLocationCard({
     required this.partner, required this.partnerName, required this.coupleId, super.key,
+    this.partnerProfile,
+    this.myTimezone,
     this.myLat,
     this.myLon,
   });
@@ -24,6 +28,11 @@ class PartnerLocationCard extends StatefulWidget {
   final Presence? partner;
   final String partnerName;
   final String coupleId;
+
+  /// Carries the timezone and sleep window the sentence is built from. Those
+  /// columns have existed since the first migration and have never been drawn.
+  final Profile? partnerProfile;
+  final String? myTimezone;
   final double? myLat;
   final double? myLon;
 
@@ -130,6 +139,30 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
     return '${NumberFormat.decimalPattern().format(km.round())} km apart';
   }
 
+  /// The line that answers "can I talk to her right now".
+  ///
+  /// Above every branch, because it is true whether or not she shares a
+  /// location: it is made of time, not position.
+  Widget _sentence() {
+    final s = partnerSentence(
+      presence: widget.partner,
+      partner: widget.partnerProfile,
+      myTimezone: widget.myTimezone,
+      partnerName: widget.partnerName,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        s.text,
+        style: TextStyle(
+          color: s.confident ? MilesColors.cream50 : MilesColors.taupe,
+          fontSize: 14,
+          height: 1.3,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.partner;
@@ -140,7 +173,12 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
     // also the one that does not touch a tile server at all.
     if (p != null && p.isSharingCity) {
       return SurfacePanel(
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sentence(),
+            Row(
           children: [
             const Icon(Icons.location_city_outlined,
                 color: MilesColors.gilt, size: 20,),
@@ -152,6 +190,8 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                     color: MilesColors.cream50, fontSize: 13,),
               ),
             ),
+              ],
+            ),
           ],
         ),
       );
@@ -159,7 +199,12 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
 
     if (p == null || !p.isSharingLive) {
       return SurfacePanel(
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sentence(),
+            Row(
           children: [
             const Icon(Icons.location_off_outlined,
                 color: MilesColors.taupe, size: 20,),
@@ -169,6 +214,8 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                 "${widget.partnerName} isn't sharing location right now",
                 style: const TextStyle(color: MilesColors.taupe, fontSize: 13),
               ),
+            ),
+              ],
             ),
           ],
         ),

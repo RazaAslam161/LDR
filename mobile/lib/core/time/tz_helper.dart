@@ -28,12 +28,30 @@ class TzHelper {
   static tz.TZDateTime inZone(DateTime instant, String ianaName) =>
       tz.TZDateTime.from(instant.toUtc(), _location(ianaName));
 
-  /// Whole-hour offset of [b] relative to [a] right now (DST-aware).
+  /// Offset of [b] relative to [a] right now, in MINUTES (DST-aware).
   /// Positive = b is ahead of a.
-  static int offsetHours(String a, String b) {
-    final minutes =
-        nowIn(b).timeZoneOffset.inMinutes - nowIn(a).timeZoneOffset.inMinutes;
-    return (minutes / 60).round();
+  ///
+  /// Minutes, not hours, because a great many of the zones this app's users
+  /// actually live in are not whole hours from each other: India is +5:30,
+  /// Nepal +5:45, Iran +3:30, Newfoundland -3:30, parts of Australia +8:45.
+  /// Rounding turned "5 and a half hours" into "6", which is wrong on the one
+  /// number a long-distance couple looks at most.
+  static int offsetMinutes(String a, String b) =>
+      nowIn(b).timeZoneOffset.inMinutes - nowIn(a).timeZoneOffset.inMinutes;
+
+  /// The offset as people say it: "5h 30m ahead", "8h behind", "same time".
+  static String offsetLabel(String a, String b) {
+    final m = offsetMinutes(a, b);
+    if (m == 0) return 'same time';
+    final ahead = m > 0;
+    final abs = m.abs();
+    final h = abs ~/ 60;
+    final mins = abs % 60;
+    final parts = [
+      if (h > 0) '${h}h',
+      if (mins > 0) '${mins}m',
+    ].join(' ');
+    return '$parts ${ahead ? 'ahead' : 'behind'}';
   }
 
   static tz.Location _location(String ianaName) {
