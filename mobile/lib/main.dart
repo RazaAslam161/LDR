@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/ads/ad_service.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/release_gate.dart';
@@ -89,7 +88,6 @@ Future<void> main() async {
   // News cover, the biometric gate and the splash are all behind us, and
   // AppShell drains the pending reach/call notifiers in its post-frame
   // callback. Awaiting these cost the first frame ~a dozen platform crossings.
-  unawaited(AdService.init());
   unawaited(FcmService.init());
   // Lets the call's background foreground-service talk to the UI isolate.
   FlutterForegroundTask.initCommunicationPort();
@@ -450,13 +448,39 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void _handleLink(Uri uri) {
     if (uri.scheme != 'tethered') return;
     if (uri.host == 'auth-callback') {
+      // The scheme alone is not evidence. MainActivity is exported and this
+      // intent-filter carries BROWSABLE, so a bare
+      // Intent(ACTION_VIEW, "tethered://auth-callback") from any installed app
+      // — or a link on any web page — used to set this, and CoverGate then ran
+      // runEntryGate() unconditionally. With no app lock enrolled, which is the
+      // default, that dropped the disguise on a third party's say-so.
+      //
+      // A real Supabase callback carries the material it is redeeming. This
+      // narrows the caller from "anyone" to "anyone who also supplies a
+      // plausible token", and is the interim: the durable fix is to raise this
+      // off the auth-state stream (passwordRecovery / signedIn arriving while
+      // showRealApp is false) rather than off an intent at all.
+      const proof = ['code', 'access_token', 'refresh_token', 'token', 'type'];
+      final q = uri.queryParameters;
+      final frag = uri.fragment.isEmpty
+          ? const <String, String>{}
+          : Uri.splitQueryString(uri.fragment);
+      final carries = proof.any((k) =>
+          (q[k]?.isNotEmpty ?? false) || (frag[k]?.isNotEmpty ?? false));
+      if (!carries) return;
       pendingAuthLink.value = true;
       return;
     }
     if (uri.host != 'join') return;
-    final code = uri.queryParameters['code'];
-    if (code == null || code.isEmpty) return;
-    ref.read(pendingInviteCodeProvider.notifier).state = code.toUpperCase();
+    final raw = uri.queryParameters['code'];
+    if (raw == null || raw.isEmpty) return;
+    // Same reasoning one step further in: this is pre-filled into the pairing
+    // field from an unauthenticated caller, so it is bounded to the shape the
+    // server actually mints (8 hex characters, create_pairing_invite) rather
+    // than pushed through verbatim.
+    final code = raw.toUpperCase();
+    if (!RegExp(r'^[0-9A-F]{6,12}$').hasMatch(code)) return;
+    ref.read(pendingInviteCodeProvider.notifier).state = code;
     ref.read(routerProvider).go('/couple');
   }
 

@@ -2090,9 +2090,17 @@ class _ChatBg extends StatelessWidget {
       return Stack(
         fit: StackFit.expand,
         children: [
+          // Bounded on BOTH edges, and on the LONG one. Without any bound
+          // SignedImage passes null through to memCacheWidth and the wallpaper
+          // decodes at whatever the user uploaded — full resolution, resident
+          // behind every frame of the scrolling list. Bounding the short edge
+          // instead would be worse than nothing: this is BoxFit.cover on a
+          // full-bleed image, so the short edge is the one that gets upscaled.
           SignedImage(
             bucket: chatBgBucket,
             value: bgPath,
+            width: MediaQuery.sizeOf(context).width,
+            height: MediaQuery.sizeOf(context).height,
             placeholder: const ColoredBox(color: MilesColors.night),
           ),
           const DecoratedBox(

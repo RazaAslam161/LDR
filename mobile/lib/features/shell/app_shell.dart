@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/ads/banner_ad_slot.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
@@ -298,8 +297,6 @@ class _AppShellState extends ConsumerState<AppShell>
     final selected = index.clamp(0, destCount - 1);
     final bodyIndex = (selected < cameraTab ? selected : selected - 1)
         .clamp(0, bodies.length - 1);
-    final isCloserTab = showCloser && selected == destCount - 1;
-    final showAd = selected == 3 && !isCloserTab; // ads only on the Touch tab
 
     return Scaffold(
       key: rootScaffoldKey,
@@ -307,7 +304,6 @@ class _AppShellState extends ConsumerState<AppShell>
       body: Column(
         children: [
           Expanded(child: bodies[bodyIndex]),
-          if (showAd) const BannerAdSlot(),
         ],
       ),
       bottomNavigationBar: SurfaceNavBar(

@@ -244,13 +244,6 @@
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
 
-        <!-- AdMob App ID.
-             This is Google's official TEST App ID — safe for development.
-             Replace with your real AdMob App ID before publishing, and set
-             AdConfig.useTestAds = false in lib/core/ads/ad_config.dart. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
 
         <!-- Default FCM channel (used if a notification-type message ever arrives;
              our Reach pushes are data-only and routed to reach_channel in code). -->
