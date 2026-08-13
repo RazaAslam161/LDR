@@ -80,14 +80,32 @@ class _AfterglowFormScreenState extends ConsumerState<AfterglowFormScreen> {
 
     try {
       await ensureSharedKey(session);
-      await AfterglowRepository.startEntry(
-        coupleId: couple.id,
-        myId: me.id,
-        partnerId: partner.id,
-        gratitude: text,
-        photoBytes: _photo,
-        ephemeral: _ephemeral,
-      );
+      final pending = await AfterglowRepository.fetchPending(couple.id);
+      final amPartnerA = me.id.compareTo(partner.id) < 0;
+      final alreadyContributed = amPartnerA
+          ? pending?.gratitudeABytes != null
+          : pending?.gratitudeBBytes != null;
+
+      if (pending == null) {
+        await AfterglowRepository.startEntry(
+          coupleId: couple.id,
+          myId: me.id,
+          partnerId: partner.id,
+          gratitude: text,
+          photoBytes: _photo,
+          ephemeral: _ephemeral,
+        );
+      } else if (alreadyContributed) {
+        throw StateError('Your gratitude is already waiting for your partner.');
+      } else {
+        await AfterglowRepository.completeAndSeal(
+          entryId: pending.id,
+          myId: me.id,
+          partnerId: partner.id,
+          gratitude: text,
+          photoBytes: _photo,
+        );
+      }
       if (!mounted) return;
       context.pop(true);
     } catch (e) {
@@ -232,9 +250,8 @@ class _AfterglowFormScreenState extends ConsumerState<AfterglowFormScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: _ephemeral
-                      ? const Color(0xFFEF6F58)
-                      : Colors.transparent,
+                  color:
+                      _ephemeral ? const Color(0xFFEF6F58) : Colors.transparent,
                   borderRadius: BorderRadius.circular(40),
                 ),
                 child: Text(

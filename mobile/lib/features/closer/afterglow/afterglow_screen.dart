@@ -27,9 +27,8 @@ class AfterglowScreen extends ConsumerStatefulWidget {
 }
 
 class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
-  bool _loading = true;
+  Stream<List<AfterglowEntry>>? _entriesStream;
   String? _error;
-  List<AfterglowEntry> _entries = const [];
 
   @override
   void didChangeDependencies() {
@@ -44,39 +43,22 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
     if (couple == null || me == null) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
         _error = 'Link your partner to use Afterglow.';
       });
       return;
     }
 
-    setState(() => _loading = true);
     try {
       await ensureSharedKey(session);
-      await _refresh(couple.id);
-    } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = e.toString().replaceFirst('Exception: ', '');
-      });
-    }
-  }
-
-  Future<void> _refresh(String coupleId) async {
-    try {
-      final entries = await AfterglowRepository.fetchEntries(coupleId);
-      if (!mounted) return;
-      setState(() {
-        _entries = entries;
-        _loading = false;
+        _entriesStream = AfterglowRepository.streamEntries(couple.id);
         _error = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = e.toString();
+        _error = e.toString().replaceFirst('Exception: ', '');
       });
     }
   }
@@ -90,9 +72,9 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
     await context.push<bool>(
       '/app/closer/afterglow/new',
     );
-    // After the form seals, refresh.
+    // After the form returns (sealed or cancelled), re-init the stream
     if (!mounted) return;
-    await _refresh(couple.id);
+    _ensureKeyAndLoad();
   }
 
   @override
@@ -107,11 +89,43 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
               subtitle: 'The tenderness after.',
               onBack: () => context.pop(),
             ),
-            Expanded(child: _body),
+            Expanded(
+              child: _error != null
+                  ? _ErrorState(message: _error!, onRetry: _ensureKeyAndLoad)
+                  : _entriesStream == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : StreamBuilder<List<AfterglowEntry>>(
+                          stream: _entriesStream,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return _ErrorState(
+                                message: snapshot.error.toString(),
+                                onRetry: _ensureKeyAndLoad,
+                              );
+                            }
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                  child: CircularProgressIndicator());
+                            }
+                            final entries = snapshot.data!;
+                            if (entries.isEmpty) {
+                              return _emptyState();
+                            }
+                            return ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                              itemCount: entries.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 12),
+                              itemBuilder: (context, i) =>
+                                  _AfterglowCard(entry: entries[i]),
+                            );
+                          },
+                        ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               child: FilledButton.icon(
-                onPressed: _loading ? null : _startNew,
+                onPressed: _entriesStream == null ? null : _startNew,
                 icon: const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: const Text('Start a moment'),
               ),
@@ -122,54 +136,32 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
     );
   }
 
-  Widget get _body {
-    if (_loading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(strokeWidth: 2),
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🌙', style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 16),
+            Text(
+              'Afterglow',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                    color: const Color(0xFFFBF8F4),
+                  ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'A soft wind-down after intimacy. Share a gratitude, '
+              'an optional photo. Sealed for the two of you.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
+            ),
+          ],
         ),
-      );
-    }
-    if (_error != null) {
-      return _ErrorState(
-        message: _error!,
-        onRetry: _ensureKeyAndLoad,
-      );
-    }
-    if (_entries.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('🌙', style: TextStyle(fontSize: 48)),
-              const SizedBox(height: 16),
-              Text(
-                'Afterglow',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: const Color(0xFFFBF8F4),
-                    ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'A soft wind-down after intimacy. Share a gratitude, '
-                'an optional photo. Sealed for the two of you.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      itemCount: _entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, i) => _AfterglowCard(entry: _entries[i]),
+      ),
     );
   }
 }
@@ -235,8 +227,11 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_outlined,
-                color: Color(0xFFEF6F58), size: 36,),
+            const Icon(
+              Icons.cloud_off_outlined,
+              color: Color(0xFFEF6F58),
+              size: 36,
+            ),
             const SizedBox(height: 16),
             Text(
               message,
@@ -269,11 +264,21 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
   String? _gratitudeB;
   String? _error;
   bool _loading = true;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     _decrypt();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AfterglowCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entry.id != widget.entry.id ||
+        oldWidget.entry.sealedAt != widget.entry.sealedAt) {
+      _decrypt();
+    }
   }
 
   Future<void> _decrypt() async {
@@ -289,11 +294,17 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
       final adB = ids[1];
       final results = await Future.wait([
         if (widget.entry.gratitudeABytes != null)
-          _decryptGratitude(widget.entry.gratitudeABytes!,
-              widget.entry.nonceABytes!, adA,),
+          _decryptGratitude(
+            widget.entry.gratitudeABytes!,
+            widget.entry.nonceABytes!,
+            adA,
+          ),
         if (widget.entry.gratitudeBBytes != null)
-          _decryptGratitude(widget.entry.gratitudeBBytes!,
-              widget.entry.nonceBBytes!, adB,),
+          _decryptGratitude(
+            widget.entry.gratitudeBBytes!,
+            widget.entry.nonceBBytes!,
+            adB,
+          ),
       ]);
       if (!mounted) return;
       setState(() {
@@ -316,16 +327,83 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
   }
 
   Future<String> _decryptGratitude(
-      Uint8List blob, Uint8List nonce, String ad,) async {
+    Uint8List blob,
+    Uint8List nonce,
+    String ad,
+  ) async {
     // Afterglow schema has dedicated nonce columns but no separate MAC column,
     // so the blob is packed as `mac || ciphertext`. The author uid is the AD.
     final payload = unpackMacAndCiphertext(blob: blob, nonce: nonce);
     return CryptoCore.decryptString(payload, associatedData: ad);
   }
 
+  Future<void> _completeEntry() async {
+    await context.push<bool>(
+      '/app/closer/afterglow/new',
+    );
+  }
+
+  bool get _amPartnerA {
+    final session = ref.read(sessionProvider);
+    final me = session.profile?.id;
+    final partner = session.partner?.id;
+    return me != null && partner != null && me.compareTo(partner) < 0;
+  }
+
+  bool get _hasMyContribution => _amPartnerA
+      ? widget.entry.gratitudeABytes != null
+      : widget.entry.gratitudeBBytes != null;
+
+  Future<void> _requestDelete() async {
+    final session = ref.read(sessionProvider);
+    final me = session.profile?.id;
+    if (me == null) return;
+    setState(() => _busy = true);
+    try {
+      await AfterglowRepository.requestDelete(
+        entryId: widget.entry.id,
+        requestedBy: me,
+      );
+    } catch (e) {
+      // Ignore
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _cancelDelete() async {
+    setState(() => _busy = true);
+    try {
+      await AfterglowRepository.cancelDelete(widget.entry.id);
+    } catch (e) {
+      // Ignore
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final session = ref.read(sessionProvider);
+    final me = session.profile?.id;
+    if (me == null) return;
+    setState(() => _busy = true);
+    try {
+      await AfterglowRepository.hardDelete(
+        entryId: widget.entry.id,
+        deletedBy: me,
+      );
+    } catch (e) {
+      // Ignore
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = widget.entry.happenedAt.toLocal();
+    final me = ref.read(sessionProvider).profile?.id;
+    final amPartnerA = _amPartnerA;
     final dateStr =
         '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
@@ -377,20 +455,100 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
                 style: const TextStyle(color: Color(0xFFEF6F58), fontSize: 12),
               ),
             )
-          else
+          else if (widget.entry.sealedAt == null) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'Pending...',
+                  style: TextStyle(
+                    color: Color(0xFFFBF8F4),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+            if (!_hasMyContribution)
+              Center(
+                child: FilledButton.icon(
+                  onPressed: _completeEntry,
+                  icon: const Icon(Icons.edit, size: 16),
+                  label: const Text('Complete & Seal'),
+                ),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Waiting for your partner to add their gratitude.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0x99F5EFE6), fontSize: 12),
+                ),
+              ),
+          ] else
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: _gratitudeBlock('You', _gratitudeA)),
+                Expanded(
+                    child: _gratitudeBlock(
+                        amPartnerA ? 'You' : 'Partner', _gratitudeA)),
                 Container(
                   width: 1,
                   margin: const EdgeInsets.symmetric(horizontal: 12),
                   color: const Color(0x33F5EFE6),
                 ),
-                Expanded(child: _gratitudeBlock('Partner', _gratitudeB)),
+                Expanded(
+                    child: _gratitudeBlock(
+                        amPartnerA ? 'Partner' : 'You', _gratitudeB)),
               ],
             ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (!widget.entry.deleteRequested)
+                _actionChip(
+                    'Request delete', Icons.delete_outline, _requestDelete),
+              if (widget.entry.deleteRequested &&
+                  widget.entry.deleteRequestedBy == me)
+                _actionChip('Cancel request', Icons.close, _cancelDelete),
+              if (widget.entry.deleteRequested &&
+                  widget.entry.deleteRequestedBy != me)
+                _actionChip(
+                    'Confirm delete', Icons.delete_forever, _confirmDelete),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _actionChip(String label, IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: _busy ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: MilesColors.surface2,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: const Color(0xCCF5EFE6)),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xCCF5EFE6),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -426,9 +584,10 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
 /// One row from `afterglow_entries`. Bytes are kept raw here so the UI can
 /// decrypt lazily (and so we don't block the list on decrypting every photo).
 class AfterglowEntry {
-  AfterglowEntry({
+  const AfterglowEntry({
     required this.id,
     required this.happenedAt,
+    this.sealedAt,
     required this.retention,
     this.gratitudeABytes,
     this.nonceABytes,
@@ -436,10 +595,13 @@ class AfterglowEntry {
     this.gratitudeBBytes,
     this.nonceBBytes,
     this.photoBBytes,
+    this.deleteRequested = false,
+    this.deleteRequestedBy,
   });
 
   final String id;
   final DateTime happenedAt;
+  final DateTime? sealedAt;
   final String retention;
   final Uint8List? gratitudeABytes;
   final Uint8List? nonceABytes;
@@ -447,6 +609,8 @@ class AfterglowEntry {
   final Uint8List? gratitudeBBytes;
   final Uint8List? nonceBBytes;
   final Uint8List? photoBBytes;
+  final bool deleteRequested;
+  final String? deleteRequestedBy;
 }
 
 class AfterglowRepository {
@@ -478,6 +642,7 @@ class AfterglowRepository {
     return AfterglowEntry(
       id: JsonUtils.parseString(json['id']),
       happenedAt: JsonUtils.parseDate(json['happened_at']).toUtc(),
+      sealedAt: JsonUtils.parseDateOrNull(json['sealed_at'])?.toUtc(),
       retention: JsonUtils.parseStringOrNull(json['retention']) ?? 'ephemeral',
       gratitudeABytes: _maybeBytes(json['gratitude_a']),
       nonceABytes: _maybeBytes(json['nonce_a']),
@@ -485,10 +650,33 @@ class AfterglowRepository {
       gratitudeBBytes: _maybeBytes(json['gratitude_b']),
       nonceBBytes: _maybeBytes(json['nonce_b']),
       photoBBytes: _maybeBytes(json['photo_b']),
+      deleteRequested: (json['delete_requested'] as bool?) ?? false,
+      deleteRequestedBy:
+          JsonUtils.parseStringOrNull(json['delete_requested_by']),
     );
   }
 
-  static Uint8List? _maybeBytes(dynamic v) => v == null ? null : byteaToBytes(v);
+  static Uint8List? _maybeBytes(dynamic v) =>
+      v == null ? null : byteaToBytes(v);
+
+  /// Returns a real-time stream of ALL afterglow entries for [coupleId], including unsealed ones.
+  static Stream<List<AfterglowEntry>> streamEntries(String coupleId) {
+    return _c
+        .from('afterglow_entries')
+        .stream(primaryKey: ['id'])
+        .eq('couple_id', coupleId)
+        .order('happened_at', ascending: false)
+        .map((rows) {
+          final entries = <AfterglowEntry>[];
+          for (final row in rows) {
+            if (row['deleted'] == true) continue;
+            try {
+              entries.add(_entryFromJson(row));
+            } catch (_) {}
+          }
+          return List<AfterglowEntry>.unmodifiable(entries);
+        });
+  }
 
   /// Inserts a new entry as "started" — only the current partner's side is set.
   /// Returns the new row id so the partner's side can be filled in later.
@@ -501,7 +689,8 @@ class AfterglowRepository {
     required String myId,
     required String partnerId,
     required String gratitude,
-    required bool ephemeral, Uint8List? photoBytes,
+    required bool ephemeral,
+    Uint8List? photoBytes,
   }) async {
     final isA = _isPartnerA(myId, partnerId);
     final side = myId; // bound as associated data
@@ -520,20 +709,24 @@ class AfterglowRepository {
     }
 
     final now = DateTime.now().toUtc();
-    final res = await _c.from('afterglow_entries').insert({
-      'couple_id': coupleId,
-      'happened_at': now.toIso8601String(),
-      if (isA) ...{
-        'gratitude_a': bytesToBytea(textBlob),
-        'nonce_a': bytesToBytea(nonceBytes),
-        if (photoBlob != null) 'photo_a': bytesToBytea(photoBlob),
-      } else ...{
-        'gratitude_b': bytesToBytea(textBlob),
-        'nonce_b': bytesToBytea(nonceBytes),
-        if (photoBlob != null) 'photo_b': bytesToBytea(photoBlob),
-      },
-      'retention': ephemeral ? 'ephemeral' : 'keep',
-    }).select().single();
+    final res = await _c
+        .from('afterglow_entries')
+        .insert({
+          'couple_id': coupleId,
+          'happened_at': now.toIso8601String(),
+          if (isA) ...{
+            'gratitude_a': bytesToBytea(textBlob),
+            'nonce_a': bytesToBytea(nonceBytes),
+            if (photoBlob != null) 'photo_a': bytesToBytea(photoBlob),
+          } else ...{
+            'gratitude_b': bytesToBytea(textBlob),
+            'nonce_b': bytesToBytea(nonceBytes),
+            if (photoBlob != null) 'photo_b': bytesToBytea(photoBlob),
+          },
+          'retention': ephemeral ? 'ephemeral' : 'keep',
+        })
+        .select()
+        .single();
     return res['id'] as String;
   }
 
@@ -594,4 +787,34 @@ class AfterglowRepository {
   /// alphabetically-first UUID is partner A — both clients compute identically.
   static bool _isPartnerA(String myId, String partnerId) =>
       myId.compareTo(partnerId) < 0;
+
+  static Future<void> requestDelete({
+    required String entryId,
+    required String requestedBy,
+  }) async {
+    await _c.from('afterglow_entries').update({
+      'delete_requested': true,
+      'delete_requested_by': requestedBy,
+      'delete_requested_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', entryId);
+  }
+
+  static Future<void> cancelDelete(String entryId) async {
+    await _c.from('afterglow_entries').update({
+      'delete_requested': false,
+      'delete_requested_by': null,
+      'delete_requested_at': null,
+    }).eq('id', entryId);
+  }
+
+  static Future<void> hardDelete({
+    required String entryId,
+    required String deletedBy,
+  }) async {
+    await _c.from('afterglow_entries').update({
+      'deleted': true,
+      'deleted_by': deletedBy,
+      'deleted_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', entryId);
+  }
 }

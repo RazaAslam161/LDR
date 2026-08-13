@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -8,15 +10,16 @@ import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
-import 'package:miles/features/closer/secure_screen.dart';
+import 'package:miles/features/closer/private_vault/vault_media_cache.dart';
+import 'package:miles/features/closer/private_vault/vault_media_viewer.dart';
 import 'package:miles/main.dart' show MilesApp;
 
-/// Private Vault — E2EE photo/note storage with user-controlled retention.
+/// Shared Vault — E2EE photo/note storage synced in real-time between partners.
 ///
-/// The list view shows a card per item: a decrypted preview (note text or a
-/// blurred photo thumbnail), a retention badge, and the delete button. Tapping
-/// a photo opens a full-screen decrypted view that sets FLAG_SECURE.
+/// Implements a buttery-smooth SliverGrid for photos and notes, leveraging
+/// an Isolate-based decryption cache to prevent main-thread jank.
 class PrivateVaultScreen extends ConsumerStatefulWidget {
   const PrivateVaultScreen({super.key});
 
@@ -24,64 +27,42 @@ class PrivateVaultScreen extends ConsumerStatefulWidget {
   ConsumerState<PrivateVaultScreen> createState() => _PrivateVaultScreenState();
 }
 
-enum _LoadState { loading, ready, error }
-
 class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
-  _LoadState _state = _LoadState.loading;
+  Stream<CloserLoadResult<VaultItem>>? _itemsStream;
   String? _error;
-  List<VaultItem> _items = const [];
+  int _uploadingItems = 0;
+
+  bool get _isUploading => _uploadingItems > 0;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _ensureKeyAndLoad();
+    _ensureKeyAndInitStream();
   }
 
-  Future<void> _ensureKeyAndLoad() async {
+  Future<void> _ensureKeyAndInitStream() async {
     final session = ref.read(sessionProvider);
     final couple = session.couple;
     final me = session.profile;
     if (couple == null || me == null) {
       if (!mounted) return;
       setState(() {
-        _state = _LoadState.error;
         _error = 'Link your partner to open the Vault.';
       });
       return;
     }
 
-    setState(() => _state = _LoadState.loading);
     try {
       await ensureSharedKey(session);
-      await _refresh(couple.id);
-    } catch (e) {
       if (!mounted) return;
       setState(() {
-        _state = _LoadState.error;
-        _error = e.toString().replaceFirst('Exception: ', '');
-      });
-    }
-  }
-
-  Future<void> _refresh(String coupleId) async {
-    try {
-      final result = await PrivateVaultRepository.fetchItems(coupleId);
-      if (!mounted) return;
-      if (result.hasUnreadable) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.unreadableMessage)),
-        );
-      }
-      setState(() {
-        _items = result.items;
-        _state = _LoadState.ready;
+        _itemsStream = PrivateVaultRepository.streamItems(couple.id);
         _error = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _state = _LoadState.error;
-        _error = e.toString();
+        _error = e.toString().replaceFirst('Exception: ', '');
       });
     }
   }
@@ -103,7 +84,6 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
         plaintextBytes: Uint8List.fromList(utf8.encode(text.trim())),
         retention: ephemeral ? VaultRetention.ephemeral : VaultRetention.keep,
       );
-      await _refresh(couple.id);
     } catch (e) {
       _toast('Could not save: $e');
     }
@@ -114,35 +94,57 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
     final me = ref.read(sessionProvider).profile;
     if (couple == null || me == null) return;
 
+    if (_isUploading) return;
+
     final picker = ImagePicker();
-    XFile? xfile;
+    List<XFile> xfiles = [];
     MilesApp.systemOverlayActive = true;
     try {
-      xfile = await picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 85,
-      );
+      xfiles = await picker.pickMultipleMedia();
     } finally {
       MilesApp.systemOverlayActive = false;
     }
-    if (xfile == null) return;
-
-    final bytes = await xfile.readAsBytes();
+    if (xfiles.isEmpty) return;
 
     final ephemeral = await _confirmRetention() ?? true;
 
-    try {
-      await PrivateVaultRepository.insert(
-        coupleId: couple.id,
-        createdBy: me.id,
-        kind: VaultKind.photo,
-        plaintextBytes: bytes,
-        retention: ephemeral ? VaultRetention.ephemeral : VaultRetention.keep,
-      );
-      await _refresh(couple.id);
-    } catch (e) {
-      _toast('Could not save photo: $e');
+    setState(() => _uploadingItems = xfiles.length);
+    for (final xfile in xfiles) {
+      try {
+        final bytes = await xfile.readAsBytes();
+        final mimeType = _mediaMimeType(xfile);
+        final isVideo = mimeType.startsWith('video/');
+
+        await PrivateVaultRepository.insert(
+          coupleId: couple.id,
+          createdBy: me.id,
+          kind: isVideo ? VaultKind.video : VaultKind.photo,
+          plaintextBytes: bytes,
+          retention: ephemeral ? VaultRetention.ephemeral : VaultRetention.keep,
+          mediaMimeType: mimeType,
+        );
+      } catch (e) {
+        _toast('Could not save ${xfile.name}: $e');
+      } finally {
+        if (mounted) setState(() => _uploadingItems--);
+      }
     }
+  }
+
+  String _mediaMimeType(XFile file) {
+    final declared = file.mimeType;
+    if (declared != null &&
+        (declared.startsWith('image/') || declared.startsWith('video/'))) {
+      return declared;
+    }
+    final name = file.name.toLowerCase();
+    if (name.endsWith('.mov')) return 'video/quicktime';
+    if (name.endsWith('.webm')) return 'video/webm';
+    if (name.endsWith('.mp4')) return 'video/mp4';
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
   }
 
   Future<String?> _showNoteDialog() async {
@@ -178,7 +180,6 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
     );
   }
 
-  /// Returns true for "Ephemeral", false for "Keep", null if dismissed.
   Future<bool?> _confirmRetention() async {
     return showDialog<bool>(
       context: context,
@@ -212,7 +213,6 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
     final me = ref.read(sessionProvider).profile!;
     switch (item.deleteState) {
       case VaultDeleteState.none:
-        // Start the delete request.
         final confirmed = await _confirm(
           'Ask your partner to confirm the delete? You can force it in 14 days.',
         );
@@ -220,17 +220,14 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
         await _guard(() => PrivateVaultRepository.requestDelete(
               itemId: item.id,
               requestedBy: me.id,
-            ),);
-        await _refresh(ref.read(sessionProvider).couple!.id);
+            ));
       case VaultDeleteState.requested:
         if (item.deleteRequestedBy == me.id) {
-          // Requester cancels.
           final confirmed = await _confirm('Cancel this delete request?');
           if (!confirmed) return;
-          await _guard(() =>
-              PrivateVaultRepository.cancelDeleteRequest(item.id),);
+          await _guard(
+              () => PrivateVaultRepository.cancelDeleteRequest(item.id));
         } else {
-          // Partner confirms → hard delete.
           final confirmed = await _confirm(
             'Confirm permanent delete? This cannot be undone.',
           );
@@ -238,9 +235,8 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
           await _guard(() => PrivateVaultRepository.hardDelete(
                 itemId: item.id,
                 deletedBy: me.id,
-              ),);
+              ));
         }
-        await _refresh(ref.read(sessionProvider).couple!.id);
       case VaultDeleteState.expired:
         if (item.deleteRequestedBy == me.id) {
           final confirmed = await _confirm(
@@ -250,8 +246,7 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
           await _guard(() => PrivateVaultRepository.hardDelete(
                 itemId: item.id,
                 deletedBy: me.id,
-              ),);
-          await _refresh(ref.read(sessionProvider).couple!.id);
+              ));
         }
     }
   }
@@ -299,6 +294,12 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
   }
 
   @override
+  void dispose() {
+    unawaited(VaultMediaCache.clear());
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F16),
@@ -306,80 +307,252 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
         child: Column(
           children: [
             _Header(
-              title: 'Private Vault',
-              subtitle: 'Yours alone. Encrypted on your phone.',
+              title: 'Shared Vault',
+              subtitle: 'Synced instantly. Encrypted end-to-end.',
               onBack: () => context.pop(),
             ),
-            Expanded(child: _body),
-            _ActionBar(
-              onAddNote: _addNote,
-              onAddPhoto: _addPhoto,
+            if (_isUploading) _UploadBanner(remaining: _uploadingItems),
+            Expanded(
+              child: _error != null
+                  ? _ErrorState(
+                      message: _error!,
+                      onRetry: _ensureKeyAndInitStream,
+                    )
+                  : _itemsStream == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : StreamBuilder<CloserLoadResult<VaultItem>>(
+                          stream: _itemsStream,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return _ErrorState(
+                                message: snapshot.error.toString(),
+                                onRetry: _ensureKeyAndInitStream,
+                              );
+                            }
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                  child: CircularProgressIndicator());
+                            }
+                            final result = snapshot.data!;
+                            if (result.items.isEmpty) {
+                              return const _EmptyVault();
+                            }
+                            return GridView.builder(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 2, vertical: 8),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                crossAxisSpacing: 2,
+                                mainAxisSpacing: 2,
+                              ),
+                              itemCount: result.items.length,
+                              itemBuilder: (context, i) {
+                                final item = result.items[i];
+                                return _VaultGridItem(
+                                  item: item,
+                                  onTap: () {
+                                    Navigator.of(context).push<void>(
+                                      MaterialPageRoute(
+                                        builder: (_) => VaultMediaViewer(
+                                          items: result.items,
+                                          initialIndex: i,
+                                        ),
+                                        fullscreenDialog: true,
+                                      ),
+                                    );
+                                  },
+                                  onLongPress: () => _onDelete(item),
+                                );
+                              },
+                            );
+                          },
+                        ),
             ),
+          ],
+        ),
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: 'vault_note',
+            onPressed: _isUploading ? null : _addNote,
+            backgroundColor: MilesColors.surface2,
+            child: const Icon(Icons.edit_outlined, color: Colors.white),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'vault_photo',
+            onPressed: _isUploading ? null : _addPhoto,
+            backgroundColor: MilesColors.ember,
+            child: const Icon(Icons.add_a_photo, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VaultGridItem extends StatefulWidget {
+  const _VaultGridItem({
+    required this.item,
+    required this.onTap,
+    required this.onLongPress,
+  });
+  final VaultItem item;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  State<_VaultGridItem> createState() => _VaultGridItemState();
+}
+
+class _VaultGridItemState extends State<_VaultGridItem> {
+  File? _file;
+  String? _notePreview;
+
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VaultGridItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.id != widget.item.id) {
+      _file = null;
+      _notePreview = null;
+      _loading = true;
+      _error = null;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    if (widget.item.kind == VaultKind.photo ||
+        widget.item.kind == VaultKind.video) {
+      try {
+        final file = await VaultMediaCache.getDecryptedFile(widget.item)
+            .timeout(const Duration(minutes: 1));
+        if (mounted)
+          setState(() {
+            _file = file;
+            _loading = false;
+          });
+      } catch (e) {
+        if (mounted)
+          setState(() {
+            _error = 'Preview unavailable';
+            _loading = false;
+          });
+      }
+    } else {
+      try {
+        final text = await decryptVaultNote(widget.item);
+        if (mounted)
+          setState(() {
+            _notePreview = text;
+            _loading = false;
+          });
+      } catch (e) {
+        if (mounted)
+          setState(() {
+            _error = 'Could not open note';
+            _loading = false;
+          });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
+      child: Container(
+        color: MilesColors.surface1,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_error != null)
+              Center(
+                child: IconButton(
+                  tooltip: _error,
+                  onPressed: () {
+                    setState(() {
+                      _loading = true;
+                      _error = null;
+                    });
+                    _load();
+                  },
+                  icon: const Icon(Icons.refresh_rounded,
+                      color: Color(0xFFE0553D), size: 30),
+                ),
+              )
+            else if (widget.item.kind == VaultKind.photo ||
+                widget.item.kind == VaultKind.video)
+              _file != null
+                  ? (widget.item.kind == VaultKind.video
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Container(color: Colors.black87),
+                            const Center(
+                              child: Icon(Icons.play_circle_fill,
+                                  color: Colors.white, size: 48),
+                            ),
+                          ],
+                        )
+                      : Image.file(_file!, fit: BoxFit.cover))
+                  : _loading
+                      ? const Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : const SizedBox.shrink()
+            else
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Center(
+                  child: Text(
+                    _notePreview ?? '',
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                  ),
+                ),
+              ),
+            if (widget.item.deleteState != VaultDeleteState.none)
+              Positioned.fill(
+                child: Container(
+                  // scrim over the decrypted media behind it
+                        color: Colors.black.withOpacity(0.5),
+                  child: const Center(
+                    child: Icon(Icons.delete_sweep, color: Colors.red),
+                  ),
+                ),
+              ),
+            if (widget.item.retention == VaultRetention.ephemeral)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Icon(Icons.timer, size: 14, color: MilesColors.ember),
+              ),
           ],
         ),
       ),
     );
   }
-
-  Widget get _body {
-    switch (_state) {
-      case _LoadState.loading:
-        return const Center(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        );
-      case _LoadState.error:
-        return _ErrorState(
-          message: _error ?? 'Something went wrong.',
-          onRetry: _ensureKeyAndLoad,
-        );
-      case _LoadState.ready:
-        if (_items.isEmpty) {
-          return const _EmptyVault();
-        }
-        return RefreshIndicator(
-          onRefresh: () =>
-              _refresh(ref.read(sessionProvider).couple!.id),
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            itemCount: _items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, i) {
-              final me = ref.read(sessionProvider).profile!.id;
-              return _VaultItemCard(
-                item: _items[i],
-                isMine: _items[i].createdBy == me,
-                onTap: () => _openItem(_items[i]),
-                onDelete: () => _onDelete(_items[i]),
-              );
-            },
-          ),
-        );
-    }
-  }
-
-  Future<void> _openItem(VaultItem item) async {
-    if (item.kind == VaultKind.photo) {
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => _SecurePhotoView(item: item),
-          fullscreenDialog: true,
-        ),
-      );
-    } else {
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => _NoteDetailView(item: item),
-          fullscreenDialog: true,
-        ),
-      );
-    }
-  }
 }
 
-/// Common header used across Closer feature screens.
 class _Header extends StatelessWidget {
   const _Header({
     required this.title,
@@ -428,6 +601,36 @@ class _Header extends StatelessWidget {
   }
 }
 
+class _UploadBanner extends StatelessWidget {
+  const _UploadBanner({required this.remaining});
+
+  final int remaining;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      decoration: BoxDecoration(
+        color: MilesColors.surface2,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Encrypting and uploading $remaining ${remaining == 1 ? 'item' : 'items'}…',
+            style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          const LinearProgressIndicator(color: MilesColors.ember),
+        ],
+      ),
+    );
+  }
+}
+
 class _EmptyVault extends StatelessWidget {
   const _EmptyVault();
 
@@ -442,7 +645,7 @@ class _EmptyVault extends StatelessWidget {
             const Text('🔒', style: TextStyle(fontSize: 48)),
             const SizedBox(height: 16),
             Text(
-              'Your Private Vault',
+              'Shared Vault',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.displaySmall?.copyWith(
                     color: const Color(0xFFFBF8F4),
@@ -450,7 +653,7 @@ class _EmptyVault extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Yours alone. Encrypted on your phone — not even we can read it.',
+              'Synced instantly. Encrypted end-to-end.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Color(0x99F5EFE6),
@@ -459,7 +662,7 @@ class _EmptyVault extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Add a note or photo below to begin.',
+              'Use the + buttons to begin.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Color(0x66F5EFE6)),
             ),
@@ -483,8 +686,7 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lock_outline,
-                color: Color(0xFFEF6F58), size: 36,),
+            const Icon(Icons.lock_outline, color: Color(0xFFEF6F58), size: 36),
             const SizedBox(height: 16),
             Text(
               message,
@@ -495,389 +697,6 @@ class _ErrorState extends StatelessWidget {
             OutlinedButton(
               onPressed: onRetry,
               child: const Text('Try again'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionBar extends StatelessWidget {
-  const _ActionBar({required this.onAddNote, required this.onAddPhoto});
-  final VoidCallback onAddNote;
-  final VoidCallback onAddPhoto;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onAddNote,
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('Note'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: onAddPhoto,
-              icon: const Icon(Icons.photo_outlined, size: 18),
-              label: const Text('Photo'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _VaultItemCard extends StatelessWidget {
-  const _VaultItemCard({
-    required this.item,
-    required this.isMine,
-    required this.onTap,
-    required this.onDelete,
-  });
-  final VaultItem item;
-  final bool isMine;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: MilesColors.surface1,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: item.deleteState != VaultDeleteState.none
-                  ? const Color(0xFFEF6F58).withValues(alpha: 0.4)
-                  : const Color(0x1aF5EFE6),
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _thumbnail,
-              const SizedBox(width: 14),
-              Expanded(child: _body),
-              _deleteButton,
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget get _thumbnail {
-    if (item.kind == VaultKind.photo) {
-      return Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1F2937),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Icon(Icons.photo, color: Color(0xFFEF6F58), size: 24),
-      );
-    }
-    return Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1F2937),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Icon(Icons.lock_outline, color: Color(0xFFF4937E), size: 24),
-    );
-  }
-
-  Widget get _body {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              item.kind == VaultKind.photo ? 'Photo' : 'Note',
-              style: const TextStyle(
-                color: Color(0xFFFBF8F4),
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 8),
-            _retentionBadge,
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          _metaLine,
-          style: const TextStyle(fontSize: 11, color: Color(0x80F5EFE6)),
-        ),
-        if (item.deleteState != VaultDeleteState.none) ...[
-          const SizedBox(height: 8),
-          Text(
-            item.deleteState == VaultDeleteState.expired
-                ? (isMine
-                    ? 'Delete window expired — you can force delete.'
-                    : 'Delete window expired.')
-                : (isMine
-                    ? 'Waiting for your partner to confirm (14 days).'
-                    : 'Your partner asked to delete this. Confirm?'),
-            style: const TextStyle(fontSize: 11, color: Color(0xFFEF6F58)),
-          ),
-        ] else if (item.retention == VaultRetention.ephemeral &&
-            item.reconfirmDue != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            _daysUntilReconfirm,
-            style: const TextStyle(fontSize: 11, color: Color(0xFFF4937E)),
-          ),
-        ],
-      ],
-    );
-  }
-
-  String get _metaLine {
-    final d = item.createdAt.toLocal();
-    final dateStr =
-        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-    return '${isMine ? 'You' : 'Partner'} · $dateStr';
-  }
-
-  String get _daysUntilReconfirm {
-    final left = item.reconfirmDue!.difference(DateTime.now().toUtc());
-    final days = left.inDays;
-    if (days <= 0) {
-      return 'Reconfirm soon or this will expire.';
-    }
-    return '$days day${days == 1 ? '' : 's'} until reconfirm.';
-  }
-
-  Widget get _retentionBadge {
-    final ephemeral = item.retention == VaultRetention.ephemeral;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: ephemeral
-            ? MilesColors.tint(const Color(0xFFF4937E), 0.15)
-            : MilesColors.surface2,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        ephemeral ? 'Ephemeral' : 'Keep',
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: ephemeral ? const Color(0xFFF4937E) : const Color(0x99F5EFE6),
-        ),
-      ),
-    );
-  }
-
-  Widget get _deleteButton {
-    final canAct = item.deleteState == VaultDeleteState.none ||
-        item.deleteState == VaultDeleteState.expired && isMine ||
-        item.deleteState == VaultDeleteState.requested;
-    return IconButton(
-      icon: Icon(
-        item.deleteState == VaultDeleteState.none
-            ? Icons.delete_outline
-            : Icons.more_horiz,
-        color: const Color(0xFFEF6F58),
-        size: 20,
-      ),
-      onPressed: canAct ? onDelete : null,
-    );
-  }
-}
-
-/// Full-screen decrypted photo viewer. Sets FLAG_SECURE on entry so the surface
-/// can't be screenshotted or recorded (spec §5.4 + §F4). FLAG_SECURE is cleared
-/// on exit so it doesn't leak to other screens.
-class _SecurePhotoView extends StatefulWidget {
-  const _SecurePhotoView({required this.item});
-  final VaultItem item;
-
-  @override
-  State<_SecurePhotoView> createState() => _SecurePhotoViewState();
-}
-
-class _SecurePhotoViewState extends State<_SecurePhotoView> {
-  Uint8List? _bytes;
-  String? _error;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    SecureScreen.setSecure();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final bytes = await decryptVaultBytes(widget.item);
-      if (!mounted) return;
-      setState(() {
-        _bytes = bytes;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'Could not decrypt: $e';
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    SecureScreen.clearSecure();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            if (_loading)
-              const Center(
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else if (_error != null)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Text(
-                    _error!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Color(0xCCF5EFE6)),
-                  ),
-                ),
-              )
-            else if (_bytes != null)
-              InteractiveViewer(
-                child: Center(
-                  child: Image.memory(_bytes!),
-                ),
-              ),
-            Positioned(
-              top: 8,
-              left: 4,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Color(0xCCFBF8F4)),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NoteDetailView extends StatefulWidget {
-  const _NoteDetailView({required this.item});
-  final VaultItem item;
-
-  @override
-  State<_NoteDetailView> createState() => _NoteDetailState();
-}
-
-class _NoteDetailState extends State<_NoteDetailView> {
-  String? _text;
-  String? _error;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final text = await decryptVaultNote(widget.item);
-      if (!mounted) return;
-      setState(() {
-        _text = text;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'Could not decrypt: $e';
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0B0F16),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back,
-                      color: Color(0x80F5EFE6),),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-                const Text(
-                  'Note',
-                  style: TextStyle(
-                    color: Color(0xFFFBF8F4),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            Expanded(
-              child: _loading
-                  ? const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : _error != null
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(32),
-                            child: Text(
-                              _error!,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Color(0xCCF5EFE6)),
-                            ),
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            _text ?? '',
-                            style: const TextStyle(
-                              color: Color(0xFFFBF8F4),
-                              fontSize: 16,
-                              height: 1.6,
-                            ),
-                          ),
-                        ),
             ),
           ],
         ),

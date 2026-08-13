@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/memory_threads/memory_pin_gate.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -34,8 +35,10 @@ class _MemoryThreadsScreenState extends ConsumerState<MemoryThreadsScreen> {
         child: AnnotatedRegion<SystemUiOverlayStyle>(
           value: SystemUiOverlayStyle.light,
           child: switch (_unlocked) {
-            null => _PinGate(onUnlocked: () => setState(() => _unlocked = true)),
-            false => _PinGate(onUnlocked: () => setState(() => _unlocked = true)),
+            null =>
+              _PinGate(onUnlocked: () => setState(() => _unlocked = true)),
+            false =>
+              _PinGate(onUnlocked: () => setState(() => _unlocked = true)),
             true => _UnlockedView(),
           },
         ),
@@ -58,6 +61,7 @@ class _PinGateState extends State<_PinGate> {
   final _controller = TextEditingController();
   bool _checking = false;
   bool _needsSetup = false;
+  bool _bioAttempted = false;
   String? _error;
   String _enteredPin = '';
 
@@ -74,6 +78,10 @@ class _PinGateState extends State<_PinGate> {
   }
 
   Future<void> _bootstrap() async {
+    // Prevent re-triggering biometric if we've already attempted it
+    if (_bioAttempted) return;
+    _bioAttempted = true;
+
     final hasPin = await MemoryPinGate.hasAppPin();
     if (!mounted) return;
     setState(() => _needsSetup = !hasPin);
@@ -295,9 +303,8 @@ class _UnlockedView extends ConsumerStatefulWidget {
 }
 
 class _UnlockedViewState extends ConsumerState<_UnlockedView> {
-  bool _loading = true;
+  Stream<CloserLoadResult<MemoryThread>>? _threadsStream;
   String? _error;
-  List<MemoryThread> _threads = const [];
 
   @override
   void initState() {
@@ -319,44 +326,22 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     if (couple == null || me == null) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
         _error = 'Link your partner to use Memory Threads.';
       });
       return;
     }
 
-    setState(() => _loading = true);
     try {
       await ensureSharedKey(session);
-      await _refresh(couple.id);
-    } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = e.toString().replaceFirst('Exception: ', '');
-      });
-    }
-  }
-
-  Future<void> _refresh(String coupleId) async {
-    try {
-      final result = await MemoryThreadRepository.fetchThreads(coupleId);
-      if (!mounted) return;
-      if (result.hasUnreadable) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.unreadableMessage)),
-        );
-      }
-      setState(() {
-        _threads = result.items;
-        _loading = false;
+        _threadsStream = MemoryThreadRepository.streamThreads(couple.id);
         _error = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = e.toString();
+        _error = e.toString().replaceFirst('Exception: ', '');
       });
     }
   }
@@ -364,12 +349,12 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
   Future<void> _propose() async {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
-    final didAdd = await context.push<bool>(
+    await context.push<bool>(
       '/app/closer/memory-threads/propose',
     );
-    if ((didAdd ?? false) && mounted) {
-      await _refresh(couple.id);
-    }
+    // Refresh the stream after proposing so the new thread appears immediately
+    if (!mounted) return;
+    _ensureKeyAndLoad();
   }
 
   @override
@@ -381,11 +366,48 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
           subtitle: "Milestones you've kept.",
           onBack: () => context.pop(),
         ),
-        Expanded(child: _body),
+        Expanded(
+          child: _error != null
+              ? _ErrorState(message: _error!, onRetry: _ensureKeyAndLoad)
+              : _threadsStream == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : StreamBuilder<CloserLoadResult<MemoryThread>>(
+                      stream: _threadsStream,
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return _ErrorState(
+                            message: snapshot.error.toString(),
+                            onRetry: _ensureKeyAndLoad,
+                          );
+                        }
+                        if (!snapshot.hasData) {
+                          return const Center(
+                              child: CircularProgressIndicator());
+                        }
+                        final result = snapshot.data!;
+                        if (result.items.isEmpty) {
+                          return _emptyState();
+                        }
+                        return ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                          itemCount: result.items.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, i) {
+                            final me = ref.read(sessionProvider).profile!.id;
+                            return _MemoryCard(
+                              thread: result.items[i],
+                              isMine: result.items[i].proposer == me,
+                            );
+                          },
+                        );
+                      },
+                    ),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           child: FilledButton.icon(
-            onPressed: _loading ? null : _propose,
+            onPressed: _threadsStream == null ? null : _propose,
             icon: const Icon(Icons.add, size: 18),
             label: const Text('Propose a memory'),
           ),
@@ -394,62 +416,32 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     );
   }
 
-  Widget get _body {
-    if (_loading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(strokeWidth: 2),
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🧵', style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 16),
+            Text(
+              'Memory Threads',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                    color: const Color(0xFFFBF8F4),
+                  ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'A PIN-kept timeline of the moments that mattered. '
+              'Propose one — your partner adds it to the thread.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
+            ),
+          ],
         ),
-      );
-    }
-    if (_error != null) {
-      return _ErrorState(
-        message: _error!,
-        onRetry: _ensureKeyAndLoad,
-      );
-    }
-    if (_threads.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('🧵', style: TextStyle(fontSize: 48)),
-              const SizedBox(height: 16),
-              Text(
-                'Memory Threads',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: const Color(0xFFFBF8F4),
-                    ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'A PIN-kept timeline of the moments that mattered. '
-                'Propose one — your partner adds it to the thread.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      itemCount: _threads.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, i) {
-        final me = ref.read(sessionProvider).profile!.id;
-        return _MemoryCard(
-          thread: _threads[i],
-          isMine: _threads[i].proposer == me,
-          onChanged: () =>
-              _refresh(ref.read(sessionProvider).couple!.id),
-        );
-      },
+      ),
     );
   }
 }
@@ -459,11 +451,9 @@ class _MemoryCard extends StatefulWidget {
   const _MemoryCard({
     required this.thread,
     required this.isMine,
-    required this.onChanged,
   });
   final MemoryThread thread;
   final bool isMine;
-  final VoidCallback onChanged;
 
   @override
   State<_MemoryCard> createState() => _MemoryCardState();
@@ -480,6 +470,15 @@ class _MemoryCardState extends State<_MemoryCard> {
   void initState() {
     super.initState();
     _decrypt();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MemoryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.thread.id != widget.thread.id ||
+        oldWidget.thread.state != widget.thread.state) {
+      _decrypt();
+    }
   }
 
   Future<void> _decrypt() async {
@@ -515,7 +514,6 @@ class _MemoryCardState extends State<_MemoryCard> {
         threadId: widget.thread.id,
         acceptedBy: me,
       );
-      widget.onChanged();
     } catch (e) {
       _toast('Failed: $e');
     } finally {
@@ -527,7 +525,6 @@ class _MemoryCardState extends State<_MemoryCard> {
     setState(() => _busy = true);
     try {
       await MemoryThreadRepository.archive(widget.thread.id);
-      widget.onChanged();
     } catch (e) {
       _toast('Failed: $e');
     } finally {
@@ -536,14 +533,18 @@ class _MemoryCardState extends State<_MemoryCard> {
   }
 
   Future<void> _requestDelete() async {
+    final me = _readMe();
+    if (me == null) return;
     final confirmed = await _confirm(
       'Request deletion? Your partner will need to confirm.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
     try {
-      await MemoryThreadRepository.requestDeletion(widget.thread.id);
-      widget.onChanged();
+      await MemoryThreadRepository.requestDeletion(
+        threadId: widget.thread.id,
+        requestedBy: me,
+      );
     } catch (e) {
       _toast('Failed: $e');
     } finally {
@@ -552,14 +553,18 @@ class _MemoryCardState extends State<_MemoryCard> {
   }
 
   Future<void> _confirmDelete() async {
+    final me = _readMe();
+    if (me == null) return;
     final confirmed = await _confirm(
       'Permanently delete this memory? This cannot be undone.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
     try {
-      await MemoryThreadRepository.hardDelete(widget.thread.id);
-      widget.onChanged();
+      await MemoryThreadRepository.hardDelete(
+        threadId: widget.thread.id,
+        deletedBy: me,
+      );
     } catch (e) {
       _toast('Failed: $e');
     } finally {
@@ -571,7 +576,6 @@ class _MemoryCardState extends State<_MemoryCard> {
     setState(() => _busy = true);
     try {
       await MemoryThreadRepository.cancelDeletion(widget.thread.id);
-      widget.onChanged();
     } catch (e) {
       _toast('Failed: $e');
     } finally {
@@ -736,8 +740,11 @@ class _MemoryCardState extends State<_MemoryCard> {
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.image_outlined,
-                          size: 14, color: Color(0xFFEF6F58),),
+                      Icon(
+                        Icons.image_outlined,
+                        size: 14,
+                        color: Color(0xFFEF6F58),
+                      ),
                       SizedBox(width: 4),
                       Text(
                         'View photo',
@@ -753,7 +760,7 @@ class _MemoryCardState extends State<_MemoryCard> {
               ),
             ],
             const SizedBox(height: 14),
-            _actions(dateStr),
+            _actions(),
           ],
         ],
       ),
@@ -811,7 +818,8 @@ class _MemoryCardState extends State<_MemoryCard> {
     );
   }
 
-  Widget _actions(String dateStr) {
+  Widget _actions() {
+    final me = _readMe();
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -825,16 +833,19 @@ class _MemoryCardState extends State<_MemoryCard> {
         if (widget.thread.state == MemoryState.archived)
           _actionChip('Unarchive', Icons.unarchive_outlined, () async {
             await MemoryThreadRepository.unarchive(widget.thread.id);
-            widget.onChanged();
           }),
         if (widget.thread.state == MemoryState.accepted)
           _actionChip(
-              'Request delete', Icons.delete_outline, _requestDelete,),
-        if (widget.thread.state == MemoryState.deletionRequested)
-          if (widget.isMine)
-            _actionChip('Confirm delete', Icons.delete_forever, _confirmDelete)
-          else
-            _actionChip('Cancel', Icons.close, _cancelDelete),
+            'Request delete',
+            Icons.delete_outline,
+            _requestDelete,
+          ),
+        if (widget.thread.state == MemoryState.deletionRequested &&
+            widget.thread.deleteRequestedBy == me)
+          _actionChip('Cancel delete', Icons.close, _cancelDelete),
+        if (widget.thread.state == MemoryState.deletionRequested &&
+            widget.thread.deleteRequestedBy != me)
+          _actionChip('Confirm delete', Icons.delete_forever, _confirmDelete),
       ],
     );
   }
@@ -1015,8 +1026,11 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lock_outline,
-                color: Color(0xFFEF6F58), size: 36,),
+            const Icon(
+              Icons.lock_outline,
+              color: Color(0xFFEF6F58),
+              size: 36,
+            ),
             const SizedBox(height: 16),
             Text(
               message,

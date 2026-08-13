@@ -60,6 +60,13 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false">
 
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyBa6XGzV-g28HSX9rp3AeVs2YPzSlDTyH4" />
+        <meta-data
+            android:name="com.google.android.gms.version"
+            android:value="@integer/google_play_services_version" />
+
         <!-- importantForAutofill: belt-and-braces. Flutter only registers a
              field with the Autofill framework when autofillHints is set, and
              this app sets it nowhere, so today this changes nothing; it keeps

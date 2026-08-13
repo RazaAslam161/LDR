@@ -19,6 +19,7 @@ class RitualRepository {
         .from('rituals')
         .select()
         .eq('couple_id', coupleId)
+        .neq('deleted', true)
         .order('deliver_at', ascending: true);
     final out = <Ritual>[];
     for (final row in (res as List)) {
@@ -35,17 +36,47 @@ class RitualRepository {
     required String message,
     required DateTime deliverAt,
   }) async {
-    final res = await _c.from('rituals').insert({
-      'couple_id': coupleId,
-      'type': ritualTypeToJson(type),
-      'message': message,
-      'deliver_at': deliverAt.toUtc().toIso8601String(),
-      'delivered': false,
-    }).select().single();
+    final res = await _c
+        .from('rituals')
+        .insert({
+          'couple_id': coupleId,
+          'type': ritualTypeToJson(type),
+          'message': message,
+          'deliver_at': deliverAt.toUtc().toIso8601String(),
+          'delivered': false,
+        })
+        .select()
+        .single();
     return Ritual.fromJson(res);
   }
 
-  static Future<void> delete(String ritualId) async {
-    await _c.from('rituals').delete().eq('id', ritualId);
+  static Future<void> requestDelete({
+    required String ritualId,
+    required String requestedBy,
+  }) async {
+    await _c.from('rituals').update({
+      'delete_requested': true,
+      'delete_requested_by': requestedBy,
+      'delete_requested_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', ritualId);
+  }
+
+  static Future<void> cancelDelete(String ritualId) async {
+    await _c.from('rituals').update({
+      'delete_requested': false,
+      'delete_requested_by': null,
+      'delete_requested_at': null,
+    }).eq('id', ritualId);
+  }
+
+  static Future<void> hardDelete({
+    required String ritualId,
+    required String deletedBy,
+  }) async {
+    await _c.from('rituals').update({
+      'deleted': true,
+      'deleted_by': deletedBy,
+      'deleted_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', ritualId);
   }
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Couple-shared authenticated encryption for the Closer module.
@@ -58,7 +59,9 @@ class CryptoCore {
       final kp = await _x25519.newKeyPair();
       final data = await kp.extract();
       await _storage.write(
-          key: _privKeyStoreKey, value: base64Encode(data.bytes),);
+        key: _privKeyStoreKey,
+        value: base64Encode(data.bytes),
+      );
       _myKeyPair = kp;
     }
     return _myKeyPair!;
@@ -107,6 +110,11 @@ class CryptoCore {
 
   static void clearCache() => _sharedKey = null;
 
+  static Future<List<int>?> exportSharedKeyBytes() async {
+    if (_sharedKey == null) return null;
+    return _sharedKey!.extractBytes();
+  }
+
   static bool _isLegacy(Uint8List nonce, Uint8List mac) =>
       nonce.every((b) => b == 0) && mac.every((b) => b == 0);
 
@@ -115,6 +123,30 @@ class CryptoCore {
     String? associatedData,
   }) =>
       encryptBytes(utf8.encode(plaintext), associatedData: associatedData);
+
+  /// What an isolate needs to encrypt without touching this class's state.
+  ///
+  /// A SecretKey cannot cross an isolate boundary, so the raw bytes are
+  /// exported once on the caller's side and the isolate rebuilds the key.
+  static Future<EncryptedPayload> encryptBytesOffThread(
+    Uint8List bytes, {
+    String? associatedData,
+  }) async {
+    final keyBytes = await exportSharedKeyBytes();
+    // No key means plaintext mode, which is a base64 encode and nothing else —
+    // not worth an isolate spawn.
+    if (keyBytes == null) {
+      return encryptBytes(bytes, associatedData: associatedData);
+    }
+    // Small payloads cost more to ship across the boundary than to encrypt.
+    if (bytes.length < 256 * 1024) {
+      return encryptBytes(bytes, associatedData: associatedData);
+    }
+    return compute(
+      _isolateEncrypt,
+      _EncryptRequest(bytes, associatedData, keyBytes),
+    );
+  }
 
   static Future<EncryptedPayload> encryptBytes(
     List<int> bytes, {
@@ -202,4 +234,36 @@ class EncryptedPayload {
   final String ciphertextB64;
   final String nonceB64;
   final String macB64;
+}
+
+
+/// Arguments for [_isolateEncrypt]. Top-level because `compute` sends the
+/// callback by reference and it must not close over anything.
+class _EncryptRequest {
+  const _EncryptRequest(this.bytes, this.ad, this.keyBytes);
+
+  final Uint8List bytes;
+  final String? ad;
+  final List<int> keyBytes;
+}
+
+/// Encrypt on a background isolate.
+///
+/// The vault encrypts the ORIGINAL media — up to 100MB — and did it here on the
+/// main isolate. AES/XChaCha over 100MB plus a base64 encode of the result is
+/// seconds of solid CPU on the UI thread, which is why the upload spinner did
+/// not merely take a long time: it stopped animating entirely, because the
+/// thread that would have animated it was busy. Mirrors the decrypt isolate the
+/// vault cache already uses.
+Future<EncryptedPayload> _isolateEncrypt(_EncryptRequest r) async {
+  final box = await Xchacha20.poly1305Aead().encrypt(
+    r.bytes,
+    secretKey: SecretKey(r.keyBytes),
+    aad: r.ad == null ? const <int>[] : utf8.encode(r.ad!),
+  );
+  return EncryptedPayload(
+    ciphertextB64: base64Encode(box.cipherText),
+    nonceB64: base64Encode(box.nonce),
+    macB64: base64Encode(box.mac.bytes),
+  );
 }

@@ -4,7 +4,8 @@
 /// live in [SupabaseRepository] so these stay clean.
 library;
 
-import 'package:miles/core/data/supabase_repository.dart' show SupabaseRepository;
+import 'package:miles/core/data/supabase_repository.dart'
+    show SupabaseRepository;
 import 'package:miles/core/utils/json_utils.dart';
 
 enum PresenceStatus { asleep, awake, work, free, busy }
@@ -76,7 +77,8 @@ class Profile {
       wakeTime: JsonUtils.parseStringOrNull(json['wake_time']),
       sleepTime: JsonUtils.parseStringOrNull(json['sleep_time']),
       presenceStatus: _parsePresence(
-          JsonUtils.parseString(json['presence_status'], fallback: 'free'),),
+        JsonUtils.parseString(json['presence_status'], fallback: 'free'),
+      ),
       createdAt: JsonUtils.parseDate(json['created_at']),
       birthDate: JsonUtils.parseStringOrNull(json['birth_date']),
       statusMessage: JsonUtils.parseStringOrNull(json['status_message']),
@@ -190,6 +192,8 @@ class Ritual {
     this.message,
     this.cron,
     this.deliverAt,
+    this.deleteRequested = false,
+    this.deleteRequestedBy,
   });
 
   factory Ritual.fromJson(Map<String, dynamic> json) {
@@ -197,11 +201,15 @@ class Ritual {
       id: JsonUtils.parseString(json['id']),
       coupleId: JsonUtils.parseString(json['couple_id']),
       type: _parseRitualType(
-          JsonUtils.parseString(json['type'], fallback: 'custom'),),
+        JsonUtils.parseString(json['type'], fallback: 'custom'),
+      ),
       message: JsonUtils.parseStringOrNull(json['message']),
       cron: JsonUtils.parseStringOrNull(json['cron']),
       deliverAt: JsonUtils.parseDateOrNull(json['deliver_at'])?.toUtc(),
       delivered: JsonUtils.parseBool(json['delivered']),
+      deleteRequested: (json['delete_requested'] as bool?) ?? false,
+      deleteRequestedBy:
+          JsonUtils.parseStringOrNull(json['delete_requested_by']),
     );
   }
 
@@ -212,6 +220,8 @@ class Ritual {
   final String? cron;
   final DateTime? deliverAt;
   final bool delivered;
+  final bool deleteRequested;
+  final String? deleteRequestedBy;
 }
 
 RitualType _parseRitualType(String raw) {

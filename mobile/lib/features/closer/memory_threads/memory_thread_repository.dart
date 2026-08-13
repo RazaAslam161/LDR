@@ -54,7 +54,14 @@ class MemoryThread {
     required this.proposer,
     required this.titleCipher,
     required this.titleNonce,
-    required this.happenedOn, required this.state, required this.acceptedBy, required this.acceptedAt, required this.archivedAt, required this.createdAt, this.photoCipher,
+    required this.happenedOn,
+    required this.state,
+    required this.acceptedBy,
+    required this.acceptedAt,
+    required this.archivedAt,
+    required this.createdAt,
+    this.deleteRequestedBy,
+    this.photoCipher,
     this.photoNonce,
     this.noteCipher,
     this.noteNonce,
@@ -74,12 +81,12 @@ class MemoryThread {
   final DateTime? acceptedAt;
   final DateTime? archivedAt;
   final DateTime createdAt;
+  final String? deleteRequestedBy;
 
   EncryptedPayload titlePayload() => _unpack(titleCipher, titleNonce);
-  EncryptedPayload? photoPayload() =>
-      photoCipher == null || photoNonce == null
-          ? null
-          : _unpack(photoCipher!, photoNonce!);
+  EncryptedPayload? photoPayload() => photoCipher == null || photoNonce == null
+      ? null
+      : _unpack(photoCipher!, photoNonce!);
   EncryptedPayload? notePayload() => noteCipher == null || noteNonce == null
       ? null
       : _unpack(noteCipher!, noteNonce!);
@@ -103,10 +110,13 @@ class MemoryThread {
       acceptedAt: JsonUtils.parseDateOrNull(json['accepted_at'])?.toUtc(),
       archivedAt: JsonUtils.parseDateOrNull(json['archived_at'])?.toUtc(),
       createdAt: JsonUtils.parseDate(json['created_at']).toUtc(),
+      deleteRequestedBy:
+          JsonUtils.parseStringOrNull(json['delete_requested_by']),
     );
   }
 
-  static Uint8List? _maybeBytes(dynamic v) => v == null ? null : byteaToBytes(v);
+  static Uint8List? _maybeBytes(dynamic v) =>
+      v == null ? null : byteaToBytes(v);
 }
 
 class MemoryRevisit {
@@ -133,7 +143,8 @@ class MemoryThreadRepository {
   /// Live + archived threads for [coupleId]. Deleted rows are excluded.
   /// Ordered newest-first by `happened_on` so the timeline reads top-down.
   static Future<CloserLoadResult<MemoryThread>> fetchThreads(
-      String coupleId,) async {
+    String coupleId,
+  ) async {
     final res = await _c
         .from('memory_threads')
         .select()
@@ -157,6 +168,32 @@ class MemoryThreadRepository {
     );
   }
 
+  /// Realtime stream of live + archived threads.
+  static Stream<CloserLoadResult<MemoryThread>> streamThreads(String coupleId) {
+    return _c
+        .from('memory_threads')
+        .stream(primaryKey: ['id'])
+        .eq('couple_id', coupleId)
+        .order('happened_on', ascending: false)
+        .map((rows) {
+          final threads = <MemoryThread>[];
+          var unreadable = 0;
+          for (final row in rows) {
+            if (row['state'] == _stringifyState(MemoryState.deleted)) continue;
+            try {
+              threads.add(MemoryThread.fromJson(row));
+            } catch (e) {
+              unreadable++;
+              debugPrint('memory threads stream: unreadable row: $e');
+            }
+          }
+          return CloserLoadResult(
+            List<MemoryThread>.unmodifiable(threads),
+            unreadable: unreadable,
+          );
+        });
+  }
+
   /// Propose a new memory (state = `proposed`). Awaits partner's accept.
   /// All fields are encrypted with the item UUID as associated data; the UUID
   /// is generated client-side so it can be used as AD before insert.
@@ -172,13 +209,14 @@ class MemoryThreadRepository {
     final titlePayload =
         await CryptoCore.encryptString(title, associatedData: itemId);
     final titleBlob = packMacAndCiphertext(titlePayload);
-    final titleNonceBytes = Uint8List.fromList(base64Decode(titlePayload.nonceB64));
+    final titleNonceBytes =
+        Uint8List.fromList(base64Decode(titlePayload.nonceB64));
 
     Uint8List? noteBlob;
     Uint8List? noteNonceBytes;
     if (note != null && note.trim().isNotEmpty) {
-      final notePayload =
-          await CryptoCore.encryptString(note, associatedData: '${itemId}_note');
+      final notePayload = await CryptoCore.encryptString(note,
+          associatedData: '${itemId}_note');
       noteBlob = packMacAndCiphertext(notePayload);
       noteNonceBytes = Uint8List.fromList(base64Decode(notePayload.nonceB64));
     }
@@ -243,9 +281,14 @@ class MemoryThreadRepository {
   }
 
   /// Request deletion — dual consent. Marks the row as `deletion_requested`.
-  static Future<void> requestDeletion(String threadId) async {
+  static Future<void> requestDeletion({
+    required String threadId,
+    required String requestedBy,
+  }) async {
     await _c.from('memory_threads').update({
       'state': _stringifyState(MemoryState.deletionRequested),
+      'delete_requested_by': requestedBy,
+      'delete_requested_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', threadId);
   }
 
@@ -255,14 +298,21 @@ class MemoryThreadRepository {
   static Future<void> cancelDeletion(String threadId) async {
     await _c.from('memory_threads').update({
       'state': _stringifyState(MemoryState.accepted),
+      'delete_requested_by': null,
+      'delete_requested_at': null,
     }).eq('id', threadId);
   }
 
   /// Hard delete after mutual consent (or partner-initiated escape hatch).
   /// We set `state = deleted` so a future purge job can vacuum these.
-  static Future<void> hardDelete(String threadId) async {
+  static Future<void> hardDelete({
+    required String threadId,
+    required String deletedBy,
+  }) async {
     await _c.from('memory_threads').update({
       'state': _stringifyState(MemoryState.deleted),
+      'deleted_by': deletedBy,
+      'deleted_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', threadId);
   }
 
@@ -327,22 +377,28 @@ class MemoryThreadRepository {
 
 /// Decrypts the title of [thread] for display.
 Future<String> decryptTitle(MemoryThread thread) async {
-  return CryptoCore.decryptString(thread.titlePayload(),
-      associatedData: thread.id,);
+  return CryptoCore.decryptString(
+    thread.titlePayload(),
+    associatedData: thread.id,
+  );
 }
 
 /// Decrypts the optional note. Returns null if there isn't one.
 Future<String?> decryptNote(MemoryThread thread) async {
   final payload = thread.notePayload();
   if (payload == null) return null;
-  return CryptoCore.decryptString(payload,
-      associatedData: '${thread.id}_note',);
+  return CryptoCore.decryptString(
+    payload,
+    associatedData: '${thread.id}_note',
+  );
 }
 
 /// Decrypts the optional photo. Returns null if there isn't one.
 Future<Uint8List?> decryptPhoto(MemoryThread thread) async {
   final payload = thread.photoPayload();
   if (payload == null) return null;
-  return CryptoCore.decryptBytes(payload,
-      associatedData: '${thread.id}_photo',);
+  return CryptoCore.decryptBytes(
+    payload,
+    associatedData: '${thread.id}_photo',
+  );
 }

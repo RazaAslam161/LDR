@@ -68,43 +68,8 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
     }
   }
 
-  Future<void> _delete(Ritual ritual) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF141B26),
-        title: const Text('Remove ritual?'),
-        content: const Text('This ritual will no longer be scheduled.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    try {
-      await RitualRepository.delete(ritual.id);
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final session = ref.watch(sessionProvider);
-    final partnerTz = session.partner?.timezone ?? 'their timezone';
-
     return Scaffold(
       appBar: AppBar(
         actions: const [PartnerHereAction()],
@@ -121,12 +86,12 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
         child: const Icon(Icons.add),
       ),
       body: SafeArea(
-        child: _body(partnerTz),
+        child: _body(),
       ),
     );
   }
 
-  Widget _body(String partnerTz) {
+  Widget _body() {
     if (_busy && _rituals == null) {
       return const Center(
         child: CircularProgressIndicator(strokeWidth: 2),
@@ -161,137 +126,222 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, i) => _RitualCard(
           ritual: list[i],
-          partnerTz: partnerTz,
-          onDelete: () => _delete(list[i]),
+          onRefresh: _load,
         ),
       ),
     );
   }
 }
 
-class _RitualCard extends StatelessWidget {
+class _RitualCard extends ConsumerStatefulWidget {
   const _RitualCard({
     required this.ritual,
-    required this.partnerTz,
-    required this.onDelete,
+    required this.onRefresh,
   });
+
   final Ritual ritual;
-  final String partnerTz;
-  final VoidCallback onDelete;
+  final VoidCallback onRefresh;
+
+  @override
+  ConsumerState<_RitualCard> createState() => _RitualCardState();
+}
+
+class _RitualCardState extends ConsumerState<_RitualCard> {
+  bool _busy = false;
+
+  Future<void> _cancelDelete() async {
+    setState(() => _busy = true);
+    try {
+      await RitualRepository.cancelDelete(widget.ritual.id);
+      widget.onRefresh();
+    } catch (e) {
+      // Ignore
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final me = ref.read(sessionProvider).profile?.id;
+    if (me == null) return;
+    setState(() => _busy = true);
+    try {
+      await RitualRepository.hardDelete(
+        ritualId: widget.ritual.id,
+        deletedBy: me,
+      );
+      widget.onRefresh();
+    } catch (e) {
+      // Ignore
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestDelete() async {
+    final me = ref.read(sessionProvider).profile?.id;
+    if (me == null) return;
+    setState(() => _busy = true);
+    try {
+      await RitualRepository.requestDelete(
+        ritualId: widget.ritual.id,
+        requestedBy: me,
+      );
+      widget.onRefresh();
+    } catch (e) {
+      // Ignore
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ritual = widget.ritual;
     final type = ritual.type;
-    return Dismissible(
-      key: ValueKey(ritual.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        decoration: BoxDecoration(
-          color: MilesColors.tint(const Color(0xFFE0553D), 0.15,
-              over: MilesColors.night,),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: const Icon(Icons.delete_outline, color: Color(0xFFE0553D)),
+    final me = ref.read(sessionProvider).profile?.id;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: MilesColors.surface1,
+        borderRadius: BorderRadius.circular(20),
       ),
-      confirmDismiss: (_) async {
-        onDelete();
-        return false;
-      },
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: MilesColors.surface1,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: MilesColors.tint(const Color(0xFFEF6F58), 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                _iconFor(type),
-                color: const Color(0xFFF4937E),
-                size: 22,
-              ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: MilesColors.tint(const Color(0xFFEF6F58), 0.15),
+              borderRadius: BorderRadius.circular(12),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _labelFor(type),
-                        style: const TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 2,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFF4937E),
+            child: Icon(
+              _iconFor(type),
+              color: const Color(0xFFF4937E),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      _labelFor(type),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 2,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFF4937E),
+                      ),
+                    ),
+                    if (ritual.delivered) ...[
+                      const SizedBox(width: 8),
+                      const Text(
+                        '· delivered',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Color(0x80F5EFE6),
                         ),
                       ),
-                      if (ritual.delivered) ...[
-                        const SizedBox(width: 8),
-                        const Text(
-                          '· delivered',
-                          style: TextStyle(
-                            fontSize: 10,
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  ritual.message ?? '(no message)',
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFFBF8F4),
+                    fontSize: 15,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                if (ritual.deliverAt != null)
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.access_time,
+                        size: 14,
+                        color: Color(0x80F5EFE6),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'delivers ${DateFormat('h:mm a').format(ritual.deliverAt!.toLocal())}',
+                          style: const TextStyle(
+                            fontSize: 12,
                             color: Color(0x80F5EFE6),
                           ),
                         ),
-                      ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    ritual.message ?? '(no message)',
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFFBF8F4),
-                      fontSize: 15,
-                      height: 1.35,
+                if (!ritual.deleteRequested)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: IconButton(
+                      icon: const Icon(Icons.delete_outline,
+                          color: Color(0x66F5EFE6), size: 20),
+                      tooltip: 'Request delete',
+                      onPressed: _busy ? null : _requestDelete,
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  if (ritual.deliverAt != null)
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.access_time,
-                          size: 14,
-                          color: Color(0x80F5EFE6),
+                if (ritual.deleteRequested) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Text(
+                        'Delete pending',
+                        style: TextStyle(
+                          color: Color(0xFFEF6F58),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            'delivers ${DateFormat('h:mm a').format(ritual.deliverAt!.toLocal())} '
-                            '· ${DateFormat('h:mm a').format(ritual.deliverAt!.toLocal())} their time',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0x80F5EFE6),
+                      ),
+                      const Spacer(),
+                      if (_busy)
+                        const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                      else ...[
+                        if (ritual.deleteRequestedBy == me)
+                          TextButton(
+                            onPressed: _cancelDelete,
+                            child: const Text('Cancel request',
+                                style: TextStyle(
+                                    color: Color(0x80F5EFE6), fontSize: 12)),
+                          )
+                        else
+                          FilledButton(
+                            onPressed: _confirmDelete,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFEF6F58),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
                             ),
+                            child: const Text('Confirm Delete',
+                                style: TextStyle(fontSize: 12)),
                           ),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
+                      ]
+                    ],
+                  ),
+                ]
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  static IconData _iconFor(RitualType t) {
+  IconData _iconFor(RitualType t) {
     switch (t) {
       case RitualType.goodnight:
         return Icons.nights_stay_outlined;
@@ -304,7 +354,7 @@ class _RitualCard extends StatelessWidget {
     }
   }
 
-  static String _labelFor(RitualType t) {
+  String _labelFor(RitualType t) {
     switch (t) {
       case RitualType.goodnight:
         return 'GOODNIGHT';

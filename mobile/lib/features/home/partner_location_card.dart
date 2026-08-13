@@ -1,25 +1,27 @@
-import 'dart:math' as math;
+import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter/services.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/partner_sentence.dart';
 import 'package:miles/features/home/world_map_screen.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart'; // For Distance
 
-
-/// Live partner location on the dashboard. Shows an OpenStreetMap (no API key)
+/// Live partner location on the dashboard. Shows a Google Map
 /// with the partner's marker that animates to each new fix, "updated Xs ago",
-/// and the distance between you. When the partner stops sharing it shows a
-/// "paused" state — never a stale pin presented as live.
+/// and the distance between you.
 class PartnerLocationCard extends StatefulWidget {
   const PartnerLocationCard({
-    required this.partner, required this.partnerName, required this.coupleId, super.key,
+    required this.partner,
+    required this.partnerName,
+    required this.coupleId,
+    super.key,
     this.partnerProfile,
     this.myTimezone,
     this.myLat,
@@ -29,9 +31,6 @@ class PartnerLocationCard extends StatefulWidget {
   final Presence? partner;
   final String partnerName;
   final String coupleId;
-
-  /// Carries the timezone and sleep window the sentence is built from. Those
-  /// columns have existed since the first migration and have never been drawn.
   final Profile? partnerProfile;
   final String? myTimezone;
   final double? myLat;
@@ -41,52 +40,78 @@ class PartnerLocationCard extends StatefulWidget {
   State<PartnerLocationCard> createState() => _PartnerLocationCardState();
 }
 
-class _PartnerLocationCardState extends State<PartnerLocationCard>
-    with TickerProviderStateMixin {
-  final _map = MapController();
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat();
-  // Glides the camera smoothly between live fixes so movement is visible.
-  late final AnimationController _move = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1100),
-  )..addListener(_onMoveTick);
-  LatLng? _animFrom;
-  LatLng? _animTo;
-
-  void _onMoveTick() {
-    final from = _animFrom;
-    final to = _animTo;
-    if (from == null || to == null) return;
-    final t = Curves.easeInOut.transform(_move.value);
-    try {
-      _map.move(
-        LatLng(
-          from.latitude + (to.latitude - from.latitude) * t,
-          from.longitude + (to.longitude - from.longitude) * t,
-        ),
-        _map.camera.zoom,
-      );
-    } catch (_) {}
-  }
-
-  void _glideTo(LatLng target) {
-    try {
-      _animFrom = _map.camera.center;
-    } catch (_) {
-      _animFrom = target;
-    }
-    _animTo = target;
-    _move.forward(from: 0);
-  }
+class _PartnerLocationCardState extends State<PartnerLocationCard> {
+  GoogleMapController? _mapController;
+  BitmapDescriptor? _partnerIcon;
+  BitmapDescriptor? _myIcon;
 
   @override
-  void dispose() {
-    _pulse.dispose();
-    _move.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadIcons();
+  }
+
+  Future<void> _loadIcons() async {
+    _partnerIcon = await _createAvatarMarker(
+        widget.partnerName, MilesColors.blush, MilesColors.cream50);
+    _myIcon = await _createMyDotMarker();
+    if (mounted) setState(() {});
+  }
+
+  static Future<BitmapDescriptor> _createAvatarMarker(
+      String name, Color color, Color textColor) async {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+
+    final Paint shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.3);
+    canvas.drawOval(const Rect.fromLTWH(18, 44, 12, 4), shadowPaint);
+
+    final Paint circlePaint = Paint()..color = color;
+    canvas.drawCircle(const Offset(24, 24), 14, circlePaint);
+
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawCircle(const Offset(24, 24), 14, borderPaint);
+
+    final TextPainter textPainter = TextPainter(
+      textDirection: ui.TextDirection.ltr,
+      text: TextSpan(
+        text: initial,
+        style: TextStyle(
+            fontSize: 14, color: textColor, fontWeight: FontWeight.bold),
+      ),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas,
+        Offset(24 - textPainter.width / 2, 24 - textPainter.height / 2));
+
+    final ui.Image image = await pictureRecorder.endRecording().toImage(48, 48);
+    final ByteData? byteData =
+        await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+  }
+
+  static Future<BitmapDescriptor> _createMyDotMarker() async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+
+    final Paint circlePaint = Paint()..color = MilesColors.sage;
+    canvas.drawCircle(const Offset(13, 13), 10, circlePaint);
+
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawCircle(const Offset(13, 13), 10, borderPaint);
+
+    final ui.Image image = await pictureRecorder.endRecording().toImage(26, 26);
+    final ByteData? byteData =
+        await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
   }
 
   @override
@@ -100,9 +125,8 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
       final moved = old.partner?.latitude != p.latitude ||
           old.partner?.longitude != p.longitude;
       if (moved) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _glideTo(LatLng(p.latitude!, p.longitude!));
-        });
+        _mapController?.animateCamera(
+            CameraUpdate.newLatLng(LatLng(p.latitude!, p.longitude!)));
       }
     }
   }
@@ -110,9 +134,8 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   void _recenter() {
     final p = widget.partner;
     if (p == null || !p.isSharingLive) return;
-    try {
-      _map.move(LatLng(p.latitude!, p.longitude!), 16);
-    } catch (_) {}
+    _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(p.latitude!, p.longitude!), 15.5));
   }
 
   String _agoText(DateTime? at) {
@@ -130,20 +153,13 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
     if (p == null || !p.isSharingLive) return null;
     if (widget.myLat == null || widget.myLon == null) return null;
     if (p.latitude == null || p.longitude == null) return null;
-    final m = const Distance().as(
-      LengthUnit.Meter,
-      LatLng(widget.myLat!, widget.myLon!),
-      LatLng(p.latitude!, p.longitude!),
-    );
+    final m = Geolocator.distanceBetween(
+        widget.myLat!, widget.myLon!, p.latitude!, p.longitude!);
     if (m < 950) return '${m.round()} m apart';
     final km = m / 1000;
     return '${NumberFormat.decimalPattern().format(km.round())} km apart';
   }
 
-  /// The line that answers "can I talk to her right now".
-  ///
-  /// Above every branch, because it is true whether or not she shares a
-  /// location: it is made of time, not position.
   Widget _sentence() {
     final s = partnerSentence(
       presence: widget.partner,
@@ -168,10 +184,6 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   Widget build(BuildContext context) {
     final p = widget.partner;
 
-    // City mode: a place name and deliberately no coordinates. It was being
-    // reported as "isn't sharing", which made the considerate setting
-    // indistinguishable from off — and no map is drawn here, so this branch is
-    // also the one that does not touch a tile server at all.
     if (p != null && p.isSharingCity) {
       return SurfacePanel(
         child: Column(
@@ -180,17 +192,17 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
           children: [
             _sentence(),
             Row(
-          children: [
-            const Icon(Icons.location_city_outlined,
-                color: MilesColors.gilt, size: 20,),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                '${widget.partnerName} is in ${p.locationLabel}',
-                style: const TextStyle(
-                    color: MilesColors.cream50, fontSize: 13,),
-              ),
-            ),
+              children: [
+                const Icon(Icons.location_city_outlined,
+                    color: MilesColors.gilt, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '${widget.partnerName} is in ${p.locationLabel}',
+                    style: const TextStyle(
+                        color: MilesColors.cream50, fontSize: 13),
+                  ),
+                ),
               ],
             ),
           ],
@@ -206,16 +218,17 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
           children: [
             _sentence(),
             Row(
-          children: [
-            const Icon(Icons.location_off_outlined,
-                color: MilesColors.taupe, size: 20,),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                "${widget.partnerName} isn't sharing location right now",
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 13),
-              ),
-            ),
+              children: [
+                const Icon(Icons.location_off_outlined,
+                    color: MilesColors.taupe, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "${widget.partnerName} isn't sharing location right now",
+                    style:
+                        const TextStyle(color: MilesColors.taupe, fontSize: 13),
+                  ),
+                ),
               ],
             ),
           ],
@@ -228,6 +241,35 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
         ? LatLng(widget.myLat!, widget.myLon!)
         : null;
     final dist = _distanceText();
+
+    final Set<Marker> markers = {};
+    if (_partnerIcon != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('partner'),
+        position: point,
+        icon: _partnerIcon!,
+        anchor: const Offset(0.5, 0.9),
+      ));
+    }
+    if (myPoint != null && _myIcon != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('me'),
+        position: myPoint,
+        icon: _myIcon!,
+        anchor: const Offset(0.5, 0.5),
+      ));
+    }
+
+    final Set<Polyline> polylines = {};
+    if (myPoint != null) {
+      polylines.add(Polyline(
+        polylineId: const PolylineId('line'),
+        points: [myPoint, point],
+        color: MilesColors.blush.withValues(alpha: 0.55),
+        width: 2,
+        patterns: [PatternItem.dot, PatternItem.gap(10)],
+      ));
+    }
 
     return SurfacePanel(
       padding: EdgeInsets.zero,
@@ -247,14 +289,12 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                       '${widget.partnerName} · ${_agoText(p.locationUpdatedAt)}',
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 13,),
+                          color: MilesColors.cream50, fontSize: 13),
                     ),
                   ),
-                  // The one place in the app that contacts a third party, and
-                  // it happens because the user pressed this.
                   IconButton(
                     icon: const Icon(Icons.travel_explore,
-                        color: MilesColors.gilt, size: 20,),
+                        color: MilesColors.gilt, size: 20),
                     tooltip: 'Open the world map',
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -268,7 +308,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                   ),
                   IconButton(
                     icon: const Icon(Icons.my_location,
-                        color: MilesColors.gilt, size: 20,),
+                        color: MilesColors.gilt, size: 20),
                     onPressed: _recenter,
                     tooltip: 'Recenter',
                   ),
@@ -281,110 +321,53 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                 onTap: () => context.push('/app/location-map', extra: {
                   'coupleId': widget.coupleId,
                   'partnerName': widget.partnerName,
-                },),
-                child: Stack(
-                  children: [
-                    FlutterMap(
-                      mapController: _map,
-                      options: MapOptions(
-                        initialCenter: point,
-                        initialZoom: 15.5,
-                        interactionOptions: const InteractionOptions(
-                          flags: InteractiveFlag.pinchZoom |
-                              InteractiveFlag.drag,
+                }),
+                child: AbsorbPointer(
+                  child: Stack(
+                    children: [
+                      GoogleMap(
+                        initialCameraPosition: CameraPosition(
+                          target: point,
+                          zoom: 15.5,
                         ),
+                        markers: markers,
+                        polylines: polylines,
+                        zoomControlsEnabled: false,
+                        compassEnabled: false,
+                        mapToolbarEnabled: false,
+                        myLocationButtonEnabled: false,
+                        onMapCreated: (c) => _mapController = c,
                       ),
-                      children: [
-                        // CARTO Voyager — full OSM data with street names, POI
-                        // labels, building outlines, parks, transit. Free, no
-                        // API key, reliable CDN. (Standard raster tiles; the
-                        // "no labels" issue with OSM's free server was caused
-                        // by rate-limiting returning blank tiles.)
-                        TileLayer(
-                          // Null cachingProvider resolves to the built-in disk cache
-                          // (image_provider.dart:166) — not configuring one is what
-                          // turns it on, and it records every place looked at.
-                          tileProvider: NetworkTileProvider(
-                            cachingProvider: const DisabledMapCachingProvider(),
-                          ),
-                          urlTemplate:
-                              'https://tile.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.miles.miles',
-                          maxZoom: 19,
-                        ),
-                        RichAttributionWidget(
-                          attributions: [
-                            TextSourceAttribution(
-                              '© OpenStreetMap contributors',
-                              onTap: () => launchUrl(Uri.parse(
-                                  'https://www.openstreetmap.org/copyright',),),
-                            ),
-                          ],
-                        ),
-                          if (myPoint != null)
-                            PolylineLayer(
-                              polylines: [
-                                Polyline(
-                                  points: [myPoint, point],
-                                  color: MilesColors.blush
-                                      .withValues(alpha: 0.55),
-                                  strokeWidth: 1.5,
-                                  pattern: const StrokePattern.dotted(),
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            // scrim over the map tiles behind it
+                  color: Colors.black.withValues(alpha: 0.45),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.fullscreen_rounded,
+                                    color: MilesColors.cream50, size: 14),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Full screen',
+                                  style: TextStyle(
+                                      color: MilesColors.cream50,
+                                      fontSize: 11,
+                                      fontFamily: 'Inter'),
                                 ),
                               ],
                             ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: point,
-                              width: 48,
-                              height: 54,
-                              alignment: Alignment.bottomCenter,
-                              child: _CuteMarker(
-                                  pulse: _pulse, name: widget.partnerName,),
-                            ),
-                            if (myPoint != null)
-                              Marker(
-                                point: myPoint,
-                                width: 26,
-                                height: 26,
-                                child: const _MyDot(),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    // Tap affordance — "Full screen" pill, bottom-right.
-                    Positioned(
-                      bottom: 8,
-                      right: 8,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5,),
-                          // A scrim over the map tiles underneath.
-                          color: Colors.black.withValues(alpha: 0.45),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.fullscreen_rounded,
-                                  color: MilesColors.cream50, size: 14,),
-                              SizedBox(width: 4),
-                              Text(
-                                'Full screen',
-                                style: TextStyle(
-                                  color: MilesColors.cream50,
-                                  fontSize: 11,
-                                  fontFamily: 'Inter',
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -394,114 +377,16 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                 child: Row(
                   children: [
                     const Icon(Icons.favorite,
-                        color: MilesColors.blush, size: 14,),
+                        color: MilesColors.blush, size: 14),
                     const SizedBox(width: 8),
                     Text(dist,
                         style: const TextStyle(
-                            color: MilesColors.cream50, fontSize: 13,),),
+                            color: MilesColors.cream50, fontSize: 13)),
                   ],
                 ),
               ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// A small, cute partner marker: a gently-bobbing avatar with a soft "live"
-/// halo and a little ground shadow, anchored at the location point.
-class _CuteMarker extends StatelessWidget {
-  const _CuteMarker({required this.pulse, required this.name});
-  final Animation<double> pulse;
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
-    return AnimatedBuilder(
-      animation: pulse,
-      builder: (context, _) {
-        final v = pulse.value; // 0..1 looping
-        final bob = math.sin(v * 2 * math.pi) * 2.5; // gentle up/down
-        final halo = 1 - (v - 0.5).abs() * 2; // 0 → 1 → 0
-        return Stack(
-          alignment: Alignment.bottomCenter,
-          clipBehavior: Clip.none,
-          children: [
-            // ground shadow
-            Container(
-              width: 12,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            // avatar + halo, lifted off the ground and gently bobbing
-            Positioned(
-              bottom: 6,
-              child: Transform.translate(
-                offset: Offset(0, bob),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Container(
-                      width: 24 + halo * 12,
-                      height: 24 + halo * 12,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: MilesColors.blush.withValues(alpha: halo * 0.3),
-                      ),
-                    ),
-                    Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: MilesColors.blush,
-                        border:
-                            Border.all(color: MilesColors.cream50, width: 2),
-                        boxShadow: [
-                          BoxShadow(
-                              color: MilesColors.blush.withValues(alpha: 0.6),
-                              blurRadius: 8,),
-                        ],
-                      ),
-                      child: Center(
-                        child: Text(initial,
-                            style: const TextStyle(
-                                color: MilesColors.cream50,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,),),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// "You are here" dot.
-class _MyDot extends StatelessWidget {
-  const _MyDot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: MilesColors.sage,
-        border: Border.all(color: MilesColors.cream50, width: 2),
-        boxShadow: [
-          BoxShadow(
-              color: MilesColors.sage.withValues(alpha: 0.5), blurRadius: 8,),
-        ],
       ),
     );
   }

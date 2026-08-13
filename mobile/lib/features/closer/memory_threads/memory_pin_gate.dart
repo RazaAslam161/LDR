@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:miles/main.dart' show MilesApp;
 
 /// PIN + biometric gate for Memory Threads (spec §F9: "sits behind its OWN
 /// 6-digit PIN / biometric prompt, on top of the general Closer gate").
@@ -58,13 +59,17 @@ class MemoryPinGate {
       final isDeviceSupported = await _localAuth.isDeviceSupported();
       if (!canCheck || !isDeviceSupported) return false;
 
-      return _localAuth.authenticate(
+      MilesApp.authInProgress = true;
+      final result = await _localAuth.authenticate(
         localizedReason: 'Open Memory Threads',
         options: const AuthenticationOptions(
           stickyAuth: true,
         ),
       );
+      MilesApp.authInProgress = false;
+      return result;
     } catch (_) {
+      MilesApp.authInProgress = false;
       return false;
     }
   }
