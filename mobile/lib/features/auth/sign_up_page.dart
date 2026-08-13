@@ -39,7 +39,23 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
       );
       setState(() {
         _loading = false;
-        _notice = 'Check your inbox — we sent you a confirmation link.';
+        // Deliberately ambiguous, and deliberately TRUE in both cases.
+        //
+        // Supabase answers a signup for an address that already has an account
+        // with a success-shaped response, on purpose: saying "that email is
+        // taken" turns this form into an oracle anyone can feed addresses to in
+        // order to learn who has an account on a private couples app. That
+        // property is worth keeping.
+        //
+        // What was not worth keeping is the old copy, "we sent you a
+        // confirmation link", which ASSERTS something that is false for an
+        // existing account — so a user who had simply forgotten they had signed
+        // up waited for mail that was never coming, with no way to read the
+        // screen correctly. This says only what is true either way, and the two
+        // routes out are on the screen instead of being guessed at.
+        _notice = 'If this address is new, a confirmation link is on its way. '
+            'If it already has an account, sign in below — or reset the '
+            'password if you have forgotten it.';
       });
     } catch (e) {
       setState(() {
@@ -47,6 +63,34 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
         _error = friendlyAuthError(e);
       });
     }
+  }
+
+  /// Sends the reset mail for whatever is typed above, without leaving the page.
+  ///
+  /// Same non-committal answer as everywhere else — sendPasswordReset does not
+  /// report whether the address exists and this must not either.
+  Future<void> _resetPassword() async {
+    final email = _email.text.trim();
+    if (email.isEmpty) {
+      setState(() => _error = 'Enter your email address first.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await SupabaseRepository.sendPasswordReset(email);
+    } catch (_) {
+      // Swallowed on purpose: an error here that a success does not produce
+      // would say whether the address is registered, which is the whole thing
+      // this screen refuses to say.
+    }
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _notice = 'If that address has an account, a reset link is on its way.';
+    });
   }
 
   @override
@@ -109,6 +153,27 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
               if (_notice != null) ...[
                 const SizedBox(height: 16),
                 _AlertBanner(message: _notice!, tone: _AlertTone.info),
+                const SizedBox(height: 8),
+                // Both exits, shown only once the ambiguous notice is up. The
+                // screen otherwise ends at a dead end for exactly the user who
+                // needs them: the one who already has an account.
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _loading ? null : () => context.go('/signin'),
+                        child: const Text('Sign in'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _loading ? null : _resetPassword,
+                        child: const Text('Reset password'),
+                      ),
+                    ),
+                  ],
+                ),
               ],
               const SizedBox(height: 24),
               FilledButton(
