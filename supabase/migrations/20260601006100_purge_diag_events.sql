@@ -1,0 +1,44 @@
+-- diag_events held ~36,800 rows of call, presence and chat traces across two
+-- couples. Diagnostics is gone from the client as of build 10, the read policy
+-- is own-rows-only, and nothing writes to the table any more — so every one of
+-- those rows was unreadable by anybody and unreachable by anything, while still
+-- being a timestamped record of who called whom and when. It was also roughly
+-- 65% of this database.
+--
+-- The table stays. Dropping it would take the retention job, the BRIN index and
+-- the ops heartbeat with it, and leave the migration history describing
+-- something that is not there.
+delete from public.diag_events;
+
+-- ── NOT closed, recorded so nobody assumes otherwise ─────────────────────────
+--
+-- pg_net is an outbound HTTP client inside the database. Its functions carry no
+-- ACL — for a function that means EXECUTE TO PUBLIC — and the net schema grants
+-- USAGE to PUBLIC, anon and authenticated:
+--
+--   net: supabase_admin=UC/supabase_admin | =U/supabase_admin
+--        | anon=U/supabase_admin | authenticated=U/supabase_admin | ...
+--
+-- Those grants were issued BY supabase_admin. Postgres only lets a role revoke
+-- grants it made itself, so a `revoke ... from anon, authenticated` run as
+-- postgres reports success and changes nothing — which is exactly what happened
+-- on the first attempt here, and the verification query is the only reason it
+-- was caught. supabase_admin is not assumable through the connection available
+-- to this project, so it cannot be revoked from here at all.
+--
+-- Assessment rather than alarm: this is Supabase's own default layout for
+-- pg_net, not something this project configured. PostgREST exposes only the
+-- schemas in its exposed-schema list, which is `public`, so net.http_post is
+-- NOT reachable over the REST API by any client role today. The exposure would
+-- become real if `net` were ever added to that list, or if a SECURITY INVOKER
+-- function in public were written to call into it.
+--
+-- To actually close it, from the SQL editor in the dashboard, which runs with
+-- more privilege than this connection:
+--
+--   revoke usage on schema net from public, anon, authenticated;
+--   revoke all on all functions in schema net from public, anon, authenticated;
+--
+-- The notify path is unaffected either way: notify_call, notify_reach,
+-- notify_care, notify_message and notify_secret are SECURITY DEFINER owned by
+-- postgres and execute with the owner's rights.
