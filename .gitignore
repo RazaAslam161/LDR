@@ -33,6 +33,7 @@ next-env.d.ts
 
 # built APK artifacts (large binaries — never commit; install from disk)
 *.apk
+Miles*.apk
 Tethered*.apk
 
 # Supabase CLI scratch state (project ref + org id, machine-local)
