@@ -43,3 +43,11 @@ supabase/.temp/
 
 # Local quarantine for regenerable build output pending deletion
 _trash/
+
+# Release signing material. android/.gitignore covers these too, but only for
+# paths under android/ — a keystore kept anywhere else in the tree was one
+# `git add -A` away from being committed, and a signing key in git history is a
+# signing key that has to be replaced.
+*.jks
+*.keystore
+key.properties
