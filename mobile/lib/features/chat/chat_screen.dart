@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,9 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
+import 'package:miles/core/links/link_open.dart';
+import 'package:miles/core/links/link_scan.dart';
+import 'package:miles/core/links/link_target.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
@@ -41,6 +45,7 @@ import 'package:miles/features/chat/widgets/album_bubble.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
+import 'package:miles/features/chat/widgets/link_card.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
 import 'package:miles/features/chat/widgets/selectable_message.dart';
@@ -2065,13 +2070,46 @@ class _Content extends StatelessWidget {
       case 'file':
         return FileBubble(message: m);
       default:
-        return Text(
-          m.body ?? '',
-          style: TextStyle(
-            color: textColor,
-            fontSize: 15,
-            height: 1.35,
-          ),
+        final body = m.body ?? '';
+        final spans = LinkScan.spans(body);
+        final style = TextStyle(
+          color: textColor,
+          fontSize: 15,
+          height: 1.35,
+        );
+        if (spans.isEmpty) return Text(body, style: style);
+
+        // Linkified text, plus a card for the first link. A plain Text was the
+        // whole of this branch, so a shared reel was an unclickable string the
+        // partner had to select, copy and paste into a browser by hand.
+        final linkStyle = style.copyWith(
+          decoration: TextDecoration.underline,
+          decorationColor: textColor.withValues(alpha: 0.55),
+        );
+        final pieces = <InlineSpan>[];
+        var at = 0;
+        for (final sp in spans) {
+          if (sp.start > at) {
+            pieces.add(TextSpan(text: body.substring(at, sp.start)));
+          }
+          final target = classifyLink(sp.url);
+          pieces.add(TextSpan(
+            text: body.substring(sp.start, sp.end),
+            style: linkStyle,
+            recognizer: TapGestureRecognizer()
+              ..onTap = () => LinkOpen.open(context, target),
+          ),);
+          at = sp.end;
+        }
+        if (at < body.length) pieces.add(TextSpan(text: body.substring(at)));
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text.rich(TextSpan(style: style, children: pieces)),
+            LinkCard(target: classifyLink(spans.first.url), onBubble: true),
+          ],
         );
     }
   }
