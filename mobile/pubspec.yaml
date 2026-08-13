@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+11
+version: 0.1.0+12
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

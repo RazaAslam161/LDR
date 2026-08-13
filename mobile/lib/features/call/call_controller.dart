@@ -65,6 +65,54 @@ class CallController extends ChangeNotifier {
   /// thing it and the caller both hold.
   String? _callId;
 
+  /// Which attempt owns the fields below.
+  ///
+  /// Bumped by _teardown and by a glare resolution, and captured across every
+  /// await on a call path. Without it a resolution that lands while startCall
+  /// is between _openMedia and _startConnectTimeout lets the dead attempt run
+  /// to completion: it publishes its peer connection over _pc, and the one it
+  /// displaced is left holding an OPEN MICROPHONE that nothing will ever close
+  /// — _teardown disposes the field, not the orphan, so the leak outlives the
+  /// call, the call screen, and the next call as well.
+  int _attempt = 0;
+
+  /// True for the whole of a _teardown, which is four awaits long.
+  ///
+  /// `state` is not written until the last of them, so until then this
+  /// controller still reads `calling` with isCaller true — the exact shape the
+  /// glare branch adopts on, and the shape dispose()'s own Closed callback
+  /// re-enters _teardown with.
+  bool _tearingDown = false;
+
+  /// The call id this device is in the middle of adopting, or null.
+  ///
+  /// Open only from the moment the peer's offer wins the tie-break until
+  /// _callId becomes theirs. Signals are demuxed by call_id, and for the width
+  /// of that window the peer's candidates are addressed to an id this device
+  /// does not answer to yet — they are early, not stale.
+  String? _resolvingCallId;
+
+  /// Candidates that arrived under [_resolvingCallId] before it was adopted.
+  ///
+  /// Buffered rather than dropped. Dropped, the adopted call begins with no
+  /// remote candidates at all, which is indistinguishable in every trace from
+  /// signalling that never arrived — one of the two failures this file already
+  /// spends a hundred lines separating.
+  final List<Map<String, dynamic>> _resolvingIce = [];
+
+  /// The capture a call attempt has already asked the platform for.
+  ///
+  /// Android opens one camera per process, and getUserMedia is the widest await
+  /// on the call path — so it is the await a glare resolution most often lands
+  /// inside. A second request while the first is in flight either throws (busy)
+  /// or leaves two live captures with one of them stranded; the adoption waits
+  /// for this one instead.
+  Future<MediaStream>? _openingMedia;
+
+  /// The unawaited invite insert, so a call that is abandoned can delete its
+  /// row after the insert it is racing has actually landed.
+  Future<void>? _inviteWrite;
+
   /// Candidate types seen, ours and theirs. The counts are the whole diagnosis
   /// when a call fails: no local relay means TURN never allocated, no remote
   /// candidates at all means signalling never arrived, and both present with no
@@ -233,7 +281,12 @@ class CallController extends ChangeNotifier {
   /// That trigger is `notify_call`, and it POSTs to reach-notify — not to the
   /// call-notify function this comment used to name. call-notify was deployed
   /// once, wired to nothing, and left running unauthenticated for a year.
-  Future<void> _insertInvite(String offerSdp, bool video) async {
+  ///
+  /// The id is a parameter, not a read of `_callId`: this method awaits, and a
+  /// glare resolution landing inside it would otherwise file the row under the
+  /// WINNER's id — whose own insert then fails on the primary key, and that
+  /// insert is the push, which is the only thing that wakes a closed app.
+  Future<void> _insertInvite(String id, String offerSdp, bool video) async {
     final couple = _coupleId;
     final me = _myUid;
     final callee = _ref.read(sessionProvider).partner?.id;
@@ -241,7 +294,7 @@ class CallController extends ChangeNotifier {
       // Returned in silence. The FCM ring hangs entirely off this insert, so
       // this is "the callee's phone never made a sound" — and the caller's
       // screen is identical to a call that rang and went unanswered.
-      Diag.record(DiagArea.call, 'invite_skipped', corr: _callId, fields: {
+      Diag.record(DiagArea.call, 'invite_skipped', corr: id, fields: {
         'has_couple': couple != null,
         'has_me': me != null,
         'has_callee': callee != null,
@@ -252,14 +305,14 @@ class CallController extends ChangeNotifier {
       await SupabaseService.client.from('call_invites').insert({
         // Explicit, so the row id IS the call id and the FCM-woken callee joins
         // the same trace as the caller.
-        'id': _callId,
+        'id': id,
         'couple_id': couple,
         'caller_id': me,
         'callee_id': callee,
         'offer_sdp': offerSdp,
         'video': video,
       });
-      Diag.record(DiagArea.call, 'invite_inserted', corr: _callId);
+      Diag.record(DiagArea.call, 'invite_inserted', corr: id);
     } catch (e) {
       // `catch (_) {}` before. This insert is what fires the push that rings a
       // closed app, so when it fails the caller waits the full 35s and tears
@@ -271,7 +324,7 @@ class CallController extends ChangeNotifier {
       // duplicate id are one indistinguishable "PostgrestException" without the
       // code. Same two fields as msg_insert_result, so both write paths read
       // alike.
-      Diag.record(DiagArea.call, 'invite_failed', corr: _callId, fields: {
+      Diag.record(DiagArea.call, 'invite_failed', corr: id, fields: {
         'error': e.runtimeType.toString(),
         // Which couple the row was written FOR. A 42501 here is the RLS policy
         // saying this is not your couple — unreadable without knowing which
@@ -280,6 +333,25 @@ class CallController extends ChangeNotifier {
         'couple': couple,
         'pg_code': e is PostgrestException ? e.code : null,
         'pg_msg': e is PostgrestException ? e.message : null,
+      },);
+    }
+  }
+
+  /// Take back the durable invite for a call that was abandoned.
+  ///
+  /// A glare resolution always leaves one: the yielding device inserted its own
+  /// row, and the trigger on that insert has already pushed the partner. Left
+  /// behind, it is a phone that rings for a call nobody is placing — on a push
+  /// delivered late out of doze, or on a notification tapped after a restart —
+  /// and handlePendingCall checks only that the row exists.
+  Future<void> _deleteInvite(String id) async {
+    try {
+      await SupabaseService.client.from('call_invites').delete().eq('id', id);
+      Diag.record(DiagArea.call, 'invite_deleted', corr: id);
+    } catch (e) {
+      Diag.record(DiagArea.call, 'invite_delete_failed', corr: id, fields: {
+        'error': e.runtimeType.toString(),
+        'pg_code': e is PostgrestException ? e.code : null,
       },);
     }
   }
@@ -706,6 +778,11 @@ class CallController extends ChangeNotifier {
     // devices where the binding had gone wrong. An unbound controller now fails
     // through the channel gate below, which says so out loud.
     if (state != CallState.idle) return;
+    // Claimed before the first await. Everything below resumes on a controller
+    // that may have been handed to the PEER's call in the meantime: both people
+    // pressed Call, this side lost the tie-break, and every line after that
+    // point would otherwise write over the call being rescued.
+    final attempt = ++_attempt;
     isCaller = true;
     isVideo = video;
     camOn = video;
@@ -714,7 +791,9 @@ class CallController extends ChangeNotifier {
     // Minted here rather than by the database, because it has to be on the
     // broadcast offer AND be the invite row id — those are the two separate
     // paths a callee can learn about this call on, and both traces have to
-    // land under one name.
+    // land under one name. It is also this device's operand in the glare
+    // tie-break, which is why it is assigned outright: a `??=` here would make
+    // two consecutive calls share one id, and a shared id decides nothing.
     _callId = const Uuid().v4();
     _startedAt = DateTime.now();
     _localCandTypes.clear();
@@ -730,15 +809,25 @@ class CallController extends ChangeNotifier {
     // call: without this the app sent an offer and 37 candidates into a channel
     // the server had refused, then blamed the network 35 seconds later.
     if (!await _ensureChannel()) {
+      // A resolution that landed inside the subscribe poll owns the controller
+      // now; failing it here would end the call this device just adopted.
+      if (attempt != _attempt) return;
       _failWithoutChannel('call_no_channel');
       return;
     }
+    // The poll runs for up to five seconds and is the widest await before the
+    // camera opens, so it is the likeliest place for a resolution to land. Past
+    // this line the controller may already belong to the peer's call.
+    if (attempt != _attempt) return;
     try {
       await _openMedia(video: video);
+      if (attempt != _attempt) return;
       await _routeAudio();
+      if (attempt != _attempt) return;
       // Before the peer connection exists, so the relay is in its ICE config
       // rather than arriving too late to be used.
       await _ensureRelay();
+      if (attempt != _attempt) return;
       if (!relayAvailable) {
         // Deliberately NOT an abort any more. Aborting here bricked the first
         // call of every fresh install: relayAvailable is derived from
@@ -755,13 +844,34 @@ class CallController extends ChangeNotifier {
             '(${turnError ?? 'still fetching'}) — candidates may trickle in');
       }
       await _createPc();
+      if (attempt != _attempt) return;
       final offer = await _pc!.createOffer();
+      if (attempt != _attempt) return;
       await _pc!.setLocalDescription(offer);
-      _send('offer', {'sdp': offer.sdp, 'type': offer.type, 'video': video});
-      unawaited(_insertInvite(offer.sdp ?? '', video)); // durable → FCM rings a closed app
+      if (attempt != _attempt) return;
+      _send('offer', {
+        'sdp': offer.sdp,
+        'type': offer.type,
+        'video': video,
+        // Says this device honours the tie-break. Build 9 puts call_id on every
+        // signal but drops any offer that arrives while it is busy, so it can
+        // only ever KEEP — and a tie-break against a peer that cannot yield is
+        // a coin flip that loses half of all double-dials to a 35s timeout on
+        // both phones. There is no update channel; mixed builds are the steady
+        // state for a while.
+        'glare': true,
+      });
+      final invite = _insertInvite(_callId!, offer.sdp ?? '', video);
+      _inviteWrite = invite;
+      unawaited(invite); // durable → FCM rings a closed app
       await CallForegroundService.start();
+      // The service belongs to whichever call is live, so it is left running;
+      // only the timer would be this dead attempt's, and arming it would end
+      // the adopted call 35 seconds from now.
+      if (attempt != _attempt) return;
       _startConnectTimeout();
     } catch (e) {
+      if (attempt != _attempt) return;
       // e.g. camera/mic permission denied — don't hang on "Calling…".
       debugPrint('[call] startCall failed: $e');
       _lastError = _readableCallError(e);
@@ -809,6 +919,10 @@ class CallController extends ChangeNotifier {
 
   Future<void> accept() async {
     if (state != CallState.ringing || _pendingOffer == null) return;
+    // Six awaits, and the same orphan shape as startCall: a hangup arriving
+    // mid-accept runs _teardown, and without a generation the media and the
+    // peer connection opened after it are published to a call that has ended.
+    final attempt = ++_attempt;
     camOn = _pendingVideo;
     _startedAt = DateTime.now();
     _localCandTypes.clear();
@@ -823,9 +937,11 @@ class CallController extends ChangeNotifier {
     // Answering without it is a phone that rings, is picked up, and connects to
     // nothing — reported as "the call never worked", never as an error.
     if (!await _ensureChannel()) {
+      if (attempt != _attempt) return;
       _failWithoutChannel('accept_no_channel');
       return;
     }
+    if (attempt != _attempt) return;
     try {
       await _openMedia(video: isVideo);
       await _routeAudio();
@@ -836,6 +952,8 @@ class CallController extends ChangeNotifier {
       await _flushPending();
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
+      // Everything below writes state a teardown has already reset.
+      if (attempt != _attempt) return;
       _send('answer', {'sdp': answer.sdp, 'type': answer.type});
       // NOT connected — nothing has been negotiated with the network yet. Set
       // here, the callee showed "connected" over a black screen for 35s while
@@ -850,6 +968,7 @@ class CallController extends ChangeNotifier {
       _pendingOffer = null;
       await CallForegroundService.start();
     } catch (e) {
+      if (attempt != _attempt) return;
       // `catch (_)` before: the exception was bound and dropped. It covers
       // _openMedia (permissions, camera in use by another app), _routeAudio,
       // _ensureRelay, _createPc and the SDP exchange — five very different
@@ -943,7 +1062,8 @@ class CallController extends ChangeNotifier {
 
   // ── Internals ───────────────────────────────────────────────────────────────
   Future<void> _openMedia({bool video = true}) async {
-    _localStream = await navigator.mediaDevices.getUserMedia({
+    final attempt = _attempt;
+    final capture = navigator.mediaDevices.getUserMedia({
       // Left as-is deliberately. The Android implementation already enables
       // echo cancellation, noise suppression and auto gain; spelling them out
       // as constraints risks a device rejecting the whole request.
@@ -968,7 +1088,27 @@ class CallController extends ChangeNotifier {
             }
           : false,
     });
-    localRenderer.srcObject = _localStream;
+    _openingMedia = capture;
+    MediaStream stream;
+    try {
+      stream = await capture;
+    } finally {
+      if (identical(_openingMedia, capture)) _openingMedia = null;
+    }
+    // The camera is physically opening here, so this is the widest await on a
+    // call path and the one a glare resolution or a teardown lands inside.
+    // Publishing over the live capture does not lose a reference, it strands
+    // one: the displaced stream is still attached to the surviving call's peer
+    // connection, and _teardown disposes the field, not the orphan — so the
+    // microphone stays open past the call, the call screen and the next call.
+    if (attempt != _attempt) {
+      try {
+        await stream.dispose();
+      } catch (_) {}
+      throw const _Superseded();
+    }
+    _localStream = stream;
+    localRenderer.srcObject = stream;
     notifyListeners();
   }
 
@@ -995,8 +1135,21 @@ class CallController extends ChangeNotifier {
   // is limiting it. That is what call_stats.dart is for.
 
   Future<void> _createPc() async {
+    final attempt = _attempt;
     final config = await _iceConfig();
     final pc = await createPeerConnection(config);
+    // _pc and the stats monitor are shared, and this method reaches them two
+    // awaits in. A resolution or a teardown that landed in that gap has already
+    // disposed what it owned; writing _pc here hands the live call a connection
+    // it did not build and strands this one — ICE agent, sockets and TURN
+    // allocation open, and an undisposed connection is what leaves
+    // AudioSwitchManager unstopped for the next call.
+    if (attempt != _attempt) {
+      try {
+        await pc.dispose();
+      } catch (_) {}
+      throw const _Superseded();
+    }
     _pc = pc;
     // The ICE servers are read from the static cache HERE and setConfiguration
     // is called nowhere, so this count is final for this call: a relay that
@@ -1080,28 +1233,102 @@ class CallController extends ChangeNotifier {
     final data = payload['data'];
     final map =
         data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
-    // Adopt the caller's id so both devices file this call under one name. A
-    // callee that already has one (woken by FCM) keeps it — they are the same
-    // id, because the caller uses the invite row id for both.
-    _callId ??= payload['call_id']?.toString();
+    final theirs = payload['call_id']?.toString();
+    // `ended` is idle with a 300ms timer on it: _teardown has already reset
+    // every field this device would ring with, and the settle timer re-checks
+    // the state before firing, so this makes it a no-op rather than a race.
+    // Without it, a partner redialling straight after a call that failed — the
+    // follow-on of every glare that could not be resolved, and what people
+    // actually do — got no ring at all and another 35s of "Calling…".
+    if (kind == 'offer' && state == CallState.ended) _setState(CallState.idle);
+    // Adopt the caller's id so both devices file this call under one name — but
+    // only on an offer, and only from idle. `??=` never overwrote, and
+    // _teardown never cleared it, so a controller that had held one call id
+    // kept it for the life of the process and every later call filed its trace
+    // under the FIRST call's id. Now that id also decides which signals this
+    // device is willing to hear, so a stale one is no longer just a bad label.
+    if (kind == 'offer' && state == CallState.idle) _callId = theirs ?? _callId;
     // Paired with signal_sent on the other device, this is what separates "the
     // offer was never sent" from "the offer was sent and never arrived". They
     // are indistinguishable from either phone alone, and they have different
     // causes.
-    Diag.record(DiagArea.call, 'signal_received', corr: _callId, fields: {
+    Diag.record(DiagArea.call, 'signal_received', corr: _callId ?? theirs,
+        fields: {
       'kind': kind,
       'state': state.name,
+      'foreign': theirs != null && _callId != null && theirs != _callId,
     },);
+    // Everything except an offer belongs to a call this device is already in;
+    // an offer necessarily carries an id we have never seen. Two calls exist on
+    // this one channel during a glare, and a hangup for the loser's call would
+    // otherwise tear down the winner's. The call being adopted is let through:
+    // its hangup is how this device learns the winner gave up, and dropping it
+    // left the yielder answering a call that no longer existed. Left permissive
+    // until _callId is known: the FCM path learns its id from the invite row
+    // and candidates that beat it there still have to reach _pendingRemote.
+    if (kind != 'offer' &&
+        theirs != null &&
+        _callId != null &&
+        theirs != _callId &&
+        theirs != _resolvingCallId) {
+      Diag.record(DiagArea.call, 'signal_foreign_call', corr: _callId, fields: {
+        'kind': kind,
+        'their_call': theirs,
+      },);
+      return;
+    }
     switch (kind) {
       case 'offer':
         if (state != CallState.idle) {
-          // Dropped with no ring, no log, and nothing sent back to the caller,
-          // who then waits out the full 35s. It matters because `state` can be
-          // STUCK: any path that leaves it non-idle makes this device silently
-          // unreachable while looking perfectly healthy.
-          Diag.record(DiagArea.call, 'offer_dropped_busy',
-              corr: _callId, fields: {'state': state.name},);
-          return;
+          // Only an outgoing call that is still ours to give up can be yielded.
+          // A teardown in flight reads `calling` with isCaller true for four
+          // more awaits, and adopting into it hands the adoption a stream and a
+          // peer connection that teardown is on its way to disposing.
+          final canYield = isCaller &&
+              state == CallState.calling &&
+              !_tearingDown &&
+              _resolvingCallId == null;
+          // A peer that does not advertise the tie-break cannot yield: build 9
+          // drops every offer that reaches it while busy, so it can only keep.
+          // Tie-breaking against it decides half of all double-dials the wrong
+          // way, and the wrong way is both phones on "Calling…" for 35s.
+          final peerYields = map['glare'] as bool? ?? false;
+          final glare = !canYield
+              ? CallGlare.undecidable
+              : peerYields
+                  ? callGlareFor(mine: _callId, theirs: theirs)
+                  : theirs == null
+                      ? CallGlare.undecidable
+                      : CallGlare.yieldToPeer;
+          Diag.record(DiagArea.call, 'offer_glare', corr: _callId, fields: {
+            'state': state.name,
+            'is_caller': isCaller,
+            'their_call': theirs,
+            'peer_yields': peerYields,
+            'outcome': glare.name,
+          },);
+          switch (glare) {
+            case CallGlare.keepMine:
+              // Nothing to send and nothing to tear down: their device computes
+              // the mirror of this line and answers the offer already in flight.
+              return;
+            case CallGlare.yieldToPeer:
+              _enterResolving(theirs!);
+              unawaited(_adoptAndAnswer(
+                RTCSessionDescription(
+                    map['sdp']?.toString(), map['type']?.toString(),),
+                video: map['video'] as bool? ?? true,
+                id: theirs,
+              ),);
+              return;
+            case CallGlare.undecidable:
+              // Genuinely busy — ringing, connected, or mid-teardown. Today's
+              // behaviour on purpose: a unilateral yield from here abandons a
+              // call that is not the peer's to replace.
+              Diag.record(DiagArea.call, 'offer_dropped_busy',
+                  corr: _callId, fields: {'state': state.name},);
+              return;
+          }
         }
         _ring(
           RTCSessionDescription(
@@ -1112,10 +1339,199 @@ class CallController extends ChangeNotifier {
       case 'answer':
         _applyAnswer(map);
       case 'ice':
+        // Early, not stale: addressed to the id this device is in the middle of
+        // adopting and does not answer to yet. Dropped, the adopted call starts
+        // with no remote candidates at all — which reads in every trace as
+        // signalling that never arrived.
+        if (theirs != null && theirs == _resolvingCallId) {
+          _resolvingIce.add(map);
+          return;
+        }
         _addIce(map);
       case 'hangup':
         _teardown(CallState.ended);
     }
+  }
+
+  /// Open the window in which this device holds two calls at once.
+  ///
+  /// It closes the moment _callId becomes theirs, not when the answer goes out:
+  /// from that line on their candidates carry an id this device recognises and
+  /// take the ordinary path into _pendingRemote.
+  void _enterResolving(String id) {
+    _resolvingCallId = id;
+    _resolvingIce.clear();
+    Diag.record(DiagArea.call, 'glare_resolving', corr: _callId, fields: {
+      'theirs': id,
+    },);
+  }
+
+  /// Answer the peer's offer on a controller that is already mid-call.
+  ///
+  /// Both people pressed Call. Requiring the one that lost the tie-break to
+  /// also press Accept is a bug, not a safeguard — so this never passes through
+  /// ringing, and both sides read "Calling…" from the tap to the connection.
+  Future<void> _adoptAndAnswer(
+    RTCSessionDescription offer, {
+    required bool video,
+    required String id,
+  }) async {
+    // A capture already in flight is this process's one camera, and the offer
+    // most often arrives inside it. Opening a second one hands Android a busy
+    // camera, which fails the adoption and so ends BOTH calls; waiting is also
+    // what lets keepMedia see the stream the displaced attempt was opening
+    // instead of deciding there is none.
+    final opening = _openingMedia;
+    if (opening != null) {
+      try {
+        await opening;
+      } catch (_) {}
+    }
+    // An answer cannot add a video m-line the offer did not have. Keeping a
+    // video capture for an audio offer leaves the camera on for a call that can
+    // never show it, so the capture survives only when the kinds agree.
+    final keepMedia = _localStream != null && video == isVideo;
+    final attempt = await _discardOutgoingForResolution(keepMedia: keepMedia);
+    // Those disposes are awaits. A hangup, a connect timeout or a Failed
+    // connection landing in them runs _teardown, and reading the generation
+    // after them made every later check blind to it — the adoption then built a
+    // peer connection, a foreground service and a 35s timer under a controller
+    // the UI had already returned to idle.
+    if (attempt != _attempt) return;
+    _callId = id;
+    _resolvingCallId = null;
+    isCaller = false;
+    isVideo = video;
+    camOn = video;
+    _startedAt = DateTime.now();
+    notifyListeners();
+    Diag.record(DiagArea.call, 'glare_adopt', corr: id, fields: {
+      'video': video,
+      'kept_media': keepMedia,
+      'queued_ice': _resolvingIce.length,
+    },);
+    try {
+      if (!keepMedia) {
+        await _openMedia(video: video);
+        if (attempt != _attempt) return;
+        await _routeAudio();
+        if (attempt != _attempt) return;
+      }
+      // accept() awaits this and this path did not, which made the yielding
+      // device the one place in the file that builds a peer connection on
+      // whatever happened to be cached: iceServers are read once, at
+      // construction, so a relay arriving afterwards cannot join the call. On a
+      // cold cache that is a glare between two carrier NATs that cannot pair,
+      // reported by pc_created as a TURN outage.
+      await _ensureRelay();
+      if (attempt != _attempt) return;
+      await _createPc();
+      if (attempt != _attempt) return;
+      await _pc!.setRemoteDescription(offer);
+      if (attempt != _attempt) return;
+      _remoteSet = true;
+      await _flushPending();
+      for (final ice in _resolvingIce) {
+        await _addIce(ice);
+      }
+      _resolvingIce.clear();
+      final answer = await _pc!.createAnswer();
+      if (attempt != _attempt) return;
+      await _pc!.setLocalDescription(answer);
+      if (attempt != _attempt) return;
+      // The offer came in over this channel, so it was live a moment ago — but
+      // a resume nulls it for the length of a removeChannel round trip, and
+      // _send drops what it cannot put on the wire. The answer is the one
+      // message whose loss nobody detects: the winner is waiting for it and has
+      // no exit but its 35s timeout. Gated here, after the SDP is built, so it
+      // cannot widen the window in which this device answers to two call ids.
+      if (!await _ensureChannel()) {
+        if (attempt != _attempt) return;
+        _failWithoutChannel('glare_no_channel');
+        return;
+      }
+      if (attempt != _attempt) return;
+      _send('answer', {'sdp': answer.sdp, 'type': answer.type});
+      _startConnectTimeout();
+      await CallForegroundService.start();
+    } catch (e) {
+      if (attempt != _attempt) return;
+      // The failure that is invisible from the other phone: it won the
+      // tie-break, so it is sitting on "Calling…" waiting for an answer that
+      // this device has already given up on producing.
+      Diag.record(DiagArea.call, 'glare_adopt_failed', corr: _callId, fields: {
+        'error': e.runtimeType.toString(),
+        'has_pc': _pc != null,
+        'remote_set': _remoteSet,
+      },);
+      _lastError = _readableCallError(e);
+      _send('hangup', {});
+      unawaited(_teardown(CallState.ended));
+    }
+  }
+
+  /// Drop the outgoing call this device placed WITHOUT ending the call.
+  ///
+  /// Deliberately not _teardown. Teardown sets `ended`, nulls _pendingOffer,
+  /// resets isVideo/camOn, stops the foreground service and lands on idle 300ms
+  /// later — and the last of those is fatal here: the answer this device is
+  /// about to build would be assembled by a controller on its way to idle, on a
+  /// screen that pops itself the moment it arrives.
+  ///
+  /// Returns the generation it mints, because the disposes below are awaits and
+  /// the caller must not read _attempt after them.
+  Future<int> _discardOutgoingForResolution({required bool keepMedia}) async {
+    // Synchronous, before the first await: the startCall still in flight must
+    // be invalidated in this same turn of the event loop, or it resumes and
+    // publishes its peer connection over the call being rescued.
+    final attempt = ++_attempt;
+    _connectTimer?.cancel();
+    // The monitor's 2s timer would go on sampling the connection disposed
+    // below, and `stats` would carry the abandoned call's last sample into the
+    // adopted call's teardown row as if it described that one.
+    _statsMonitor.stop();
+    stats = null;
+    // Nulled BEFORE dispose, not after. dispose() fires onConnectionState with
+    // Closed synchronously, and that handler's `identical(pc, _pc)` guard is
+    // still true until this line — so disposing first tears down the call this
+    // method exists to save.
+    final pc = _pc;
+    _pc = null;
+    // _pendingRemote is kept on purpose: the peer only ever built ONE
+    // connection, so anything queued from it belongs to the survivor.
+    _localCandidates.clear();
+    _localCandTypes.clear();
+    _remoteCandTypes.clear();
+    _remoteSet = false;
+    remoteRenderer.srcObject = null;
+    final stream = keepMedia ? null : _localStream;
+    if (!keepMedia) {
+      _localStream = null;
+      localRenderer.srcObject = null;
+    }
+    Diag.record(DiagArea.call, 'glare_discard', corr: _callId, fields: {
+      'kept_media': keepMedia,
+      'had_pc': pc != null,
+      'queued_remote': _pendingRemote.length,
+    },);
+    // The row this attempt inserted is a durable ring, and nothing else in this
+    // file deletes one. Chained behind the insert because that insert is
+    // deliberately not awaited and would otherwise land after the delete.
+    final orphan = _callId;
+    final write = _inviteWrite;
+    _inviteWrite = null;
+    if (orphan != null) {
+      unawaited(write == null
+          ? _deleteInvite(orphan)
+          : write.whenComplete(() => _deleteInvite(orphan)),);
+    }
+    try {
+      await pc?.dispose();
+    } catch (_) {}
+    try {
+      await stream?.dispose();
+    } catch (_) {}
+    return attempt;
   }
 
   Future<void> _applyAnswer(Map<String, dynamic> map) async {
@@ -1225,55 +1641,78 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> _teardown(CallState end) async {
-    // The last stats sample is taken BEFORE the monitor stops, because it is
-    // the only record of what the media path was actually doing at the end —
-    // and it is discarded two lines below. On a call that connected and then
-    // degraded, this row is the whole story.
-    Diag.record(DiagArea.call, 'teardown', corr: _callId, fields: {
-      'from_state': state.name,
-      'connected_ever': stats != null,
-      'ms': _startedAt == null
-          ? null
-          : DateTime.now().difference(_startedAt!).inMilliseconds,
-      'relayed': stats?.relayed,
-      'rtt_ms': stats?.rttMs,
-      'rx_kbps': stats?.recvKbps,
-      'tx_kbps': stats?.sendKbps,
-    },);
-    _connectTimer?.cancel();
-    _statsMonitor.stop();
-    stats = null;
-    await CallForegroundService.stop();
+    // Re-entered for real: `await _pc?.dispose()` below fires this connection's
+    // own onConnectionState(Closed), whose `identical(pc, _pc)` guard is still
+    // true because _pc is nulled afterwards. The same flag is what tells the
+    // glare branch that a controller still reading `calling` is on its way out.
+    if (_tearingDown) return;
+    _tearingDown = true;
+    // Before anything can await: an attempt still in flight has to stop writing
+    // to fields this method is about to reset, or it republishes _pc after the
+    // dispose below and leaves the microphone open on a call that has ended.
+    _attempt++;
     try {
-      await _localStream?.dispose();
-    } catch (_) {}
-    try {
-      // dispose(), not close(): the native close() clears the stream maps but
-      // leaves the peerConnection field set, so AudioSwitchManager.stop() never
-      // runs and the next call starts on a dirty audio session. dispose() calls
-      // close() itself, so this is not skipping anything.
-      await _pc?.dispose();
-    } catch (_) {}
-    _pc = null;
-    _localStream = null;
-    _pendingOffer = null;
-    _pendingRemote.clear();
-    _localCandidates.clear();
-    _remoteSet = false;
-    isCaller = false;
-    micOn = true;
-    camOn = true;
-    isVideo = true;
-    speakerOn = true;
-    frontCamera = true;
-    minimized = false;
-    localRenderer.srcObject = null;
-    remoteRenderer.srcObject = null;
-    _setState(end);
-    // settle back to idle so the next call can start
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (state == CallState.ended) _setState(CallState.idle);
-    });
+      // The last stats sample is taken BEFORE the monitor stops, because it is
+      // the only record of what the media path was actually doing at the end —
+      // and it is discarded two lines below. On a call that connected and then
+      // degraded, this row is the whole story.
+      Diag.record(DiagArea.call, 'teardown', corr: _callId, fields: {
+        'from_state': state.name,
+        'connected_ever': stats != null,
+        'ms': _startedAt == null
+            ? null
+            : DateTime.now().difference(_startedAt!).inMilliseconds,
+        'relayed': stats?.relayed,
+        'rtt_ms': stats?.rttMs,
+        'rx_kbps': stats?.recvKbps,
+        'tx_kbps': stats?.sendKbps,
+      },);
+      _connectTimer?.cancel();
+      _statsMonitor.stop();
+      stats = null;
+      await CallForegroundService.stop();
+      try {
+        await _localStream?.dispose();
+      } catch (_) {}
+      try {
+        // dispose(), not close(): the native close() clears the stream maps but
+        // leaves the peerConnection field set, so AudioSwitchManager.stop()
+        // never runs and the next call starts on a dirty audio session.
+        // dispose() calls close() itself, so this is not skipping anything.
+        await _pc?.dispose();
+      } catch (_) {}
+      _pc = null;
+      _localStream = null;
+      _pendingOffer = null;
+      _pendingRemote.clear();
+      _localCandidates.clear();
+      _remoteSet = false;
+      // Ten fields were reset here and not this one, and _onSignal assigned it
+      // with `??=` — so the first call this controller ever saw named every
+      // call after it. Signals are demuxed by call_id now, which turns that
+      // stale id from a mislabelled trace into a device that answers to the
+      // wrong call.
+      _callId = null;
+      _resolvingCallId = null;
+      _resolvingIce.clear();
+      _inviteWrite = null;
+      isCaller = false;
+      micOn = true;
+      camOn = true;
+      isVideo = true;
+      speakerOn = true;
+      frontCamera = true;
+      minimized = false;
+      localRenderer.srcObject = null;
+      remoteRenderer.srcObject = null;
+      _setState(end);
+      // settle back to idle so the next call can start
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (state == CallState.ended) _setState(CallState.idle);
+      });
+    } finally {
+      _tearingDown = false;
+    }
   }
 
   /// Keep the display awake while a call is up.
@@ -1313,6 +1752,14 @@ class CallController extends ChangeNotifier {
   }
 }
 
+/// Thrown by the attempt that no longer owns the controller, at the moment it
+/// would have published a stream or a peer connection over the call that
+/// replaced it. Every catch on a call path returns on the generation check
+/// first, so this never reaches a user-facing message.
+class _Superseded implements Exception {
+  const _Superseded();
+}
+
 /// What a session change means for call signalling.
 enum CallBinding { unchanged, bind, clear }
 
@@ -1345,6 +1792,49 @@ CallBinding callBindingFor({
     return CallBinding.unchanged;
   }
   return CallBinding.bind;
+}
+
+/// What this device does with an offer that arrived while it was already
+/// calling.
+enum CallGlare { keepMine, yieldToPeer, undecidable }
+
+/// Who keeps their outgoing call when both people dial inside the same window.
+///
+/// Both devices already hold both operands — _callId is minted locally and
+/// rides every broadcast as payload['call_id'] — so this is decided twice,
+/// independently, with no extra round trip, and the two answers have to be
+/// mirror images. Lower id keeps its call, higher id yields.
+///
+/// Lowercased first, and that is the whole reason this is a function rather
+/// than a `<`: 'A' is 0x41 and 'a' is 0x61, so an id that came back through a
+/// payload in the other case would invert the comparison on ONE side. Both
+/// devices then reach the same conclusion about themselves — both keep, or both
+/// yield — and neither call is ever answered.
+///
+/// Deliberately not call_invites.created_at: the offer broadcast goes out
+/// before that row is inserted, the row is sometimes never inserted at all, and
+/// Postgres now() is transaction-start, so it ranks network latency rather than
+/// who tapped. Deliberately not a time-ordered id (UUID v7 / ULID) either:
+/// lexicographic order over one of those IS timestamp order, which puts the
+/// decision back on two handset clocks that this repo has measured seconds
+/// apart.
+///
+/// [CallGlare.undecidable] covers a missing id and two ids that compare equal.
+/// Both fall through to the old drop-the-offer behaviour on purpose: a
+/// unilateral yield against a peer that cannot reciprocate is the same no-call
+/// outcome as the bug. A peer that does not advertise the tie-break at all is
+/// handled before this is reached — it can only keep, so it is yielded to.
+///
+/// Pure and top-level for the same reason as [callBindingFor]: the controller
+/// cannot be constructed under test, and this is the part that has to be right.
+CallGlare callGlareFor({required String? mine, required String? theirs}) {
+  if (mine == null || mine.isEmpty || theirs == null || theirs.isEmpty) {
+    return CallGlare.undecidable;
+  }
+  final a = mine.toLowerCase();
+  final b = theirs.toLowerCase();
+  if (a == b) return CallGlare.undecidable;
+  return a.compareTo(b) < 0 ? CallGlare.keepMine : CallGlare.yieldToPeer;
 }
 
 final callControllerProvider = ChangeNotifierProvider<CallController>((ref) {
