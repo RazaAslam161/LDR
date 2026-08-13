@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/media_urls.dart';
+import 'package:miles/core/media/media_decode.dart';
 
 /// One thing a full-screen viewer can show.
 ///
@@ -56,6 +57,17 @@ class MediaItem {
   /// Files a tile's bytes separately from the original's, so a grid and a
   /// viewer of the same photo do not fight over one cache entry.
   String get tileCacheKey => '$bucket/$tilePath';
+
+  /// A real thumbnail sibling exists for this item.
+  bool get hasThumb => thumbPath != null;
+
+  /// The width every surface must decode this item's TILE at.
+  ///
+  /// A real thumbnail is already ~720px on its longest edge, so it is decoded
+  /// unbounded and one frame serves the grid, the viewer's underlay and the
+  /// precache. A legacy original has no such bound and would decode at source
+  /// resolution into a tile, so it is capped.
+  int? get tileDecodeWidth => hasThumb ? null : kTileDecodePx;
 
   /// Whose it is, for the vault label a save writes.
   final String senderName;

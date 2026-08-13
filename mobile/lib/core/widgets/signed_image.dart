@@ -24,6 +24,8 @@ class SignedImage extends StatefulWidget {
     this.width,
     this.height,
     this.placeholder,
+    this.thumb = false,
+    this.decodeWidth,
   });
 
   final String bucket;
@@ -35,6 +37,11 @@ class SignedImage extends StatefulWidget {
   final double? width;
   final double? height;
   final Widget? placeholder;
+
+  /// See [NetImage.thumb] and [NetImage.decodeWidth]. Passed straight through:
+  /// this widget only resolves the URL, it does not decide the decode.
+  final bool thumb;
+  final int? decodeWidth;
 
   @override
   State<SignedImage> createState() => _SignedImageState();
@@ -93,6 +100,8 @@ class _SignedImageState extends State<SignedImage> {
         fit: widget.fit,
         width: widget.width,
         height: widget.height,
+        thumb: widget.thumb,
+        decodeWidth: widget.decodeWidth,
         cacheKey: '${widget.bucket}/$_path',);
   }
 }

@@ -11,6 +11,7 @@ import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/chat/widgets/video_surface.dart';
 import 'package:miles/features/closer/secure_screen.dart';
+import 'package:miles/core/media/media_decode.dart';
 
 /// Full-screen media, paged.
 ///
@@ -468,53 +469,84 @@ class _PhotoPageState extends State<_PhotoPage> {
     } else {
       final dpr = MediaQuery.devicePixelRatioOf(context);
       final width = MediaQuery.sizeOf(context).width;
-      // The thumbnail the grid already decoded, painted underneath while the
-      // original arrives. This is the second of the two spinners, and the one
-      // that made every swipe feel like a load: the bytes for this exact
-      // thumbnail are on disk and decoded — the tile the user tapped to get
-      // here was drawn with them — and the viewer was throwing that away to
-      // show a wheel instead.
-      //
-      // Only when a real thumbnail exists. For media sent before the thumbnail
-      // pipeline, tilePath IS path, so this would be the same download twice.
-      final thumbUrl = widget.item.thumbPath == null
-          ? null
-          : MediaUrls.cached(widget.item.bucket, widget.item.tilePath);
 
-      final image = CachedNetworkImage(
-        imageUrl: url,
-        cacheKey: widget.item.cacheKey,
-        fit: BoxFit.contain,
-        // Bounded even when full. `null` decoded a 12MP original at source
-        // resolution — ~48MB resident per page, three pages alive at once in a
-        // PageView. Twice the screen keeps a 2x pinch crisp, and _maxScale is
-        // 5.0 so the far end of a zoom softens rather than costing that.
-        memCacheWidth:
-            (width * dpr * (widget.full ? 2.0 : 1.0)).round(),
-        placeholder: (_, __) => thumbUrl != null
-            ? CachedNetworkImage(
-                imageUrl: thumbUrl,
-                cacheKey: widget.item.tileCacheKey,
-                fit: BoxFit.contain,
-                // No fade: this is a backdrop being replaced, and a fade here
-                // reads as the image loading twice.
-                fadeInDuration: Duration.zero,
-                placeholder: (_, __) => const ColoredBox(color: Colors.black),
-                errorWidget: (_, __, ___) =>
-                    const ColoredBox(color: Colors.black),
-              )
-            : const Center(
-                child: CircularProgressIndicator(color: Colors.white70),
-              ),
-        errorWidget: (_, __, ___) {
-          _onImageFailed();
-          return _Failed(onRetry: _retry);
-        },
+      // ONE decode width for every page, current or not.
+      //
+      // This used to be `widget.full ? 2.0 : 1.0`, which meant the neighbour
+      // Flutter had already decoded carried a different ResizeImageKey from the
+      // page it was about to become — so arriving discarded the finished frame
+      // and decoded the same file again, which is the stutter-then-spinner the
+      // precache was added to remove. Zoom is served by a separate layer that
+      // is mounted only while pinched, so no page pays 2x for a gesture most
+      // pages never receive.
+      final decodePx = (width * dpr).round();
+
+      // The thumbnail as a LAYER, not a placeholder.
+      //
+      // As a placeholder it was unmounted the instant the full image resolved
+      // OR errored — so a soft-but-correct photograph was replaced by a grey
+      // failure card whenever the original failed to load. Underneath, it stays
+      // until something better is painted over it, and a failure leaves the
+      // thumbnail on screen with the retry drawn on top.
+      //
+      // Only where a real thumbnail exists: for media predating the pipeline
+      // tilePath IS path, so this would be the same object twice.
+      final thumbUrl = widget.item.hasThumb
+          ? MediaUrls.cached(widget.item.bucket, widget.item.tilePath)
+          : null;
+
+      final image = Stack(
+        fit: StackFit.expand,
+        children: [
+          if (thumbUrl != null)
+            CachedNetworkImage(
+              imageUrl: thumbUrl,
+              cacheKey: widget.item.tileCacheKey,
+              fit: BoxFit.contain,
+              // Unbounded on purpose: a thumbnail IS its own bound, and this
+              // is the exact key/bounds pair the grid tile decoded, so the
+              // frame is already resident and this paints without work.
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+              placeholder: (_, __) => const ColoredBox(color: Colors.black),
+              errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black),
+            ),
+          CachedNetworkImage(
+            imageUrl: url,
+            cacheKey: widget.item.cacheKey,
+            fit: BoxFit.contain,
+            memCacheWidth: decodePx,
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            // Nothing underneath means nothing to look at, so the delayed
+            // indicator is allowed. With a thumbnail underneath it never is —
+            // a spinner over a perfectly good photograph is the complaint.
+            placeholder: (_, __) => thumbUrl != null
+                ? const SizedBox.shrink()
+                : const _DelayedSpinner(),
+            errorWidget: (_, __, ___) {
+              _onImageFailed();
+              // Drawn OVER the underlay rather than replacing it — this is
+              // the top of a Stack, so a thumbnail that has already painted
+              // stays visible behind the retry instead of being thrown away
+              // because the original 404'd.
+              return _Failed(onRetry: _retry);
+            },
+          ),
+        ],
       );
+      // Unconditional Hero. Conditioned on `full`, the widget TYPE at this slot
+      // changed as pages became current — Hero to no-Hero — which remounts the
+      // element and restarts the decode that was already finished. Non-current
+      // pages get a tag nothing can fly to, so the flight still only happens
+      // for the page the user is actually on.
       content = Center(
-        child: widget.full
-            ? Hero(tag: widget.item.heroTag, child: image)
-            : image,
+        child: Hero(
+          tag: widget.full
+              ? widget.item.heroTag
+              : '__offstage__${widget.item.cacheKey}',
+          child: image,
+        ),
       );
     }
 
@@ -579,6 +611,44 @@ class _VideoPageState extends State<_VideoPage> {
       child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 64),
     );
   }
+}
+
+/// A progress indicator that only appears once nothing has painted for
+/// [kIndicatorDelay].
+///
+/// Gated on time, not on state. A row whose has_thumb is true but whose
+/// thumbnail object is missing signs to nothing, and without this the page is
+/// pure black for the whole original download with nothing to say it is
+/// working.
+class _DelayedSpinner extends StatefulWidget {
+  const _DelayedSpinner();
+
+  @override
+  State<_DelayedSpinner> createState() => _DelayedSpinnerState();
+}
+
+class _DelayedSpinnerState extends State<_DelayedSpinner> {
+  bool _show = false;
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer(kIndicatorDelay, () {
+      if (mounted) setState(() => _show = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _show
+      ? const Center(child: CircularProgressIndicator(color: Colors.white70))
+      : const ColoredBox(color: Colors.black);
 }
 
 class _Failed extends StatelessWidget {

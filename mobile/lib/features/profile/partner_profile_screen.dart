@@ -390,11 +390,18 @@ class _MediaTile extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // `height: side` is gone on purpose, and it is the whole fix.
+            // memCacheHeight joins the resize key, so a square tile asking for
+            // both dimensions could never share its decoded frame with the
+            // viewer's underlay, which asks for width alone. The tile and the
+            // photo it opens were two decodes of one file, and the "instant"
+            // hand-off never happened. BoxFit still squares it.
             SignedImage(
                 bucket: item.bucket,
                 value: item.tilePath,
                 width: side,
-                height: side,),
+                thumb: item.hasThumb,
+                decodeWidth: item.tileDecodeWidth,),
             if (item.isVideo)
               const Center(
                 child: Icon(Icons.play_circle_outline,
