@@ -174,12 +174,19 @@ class _MediaViewerState extends State<MediaViewer>
     if (i >= widget.source.length - _extendWithin) widget.source.extend();
   }
 
-  /// Put the files two and three pages out on disk, so the swipe after the one
-  /// Flutter pre-built is not a cold network fetch either.
+  /// Put the neighbours on disk AND, for the immediate ones, through the
+  /// decoder — so arriving on a page is a paint rather than a download or a
+  /// decode.
   ///
-  /// The file only. This is the same cache manager and the same key
-  /// CachedNetworkImage reads, so arriving on the page is a decode rather than
-  /// a download, and nothing is decoded before it is looked at.
+  /// The old version stopped at the file. "Arriving on the page is a decode
+  /// rather than a download" was true and was still the wrong finish line: a
+  /// 12MP decode is ~100ms of CPU that lands on the raster thread in the middle
+  /// of the swipe animation, which is a stutter and then a spinner. The bytes
+  /// were the cheap half.
+  ///
+  /// Distance 1 is decoded, 2 and 3 are only fetched. Decoding the whole radius
+  /// would hold four full-size images resident to save a decode the user may
+  /// never ask for.
   Future<void> _warm() async {
     // One loop, however fast the swiping is. Ten pages in a second would
     // otherwise start ten of these, each holding four downloads open, and a
@@ -188,6 +195,32 @@ class _MediaViewerState extends State<MediaViewer>
     if (_warming) return;
     _warming = true;
     try {
+      // The immediate neighbours, decoded. precacheImage puts the frame in
+      // Flutter's ImageCache under the same provider CachedNetworkImage will
+      // construct, so the page finds it already resident.
+      for (final direction in const [1, -1]) {
+        final i = _index + direction;
+        if (i < 0 || i >= widget.source.length) continue;
+        final item = widget.source.itemAt(i);
+        if (item.isVideo) continue;
+        final url = await MediaUrls.sign(item.bucket, item.path);
+        if (!mounted) return;
+        if (url == null) continue;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final w = (MediaQuery.sizeOf(context).width * dpr).round();
+        try {
+          await precacheImage(
+            ResizeImage(
+              CachedNetworkImageProvider(url, cacheKey: item.cacheKey),
+              width: w,
+            ),
+            context,
+          );
+        } catch (_) {
+          // A miss costs one spinner on one page. Never worth failing a swipe.
+        }
+        if (!mounted) return;
+      }
       for (var d = 2; d <= _warmRadius; d++) {
         for (final direction in const [1, -1]) {
           // Re-read rather than captured: a swipe during the await above moved
@@ -371,7 +404,18 @@ class _PhotoPageState extends State<_PhotoPage> {
   @override
   void initState() {
     super.initState();
-    unawaited(_resolve());
+    // Synchronously first. MediaUrls.cached is a map lookup, and the page the
+    // user is arriving at was signed by _warm several swipes ago — so going
+    // straight to the async path meant a guaranteed frame of spinner for a URL
+    // that was already in hand. That was the first of the TWO spinners every
+    // page used to show.
+    final warm = MediaUrls.cached(widget.item.bucket, widget.item.path);
+    if (warm != null) {
+      _url = warm;
+      _resolving = false;
+    } else {
+      unawaited(_resolve());
+    }
   }
 
   Future<void> _resolve() async {
@@ -424,14 +468,44 @@ class _PhotoPageState extends State<_PhotoPage> {
     } else {
       final dpr = MediaQuery.devicePixelRatioOf(context);
       final width = MediaQuery.sizeOf(context).width;
+      // The thumbnail the grid already decoded, painted underneath while the
+      // original arrives. This is the second of the two spinners, and the one
+      // that made every swipe feel like a load: the bytes for this exact
+      // thumbnail are on disk and decoded — the tile the user tapped to get
+      // here was drawn with them — and the viewer was throwing that away to
+      // show a wheel instead.
+      //
+      // Only when a real thumbnail exists. For media sent before the thumbnail
+      // pipeline, tilePath IS path, so this would be the same download twice.
+      final thumbUrl = widget.item.thumbPath == null
+          ? null
+          : MediaUrls.cached(widget.item.bucket, widget.item.tilePath);
+
       final image = CachedNetworkImage(
         imageUrl: url,
         cacheKey: widget.item.cacheKey,
         fit: BoxFit.contain,
-        memCacheWidth: widget.full ? null : (width * dpr).round(),
-        placeholder: (_, __) => const Center(
-          child: CircularProgressIndicator(color: Colors.white70),
-        ),
+        // Bounded even when full. `null` decoded a 12MP original at source
+        // resolution — ~48MB resident per page, three pages alive at once in a
+        // PageView. Twice the screen keeps a 2x pinch crisp, and _maxScale is
+        // 5.0 so the far end of a zoom softens rather than costing that.
+        memCacheWidth:
+            (width * dpr * (widget.full ? 2.0 : 1.0)).round(),
+        placeholder: (_, __) => thumbUrl != null
+            ? CachedNetworkImage(
+                imageUrl: thumbUrl,
+                cacheKey: widget.item.tileCacheKey,
+                fit: BoxFit.contain,
+                // No fade: this is a backdrop being replaced, and a fade here
+                // reads as the image loading twice.
+                fadeInDuration: Duration.zero,
+                placeholder: (_, __) => const ColoredBox(color: Colors.black),
+                errorWidget: (_, __, ___) =>
+                    const ColoredBox(color: Colors.black),
+              )
+            : const Center(
+                child: CircularProgressIndicator(color: Colors.white70),
+              ),
         errorWidget: (_, __, ___) {
           _onImageFailed();
           return _Failed(onRetry: _retry);
