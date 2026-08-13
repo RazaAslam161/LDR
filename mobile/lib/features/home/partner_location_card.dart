@@ -9,6 +9,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/partner_sentence.dart';
+import 'package:miles/features/home/world_map_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 
@@ -247,6 +248,22 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: MilesColors.cream50, fontSize: 13,),
+                    ),
+                  ),
+                  // The one place in the app that contacts a third party, and
+                  // it happens because the user pressed this.
+                  IconButton(
+                    icon: const Icon(Icons.travel_explore,
+                        color: MilesColors.gilt, size: 20,),
+                    tooltip: 'Open the world map',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => WorldMapScreen(
+                          lat: point.latitude,
+                          lon: point.longitude,
+                          name: widget.partnerName,
+                        ),
+                      ),
                     ),
                   ),
                   IconButton(

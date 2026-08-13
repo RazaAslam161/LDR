@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
@@ -8,12 +7,14 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 
 /// The full state of "who am I + who is my partner" used across the app.
 class SessionState {
@@ -272,6 +273,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // URLs to this couple's storage objects, and uploads accepted for it.
     // Neither belongs to whoever signs in on this handset next.
     MediaUrls.clear();
+    MapToken.clear();
     ChatSendQueue.instance.clear();
     state = const SessionState(loading: false);
   }

@@ -105,6 +105,7 @@ dependencies:
   google_mlkit_pose_detection: ^0.14.1
   file_picker: ^11.0.3
   flutter_image_compress: ^2.5.1
+  mapbox_maps_flutter: ^2.28.1
 
 dev_dependencies:
   flutter_test:
