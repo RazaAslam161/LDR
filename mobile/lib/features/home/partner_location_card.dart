@@ -8,7 +8,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
-import 'package:miles/features/home/map_3d_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Live partner location on the dashboard. Shows an OpenStreetMap (no API key)
@@ -106,17 +105,6 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
     } catch (_) {}
   }
 
-  /// Opens the full-screen Google photorealistic 3D map at the partner's spot.
-  void _open3D(LatLng point) {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => Map3DScreen(
-        lat: point.latitude,
-        lon: point.longitude,
-        name: widget.partnerName,
-      ),
-    ),);
-  }
-
   String _agoText(DateTime? at) {
     if (at == null) return 'live';
     final secs = DateTime.now().difference(at).inSeconds;
@@ -145,6 +133,30 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
   @override
   Widget build(BuildContext context) {
     final p = widget.partner;
+
+    // City mode: a place name and deliberately no coordinates. It was being
+    // reported as "isn't sharing", which made the considerate setting
+    // indistinguishable from off — and no map is drawn here, so this branch is
+    // also the one that does not touch a tile server at all.
+    if (p != null && p.isSharingCity) {
+      return SurfacePanel(
+        child: Row(
+          children: [
+            const Icon(Icons.location_city_outlined,
+                color: MilesColors.gilt, size: 20,),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '${widget.partnerName} is in ${p.locationLabel}',
+                style: const TextStyle(
+                    color: MilesColors.cream50, fontSize: 13,),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (p == null || !p.isSharingLive) {
       return SurfacePanel(
         child: Row(
@@ -191,12 +203,6 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.threed_rotation,
-                        color: MilesColors.gilt, size: 20,),
-                    onPressed: () => _open3D(point),
-                    tooltip: 'View in 3D',
-                  ),
-                  IconButton(
                     icon: const Icon(Icons.my_location,
                         color: MilesColors.gilt, size: 20,),
                     onPressed: _recenter,
@@ -231,6 +237,12 @@ class _PartnerLocationCardState extends State<PartnerLocationCard>
                         // "no labels" issue with OSM's free server was caused
                         // by rate-limiting returning blank tiles.)
                         TileLayer(
+                          // Null cachingProvider resolves to the built-in disk cache
+                          // (image_provider.dart:166) — not configuring one is what
+                          // turns it on, and it records every place looked at.
+                          tileProvider: NetworkTileProvider(
+                            cachingProvider: const DisabledMapCachingProvider(),
+                          ),
                           urlTemplate:
                               'https://tile.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.miles.miles',

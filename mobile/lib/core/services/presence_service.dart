@@ -161,6 +161,21 @@ class Presence {
 
   bool get isSharingLive =>
       locationSharingMode == 'precise' && latitude != null && longitude != null;
+
+  /// Sharing a place name but no coordinates — the considerate setting.
+  ///
+  /// location_service.dart implements 'city' properly: it geocodes to a
+  /// "City, Country" label and deliberately stores NO latitude or longitude.
+  /// Nothing read that. Every surface asked [isSharingLive], which is false
+  /// for city mode, so anyone who picked the polite option was reported to
+  /// their partner as "isn't sharing right now" — the coarse choice was
+  /// indistinguishable from off, which is the one thing it must never be.
+  bool get isSharingCity =>
+      locationSharingMode == 'city' &&
+      (locationLabel?.isNotEmpty ?? false);
+
+  /// Sharing anything at all, at any granularity.
+  bool get isSharingAnything => isSharingLive || isSharingCity;
 }
 
 /// Couple-scoped presence read/write. RLS lets you update only your own row and

@@ -193,6 +193,16 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
               ),
               children: [
                 TileLayer(
+                  // flutter_map 8.x resolves a null cachingProvider to
+                  // BuiltInMapCachingProvider (image_provider.dart:166-167),
+                  // which writes tiles under getApplicationCacheDirectory().
+                  // Not configuring one is what TURNS IT ON — so this app was
+                  // keeping an on-disk record of every place either partner had
+                  // looked at, on a handset that wears a disguise precisely
+                  // because someone might pick it up.
+                  tileProvider: NetworkTileProvider(
+                    cachingProvider: const DisabledMapCachingProvider(),
+                  ),
                   urlTemplate:
                       'https://tile.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.miles.miles',
