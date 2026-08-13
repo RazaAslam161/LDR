@@ -127,6 +127,7 @@ class SharedMediaWindow extends MediaSource {
           ? null
           : MediaItem.stored(intimateBucket, path,
               thumbPath: m.videoThumbPath,
+              messageId: m.id,
               isVideo: true,
               senderName: sender,
               sentAt: m.createdAt,);
@@ -136,6 +137,7 @@ class SharedMediaWindow extends MediaSource {
         ? null
         : MediaItem.stored(chatBucket, path,
             thumbPath: m.imageThumbPath,
+            messageId: m.id,
             senderName: sender,
             sentAt: m.createdAt,);
   }

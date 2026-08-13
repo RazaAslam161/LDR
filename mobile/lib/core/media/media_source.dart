@@ -14,6 +14,7 @@ class MediaItem {
     required this.bucket,
     required this.path,
     this.thumbPath,
+    this.messageId,
     this.isVideo = false,
     this.senderName = 'a message',
     this.sentAt,
@@ -26,6 +27,7 @@ class MediaItem {
     String bucket,
     String value, {
     String? thumbPath,
+    String? messageId,
     bool isVideo = false,
     String senderName = 'a message',
     DateTime? sentAt,
@@ -35,6 +37,7 @@ class MediaItem {
         bucket: bucket,
         path: MediaUrls.toPath(bucket, value),
         thumbPath: thumbPath,
+        messageId: messageId,
         isVideo: isVideo,
         senderName: senderName,
         sentAt: sentAt,
@@ -47,6 +50,13 @@ class MediaItem {
   /// The small sibling object, in the same [bucket], or null for anything
   /// written before thumbnails existed.
   final String? thumbPath;
+
+  /// The message row this came from, when there is one.
+  ///
+  /// Only used to claim a backfilled thumbnail. Null for media that is not a
+  /// message — an avatar, a check-in snap — which is also media that has no
+  /// thumbnail to claim.
+  final String? messageId;
 
   final bool isVideo;
 

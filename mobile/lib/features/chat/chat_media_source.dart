@@ -55,6 +55,7 @@ class ChatMediaSource extends MediaSource {
       isVideo ? intimateBucket : chatBucket,
       raw ?? '',
       thumbPath: isVideo ? m.videoThumbPath : m.imageThumbPath,
+      messageId: m.id,
       isVideo: isVideo,
       senderName: senderNameFor(m),
       sentAt: m.createdAt,

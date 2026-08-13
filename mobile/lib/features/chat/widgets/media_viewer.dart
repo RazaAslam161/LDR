@@ -12,6 +12,7 @@ import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/chat/widgets/video_surface.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/core/media/media_decode.dart';
+import 'package:miles/core/media/thumb_backfill.dart';
 
 /// Full-screen media, paged.
 ///
@@ -114,6 +115,7 @@ class _MediaViewerState extends State<MediaViewer>
 
   @override
   void dispose() {
+    _healTimer?.cancel();
     widget.source.removeListener(_onSourceChanged);
     _transform.removeListener(_onTransform);
     _zoom
@@ -159,7 +161,38 @@ class _MediaViewerState extends State<MediaViewer>
     _applySecure(i);
     _maybeExtend(i);
     unawaited(_warm());
+    _scheduleHeal(i);
   }
+
+  /// Give a legacy photo the thumbnail it never had, once the user has actually
+  /// settled on it.
+  ///
+  /// Dwell-gated rather than fired on arrival: a fast swipe through forty
+  /// photos would otherwise queue forty full-size decodes behind the animation
+  /// it is trying to run. 1.5s means the user stopped to look, which is also
+  /// when the original has finished arriving and the bytes are local.
+  ///
+  /// Everything about this is best-effort. It never blocks a frame, never
+  /// surfaces an error, and a failure simply leaves the row rendering from its
+  /// original exactly as it does today.
+  void _scheduleHeal(int i) {
+    _healTimer?.cancel();
+    if (i < 0 || i >= widget.source.length) return;
+    final item = widget.source.itemAt(i);
+    // A video's poster cannot be made from the video bytes on this path, and an
+    // item that already has one needs nothing.
+    if (item.isVideo || item.hasThumb || item.messageId == null) return;
+    _healTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      unawaited(ThumbBackfill.heal(
+        messageId: item.messageId!,
+        bucket: item.bucket,
+        path: item.path,
+      ));
+    });
+  }
+
+  Timer? _healTimer;
 
   /// A photo lives in couple_media and a video in couple_intimate, and the
   /// player this replaced carried FLAG_SECURE for exactly that reason. In a
