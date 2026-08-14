@@ -1,9 +1,11 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:miles/core/media/map_token.dart';
+import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
+
 
 /// The full 3D map: real satellite imagery draped over real elevation, with
 /// buildings standing out of it, under a sky.
@@ -17,7 +19,7 @@ import 'package:miles/core/ui/theme.dart';
 /// 3D terrain and no sky. Only MapLibre GL JS, the browser build, does, which
 /// is why the WebView version of this screen had terrain and a native port of
 /// it would not have. That terrain branch is stalled upstream.
-class WorldMapScreen extends StatefulWidget {
+class WorldMapScreen extends ConsumerStatefulWidget {
   const WorldMapScreen({
     required this.lat,
     required this.lon,
@@ -30,10 +32,19 @@ class WorldMapScreen extends StatefulWidget {
   final String name;
 
   @override
-  State<WorldMapScreen> createState() => _WorldMapScreenState();
+  ConsumerState<WorldMapScreen> createState() => _WorldMapScreenState();
 }
 
-class _WorldMapScreenState extends State<WorldMapScreen> {
+class _WorldMapScreenState extends ConsumerState<WorldMapScreen> {
+  MapboxMap? _map;
+  PointAnnotationManager? _markers;
+  PointAnnotation? _partnerPin;
+
+  /// Where the pin currently sits, so a presence tick that has not actually
+  /// moved does not rebuild the annotation on every rebuild.
+  double? _pinLat;
+  double? _pinLon;
+
   bool _ready = false;
   bool _tokenMissing = false;
 
@@ -60,7 +71,47 @@ class _WorldMapScreenState extends State<WorldMapScreen> {
     setState(() => _ready = true);
   }
 
+  /// Draw or move the partner's pin.
+  ///
+  /// The screen was centring the camera on a position and drawing nothing, so
+  /// the partner was wherever the middle of the screen happened to be — and the
+  /// moment you panned, nothing on the map said where she actually was. The
+  /// basic map has always had this; the 3D one never did.
+  Future<void> _placePartner(double lat, double lon, {bool recentre = false}) async {
+    final markers = _markers;
+    if (markers == null) return;
+    if (_pinLat == lat && _pinLon == lon && _partnerPin != null) return;
+    _pinLat = lat;
+    _pinLon = lon;
+
+    final point = Point(coordinates: Position(lon, lat));
+    if (_partnerPin == null) {
+      _partnerPin = await markers.create(PointAnnotationOptions(
+        geometry: point,
+        iconSize: 1.4,
+        // A named icon from the style's own sprite sheet, so no asset has to be
+        // bundled and decoded for a single pin.
+        iconImage: 'dot-11',
+        iconColor: MilesColors.blush.toARGB32(),
+      ),);
+    } else {
+      _partnerPin!.geometry = point;
+      await markers.update(_partnerPin!);
+    }
+
+    if (recentre) {
+      await _map?.flyTo(
+        CameraOptions(center: point, zoom: _zoom, pitch: _pitch,
+            bearing: _bearing,),
+        MapAnimationOptions(duration: 900),
+      );
+    }
+  }
+
   Future<void> _onMapCreated(MapboxMap map) async {
+    _map = map;
+    _markers = await map.annotations.createPointAnnotationManager();
+    await _placePartner(widget.lat, widget.lon);
     // The SDK's own logo and attribution stay. They are a licence condition,
     // and the previous version of this screen set attributionControl:false —
     // which is not a style choice, it is using someone's imagery against their
@@ -86,6 +137,16 @@ class _WorldMapScreenState extends State<WorldMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Follow her. The screen took a fixed lat/lon at construction, so it showed
+    // where she was when it opened and never moved again — the basic map
+    // tracked movement and this did not.
+    ref.listen<Presence?>(partnerPresenceProvider, (_, next) {
+      final lat = next?.latitude;
+      final lon = next?.longitude;
+      if (lat == null || lon == null) return;
+      unawaited(_placePartner(lat, lon, recentre: true));
+    });
+
     return Scaffold(
       backgroundColor: MilesColors.night,
       appBar: AppBar(
