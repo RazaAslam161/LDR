@@ -2,13 +2,21 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:miles/main.dart' show MilesApp;
 
-/// PIN + biometric gate for Memory Threads (spec §F9: "sits behind its OWN
-/// 6-digit PIN / biometric prompt, on top of the general Closer gate").
+/// PIN + biometric gate for Memory Threads.
+///
+/// **Four digits, not the six §F9 asks for, and that is a decision rather than
+/// drift.** Widening the length invalidates every PIN already set: the stored
+/// hash is of whatever string was typed, so an existing user would be asked for
+/// six digits and could never enter their four. That was unrecoverable until
+/// this session — the gate now has a Forgot-PIN path — so widening is finally
+/// SAFE to do, but it still forces a reset on everyone who has one, which is a
+/// call to make deliberately rather than as a side effect of a doc comment.
+/// The doc used to claim six while the code did four; this is the code.
 ///
 /// Preference order:
 /// 1. Biometric / device PIN via [LocalAuthentication] if available and set up.
 /// 2. A 4-digit app PIN stored in `flutter_secure_storage` (hashed, not raw),
-///    which the user must set on first entry.
+///    which the user must set — and confirm — on first entry.
 ///
 /// Either path returns `true` on success. Failures bubble up as `false` so the
 /// caller can keep the user on the gate screen.
@@ -74,14 +82,9 @@ class MemoryPinGate {
     }
   }
 
-  /// Full gate: tries biometric first, then app PIN if the user has one set.
-  /// Returns true if either path succeeds. Caller decides what to render
-  /// when this returns false (usually: stay on the gate screen).
-  static Future<bool> tryBiometricOrRequirePin() async {
-    final bio = await authenticateBiometric();
-    if (bio) return true;
-    return false; // caller prompts for the app PIN
-  }
+  // tryBiometricOrRequirePin lived here: it called authenticateBiometric and
+  // returned its result unchanged, behind a name promising it also handled the
+  // PIN. Zero call sites — the gate calls authenticateBiometric directly.
 
   /// Naive hash. PINs are short, so we don't pretend this is a password KDF —
   /// we rely on `flutter_secure_storage`'s hardware-backed encryption to keep

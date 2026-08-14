@@ -2,16 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Granular, read-only views over the bundled [sessionProvider]. Features should
 /// watch the narrowest provider they need so they only rebuild when that slice
 /// changes.
-
-/// The current Supabase auth session (null when signed out).
-final authStateProvider = Provider<Session?>(
-  (ref) => ref.watch(sessionProvider).session,
-);
 
 /// The signed-in user's profile (null until loaded / onboarded).
 final currentProfileProvider = Provider<Profile?>(
@@ -26,11 +20,6 @@ final currentCoupleProvider = Provider<Couple?>(
 /// The partner's profile (null until the partner has joined).
 final partnerProfileProvider = Provider<Profile?>(
   (ref) => ref.watch(sessionProvider).partner,
-);
-
-/// True once both members are present in the couple.
-final isPairedProvider = Provider<bool>(
-  (ref) => ref.watch(sessionProvider).couple != null,
 );
 
 /// A short-lived invite code captured from a deep link (tethered://join?code=…),

@@ -49,14 +49,6 @@ const List<MoodData> kMoods = [
       intimate: true,),
 ];
 
-/// Everyday moods only (no bold/intimate ones) — for the general mood selector.
-List<MoodData> get kEverydayMoods =>
-    kMoods.where((m) => !m.intimate).toList(growable: false);
-
-/// Bold/intimate moods — for the intimacy contexts.
-List<MoodData> get kIntimateMoods =>
-    kMoods.where((m) => m.intimate).toList(growable: false);
-
 MoodData? moodByKey(String? key) {
   if (key == null) return null;
   for (final m in kMoods) {

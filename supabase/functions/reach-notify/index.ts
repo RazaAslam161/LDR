@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     // Our triggers deliver { kind, record }. Bare rows (an older reach trigger
     // that posted to_jsonb(new) directly) still work and default to "reach".
-    const kind: "reach" | "care" | "call" | "message" =
+    const kind: "reach" | "care" | "call" | "message" | "memory" =
       payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
@@ -150,11 +150,14 @@ Deno.serve(async (req) => {
     // Calls name the two sides explicitly (caller_id/callee_id); reach and care
     // use from_user and the recipient is simply the other member of the couple.
     // Messages name their author sender_id; calls name both sides explicitly;
-    // reach/care use from_user and the recipient is the other couple member.
+    // a memory names its proposer; reach/care use from_user and the recipient
+    // is the other couple member.
     const fromUser: string | undefined = kind === "call"
       ? row?.caller_id
       : kind === "message"
       ? row?.sender_id
+      : kind === "memory"
+      ? row?.proposer
       : row?.from_user;
     const explicitRecipient: string | undefined =
       kind === "call" ? row?.callee_id : undefined;
@@ -209,12 +212,12 @@ Deno.serve(async (req) => {
         // fcm_service.dart / firebaseMessagingBackgroundHandler read.
         data: {
           type: kind,
-          // Omitted for calls. Nothing renders it — the ring wears the
-          // receiving device's disguise and is built there — so for a call it
-          // was the partner's real display name travelling through Google in
-          // cleartext to be thrown away. The client already falls back when it
-          // is absent. Reach/care/message still carry it; those paths read it.
-          ...(kind === "call" ? {} : { from_name: fromName }),
+          // Omitted for calls and memories. Nothing renders it — both wear the
+          // RECEIVING device's disguise and are built there — so it was the
+          // partner's real display name travelling through Google in cleartext
+          // to be thrown away. The client already falls back when it is
+          // absent. Reach/care/message still carry it; those paths read it.
+          ...(kind === "call" || kind === "memory" ? {} : { from_name: fromName }),
           couple_id: coupleId,
           ...(kind === "reach" ? { reach_id: rowId } : {}),
           ...(kind === "care" ? { nudge_id: rowId } : {}),
@@ -222,13 +225,19 @@ Deno.serve(async (req) => {
             ? { call_id: rowId, video: String(row?.video === true) }
             : {}),
           ...(kind === "message" ? { message_id: rowId } : {}),
+          ...(kind === "memory" ? { memory_id: rowId } : {}),
         },
         // A call is worthless if it arrives late, but a MESSAGE must survive a
         // doze window or an offline stretch — a 30s TTL made FCM discard it
         // rather than queue it, so a backgrounded partner simply never got it.
+        //
+        // A memory proposal is the least urgent thing here and the one with the
+        // longest useful life: it waits for the partner however long that
+        // takes, and dropping it after thirty seconds is precisely how nine of
+        // them ended up waiting forever.
         android: {
           priority: "high",
-          ttl: kind === "message" ? "86400s" : "30s",
+          ttl: kind === "message" || kind === "memory" ? "86400s" : "30s",
         },
         apns: {
           headers: { "apns-priority": "10" },

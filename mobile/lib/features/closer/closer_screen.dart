@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
 
 /// Entry screen for the intimacy module ("Closer").
 ///
@@ -246,12 +248,49 @@ class _KeyError extends StatelessWidget {
 }
 
 /// What the couple sees once the shared key is derived and Closer is ready.
-class _ModuleEnabled extends StatelessWidget {
+class _ModuleEnabled extends ConsumerStatefulWidget {
   const _ModuleEnabled();
 
   @override
+  ConsumerState<_ModuleEnabled> createState() => _ModuleEnabledState();
+}
+
+class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
+  int _pendingMemories = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // A push landing while this grid is mounted must move the count without
+    // waiting for the user to navigate away and back.
+    pendingMemory.addListener(_refreshCounts);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshCounts());
+  }
+
+  @override
+  void dispose() {
+    pendingMemory.removeListener(_refreshCounts);
+    super.dispose();
+  }
+
+  /// `state` and `proposer` are plaintext, so this needs no key and no PIN —
+  /// which is the only reason a tile sealed behind one can carry a count at all.
+  Future<void> _refreshCounts() async {
+    final session = ref.read(sessionProvider);
+    final coupleId = session.couple?.id;
+    final me = session.profile?.id;
+    if (coupleId == null || me == null) return;
+    final n = await MemoryThreadRepository.pendingProposalCount(
+      coupleId: coupleId,
+      me: me,
+    );
+    if (!mounted || n == _pendingMemories) return;
+    setState(() => _pendingMemories = n);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    const features = <_FeatureTile>[
+    final features = <_FeatureTile>[
       _FeatureTile(
         emoji: '✏️',
         title: 'Touch Trace',
@@ -305,6 +344,7 @@ class _ModuleEnabled extends StatelessWidget {
         title: 'Memory Threads',
         blurb: "Milestones you've kept",
         route: '/app/closer/memory-threads',
+        badgeCount: _pendingMemories,
       ),
     ];
 
@@ -343,11 +383,19 @@ class _FeatureTile extends StatelessWidget {
     required this.title,
     required this.blurb,
     required this.route,
+    this.badgeCount = 0,
   });
   final String emoji;
   final String title;
   final String blurb;
   final String route;
+
+  /// How many things inside are waiting for this person. Zero draws nothing.
+  ///
+  /// This tile had nowhere to put a count, and Memory Threads is the ninth of
+  /// nine with a second PIN behind it — so a proposal was undiscoverable even
+  /// by someone standing on this screen looking straight at it.
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -370,8 +418,29 @@ class _FeatureTile extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(emoji, style: const TextStyle(fontSize: 28)),
-                const Icon(Icons.arrow_outward,
-                    size: 14, color: Color(0xFFEF6F58),),
+                if (badgeCount > 0)
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 20),
+                    height: 20,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFEF6F58),
+                      shape: BoxShape.rectangle,
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                    ),
+                    child: Text(
+                      badgeCount > 9 ? '9+' : '$badgeCount',
+                      style: const TextStyle(
+                        color: Color(0xFF141B26),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                else
+                  const Icon(Icons.arrow_outward,
+                      size: 14, color: Color(0xFFEF6F58),),
               ],
             ),
             Column(

@@ -62,6 +62,7 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingReach.addListener(_onPendingReach);
     pendingCall.addListener(_onPendingCall);
     pendingChat.addListener(_onPendingChat);
+    pendingMemory.addListener(_onPendingMemory);
     realtimeResumed.addListener(_rearmAlwaysOn);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
@@ -239,6 +240,23 @@ class _AppShellState extends ConsumerState<AppShell>
     presenceRouteObserver?.publishActiveTab();
   }
 
+  /// A tapped memory notification. Opens Memory Threads directly rather than
+  /// selecting the Closer tab: the feature is the ninth tile of nine, behind
+  /// its own PIN, and "we told you, now go and find it" is most of why nine
+  /// proposals were never opened.
+  ///
+  /// The gate still stands — this pushes the route, and the route asks for the
+  /// PIN exactly as it does when reached by hand.
+  void _onPendingMemory() {
+    final tap = pendingMemory.value;
+    if (tap == null) return;
+    pendingMemory.value = null;
+    // A proposal that merely ARRIVED while the app is open is not a reason to
+    // move anyone; the Closer tile's count is how that one surfaces.
+    if (!tap.fromTap || !mounted) return;
+    context.push('/app/closer/memory-threads');
+  }
+
   /// Single entry point for the overlay — de-duped by reach id so the realtime
   /// and push paths never double-show the same Reach.
   void _showReach(String reachId, String partnerName) {
@@ -260,6 +278,7 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingReach.removeListener(_onPendingReach);
     pendingCall.removeListener(_onPendingCall);
     pendingChat.removeListener(_onPendingChat);
+    pendingMemory.removeListener(_onPendingMemory);
     realtimeResumed.removeListener(_rearmAlwaysOn);
     final ch = _reachChannel;
     _reachChannel = null;

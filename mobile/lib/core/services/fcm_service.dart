@@ -52,6 +52,21 @@ final ValueNotifier<CallTap?> pendingCall = ValueNotifier<CallTap?>(null);
 /// message id only so a trace can tie the tap back to the push that caused it.
 final ValueNotifier<String?> pendingChat = ValueNotifier<String?>(null);
 
+/// A memory proposal arrived, or a memory notification was tapped.
+///
+/// [fromTap] separates the two, and the distinction is the whole point: a tap
+/// means open the thread, while a push landing in the foreground means only
+/// "refresh the count". Without the flag, a proposal arriving while she is
+/// mid-sentence in chat would throw her onto another screen — the same mistake
+/// [CallTap] carries this field to avoid.
+class MemoryTap {
+  const MemoryTap(this.memoryId, {required this.fromTap});
+  final String memoryId;
+  final bool fromTap;
+}
+
+final ValueNotifier<MemoryTap?> pendingMemory = ValueNotifier<MemoryTap?>(null);
+
 /// Wires Firebase Messaging: permission, token lifecycle, the local-notification
 /// channel, and the foreground / tapped-notification handlers.
 ///
@@ -229,6 +244,21 @@ class FcmService {
       // background isolate.
       return;
     }
+    if (type == 'memory') {
+      // A proposal is not urgent enough to interrupt, but it must not be lost
+      // either — a foregrounded app that swallows it leaves the partner in
+      // exactly the state all nine production rows are in. So the tray gets it
+      // (discoverable later, wearing the disguise) and the notifier lets a
+      // mounted Closer grid update its count now.
+      showMemoryNotification(
+        plugin: _fln,
+        memoryId: (m.data['memory_id'] as String?) ?? '',
+        coupleId: (m.data['couple_id'] as String?) ?? '',
+      );
+      pendingMemory.value =
+          MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: false);
+      return;
+    }
     if (type != 'reach') return;
     // Foreground: surface the in-app overlay. AppShell de-dupes by reach_id so
     // this and the Supabase realtime listener never double-show.
@@ -248,6 +278,11 @@ class FcmService {
         (m.data['video'] as String?) == 'true',
         fromTap: true,
       );
+      return;
+    }
+    if (type == 'memory') {
+      pendingMemory.value =
+          MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: true);
       return;
     }
     if (type != 'reach') return;
@@ -304,6 +339,16 @@ class FcmService {
       return;
     }
     if (tag == 'care') return; // care taps just open the app
+    if (tag == 'memory') {
+      // memory|memoryId|coupleId — opens the thread. Without this branch it
+      // falls through to the Reach default below and pops the full-screen
+      // overlay with a memory id in the reach slot, which is what the comment
+      // there warns about.
+      if (!SessionScope.allows(field(2), SessionScope.coupleId)) return;
+      pendingMemory.value =
+          MemoryTap(parts.length > 1 ? parts[1] : '', fromTap: true);
+      return;
+    }
     // Untagged by construction: the Reach payload is 'reachId|fromName|coupleId'
     // and predates every tagged kind. So this is a default branch that ASSUMES
     // reach — any new kind must get its own branch above it, or it lands here

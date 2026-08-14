@@ -16,6 +16,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/emergency_lock_service.dart';
@@ -415,6 +416,23 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // The event usually lands while the cover is still up, so the flip to the
     // real app is the second chance to act on it.
     MilesApp.showRealApp.addListener(_routeToNewPassword);
+    MilesApp.showRealApp.addListener(_dropPlaintextBehindCover);
+  }
+
+  /// Every decrypted photograph leaves RAM the moment the cover goes up.
+  ///
+  /// One listener rather than a call at each of the five places that lower
+  /// [MilesApp.showRealApp] — the shake, the volume combo, the lifecycle hook,
+  /// the app lock and the stealth scrim — because missing one of them is
+  /// missing all of them, and the failure is invisible.
+  ///
+  /// A screen's `dispose()` cannot do this job: the cover is raised on
+  /// backgrounding, which is exactly when Android kills the process, so
+  /// `dispose` frequently never runs. Only the ciphertext on disk survives,
+  /// which is the whole design.
+  void _dropPlaintextBehindCover() {
+    if (MilesApp.showRealApp.value) return;
+    EncryptedMediaCache.clear();
   }
 
   /// The router only exists while the real app is on screen — below that, the
@@ -489,6 +507,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     WidgetsBinding.instance.removeObserver(this);
     passwordRecovery.removeListener(_routeToNewPassword);
     MilesApp.showRealApp.removeListener(_routeToNewPassword);
+    MilesApp.showRealApp.removeListener(_dropPlaintextBehindCover);
     _volumeChannel.setMethodCallHandler(null);
     EmergencyLockService.dispose();
     _stopHeartbeat();

@@ -384,7 +384,3 @@ class PrivateVaultRepository {
 Future<String> decryptVaultNote(VaultItem item) {
   return CryptoCore.decryptString(item.payload, associatedData: item.ad);
 }
-
-Future<Uint8List> decryptVaultBytes(VaultItem item) {
-  return CryptoCore.decryptBytes(item.payload, associatedData: item.ad);
-}

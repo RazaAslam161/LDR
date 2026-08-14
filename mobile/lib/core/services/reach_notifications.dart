@@ -253,6 +253,50 @@ Future<void> showCareNotification({
   );
 }
 
+/// Your partner proposed a memory.
+///
+/// Nine proposals across two couples produced zero acceptances, and the reason
+/// was not the screen: nothing anywhere told the partner one existed. This is
+/// the missing half.
+///
+/// Deliberately on the REMINDERS channel rather than a seventh of its own.
+/// Channel names are listed in Android's notification settings under whatever
+/// app the launcher claims to be, so every new one is another line a stranger
+/// can read on a phone that is pretending to be a news reader — and "a gentle,
+/// non-urgent nudge that waits for you" is exactly what the reminders channel
+/// already describes. It is emphatically not Reach: a proposal is the least
+/// time-critical thing in this app, and waking the screen for one would be a
+/// lie about its urgency.
+///
+/// Carries no name and no title, like every other notification here. The spec
+/// asked for "She proposed a memory."; that would put the word *memory* on the
+/// lock screen of a disguised handset, which is the same defect as the care
+/// reminder that once arrived reading "News update" on a calculator.
+Future<void> showMemoryNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String memoryId,
+  required String coupleId,
+}) async {
+  final style = await currentNotificationStyle();
+  final android = AndroidNotificationDetails(
+    kCareChannelId,
+    kCareChannelName,
+    channelDescription: kCareChannelDesc,
+    importance: Importance.high,
+    priority: Priority.high,
+    icon: style.smallIcon,
+    ticker: style.ticker,
+    visibility: NotificationVisibility.secret,
+  );
+  await plugin.show(
+    id: memoryId.hashCode & 0x7fffffff,
+    title: style.title,
+    body: style.body,
+    notificationDetails: NotificationDetails(android: android),
+    payload: 'memory|$memoryId|$coupleId',
+  );
+}
+
 /// Background + terminated FCM handler. MUST be a top-level / static function
 /// annotated with @pragma('vm:entry-point') — it runs in its own isolate.
 @pragma('vm:entry-point')
@@ -327,6 +371,19 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
+  if (type == 'memory') {
+    await androidPlugin?.createNotificationChannel(buildCareChannel());
+    await showMemoryNotification(
+      plugin: plugin,
+      memoryId: (message.data['memory_id'] as String?) ?? '',
+      coupleId: coupleId ?? '',
+    );
+    return;
+  }
+
+  // Everything below assumes REACH. That is not a default worth relying on —
+  // a kind without its own branch above lands here and rings a full-screen
+  // alarm carrying an id that belongs to something else.
   await androidPlugin?.createNotificationChannel(buildReachChannel());
 
   // The background isolate has no Activity, so it can't query the FSI

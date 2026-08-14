@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
+import 'package:miles/core/media/media_decode.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
@@ -502,7 +503,17 @@ class _VaultGridItemState extends State<_VaultGridItem> {
                             ),
                           ],
                         )
-                      : Image.file(_file!, fit: BoxFit.cover))
+                      : Image.file(
+                          _file!,
+                          fit: BoxFit.cover,
+                          // A grid tile was decoding the preview at source
+                          // resolution — up to ~48MB of raster per cell for a
+                          // thumbnail. Width only: passing both dimensions
+                          // makes the key depend on both, so this tile and the
+                          // viewer's copy of the same photo would stop sharing
+                          // a decode even when the width agrees.
+                          cacheWidth: kTileDecodePx,
+                        ))
                   : _loading
                       ? const Center(
                           child: SizedBox(

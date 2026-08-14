@@ -435,9 +435,24 @@ class _PhotoPageState extends State<_PhotoPage> {
   bool _reSigned = false;
   Offset _tapPoint = Offset.zero;
 
+  /// Whether the full-resolution layer is mounted over the viewport-bounded
+  /// one.
+  ///
+  /// The comment above `decodePx` has promised this layer since the decode
+  /// work — "zoom is served by a separate layer that is mounted only while
+  /// pinched" — and it did not exist. `kZoomUpgradeScale` and
+  /// `kZoomRevertScale` had a test asserting they were ordered and zero widget
+  /// call sites, so pinching to 5x magnified a viewport-width bitmap: the
+  /// photograph got blurrier the harder you looked at it.
+  ///
+  /// Mounting it costs one decode and NO network — the bytes are already in the
+  /// disk cache under this exact cacheKey by the time anyone can pinch.
+  bool _upgraded = false;
+
   @override
   void initState() {
     super.initState();
+    widget.transform.addListener(_onZoomScale);
     // Synchronously first. MediaUrls.cached is a map lookup, and the page the
     // user is arriving at was signed by _warm several swipes ago — so going
     // straight to the async path meant a guaranteed frame of spinner for a URL
@@ -450,6 +465,26 @@ class _PhotoPageState extends State<_PhotoPage> {
     } else {
       unawaited(_resolve());
     }
+  }
+
+  @override
+  void dispose() {
+    widget.transform.removeListener(_onZoomScale);
+    super.dispose();
+  }
+
+  /// Two thresholds, deliberately not equal: one number would mount and unmount
+  /// a full-size decode on every jitter across the boundary.
+  ///
+  /// Only the page being LOOKED at may upgrade. The pager builds ±1, and a
+  /// neighbour deciding to decode a 12-megapixel original because the current
+  /// page is zoomed would be three full decodes for one gesture.
+  void _onZoomScale() {
+    if (!widget.full || !mounted) return;
+    final scale = widget.transform.value.getMaxScaleOnAxis();
+    final want =
+        _upgraded ? scale > kZoomRevertScale : scale > kZoomUpgradeScale;
+    if (want != _upgraded) setState(() => _upgraded = want);
   }
 
   Future<void> _resolve() async {
@@ -566,6 +601,22 @@ class _PhotoPageState extends State<_PhotoPage> {
               return _Failed(onRetry: _retry);
             },
           ),
+          // The zoom layer. Unbounded, so the pixels the pinch is asking for
+          // actually exist. Same cacheKey, so the disk cache is not touched —
+          // only the decode differs, which is precisely what a different
+          // memCacheWidth buys.
+          if (_upgraded)
+            CachedNetworkImage(
+              imageUrl: url,
+              cacheKey: widget.item.cacheKey,
+              fit: BoxFit.contain,
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+              // Nothing while it decodes: the bounded copy is directly
+              // underneath and is a perfectly good picture.
+              placeholder: (_, __) => const SizedBox.shrink(),
+              errorWidget: (_, __, ___) => const SizedBox.shrink(),
+            ),
         ],
       );
       // Unconditional Hero. Conditioned on `full`, the widget TYPE at this slot

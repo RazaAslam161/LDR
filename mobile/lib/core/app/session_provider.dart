@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/data/media_urls.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -275,6 +276,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
     MediaUrls.clear();
     MapToken.clear();
     ChatSendQueue.instance.clear();
+    // Ciphertext too, unlike a cover raise. Raising the cover keeps the disk
+    // layer because it is unreadable without the key and re-fetching it every
+    // time someone glances at their phone is a great deal of traffic for
+    // nothing; signing out is different, because the next account on this
+    // handset has no business inheriting the previous couple's objects.
+    unawaited(EncryptedMediaCache.clearAll());
     state = const SessionState(loading: false);
   }
 

@@ -3,12 +3,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
+import 'package:miles/core/media/media_decode_queue.dart';
+import 'package:miles/features/closer/memory_threads/memory_heal.dart';
+import 'package:miles/features/closer/memory_threads/memory_photo_repository.dart';
 import 'package:miles/features/closer/memory_threads/memory_pin_gate.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Memory Threads — PIN-gated timeline of intimate milestones.
 ///
@@ -65,10 +71,106 @@ class _PinGateState extends State<_PinGate> {
   String? _error;
   String _enteredPin = '';
 
+  /// The first of the two entries while setting a PIN.
+  String? _firstEntry;
+
   @override
   void initState() {
     super.initState();
     _bootstrap();
+  }
+
+  /// Forget the PIN, after proving the account password.
+  ///
+  /// [MemoryPinGate.clearAppPin] existed with **zero call sites** and there was
+  /// no "forgot" affordance anywhere, so the only escape from four forgotten
+  /// digits was reinstalling the app — which regenerates this device's X25519
+  /// key, changes the ECDH shared secret, and permanently orphans every
+  /// encrypted row the couple has. And because `publishMyPublicKey` upserts
+  /// over the old value, that happens on BOTH phones, not just this one.
+  ///
+  /// So the PIN gap and the key-loss gap compound into total data loss, and
+  /// this is the cheap half of that pair.
+  ///
+  /// The password is REQUIRED, not merely offered: without it "forgot my PIN"
+  /// is a button that removes the lock, which is not a lock.
+  Future<void> _forgotPin() async {
+    final password = await _askPassword();
+    if (password == null || password.isEmpty || !mounted) return;
+    setState(() {
+      _checking = true;
+      _error = null;
+    });
+    final email = SupabaseService.client.auth.currentUser?.email;
+    if (email == null) {
+      setState(() {
+        _checking = false;
+        _error = 'Sign in again to reset your PIN.';
+      });
+      return;
+    }
+    try {
+      await SupabaseService.client.auth
+          .signInWithPassword(email: email, password: password);
+      await MemoryPinGate.clearAppPin();
+      if (!mounted) return;
+      setState(() {
+        _checking = false;
+        _needsSetup = true;
+        _firstEntry = null;
+        _enteredPin = '';
+        _error = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _checking = false;
+        _error = "That password didn't match.";
+      });
+    }
+  }
+
+  Future<String?> _askPassword() {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF141B26),
+        title: const Text(
+          'Reset your PIN',
+          style: TextStyle(color: Color(0xFFFBF8F4), fontSize: 18),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter your account password. Your memories are not affected — '
+              'this only replaces the four digits.',
+              style: TextStyle(color: Color(0x99F5EFE6), height: 1.5, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              style: const TextStyle(color: Color(0xFFFBF8F4)),
+              decoration: const InputDecoration(labelText: 'Password'),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -112,6 +214,26 @@ class _PinGateState extends State<_PinGate> {
     });
 
     if (_needsSetup) {
+      // Confirm-entry. You used to type four digits ONCE and that was your PIN
+      // forever — a typo you could not have noticed, guarding data whose only
+      // other key is on a device you may reinstall.
+      if (_firstEntry == null) {
+        setState(() {
+          _firstEntry = pin;
+          _enteredPin = '';
+          _checking = false;
+        });
+        return;
+      }
+      if (_firstEntry != pin) {
+        setState(() {
+          _firstEntry = null;
+          _enteredPin = '';
+          _checking = false;
+          _error = "Those didn't match. Start again.";
+        });
+        return;
+      }
       await MemoryPinGate.setAppPin(pin);
       if (!mounted) return;
       widget.onUnlocked();
@@ -169,7 +291,11 @@ class _PinGateState extends State<_PinGate> {
                   const Text('🧵', style: TextStyle(fontSize: 40)),
                   const SizedBox(height: 12),
                   Text(
-                    _needsSetup ? 'Set a 4-digit PIN' : 'Enter your PIN',
+                    !_needsSetup
+                        ? 'Enter your PIN'
+                        : _firstEntry == null
+                            ? 'Set a 4-digit PIN'
+                            : 'Enter it again',
                     style: Theme.of(context).textTheme.displaySmall?.copyWith(
                           color: const Color(0xFFFBF8F4),
                           fontSize: 20,
@@ -177,9 +303,12 @@ class _PinGateState extends State<_PinGate> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _needsSetup
-                        ? "You'll enter this each time you open Memory Threads."
-                        : 'Or use biometrics when available.',
+                    !_needsSetup
+                        ? 'Or use biometrics when available.'
+                        : _firstEntry == null
+                            ? "You'll enter this each time you open Memory "
+                                'Threads.'
+                            : 'Just to be sure it is what you meant.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 11,
@@ -215,6 +344,19 @@ class _PinGateState extends State<_PinGate> {
                       style: const TextStyle(
                         color: Color(0xFFEF6F58),
                         fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (!_needsSetup) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _checking ? null : _forgotPin,
+                      child: const Text(
+                        'Forgot your PIN?',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0x99F5EFE6),
+                        ),
                       ),
                     ),
                   ],
@@ -375,8 +517,12 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                       stream: _threadsStream,
                       builder: (context, snapshot) {
                         if (snapshot.hasError) {
+                          // Never snapshot.error.toString(). A dropped socket
+                          // used to paint a PostgrestException, its SQLSTATE
+                          // and its hint across the screen.
                           return _ErrorState(
-                            message: snapshot.error.toString(),
+                            message: "Couldn't load your memories. Pull to try "
+                                'again.',
                             onRetry: _ensureKeyAndLoad,
                           );
                         }
@@ -385,8 +531,17 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                               child: CircularProgressIndicator());
                         }
                         final result = snapshot.data!;
+                        _healWhenSettled(result.items);
                         if (result.items.isEmpty) {
-                          return _emptyState();
+                          // An empty list and a list where every row failed to
+                          // decrypt used to render identically — which is the
+                          // exact failure closer_load_result.dart was written
+                          // to prevent, and its unreadableMessage had zero call
+                          // sites in this feature. To the person looking at it,
+                          // "empty" reads as "my data is gone".
+                          return result.hasUnreadable
+                              ? _UnreadableState(message: result.unreadableMessage)
+                              : _emptyState();
                         }
                         return ListView.separated(
                           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -414,6 +569,19 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
         ),
       ],
     );
+  }
+
+  /// Kicks heal-on-read once the list has been still.
+  ///
+  /// Called from `build`, which is why it must be cheap and idempotent: the
+  /// debounce lives in [MemoryHeal] so a rebuild storm collapses to one attempt
+  /// rather than one per frame.
+  void _healWhenSettled(List<MemoryThread> threads) {
+    final session = ref.read(sessionProvider);
+    final coupleId = session.couple?.id;
+    final me = session.profile?.id;
+    if (coupleId == null || me == null) return;
+    MemoryHeal.onListSettled(threads: threads, coupleId: coupleId, me: me);
   }
 
   Widget _emptyState() {
@@ -506,16 +674,30 @@ class _MemoryCardState extends State<_MemoryCard> {
   }
 
   Future<void> _accept() async {
-    final me = _readMe();
-    if (me == null) return;
     setState(() => _busy = true);
     try {
-      await MemoryThreadRepository.accept(
-        threadId: widget.thread.id,
-        acceptedBy: me,
-      );
+      // One tap, no note. Who is accepting is auth.uid() inside the RPC, not a
+      // parameter — passing it was how a proposer could accept their own.
+      await MemoryThreadRepository.accept(widget.thread.id);
     } catch (e) {
-      _toast('Failed: $e');
+      _toast(_friendly(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Take back your own pending proposal. The state all nine production rows
+  /// are stuck in previously had no action at all for the person who made it.
+  Future<void> _withdraw() async {
+    final confirmed = await _confirm(
+      "Take this back? Your partner won't see it any more.",
+    );
+    if (!confirmed) return;
+    setState(() => _busy = true);
+    try {
+      await MemoryThreadRepository.withdraw(widget.thread.id);
+    } catch (e) {
+      _toast(_friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -526,47 +708,81 @@ class _MemoryCardState extends State<_MemoryCard> {
     try {
       await MemoryThreadRepository.archive(widget.thread.id);
     } catch (e) {
-      _toast('Failed: $e');
+      _toast(_friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  /// Unarchive had no busy guard and no error handling at all — a bare inline
+  /// `await` in the chip's callback, so a failure vanished and a double tap
+  /// fired twice.
+  Future<void> _unarchive() async {
+    setState(() => _busy = true);
+    try {
+      await MemoryThreadRepository.unarchive(widget.thread.id);
+    } catch (e) {
+      _toast(_friendly(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// What to say when a lifecycle call fails.
+  ///
+  /// Never the exception. `'Failed: $e'` on a PostgrestException prints the
+  /// RPC's raised message, the SQLSTATE and the hint at the user; on a MAC
+  /// failure it printed "SecretBoxAuthenticationError: SecretBox has wrong
+  /// message authentication code (MAC)". The RPCs raise exactly three
+  /// conditions a person can act on, so those three get sentences and
+  /// everything else gets the honest generic.
+  String _friendly(Object e) {
+    final raw = e is PostgrestException ? e.message : e.toString();
+    if (raw.contains('only your partner can confirm')) {
+      return "You asked for this one — she has to confirm it.";
+    }
+    if (raw.contains('not yours to accept')) {
+      return 'Only your partner can accept this.';
+    }
+    if (raw.contains('not yours to withdraw')) {
+      return 'Only the person who proposed this can take it back.';
+    }
+    if (raw.contains('not yet')) {
+      return 'Not yet — you can delete this yourself 14 days after asking.';
+    }
+    return "That didn't go through. Try again.";
+  }
+
   Future<void> _requestDelete() async {
-    final me = _readMe();
-    if (me == null) return;
     final confirmed = await _confirm(
       'Request deletion? Your partner will need to confirm.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
     try {
-      await MemoryThreadRepository.requestDeletion(
-        threadId: widget.thread.id,
-        requestedBy: me,
-      );
+      await MemoryThreadRepository.requestDeletion(widget.thread.id);
     } catch (e) {
-      _toast('Failed: $e');
+      _toast(_friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _confirmDelete() async {
-    final me = _readMe();
-    if (me == null) return;
+    // The old copy said "This cannot be undone" over a call that only flipped a
+    // column, leaving the ciphertext in the row indefinitely. It now says what
+    // actually happens: the row and its objects are erased by the nightly purge
+    // and reap within 30 days.
     final confirmed = await _confirm(
-      'Permanently delete this memory? This cannot be undone.',
+      "Delete this for both of you? The encrypted files are erased within "
+      '30 days.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
     try {
-      await MemoryThreadRepository.hardDelete(
-        threadId: widget.thread.id,
-        deletedBy: me,
-      );
+      await MemoryThreadRepository.confirmDeletion(widget.thread.id);
     } catch (e) {
-      _toast('Failed: $e');
+      _toast(_friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -577,24 +793,7 @@ class _MemoryCardState extends State<_MemoryCard> {
     try {
       await MemoryThreadRepository.cancelDeletion(widget.thread.id);
     } catch (e) {
-      _toast('Failed: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _revisit() async {
-    final me = _readMe();
-    if (me == null) return;
-    setState(() => _busy = true);
-    try {
-      await MemoryThreadRepository.requestRevisit(
-        threadId: widget.thread.id,
-        initiatedBy: me,
-      );
-      _toast('Asked your partner to revisit.');
-    } catch (e) {
-      _toast('Failed: $e');
+      _toast(_friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -724,7 +923,10 @@ class _MemoryCardState extends State<_MemoryCard> {
                 ),
               ),
             ],
-            if (widget.thread.photoCipher != null) ...[
+            if (widget.thread.coverPath != null) ...[
+              const SizedBox(height: 12),
+              _MemoryCover(thread: widget.thread, onTap: _openPhoto),
+            ] else if (widget.thread.photoNonce != null) ...[
               const SizedBox(height: 12),
               GestureDetector(
                 onTap: _openPhoto,
@@ -820,32 +1022,34 @@ class _MemoryCardState extends State<_MemoryCard> {
 
   Widget _actions() {
     final me = _readMe();
+    final state = widget.thread.state;
+    final iRequested = widget.thread.deleteRequestedBy == me;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        if (widget.thread.state == MemoryState.proposed && !widget.isMine)
+        if (state == MemoryState.proposed && !widget.isMine)
           _actionChip('Accept', Icons.check, _accept),
-        if (widget.thread.state == MemoryState.accepted)
-          _actionChip('Revisit together', Icons.favorite_outline, _revisit),
-        if (widget.thread.state == MemoryState.accepted)
+        // The proposer's own pending memory used to render an EMPTY row: the
+        // only 'proposed' branch required !isMine. Nine of nine production rows
+        // are in this state, so the person who created them had no move at all.
+        if (state == MemoryState.proposed && widget.isMine)
+          _actionChip('Take it back', Icons.undo, _withdraw),
+        if (state == MemoryState.accepted)
           _actionChip('Archive', Icons.archive_outlined, _archive),
-        if (widget.thread.state == MemoryState.archived)
-          _actionChip('Unarchive', Icons.unarchive_outlined, () async {
-            await MemoryThreadRepository.unarchive(widget.thread.id);
-          }),
-        if (widget.thread.state == MemoryState.accepted)
-          _actionChip(
-            'Request delete',
-            Icons.delete_outline,
-            _requestDelete,
-          ),
-        if (widget.thread.state == MemoryState.deletionRequested &&
-            widget.thread.deleteRequestedBy == me)
-          _actionChip('Cancel delete', Icons.close, _cancelDelete),
-        if (widget.thread.state == MemoryState.deletionRequested &&
-            widget.thread.deleteRequestedBy != me)
-          _actionChip('Confirm delete', Icons.delete_forever, _confirmDelete),
+        if (state == MemoryState.archived)
+          _actionChip('Unarchive', Icons.unarchive_outlined, _unarchive),
+        // Archived was previously a dead end — Request delete was gated on
+        // 'accepted' alone, so archiving quietly removed the only way to
+        // delete, and nothing said so.
+        if (state == MemoryState.accepted || state == MemoryState.archived)
+          _actionChip('Request delete', Icons.delete_outline, _requestDelete),
+        // EITHER partner may cancel. The repository always said so ("either can
+        // veto by cancelling"); the UI showed it to the requester alone.
+        if (state == MemoryState.deletionRequested)
+          _actionChip('Keep it', Icons.close, _cancelDelete),
+        if (state == MemoryState.deletionRequested && !iRequested)
+          _actionChip('Delete it', Icons.delete_forever, _confirmDelete),
       ],
     );
   }
@@ -873,6 +1077,176 @@ class _MemoryCardState extends State<_MemoryCard> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Every row loaded, none of them readable.
+///
+/// Distinct from the empty state on purpose. `closer_load_result.dart` counts
+/// unreadable rows and its message had **zero call sites** in this feature, so
+/// the repository knew and the screen never asked — and the screen it drew
+/// instead said "nothing here yet" to someone whose memories all exist.
+class _UnreadableState extends StatelessWidget {
+  const _UnreadableState({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🔒', style: TextStyle(fontSize: 40)),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xCCF5EFE6),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              "They're still here. Nothing has been deleted.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Color(0x80F5EFE6)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The memory's cover, painted from its own 1024px encrypted object.
+///
+/// What this replaces is a 12px text pill reading "View photo" — the photograph
+/// being the only thing a memory is actually about. What it replaces
+/// MECHANICALLY matters more: the old path pulled the full-size inline
+/// ciphertext out of the row and decoded it at source resolution, so a
+/// 12-megapixel photograph cost ~48 MB of raster to show a thumbnail.
+class _MemoryCover extends StatefulWidget {
+  const _MemoryCover({required this.thread, required this.onTap});
+
+  final MemoryThread thread;
+  final VoidCallback onTap;
+
+  @override
+  State<_MemoryCover> createState() => _MemoryCoverState();
+}
+
+class _MemoryCoverState extends State<_MemoryCover> {
+  ImageProvider? _provider;
+  String? _failure;
+  bool _mounted = true;
+
+  /// 16:10, and the height is reserved from a constant BEFORE the bytes arrive.
+  /// A frame that grows when the picture lands is a reflow of everything below
+  /// it, which is the difference between a list that settles and one that jumps.
+  static const double _aspect = 16 / 10;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final path = widget.thread.coverPath;
+    final photoId = widget.thread.coverPhotoId;
+    if (path == null || photoId == null) return;
+
+    // Computed from the SCREEN, not from this card, and therefore identical for
+    // every card on it. A width derived per-card gives each one its own
+    // ImageCache entry and its own decode of the same size.
+    final media = MediaQuery.of(context);
+    final width =
+        ((media.size.width - 48) * media.devicePixelRatio).round();
+
+    await MediaDecodeQueue.run<void>(
+      'cover:${widget.thread.id}',
+      () => _mounted,
+      () async {
+        try {
+          final p = await EncryptedMediaCache.coverProvider(
+            path: path,
+            associatedData:
+                MemoryPhotoRepository.coverAdFor(widget.thread.id, photoId),
+            decodeWidth: width,
+          );
+          if (_mounted) setState(() => _provider = p);
+        } on MediaFailure catch (e) {
+          if (_mounted) setState(() => _failure = e.message);
+        } catch (_) {
+          // Never the exception itself. A MAC failure reads
+          // "SecretBoxAuthenticationError: SecretBox has wrong message
+          // authentication code (MAC)", which is not a sentence to show anyone.
+          if (_mounted) {
+            setState(() => _failure = 'This one is locked to an older install.');
+          }
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: AspectRatio(
+          aspectRatio: _aspect,
+          child: DecoratedBox(
+            // A miss paints the surface, never a spinner: at 400ms most of
+            // these resolve from disk faster than an indicator is allowed to
+            // appear, and a wheel per card is what the old screen looked like.
+            decoration: const BoxDecoration(color: MilesColors.surface2),
+            child: _failure != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        _failure!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0x99F5EFE6),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  )
+                : _provider == null
+                    ? const SizedBox.expand()
+                    : Image(
+                        image: _provider!,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        // In 150ms, out ZERO. The 1000ms default fade-out
+                        // composites two frames per recycled cell for a full
+                        // second while scrolling.
+                        frameBuilder: (_, child, frame, wasSync) =>
+                            wasSync || frame != null
+                                ? AnimatedOpacity(
+                                    opacity: 1,
+                                    duration: const Duration(milliseconds: 150),
+                                    child: child,
+                                  )
+                                : const SizedBox.expand(),
+                      ),
+          ),
         ),
       ),
     );

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:miles/core/media/media_decode.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
 import 'package:miles/features/closer/private_vault/vault_media_cache.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -96,10 +97,40 @@ class _PhotoPageState extends State<_PhotoPage> {
   File? _file;
   String? _error;
 
+  /// Whether the full-resolution layer is mounted over the bounded one.
+  ///
+  /// `kZoomUpgradeScale` and `kZoomRevertScale` have existed in
+  /// `media_decode.dart` since the decode work, with a test asserting they are
+  /// ordered — and **zero widget call sites**. Bounding the page decode at the
+  /// viewport (which is what stops a 12-megapixel original costing ~48MB of
+  /// raster) is exactly what makes them necessary: without this layer, pinching
+  /// to 4x now magnifies a viewport-width bitmap instead of showing the
+  /// photograph. The two thresholds differ deliberately, so jitter around the
+  /// boundary does not mount and unmount a full-size decode every frame.
+  bool _zoomed = false;
+  final TransformationController _transform = TransformationController();
+
   @override
   void initState() {
     super.initState();
+    _transform.addListener(_onZoom);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _transform
+      ..removeListener(_onZoom)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onZoom() {
+    final scale = _transform.value.getMaxScaleOnAxis();
+    final want = _zoomed
+        ? scale > kZoomRevertScale
+        : scale > kZoomUpgradeScale;
+    if (want != _zoomed && mounted) setState(() => _zoomed = want);
   }
 
   Future<void> _load() async {
@@ -132,11 +163,24 @@ class _PhotoPageState extends State<_PhotoPage> {
       }
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
+    final viewportPx =
+        (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
+            .round();
     return InteractiveViewer(
+      transformationController: _transform,
       minScale: 1.0,
       maxScale: 4.0,
       child: Center(
-        child: Image.file(_file!, fit: BoxFit.contain),
+        // Bounded at the viewport until the user actually zooms. A
+        // 12-megapixel original decoded at source resolution is ~48MB of raster
+        // to fill a screen that cannot show a tenth of it — and it is decoded
+        // on the page BEFORE the user has finished swiping to it.
+        //
+        // The upgrade costs one decode and NO network: the bytes are already
+        // decrypted and resident by the time anyone can pinch.
+        child: _zoomed
+            ? Image.file(_file!, fit: BoxFit.contain)
+            : Image.file(_file!, fit: BoxFit.contain, cacheWidth: viewportPx),
       ),
     );
   }

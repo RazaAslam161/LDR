@@ -230,25 +230,11 @@ class SupabaseRepository {
   static Future<void> deleteMyAccount() =>
       _c.rpc<dynamic>('delete_my_account');
 
-  static Future<void> joinCouple(String code) async {
-    // `join_couple_by_code` validates the code, enforces the 2-member cap, and
-    // links the profile server-side. We translate its raised errors to the
-    // friendly messages the UI already expects.
-    try {
-      await _c.rpc<dynamic>(
-        'join_couple_by_code',
-        params: {'p_code': code},
-      );
-    } on PostgrestException catch (e) {
-      if (e.message.contains('invalid_code')) {
-        throw StateError('We could not find that code.');
-      }
-      if (e.message.contains('couple_full')) {
-        throw StateError('This couple already has two members.');
-      }
-      rethrow;
-    }
-  }
+  // joinCouple lived here and called join_couple_by_code, which 003200 dropped
+  // and 003700's own comment already noted was "gone so nothing reads it
+  // today". It had no callers, so it never threw — it just sat waiting to
+  // PGRST202 the first time anyone wired it to a button. Pairing goes through
+  // create_pairing_invite / redeem_pairing_invite below.
 
   // ─── Pairing invites (expiring, single-use) ──────────────────────
 

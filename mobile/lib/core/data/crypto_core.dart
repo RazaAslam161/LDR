@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -50,6 +49,29 @@ class CryptoCore {
   /// published a real key yet, so writes stay in the legacy shape.
   static SecretKey? _sharedKey;
 
+  /// True only when the partner explicitly published [legacyPublicKey].
+  ///
+  /// Guards the plaintext branch in [encryptBytes]. A null [_sharedKey] alone
+  /// used to be enough to write cleartext, which meant every failure path —
+  /// corruption, a cleared cache, a key not derived yet — silently disabled
+  /// encryption. Now only an explicit agreement does.
+  static bool _plaintextAgreed = false;
+
+  /// Bumped every time the key this device decrypts with could have changed.
+  ///
+  /// Plaintext caches key themselves on this, and listen to it so they can
+  /// CLEAR rather than merely re-key. Both halves matter:
+  ///
+  ///   Re-keying alone leaves the old plaintext reachable in the map forever —
+  ///   correct, but it protects neither memory nor the threat model.
+  ///
+  ///   Not bumping at all is worse. [VaultMediaCache] keys by a per-PROCESS id,
+  ///   so after an escrow restore mid-session it kept serving bytes decrypted
+  ///   under the key that was just replaced.
+  static final ValueNotifier<int> keyEpoch = ValueNotifier<int>(0);
+
+  static void _bumpEpoch() => keyEpoch.value++;
+
   static Future<SimpleKeyPair> _keyPair() async {
     if (_myKeyPair != null) return _myKeyPair!;
     final stored = await _storage.read(key: _privKeyStoreKey);
@@ -86,6 +108,12 @@ class CryptoCore {
     await _storage.write(key: _privKeyStoreKey, value: base64Encode(seed));
     _myKeyPair = await _x25519.newKeyPairFromSeed(seed);
     _sharedKey = null;
+    _plaintextAgreed = false;
+    _derivedFrom = null;
+    // Immediately, not on the next derive: an escrow restore mid-session means
+    // every plaintext already in memory was decrypted under the key this call
+    // just replaced.
+    _bumpEpoch();
   }
 
   /// This device's X25519 public key, base64. Published through `partner_keys`.
@@ -103,20 +131,42 @@ class CryptoCore {
   static Future<void> deriveSharedKey({
     required String partnerPublicKeyB64,
   }) async {
+    // The ONLY value that may turn encryption off. It is a deliberate sentinel
+    // meaning "my partner is on a build with no key yet", and plaintext there
+    // is a considered decision.
     if (partnerPublicKeyB64 == legacyPublicKey) {
+      _plaintextAgreed = true;
       _sharedKey = null;
+      if (_derivedFrom != null) {
+        _derivedFrom = null;
+        _bumpEpoch();
+      }
       return;
     }
+
+    // Everything below is a partner who DOES have a key. If it cannot be read,
+    // that is corruption — a truncated column, a bad write, a tampered row —
+    // and it must not silently take the same exit as the sentinel above.
+    //
+    // It used to. A malformed or wrong-length key set _sharedKey = null and
+    // returned NORMALLY, and encryptBytes with a null key emits zero-nonce,
+    // zero-MAC cleartext. So one bad byte in partner_keys silently turned
+    // encryption off for every subsequent write, on an app whose entire premise
+    // is that its contents cannot be read, and nothing anywhere said so.
+    // Encryption must fail closed.
+    _plaintextAgreed = false;
     Uint8List partnerPub;
     try {
       partnerPub = base64Decode(partnerPublicKeyB64);
     } catch (_) {
       _sharedKey = null;
-      return;
+      throw StateError('partner key is not valid base64 — refusing to '
+          'downgrade to plaintext');
     }
     if (partnerPub.length != 32) {
       _sharedKey = null;
-      return;
+      throw StateError('partner key is ${partnerPub.length} bytes, expected 32 '
+          '— refusing to downgrade to plaintext');
     }
 
     final shared = await _x25519.sharedSecretKey(
@@ -127,9 +177,29 @@ class CryptoCore {
       secretKey: shared,
       info: utf8.encode('miles-closer-v1'),
     );
+    // ensureSharedKey runs on every Closer entry, so bumping unconditionally
+    // here would clear every plaintext cache several times a session for a key
+    // that did not move. Only a DIFFERENT partner key is a new epoch.
+    if (_derivedFrom != partnerPublicKeyB64) {
+      _derivedFrom = partnerPublicKeyB64;
+      _bumpEpoch();
+    }
   }
 
-  static void clearCache() => _sharedKey = null;
+  /// The partner public key [_sharedKey] was last derived from, so a repeat
+  /// derivation of the same key is recognised as a no-op.
+  static String? _derivedFrom;
+
+  static void clearCache() {
+    _sharedKey = null;
+    // Reset with it. A cleared cache is "we do not know yet", never "write
+    // cleartext" — and this is the state after sign-out.
+    _plaintextAgreed = false;
+    _derivedFrom = null;
+    // Sign-out. Every decrypted byte still held anywhere belongs to the account
+    // that just left.
+    _bumpEpoch();
+  }
 
   static Future<List<int>?> exportSharedKeyBytes() async {
     if (_sharedKey == null) return null;
@@ -175,9 +245,15 @@ class CryptoCore {
   }) async {
     final key = _sharedKey;
     if (key == null) {
-      // Plaintext mode: identical shape to the pre-2026-08 rows, so the read
-      // path treats it as legacy. No worse than before; upgrades itself the
-      // moment the partner publishes a real key.
+      // Cleartext ONLY where the partner published the plaintext sentinel.
+      // Without this check any state with no derived key — a cleared cache, a
+      // failed derivation, a race before pairing — wrote unencrypted content
+      // into a database whose whole point is that it holds none.
+      if (!_plaintextAgreed) {
+        throw StateError(
+          'no shared key — refusing to write unencrypted content',
+        );
+      }
       return EncryptedPayload(
         ciphertextB64: base64Encode(bytes),
         nonceB64: base64Encode(Uint8List(_nonceLength)),
@@ -194,6 +270,38 @@ class CryptoCore {
       ciphertextB64: base64Encode(box.cipherText),
       nonceB64: base64Encode(box.nonce),
       macB64: base64Encode(box.mac.bytes),
+    );
+  }
+
+  /// Decrypts a `nonce || mac || ciphertext` blob — `packFull` output — off the
+  /// UI isolate, without a base64 round trip.
+  ///
+  /// [VaultMediaCache] goes through [EncryptedPayload], whose three fields are
+  /// base64 STRINGS. For a 4 MB original that means base64-encoding the whole
+  /// blob to build the isolate request and decoding it again inside: +33 %
+  /// allocation and two extra full passes over the bytes, per view, to move
+  /// data that was already in the right shape.
+  ///
+  /// Small payloads stay inline. `compute` spawns a fresh isolate per call —
+  /// tens of milliseconds on an IN2015 plus two copies — while XChaCha20 over
+  /// a 120 KB cover is well under a millisecond. Prefetching two dozen covers
+  /// as two dozen isolate hops would be slower than simply doing them here.
+  /// [encryptBytesOffThread] already draws the line in the same place.
+  static Future<Uint8List> decryptBytesOffThread(
+    Uint8List packed, {
+    String? associatedData,
+  }) async {
+    if (packed.length < _nonceLength + _macLength) {
+      throw ArgumentError('packed blob is ${packed.length} bytes, too short to '
+          'carry a nonce and a MAC');
+    }
+    final keyBytes = await exportSharedKeyBytes();
+    if (packed.length < 256 * 1024) {
+      return _decryptPacked(_DecryptRequest(packed, associatedData, keyBytes));
+    }
+    return compute(
+      _decryptPacked,
+      _DecryptRequest(packed, associatedData, keyBytes),
     );
   }
 
@@ -257,6 +365,42 @@ class EncryptedPayload {
   final String macB64;
 }
 
+
+/// Arguments for [_decryptPacked]. Top-level for the same reason as
+/// [_EncryptRequest].
+class _DecryptRequest {
+  const _DecryptRequest(this.packed, this.ad, this.keyBytes);
+
+  final Uint8List packed;
+  final String? ad;
+  final List<int>? keyBytes;
+}
+
+/// Splits `nonce || mac || ciphertext` and opens it.
+///
+/// Runs either inline or in an isolate, so it must not touch [CryptoCore]'s
+/// state — the key arrives as raw bytes.
+Future<Uint8List> _decryptPacked(_DecryptRequest r) async {
+  final nonce = Uint8List.sublistView(r.packed, 0, _nonceLength);
+  final mac = Uint8List.sublistView(r.packed, _nonceLength, _nonceLength + _macLength);
+  final ct = Uint8List.sublistView(r.packed, _nonceLength + _macLength);
+
+  // The legacy / plaintext-mode shape, preserved on the read path forever:
+  // an all-zero nonce and MAC means the bytes are the cleartext. One
+  // production row is in exactly this state.
+  if (nonce.every((b) => b == 0) && mac.every((b) => b == 0)) {
+    return Uint8List.fromList(ct);
+  }
+  if (r.keyBytes == null) {
+    throw StateError('encrypted media but no couple key — partner key missing');
+  }
+  final clear = await Xchacha20.poly1305Aead().decrypt(
+    SecretBox(ct, nonce: nonce, mac: Mac(mac)),
+    secretKey: SecretKey(r.keyBytes!),
+    aad: r.ad == null ? const <int>[] : utf8.encode(r.ad!),
+  );
+  return Uint8List.fromList(clear);
+}
 
 /// Arguments for [_isolateEncrypt]. Top-level because `compute` sends the
 /// callback by reference and it must not close over anything.

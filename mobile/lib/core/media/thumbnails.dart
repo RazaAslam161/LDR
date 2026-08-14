@@ -79,6 +79,101 @@ class Thumbnails {
   }
 }
 
+/// Longest edge of the timeline cover, in pixels.
+///
+/// The tile's 400px under a full-bleed 16:10 cover is a 2.16x upscale on the
+/// first thing anyone sees. Raising the single shared object to 1024 instead
+/// would have made every grid tile decode a 1024px frame, so the cover is its
+/// own object with its own bound and the tile keeps being its own bound.
+const int kMemoryCoverMaxEdge = 1024;
+
+/// Longest edge of the shared tile — the gallery grid, the pager underlay and
+/// (conditionally) the filmstrip all paint this one object.
+const int kMemoryTileMaxEdge = 400;
+
+/// Two derivatives and the capture date, from ONE decode.
+class DerivedImage {
+  const DerivedImage({
+    required this.cover,
+    required this.tile,
+    this.capturedAt,
+  });
+
+  /// 1024px longest edge, q75. What the timeline paints.
+  final Uint8List cover;
+
+  /// 400px longest edge, q72. Shared by every small surface.
+  final Uint8List tile;
+
+  /// EXIF DateTimeOriginal, when the file carried one.
+  final DateTime? capturedAt;
+}
+
+/// Decode once, emit both derivatives and the capture date.
+///
+/// Three separate calls would be three 12-megapixel decodes at roughly 100 ms
+/// each on the target handsets. The EXIF date is free here because the header
+/// has already been parsed — and it is what stops a person who uploads twelve
+/// Lisbon photographs in August from filing them all under August, which is
+/// wrong on the timeline, wrong for "on this day" forever, and the reason visit
+/// matching would otherwise never fire.
+Future<DerivedImage?> deriveImage(Uint8List bytes) async {
+  try {
+    return await compute(_derive, bytes);
+  } catch (e) {
+    debugPrint('[thumb] derive failed: ${e.runtimeType}');
+    return null;
+  }
+}
+
+DerivedImage? _derive(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  final upright = img.bakeOrientation(decoded);
+  return DerivedImage(
+    cover: img.encodeJpg(_fit(upright, kMemoryCoverMaxEdge), quality: 75),
+    tile: img.encodeJpg(_fit(upright, kMemoryTileMaxEdge), quality: 72),
+    capturedAt: _exifDate(decoded),
+  );
+}
+
+/// Never upscales: a picture already smaller than the bound gains nothing but
+/// bytes from being blown up to it.
+img.Image _fit(img.Image src, int maxEdge) {
+  final longest = src.width > src.height ? src.width : src.height;
+  if (longest <= maxEdge) return src;
+  return img.copyResize(
+    src,
+    width: src.width >= src.height ? maxEdge : null,
+    height: src.height > src.width ? maxEdge : null,
+    interpolation: img.Interpolation.average,
+  );
+}
+
+/// EXIF DateTimeOriginal, or null.
+///
+/// Read from the ORIGINAL decode, before bakeOrientation — that rewrites the
+/// orientation tag and there is no reason to trust what else it normalises.
+/// The tag's format is 'YYYY:MM:DD HH:MM:SS', which [DateTime.parse] will not
+/// take, so the two date separators are rewritten.
+///
+/// Treat a null as the common case rather than the exception: several Android
+/// gallery providers hand out a stripped copy, and this is unverified on the
+/// target handsets.
+DateTime? _exifDate(img.Image image) {
+  for (final tag in const ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime']) {
+    final raw = image.exif.imageIfd[tag]?.toString() ??
+        image.exif.exifIfd[tag]?.toString();
+    if (raw == null || raw.length < 19) continue;
+    final normalised =
+        '${raw.substring(0, 4)}-${raw.substring(5, 7)}-${raw.substring(8, 10)}'
+        'T${raw.substring(11, 19)}';
+    final parsed = DateTime.tryParse(normalised);
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
 /// Runs in an isolate. Top-level because [compute] cannot send a closure.
 Uint8List? _resizeJpeg(({Uint8List bytes, int maxEdge, int quality}) job) {
   final decoded = img.decodeImage(job.bytes);

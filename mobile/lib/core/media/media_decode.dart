@@ -19,11 +19,6 @@ library;
 /// against the ~48MB an unbounded 12MP decode costs.
 const int kTileDecodePx = 512;
 
-/// The viewer's filmstrip cell: 46dp at 3x. Keeps its own key deliberately —
-/// it is an order of magnitude smaller than a grid tile and sharing the tile's
-/// decode would hold a 512px frame for a 46dp square.
-const int kFilmstripDecodePx = 138;
-
 /// How far either side of the current page a THUMBNAIL is decoded and pinned.
 ///
 /// Thumbnails only. Four each way is ~7.7MB and makes a fast swipe land on a

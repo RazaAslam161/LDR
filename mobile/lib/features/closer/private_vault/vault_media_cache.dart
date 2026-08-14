@@ -1,43 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
-import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
-import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
 import 'package:path_provider/path_provider.dart';
-
-class DecryptRequest {
-  const DecryptRequest(this.payload, this.ad, this.keyBytes);
-
-  final EncryptedPayload payload;
-  final String? ad;
-  final List<int>? keyBytes;
-}
-
-Future<Uint8List> _isolateDecrypt(DecryptRequest request) async {
-  final nonce = base64Decode(request.payload.nonceB64);
-  final mac = base64Decode(request.payload.macB64);
-  final ciphertext = base64Decode(request.payload.ciphertextB64);
-
-  if (nonce.every((byte) => byte == 0) && mac.every((byte) => byte == 0)) {
-    return Uint8List.fromList(ciphertext);
-  }
-  if (request.keyBytes == null) {
-    throw StateError('The shared vault key is unavailable.');
-  }
-
-  final clear = await Xchacha20.poly1305Aead().decrypt(
-    SecretBox(ciphertext, nonce: nonce, mac: Mac(mac)),
-    secretKey: SecretKey(request.keyBytes!),
-    aad: request.ad == null ? const <int>[] : utf8.encode(request.ad!),
-  );
-  return Uint8List.fromList(clear);
-}
 
 /// Deduplicates preview/full-media work across a grid and a pager. This avoids
 /// concurrent decrypts and downloads for the same item, which previously left
@@ -50,7 +20,31 @@ class VaultMediaCache {
   static final _files = <String, File>{};
   static final _sessionId = _randomId();
 
+  /// The epoch these decrypted files were produced under.
+  ///
+  /// The cache used to key on a per-PROCESS random id, which is stable across
+  /// exactly the event it needed to notice: [CryptoCore.adoptPrivateSeed]
+  /// clears only the shared key, so after an escrow restore mid-session this
+  /// cache went on serving files decrypted under the key that had just been
+  /// replaced — healthy-looking plaintext from a key that no longer exists.
+  static int _epoch = CryptoCore.keyEpoch.value;
+
+  static bool _wired = false;
+
+  static void _wire() {
+    if (_wired) return;
+    _wired = true;
+    CryptoCore.keyEpoch.addListener(_onEpochChanged);
+  }
+
+  static void _onEpochChanged() {
+    if (_epoch == CryptoCore.keyEpoch.value) return;
+    _epoch = CryptoCore.keyEpoch.value;
+    unawaited(clear());
+  }
+
   static Future<File> getDecryptedFile(VaultItem item) {
+    _wire();
     return _previewLoads.putIfAbsent(
       item.id,
       () => _decryptPreview(item).catchError((Object error, StackTrace stack) {
@@ -98,17 +92,30 @@ class VaultMediaCache {
           .download('vault/${item.ad}.enc')
           .timeout(const Duration(minutes: 2));
     }
-    return _write(item, await _decrypt(unpackFull(encrypted), item.ad),
-        role: 'original');
+    // The packed bytes go STRAIGHT to the isolate.
+    //
+    // This previously ran `unpackFull` first and shipped an EncryptedPayload,
+    // whose three fields are base64 STRINGS — so a 4 MB original was
+    // base64-encoded to build the request and decoded again inside it: +33 %
+    // allocation and two extra full passes over the bytes, per view, to move
+    // data that was already in exactly the shape the cipher wanted.
+    return _write(
+      item,
+      await CryptoCore.decryptBytesOffThread(encrypted,
+          associatedData: item.ad,),
+      role: 'original',
+    );
   }
 
+  /// The inline preview column. Small enough that an isolate hop costs more
+  /// than the work — `compute` spawns a fresh isolate per call, tens of
+  /// milliseconds on an IN2015, while XChaCha20 over a resized preview is well
+  /// under one.
   static Future<Uint8List> _decrypt(
     EncryptedPayload payload,
     String ad,
-  ) async {
-    final keyBytes = await CryptoCore.exportSharedKeyBytes();
-    return compute(_isolateDecrypt, DecryptRequest(payload, ad, keyBytes));
-  }
+  ) =>
+      CryptoCore.decryptBytes(payload, associatedData: ad);
 
   static Future<File> _write(
     VaultItem item,
@@ -117,8 +124,10 @@ class VaultMediaCache {
   }) async {
     final directory = await getTemporaryDirectory();
     final extension = _extensionFor(item);
+    // The epoch is in the filename, so a file written under a replaced key can
+    // never be mistaken for a current one even if the delete below fails.
     final file = File(
-        '${directory.path}/vault_${_sessionId}_${role}_${item.id}.$extension');
+        '${directory.path}/vault_${_sessionId}_${_epoch}_${role}_${item.id}.$extension');
     await file.writeAsBytes(bytes, flush: true);
     _files[file.path] = file;
     return file;
