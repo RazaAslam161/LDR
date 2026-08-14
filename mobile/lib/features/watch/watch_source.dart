@@ -301,3 +301,30 @@ Duration parseTimestamp(String? raw) {
     seconds: int.tryParse(m.group(3) ?? '') ?? 0,
   );
 }
+
+/// Rebuild a source from the key that travelled on the wire.
+///
+/// The two backends are told apart by shape: a YouTube id is eleven characters
+/// of id alphabet, everything else is a URL. So the partner's phone opens the
+/// same kind of player without the protocol having to carry a type tag.
+WatchSource? sourceFromKey(String key, {Duration startAt = Duration.zero}) {
+  if (_bareId.hasMatch(key)) {
+    return WatchSource(
+      kind: WatchKind.youtube,
+      key: key,
+      startAt: startAt,
+      site: 'YouTube',
+    );
+  }
+  final s = resolveWatchLink(key);
+  if (s == null || startAt == Duration.zero) return s;
+  return WatchSource(
+    kind: s.kind,
+    key: s.key,
+    startAt: startAt,
+    format: s.format,
+    original: s.original,
+    site: s.site,
+    reason: s.reason,
+  );
+}

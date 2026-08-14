@@ -37,8 +37,8 @@ class WorldMapScreen extends ConsumerStatefulWidget {
 
 class _WorldMapScreenState extends ConsumerState<WorldMapScreen> {
   MapboxMap? _map;
-  PointAnnotationManager? _markers;
-  PointAnnotation? _partnerPin;
+  CircleAnnotationManager? _markers;
+  CircleAnnotation? _partnerPin;
 
   /// Where the pin currently sits, so a presence tick that has not actually
   /// moved does not rebuild the annotation on every rebuild.
@@ -86,13 +86,28 @@ class _WorldMapScreenState extends ConsumerState<WorldMapScreen> {
 
     final point = Point(coordinates: Position(lon, lat));
     if (_partnerPin == null) {
-      _partnerPin = await markers.create(PointAnnotationOptions(
+      // A CIRCLE, not an icon.
+      //
+      // This drew `iconImage: 'dot-11'` — a Maki sprite name that ships with
+      // Mapbox Streets v11. This screen loads the STANDARD style (it configures
+      // `basemap`/`lightPreset`/`show3dObjects`, which only Standard has), and
+      // Standard carries no Maki sprite. A PointAnnotation whose iconImage is
+      // missing from the style renders NOTHING — no error, no placeholder, no
+      // log. So the annotation was created, the camera flew to her, and the map
+      // was empty: the exact symptom, with nothing anywhere to explain it.
+      //
+      // A circle annotation is drawn by the renderer itself, so it depends on
+      // no sprite, no bundled asset and no style choice — it cannot silently
+      // vanish the next time the basemap changes.
+      _partnerPin = await markers.create(CircleAnnotationOptions(
         geometry: point,
-        iconSize: 1.4,
-        // A named icon from the style's own sprite sheet, so no asset has to be
-        // bundled and decoded for a single pin.
-        iconImage: 'dot-11',
-        iconColor: MilesColors.blush.toARGB32(),
+        circleRadius: 8,
+        circleColor: MilesColors.blush.toARGB32(),
+        // A white ring, the way every map marks a person: the fill alone
+        // disappears against terrain of a similar tone, and satellite imagery
+        // has every tone.
+        circleStrokeWidth: 3,
+        circleStrokeColor: 0xFFFFFFFF,
       ),);
     } else {
       _partnerPin!.geometry = point;
@@ -110,7 +125,7 @@ class _WorldMapScreenState extends ConsumerState<WorldMapScreen> {
 
   Future<void> _onMapCreated(MapboxMap map) async {
     _map = map;
-    _markers = await map.annotations.createPointAnnotationManager();
+    _markers = await map.annotations.createCircleAnnotationManager();
     await _placePartner(widget.lat, widget.lon);
     // The SDK's own logo and attribution stay. They are a licence condition,
     // and the previous version of this screen set attributionControl:false —

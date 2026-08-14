@@ -126,11 +126,60 @@ void main() {
     });
   });
 
+  _roundTripTests();
+
   group('not links', () {
     for (final junk in ['', '   ', 'hello there', '12345']) {
       test('${junk.isEmpty ? '(empty)' : junk} resolves to null', () {
         expect(resolveWatchLink(junk), isNull);
       });
     }
+  });
+}
+
+// The wire carries only a key, so the partner's phone must be able to tell a
+// YouTube id from a media URL with nothing else to go on. If this round-trip
+// breaks, one side opens a player the other is not driving.
+void _roundTripTests() {
+  group('sourceFromKey round-trips what the wire carries', () {
+    test('an 11-char id reopens as YouTube', () {
+      final s = sourceFromKey('dQw4w9WgXcQ')!;
+      expect(s.kind, WatchKind.youtube);
+      expect(s.key, 'dQw4w9WgXcQ');
+    });
+
+    test('an mp4 URL reopens as media, keeping its format hint', () {
+      final s = sourceFromKey('https://example.com/clip.mp4')!;
+      expect(s.kind, WatchKind.media);
+      expect(s.format, MediaFormat.other);
+    });
+
+    test('an m3u8 URL reopens as HLS media', () {
+      final s = sourceFromKey('https://example.com/s.m3u8')!;
+      expect(s.kind, WatchKind.media);
+      expect(s.format, MediaFormat.hls);
+    });
+
+    test('a start offset survives the trip', () {
+      final s = sourceFromKey(
+        'https://example.com/clip.mp4',
+        startAt: const Duration(seconds: 42),
+      )!;
+      expect(s.startAt, const Duration(seconds: 42));
+    });
+
+    test('every resolved key reopens as the same kind it was', () {
+      for (final url in [
+        'https://youtu.be/dQw4w9WgXcQ',
+        'https://example.com/clip.mp4',
+        'https://example.com/s.m3u8',
+        'https://vimeo.com/123456789',
+      ]) {
+        final first = resolveWatchLink(url)!;
+        final again = sourceFromKey(first.key)!;
+        expect(again.kind, first.kind, reason: url);
+        expect(again.key, first.key, reason: url);
+      }
+    });
   });
 }

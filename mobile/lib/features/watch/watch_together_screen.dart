@@ -9,11 +9,11 @@ import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
+import 'package:miles/features/watch/watch_player.dart';
 import 'package:miles/features/watch/watch_protocol.dart';
 import 'package:miles/features/watch/watch_source.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 
 /// Watch & listen together — paste any video link. YouTube plays inline;
@@ -39,7 +39,7 @@ const Duration kReadyTimeout = Duration(seconds: 8);
 const Duration kEchoWindow = Duration(milliseconds: 1500);
 
 class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
-  YoutubePlayerController? _controller;
+  WatchPlayer? _player;
   ManagedSubscription? _channel;
   final _urlInput = TextEditingController();
   String? _coupleId;
@@ -130,46 +130,43 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _heartbeat?.cancel();
     _watchdog?.cancel();
     _channel?.dispose();
-    _controller?.dispose();
+    _player?.dispose();
     _urlInput.dispose();
     super.dispose();
   }
 
-  void _loadVideo(String id, {bool broadcast = true, Duration? startAt}) {
-    _videoId = id;
+  /// Open [source] in whichever backend can play it.
+  ///
+  /// A YouTube player is reused across videos — the iframe can load a new id in
+  /// place — but a media player is rebuilt, because VideoPlayerController binds
+  /// to one URL for its lifetime.
+  void _openSource(WatchSource source, {bool broadcast = true}) {
+    _videoId = source.key;
     _fault = null;
     _pendingId = null;
-    if (_controller == null) {
-      _controller = YoutubePlayerController(
-        initialVideoId: id,
-        // autoPlay:false is deliberate and is the whole reason the spinner can
-        // no longer be permanent. The package hides its play button behind
-        // `!flags.autoPlay || state == playing || state == paused`, so with
-        // autoPlay on, a video that never reaches a playing state leaves a bare
-        // progress wheel and NOTHING to tap. Off, the button appears the moment
-        // the player is ready — and _onReady below still starts playback, so
-        // nothing is lost.
-        //
-        // hideThumbnail closes an Image.network to i3.ytimg.com issued by the
-        // app's own HTTP stack, outside the webview: an unencrypted disclosure
-        // of what the couple is watching, from an app built around a disguise.
-        flags: YoutubePlayerFlags(
-          autoPlay: false,
-          hideThumbnail: true,
-          startAt: (startAt ?? Duration.zero).inSeconds,
-        ),
-      )..addListener(_onControllerChange);
-      setState(() {});
-    } else if (_controller!.value.isReady) {
-      _controller!.load(id, startAt: (startAt ?? Duration.zero).inSeconds);
+
+    final current = _player;
+    if (source.kind == WatchKind.youtube &&
+        current is YoutubeWatchPlayer) {
+      if (current.isReady) {
+        current.load(source.key, source.startAt);
+      } else {
+        // load() is silently dropped before the player is ready. The old code
+        // advanced _videoId and told the partner about a video it had just
+        // thrown away — permanent, unsignalled desync.
+        _pendingId = source.key;
+        _pendingStart = source.startAt;
+      }
     } else {
-      // load() routes through _callMethod, which silently drops every call
-      // before the player is ready. The old code advanced _videoId and told the
-      // partner about a video it had just thrown away — permanent, unsignalled
-      // desync. Hold it and drain on ready instead.
-      _pendingId = id;
-      _pendingStart = startAt ?? Duration.zero;
+      current?.removeListener(_onPlayerChange);
+      current?.dispose();
+      _player = source.kind == WatchKind.youtube
+          ? YoutubeWatchPlayer(source)
+          : MediaWatchPlayer(source);
+      _player!.addListener(_onPlayerChange);
+      setState(() {});
     }
+
     _armWatchdog();
     if (broadcast) {
       _takeLead();
@@ -184,7 +181,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _watchdog?.cancel();
     _watchdog = Timer(kReadyTimeout, () {
       if (!mounted) return;
-      if (_controller?.value.isReady ?? false) return;
+      if (_player?.isReady ?? false) return;
       setState(() => _fault = "This video won't start. It may be blocked from "
           'playing outside YouTube, or private.');
     });
@@ -195,11 +192,12 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     final queued = _pendingId;
     if (queued != null) {
       _pendingId = null;
-      _controller?.load(queued, startAt: _pendingStart.inSeconds);
+      final p = _player;
+      if (p is YoutubeWatchPlayer) p.load(queued, _pendingStart);
       _pendingStart = Duration.zero;
     }
     // autoPlay is off so the button exists; playback still starts by itself.
-    if (!_isFollowerHeld) _controller?.play();
+    if (!_isFollowerHeld) _player?.play();
   }
 
   /// Paste the clipboard link and play it (robust against the paste menu not
@@ -230,9 +228,9 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
     switch (source.kind) {
       case WatchKind.youtube:
-        setState(() => _handoff = null);
-        _loadVideo(source.key, startAt: source.startAt);
       case WatchKind.media:
+        setState(() => _handoff = null);
+        _openSource(source);
       case WatchKind.handoff:
       case WatchKind.blocked:
         // Not playable in the YouTube surface. Say which it is and why, rather
@@ -289,11 +287,18 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   }
 
   /// A local gesture. Anything the USER did makes this device the leader.
-  void _onControllerChange() {
-    final c = _controller;
-    if (c == null || _applying) return;
-    final playing = c.value.isPlaying;
-    final pos = c.value.position.inMilliseconds;
+  void _onPlayerChange() {
+    final p = _player;
+    if (p == null || _applying) return;
+    // A backend that has failed outright owes the user a sentence, not a
+    // silent frozen frame.
+    final f = p.fault;
+    if (f != null && _fault == null) {
+      setState(() => _fault = f);
+      return;
+    }
+    final playing = p.isPlaying;
+    final pos = p.position.inMilliseconds;
 
     if (_isEcho(pos, playing)) {
       _lastPlaying = playing;
@@ -330,7 +335,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
   /// Emit one intent.
   void _send(WatchIntent intent) {
-    final c = _controller;
+    final c = _player;
     final msg = WatchMessage(
       intent: intent,
       from: _myUid ?? '',
@@ -340,8 +345,8 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       // the time, and these two have been measured seconds apart.
       atMs: ServerClock.now().millisecondsSinceEpoch,
       videoId: _videoId,
-      posMs: c?.value.position.inMilliseconds ?? 0,
-      playing: c?.value.isPlaying ?? false,
+      posMs: c?.position.inMilliseconds ?? 0,
+      playing: c?.isPlaying ?? false,
       leader: _leader,
     );
     _channel?.channel
@@ -350,7 +355,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
   /// The periodic tick: the leader reports, the follower corrects.
   void _tick() {
-    final c = _controller;
+    final c = _player;
     if (c == null || _videoId == null) return;
 
     // Released BEFORE the leader branch, not after it. A follower that paused
@@ -413,10 +418,13 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
     final id = msg.videoId;
     if (id != null && id != _videoId) {
-      _applyLocal(() => _loadVideo(id, broadcast: false));
+      final remote = sourceFromKey(id);
+      if (remote != null) {
+        _applyLocal(() => _openSource(remote, broadcast: false));
+      }
     }
 
-    final c = _controller;
+    final c = _player;
     if (c == null) return;
 
     // Each branch records what it asked the player for, so the state change it
@@ -465,9 +473,9 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   /// Positive drift means this device is AHEAD. Both sides correcting toward
   /// each other is a feedback loop — each acts on the other's stale position
   /// and reports a new one that makes the other act again.
-  void _applyDrift(YoutubePlayerController c, WatchMessage msg) {
-    if (!msg.playing || !c.value.isPlaying) return;
-    final drift = c.value.position.inMilliseconds - msg.projectedPosMs();
+  void _applyDrift(WatchPlayer c, WatchMessage msg) {
+    if (!msg.playing || !c.isPlaying) return;
+    final drift = c.position.inMilliseconds - msg.projectedPosMs();
     switch (correctionFor(drift)) {
       case WatchCorrection.none:
         break;
@@ -499,7 +507,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     ref.listen<SessionState>(sessionProvider, (_, next) => _bind(next));
     final partnerName =
         ref.watch(sessionProvider).partner?.displayName ?? 'them';
-    final controller = _controller;
+    final player = _player;
     return Scaffold(
       backgroundColor: MilesColors.night,
       drawer: const AppDrawer(),
@@ -553,18 +561,13 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
               message: _fault!,
               onDismiss: () => setState(() {
                 _fault = null;
-                _controller?.dispose();
-                _controller = null;
+                _player?.dispose();
+                _player = null;
                 _videoId = null;
               }),
             )
-          else if (controller != null)
-            YoutubePlayer(
-              controller: controller,
-              showVideoProgressIndicator: true,
-              progressIndicatorColor: MilesColors.ember,
-              onReady: _onReady,
-            )
+          else if (player != null)
+            _PlayerHost(player: player, onReady: _onReady)
           else
             Expanded(
               child: Center(
@@ -580,7 +583,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
                 ),
               ),
             ),
-          if (controller != null)
+          if (player != null)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -702,4 +705,57 @@ class _LinkCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Renders whichever player is active and reports the moment it becomes ready.
+///
+/// Readiness is a transition, not a callback the abstraction can expose: the
+/// YouTube backend learns it from the iframe, the media backend from
+/// initialize(). Watching [WatchPlayer.isReady] flip covers both, and firing
+/// exactly once is what stops the queued load from being drained twice.
+class _PlayerHost extends StatefulWidget {
+  const _PlayerHost({required this.player, required this.onReady});
+
+  final WatchPlayer player;
+  final VoidCallback onReady;
+
+  @override
+  State<_PlayerHost> createState() => _PlayerHostState();
+}
+
+class _PlayerHostState extends State<_PlayerHost> {
+  bool _fired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.player.addListener(_check);
+    _check();
+  }
+
+  @override
+  void didUpdateWidget(_PlayerHost old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.player, widget.player)) {
+      old.player.removeListener(_check);
+      _fired = false;
+      widget.player.addListener(_check);
+      _check();
+    }
+  }
+
+  void _check() {
+    if (_fired || !widget.player.isReady) return;
+    _fired = true;
+    widget.onReady();
+  }
+
+  @override
+  void dispose() {
+    widget.player.removeListener(_check);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.player.view(context);
 }
