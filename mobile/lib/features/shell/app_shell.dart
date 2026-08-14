@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -14,6 +13,7 @@ import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
@@ -25,6 +25,7 @@ import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 
 /// Bottom-nav shell. Tab 0 is Home (the landing screen). The Closer tab is only
 /// shown to verified adults. An app-wide listener pops the full-screen Reach
@@ -166,6 +167,11 @@ class _AppShellState extends ConsumerState<AppShell>
     // A push may have been tapped before the listener attached.
     _onPendingReach();
     _onPendingCall();
+    // Accounts signed in before key escrow existed have no sealed copy of their
+    // key, and no reason to ever sign out and acquire one. They lose every
+    // encrypted memory on their next reinstall. Asked once, here, because this
+    // is the first point past login and pairing.
+    unawaited(EscrowPrompt.maybeShow(context));
     _onPendingChat();
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
