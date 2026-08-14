@@ -253,3 +253,56 @@ Still open, in priority order:
 2. Vault read path — same root cause (encrypted bytea inline in the row).
 3. `google_fonts` fetches from Google on first launch.
 4. Debug signing.
+
+---
+
+## 10. IMPLEMENTATION ORDER — read before touching either spec
+
+Two specs exist:
+- `docs/guides/memory-threads-spec.md` (1264 lines, complete)
+- `docs/guides/vault-read-path-spec.md` (written when its workflow lands)
+
+**They have the same root cause and must not be implemented twice.** Both store
+encrypted media as `bytea` INLINE in a database row, so every tile costs a
+decrypt before it can paint. That single decision is why both features show
+loading wheels everywhere while chat does not.
+
+### Build the shared foundation FIRST
+
+Neither feature works properly without it, and building it twice is how the two
+drift apart:
+
+1. **Encrypted thumbnail as a separate storage object.** Generated BEFORE
+   encryption, encrypted with its own associated-data binding, uploaded as
+   `application/octet-stream` to `couple_intimate`. Note: that bucket has
+   SELECT/INSERT/DELETE storage policies but **no UPDATE policy**, so
+   `upsert: true` returns 403 — either add the policy or never upsert.
+2. **Decrypt-to-disk cache keyed by item id**, with an explicit security policy.
+   This is plaintext on a device whose entire premise is that nothing is
+   readable: decide when it is written, when wiped, and whether it survives the
+   app lock, backgrounding, the disguise cover, sign-out and an adb backup.
+   `vault_media_cache.dart` already has isolate decrypt + in-flight dedup and is
+   the right place to grow this.
+3. **Honest presentation of unreadable rows.** Rows encrypted under keys
+   destroyed by pre-escrow reinstalls can never be read. The UI must say that
+   plainly instead of printing `SecretBoxAuthenticationError` at the user.
+4. **Cache-key identity**, copied from `core/media/media_decode.dart`: same key
+   AND same decode bounds, and `memCacheHeight` never set anywhere. Two surfaces
+   painting one object must produce ONE `ImageCache` entry or every hand-off
+   silently starts from scratch. This is the trick that makes chat fast.
+
+### Then, in this order
+
+5. **Vault read path** — smaller surface, no new UX, proves the foundation.
+6. **Memory Threads** — needs the foundation plus a notification edge function,
+   multi-select upload, dual-consent delete UI, and the timeline redesign.
+   **Do the notification first.** Nine proposals produced zero acceptances
+   because nothing tells the partner a proposal exists; a beautiful timeline
+   nobody knows to open changes nothing.
+
+### Sanity check before starting
+
+Run the audit that would have caught four of this session's bugs — every column
+name the repositories write, diffed against `information_schema`. All four were
+client code shipped against a schema that was never applied, and none were
+catchable by `flutter test`.
