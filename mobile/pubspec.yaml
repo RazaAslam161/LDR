@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+19
+version: 0.1.0+20
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -106,6 +106,7 @@ dependencies:
   flutter_image_compress: ^2.5.1
   google_maps_flutter: ^2.18.0
   webview_flutter: ^4.14.1
+  mapbox_maps_flutter: ^2.28.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
