@@ -2,19 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
 import 'package:miles/features/closer/private_vault/vault_media_cache.dart';
 import 'package:miles/features/closer/private_vault/vault_media_viewer.dart';
-import 'package:miles/main.dart' show MilesApp;
+
 
 /// Shared Vault — E2EE photo/note storage synced in real-time between partners.
 ///
@@ -96,24 +95,34 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
 
     if (_isUploading) return;
 
-    final picker = ImagePicker();
-    List<XFile> xfiles = [];
-    MilesApp.systemOverlayActive = true;
-    try {
-      xfiles = await picker.pickMultipleMedia();
-    } finally {
-      MilesApp.systemOverlayActive = false;
+    // Through PhotoPickerService, not a bare ImagePicker.
+    //
+    // image_picker_android defaults useAndroidPhotoPicker to FALSE, and with it
+    // false every pick fires ACTION_GET_CONTENT — the document provider. That
+    // is the "it opens the file manager instead of my gallery" complaint, and
+    // chat had exactly this bug and exactly this fix. Going through the service
+    // also brings the HEIC/ProRAW conversion with it, which the vault would
+    // have hit the moment an iPhone photo was chosen.
+    final picked = await PhotoPickerService.pickMedia();
+    final skipped = PhotoPickerService.takeRejectedFormats();
+    if (skipped.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("This phone can't read "
+              '${skipped.map((e) => '.$e').join(', ')}'),
+        ),
+      );
     }
-    if (xfiles.isEmpty) return;
+    if (picked.isEmpty) return;
 
     final ephemeral = await _confirmRetention() ?? true;
 
-    setState(() => _uploadingItems = xfiles.length);
-    for (final xfile in xfiles) {
+    setState(() => _uploadingItems = picked.length);
+    for (final item in picked) {
       try {
-        final bytes = await xfile.readAsBytes();
-        final mimeType = _mediaMimeType(xfile);
-        final isVideo = mimeType.startsWith('video/');
+        final bytes = await item.file.readAsBytes();
+        final isVideo = item.isVideo;
+        final mimeType = isVideo ? 'video/mp4' : 'image/jpeg';
 
         await PrivateVaultRepository.insert(
           coupleId: couple.id,
@@ -124,28 +133,13 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
           mediaMimeType: mimeType,
         );
       } catch (e) {
-        _toast('Could not save ${xfile.name}: $e');
+        _toast('Could not save: $e');
       } finally {
         if (mounted) setState(() => _uploadingItems--);
       }
     }
   }
 
-  String _mediaMimeType(XFile file) {
-    final declared = file.mimeType;
-    if (declared != null &&
-        (declared.startsWith('image/') || declared.startsWith('video/'))) {
-      return declared;
-    }
-    final name = file.name.toLowerCase();
-    if (name.endsWith('.mov')) return 'video/quicktime';
-    if (name.endsWith('.webm')) return 'video/webm';
-    if (name.endsWith('.mp4')) return 'video/mp4';
-    if (name.endsWith('.png')) return 'image/png';
-    if (name.endsWith('.webp')) return 'image/webp';
-    if (name.endsWith('.gif')) return 'image/gif';
-    return 'image/jpeg';
-  }
 
   Future<String?> _showNoteDialog() async {
     final controller = TextEditingController();
