@@ -222,3 +222,34 @@ Thumbnails must be **separate storage objects**, not encrypted blobs in the
 row. Generate before encryption, cache decrypted-to-disk keyed by item id.
 That is the single decision that makes the difference between the chat pipeline
 (fast) and the vault/threads (wheels everywhere).
+
+---
+
+## 9. State at end of session, 2026-08-14
+
+**Build 21** at `E:\LDR\Miles.apk` (93 MB, arm64), sha256
+`587b5e0d24dff9370af59798918c009525261aa8962ffd8a0376e75ba883523c`.
+NOT installed — the phone was unplugged. Device on build 20.
+
+**The redesign spec is written:** `docs/guides/memory-threads-spec.md`, 1264
+lines. Its headline finding is not a UI problem — **a memory proposal fires no
+notification at all.** `supabase/functions/` has care-notify, map-token,
+reach-notify, turn-credentials and nothing for memories. Nine proposals across
+two couples, zero acceptances, because the only way to find one is to open a
+disguised app, pass the app lock, find the ninth tile in Closer, and enter a
+PIN. Fix the notification before touching a pixel.
+
+Fixed ahead of the redesign, both live:
+- **Dual consent was a convention, not a rule.** `memory_threads_delete_member`
+  allowed a plain DELETE by either partner — the whole request/confirm flow was
+  bypassable with one PostgREST call. Policy dropped, grant revoked, rows now
+  leave only via the state machine. Guard trigger makes `proposer` and
+  `couple_id` immutable and rejects self-acceptance.
+- **17 tables granted DELETE with no DELETE policy.** RLS denied them, but that
+  is one layer. Revoked, catalogue-driven so it can be re-run.
+
+Still open, in priority order:
+1. Memory Threads redesign — spec is written, implementation not started.
+2. Vault read path — same root cause (encrypted bytea inline in the row).
+3. `google_fonts` fetches from Google on first launch.
+4. Debug signing.
