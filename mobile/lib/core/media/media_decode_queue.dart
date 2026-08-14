@@ -28,25 +28,39 @@ class MediaDecodeQueue {
   static const int _maxInFlight = 2;
 
   static final Queue<_Job> _queue = Queue<_Job>();
-  static final Set<Object> _queued = <Object>{};
+
+  /// In-flight work by id, so a duplicate request JOINS it.
+  ///
+  /// This used to be a Set and a duplicate resolved to null without running
+  /// anything. Null is also what a dropped job returns, so the caller could not
+  /// tell "somebody else is already doing this" from "nothing happened" — and
+  /// the cover widget treated both as a finished load with no image, painting a
+  /// blank box with no error and no retry.
+  ///
+  /// That was not rare. The disguise cover destroys the entire widget tree on
+  /// any focus loss, so the sequence — state A enqueues, A is disposed, state B
+  /// asks for the same id and is told null, A's job is then dropped as unwanted
+  /// — is a routine glance at the notification shade.
+  static final Map<Object, Future<Object?>> _inFlight = <Object, Future<Object?>>{};
+
   static int _running = 0;
 
   /// Runs [task] when a slot frees, unless [isWanted] has become false by then.
   ///
-  /// [id] deduplicates: a cell rebuilt three times while queued enqueues once.
-  /// Returns null when the job was dropped as stale.
+  /// [id] deduplicates: a cell rebuilt three times while queued enqueues once
+  /// and all three await the same result. Null means the work was dropped
+  /// because nobody wanted it any more — callers must treat that as "not
+  /// loaded", never as "loaded nothing".
   static Future<T?> run<T>(
     Object id,
     bool Function() isWanted,
     Future<T> Function() task,
   ) {
-    final completer = Completer<T?>();
-    if (_queued.contains(id)) {
-      // Already pending under this id. The newer request is the same work.
-      completer.complete(null);
-      return completer.future;
-    }
-    _queued.add(id);
+    final existing = _inFlight[id];
+    if (existing != null) return existing.then((v) => v as T?);
+
+    final completer = Completer<Object?>();
+    _inFlight[id] = completer.future;
     _queue.add(_Job(id, isWanted, () async {
       try {
         completer.complete(await task());
@@ -57,25 +71,24 @@ class MediaDecodeQueue {
       if (!completer.isCompleted) completer.complete(null);
     }));
     _pump();
-    return completer.future;
+    return completer.future.then((v) => v as T?);
   }
 
   static void _pump() {
     while (_running < _maxInFlight && _queue.isNotEmpty) {
       final job = _queue.removeFirst();
-      // The id is held until the job FINISHES, not until it starts. Releasing
-      // it at dequeue would let a cell that rebuilds while its own decode is in
-      // flight enqueue the identical work a second time — which is the common
-      // case during a scroll, not an edge one.
-      // The whole point: asked NOW, not when this was enqueued.
+      // The id is held until the job FINISHES, not until it starts, so a cell
+      // that rebuilds mid-decode joins the running job rather than enqueuing
+      // the identical work again — the common case during a scroll.
+      // isWanted is asked NOW, not when this was enqueued.
       if (!job.isWanted()) {
-        _queued.remove(job.id);
+        _inFlight.remove(job.id);
         job.drop();
         continue;
       }
       _running++;
       job.run().whenComplete(() {
-        _queued.remove(job.id);
+        _inFlight.remove(job.id);
         _running--;
         _pump();
       });
@@ -89,7 +102,7 @@ class MediaDecodeQueue {
       job.drop();
     }
     _queue.clear();
-    _queued.clear();
+    _inFlight.clear();
   }
 
   @visibleForTesting

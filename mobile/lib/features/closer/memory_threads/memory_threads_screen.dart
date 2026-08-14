@@ -1169,6 +1169,10 @@ class _MemoryCover extends StatefulWidget {
 class _MemoryCoverState extends State<_MemoryCover> {
   ImageProvider? _provider;
   MemoryFailure? _failure;
+
+  /// Why there is legitimately nothing to show. Distinct from [_failure],
+  /// which means we tried and could not.
+  String? _blank;
   bool _mounted = true;
 
   /// 16:10, and the height is reserved from a constant BEFORE the bytes arrive.
@@ -1190,7 +1194,10 @@ class _MemoryCoverState extends State<_MemoryCover> {
 
   Future<void> _load() async {
     final path = widget.thread.coverPath;
-    if (path == null) return;
+    if (path == null) {
+      if (_mounted) setState(() => _blank = 'No photo on this memory yet.');
+      return;
+    }
     // cover_photo_id went unwritten by the sync trigger for a while, and the
     // decrypt cannot build its associated data without it. The path is
     // `$coupleId/memory/$photoId/c.enc`, so the id is recoverable from it — a
@@ -1198,7 +1205,10 @@ class _MemoryCoverState extends State<_MemoryCover> {
     final segments = path.split('/');
     final photoId = widget.thread.coverPhotoId ??
         (segments.length > 2 ? segments[2] : null);
-    if (photoId == null) return;
+    if (photoId == null) {
+      if (_mounted) setState(() => _blank = "This memory's photo is missing.");
+      return;
+    }
 
     // Computed from the SCREEN, not from this card, and therefore identical for
     // every card on it. A width derived per-card gives each one its own
@@ -1207,8 +1217,11 @@ class _MemoryCoverState extends State<_MemoryCover> {
     final width =
         ((media.size.width - 48) * media.devicePixelRatio).round();
 
-    await MediaDecodeQueue.run<void>(
-      'cover:${widget.thread.id}',
+    // Keyed on the storage object, not the thread: two items in one memory
+    // share a thread id, so a per-thread key would make them dedupe each other
+    // into silence the moment a memory holds more than one photo.
+    final done = await MediaDecodeQueue.run<bool>(
+      path,
       () => _mounted,
       () async {
         try {
@@ -1219,6 +1232,7 @@ class _MemoryCoverState extends State<_MemoryCover> {
             decodeWidth: width,
           );
           if (_mounted) setState(() => _provider = p);
+          return true;
         } catch (e) {
           // A cover is a downloaded object, so a MAC failure on it is a
           // truncated file as often as a lost key — `ofObject` refuses to call
@@ -1226,9 +1240,18 @@ class _MemoryCoverState extends State<_MemoryCover> {
           // failure "locked to an older install", including the missing-key
           // StateError that heals itself.
           if (_mounted) setState(() => _failure = MemoryFailure.ofObject(e));
+          return true;
         }
       },
     );
+
+    // Null means the work was dropped, not that there was nothing to load. The
+    // widget tree is torn down on every glance at the notification shade, so
+    // this is ordinary — and treating it as a finished load is what left a
+    // permanently empty box behind.
+    if (done == null && _mounted && _provider == null && _failure == null) {
+      _load();
+    }
   }
 
   @override
@@ -1258,8 +1281,31 @@ class _MemoryCoverState extends State<_MemoryCover> {
                       ),
                     ),
                   )
-                : _provider == null
-                    ? const SizedBox.expand()
+                : _blank != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            _blank!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0x99F5EFE6),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      )
+                    : _provider == null
+                        // Still working. An unexplained empty box was the
+                        // resting state for every silent path through _load,
+                        // and it is what the user photographed.
+                        ? const Center(
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
                     : Image(
                         image: _provider!,
                         fit: BoxFit.cover,
@@ -1275,6 +1321,22 @@ class _MemoryCoverState extends State<_MemoryCover> {
                                     child: child,
                                   )
                                 : const SizedBox.expand(),
+                        // A decode failure surfaces on the ImageStream, not in
+                        // _load's try, so without this the codec giving up is
+                        // one more silent empty box.
+                        errorBuilder: (_, __, ___) => const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text(
+                              "This photo couldn't be displayed.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Color(0x99F5EFE6),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
           ),
         ),

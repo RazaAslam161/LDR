@@ -617,7 +617,38 @@ revoked; all three entry points are SECURITY DEFINER and unaffected.
 Verified live, rolled back:
 `vaultDelete=works | resetCounter=blocked | hasVaultPin=works`
 
-### BUILD 23 — built 2026-08-15, NOT installed. Test the gallery on it.
+### BUILD 24 — built 2026-08-15. THE ONE TO INSTALL. Not installed yet.
+
+`E:\LDR\Miles.apk`, one universal APK, 218.5 MB (229,161,936 bytes),
+sha256 `7ce2be53f97be4d3b31ffd2b15c626803ee5af74721104453a84710e8a8af694`,
+versionCode 24, arm64-v8a + armeabi-v7a + x86_64.
+Gate: `flutter analyze mobile` 0/0, `flutter test` **615 passing**.
+
+Everything in 23, plus everything 23 was missing:
+
+| what | why it matters on a device |
+|---|---|
+| Gallery dual-consent delete + multi-select | long-press to select, "ask to delete", partner answers the whole set |
+| Delete-request limit (3 refusals settles it) | stops the same picture being raised every evening |
+| **Video posters and a real player** | videos had NO poster and NO player — a tile handed an .mp4 to an image widget, which can never paint |
+| Daily routine chart ("Today") | seeded 10 routines, custom add, long-press remove, resets by date |
+| **Map pin** | drew a Maki sprite the STANDARD_SATELLITE style does not carry, so the pin rendered nothing, silently |
+| Watch Together fix (other session) | youtube_player_flutter past an upstream int.parse bug; a real play button |
+
+**Test in this order, because each depends on the last being true:**
+1. Gallery — does a tile paint at all? (never verified before 23)
+2. A video — poster on the tile, then does it play?
+3. Map — is there a dot on her position, not just her city centred?
+4. Today — does the chart seed, tick, and show her column?
+5. Memory Threads — "Take it back" on your own pending proposal.
+
+**Raise the gate only AFTER installing**, or you lock out the device that needs
+the install:
+`update app_release set min_build = 24, latest_build = 24;`
+
+Still debug-signed. Sideload only, not a market build.
+
+### BUILD 23 — superseded by 24
 
 `E:\LDR\Miles.apk`, one universal APK, 218.5 MB (229,162,033 bytes),
 sha256 `1564a80b662d1508c688dfbe79c773843470d288e5fd6da9b913e1a37c6820ed`,

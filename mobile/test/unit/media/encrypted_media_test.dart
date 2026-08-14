@@ -288,7 +288,11 @@ void main() {
         }),
       ]);
       expect(ran, 1);
-      expect(both.contains(null), isTrue);
+      // Both callers get the ONE result. This used to assert that the duplicate
+      // received null, which is the behaviour that painted a permanently blank
+      // memory cover: null is also what a dropped job returns, so the caller
+      // read "somebody else is loading this" as "finished, nothing to show".
+      expect(both, [1, 1]);
     });
 
     test('a failing job does not wedge the queue', () async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -26,6 +28,42 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
   Stream<RoutineDay>? _stream;
   String _date = RoutineRepository.today();
 
+  /// My ticks, applied before the server has heard about them.
+  ///
+  /// The box used to fill only after a write round trip AND the realtime echo
+  /// that follows it re-read the whole chart — two network hops before a
+  /// checkbox moved, which on a phone reads as broken rather than slow. The
+  /// truth still comes from the stream; this just stops the finger waiting for
+  /// it.
+  final Map<String, int> _optimistic = {};
+
+  /// Reverts one optimistic tick when its write fails.
+  void _rollback(String itemId) {
+    if (!mounted) return;
+    setState(() => _optimistic.remove(itemId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("That didn't save. Try again.")),
+    );
+  }
+
+  /// My count for [item], preferring an unconfirmed tap over the server's
+  /// value, and dropping the override once the server agrees.
+  int _mine(RoutineDay day, RoutineItem item, String me) {
+    final server = day.countFor(item.id, me);
+    final local = _optimistic[item.id];
+    if (local == null) return server;
+    if (local == server) {
+      // Landed. Drop it after this frame — mutating during build would be a
+      // setState inside build().
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _optimistic[item.id] == server) {
+          setState(() => _optimistic.remove(item.id));
+        }
+      });
+    }
+    return local;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -48,7 +86,7 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
     });
   }
 
-  Future<void> _tap(RoutineItem item, int mine) async {
+  void _tap(RoutineItem item, int mine) {
     final me = ref.read(sessionProvider).profile?.id;
     if (me == null) return;
     // A counted line steps up and wraps back to nothing at the target; a plain
@@ -56,19 +94,18 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
     final next = item.isCounted
         ? (mine >= item.targetCount ? 0 : mine + 1)
         : (mine > 0 ? 0 : 1);
-    try {
-      await RoutineRepository.setCount(
+
+    // Paint first. Not awaited: awaiting the write is exactly what made the box
+    // fill a beat after the tap.
+    setState(() => _optimistic[item.id] = next);
+    unawaited(
+      RoutineRepository.setCount(
         itemId: item.id,
         userId: me,
         onDate: _date,
         next: next,
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("That didn't save. Try again.")),
-      );
-    }
+      ).catchError((_) => _rollback(item.id)),
+    );
   }
 
   Future<void> _addCustom() async {
@@ -160,8 +197,11 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
             if (day.items.isEmpty) {
               return const _Note('Nothing on the chart yet.');
             }
-            final mineDone =
-                day.items.where((i) => day.doneBy(i, me)).length;
+            // Counted through _mine, not day.doneBy, or the bar lags a tick
+            // behind the box it is summarising.
+            final mineDone = day.items
+                .where((i) => _mine(day, i, me) >= i.targetCount)
+                .length;
             return Column(
               children: [
                 _Header(
@@ -178,11 +218,13 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 6),
                     itemBuilder: (_, i) {
                       final item = day.items[i];
+                      final mine = _mine(day, item, me);
                       return _Row(
                         item: item,
-                        mine: day.countFor(item.id, me),
+                        mine: mine,
                         theirs: day.countFor(item.id, partner),
-                        onTap: () => _tap(item, day.countFor(item.id, me)),
+                        partnerName: partnerName,
+                        onTap: () => _tap(item, mine),
                         onRemove:
                             item.isDefault ? null : () => _remove(item),
                       );
@@ -264,6 +306,7 @@ class _Row extends StatelessWidget {
     required this.item,
     required this.mine,
     required this.theirs,
+    required this.partnerName,
     required this.onTap,
     this.onRemove,
   });
@@ -271,6 +314,7 @@ class _Row extends StatelessWidget {
   final RoutineItem item;
   final int mine;
   final int theirs;
+  final String partnerName;
   final VoidCallback onTap;
 
   /// Null for seeded lines — removing "Fajr" for the couple is a different
@@ -326,17 +370,45 @@ class _Row extends StatelessWidget {
                 ],
               ),
             ),
-            // Their column. Read-only by construction — the policy only lets a
-            // person write their own row, so this can never be tapped into a
+            // Their column, named and legible rather than a bare glyph.
+            //
+            // This was an 18px heart with no label, which is not "seeing each
+            // other's progress" — it is a decoration you have to be told the
+            // meaning of. Read-only by construction: the policy only lets a
+            // person write their own row, so it can never be tapped into a
             // claim about someone else.
-            Tooltip(
-              message: theirsDone ? 'They did this' : 'Not yet',
-              child: Icon(
-                theirsDone ? Icons.favorite : Icons.favorite_border,
-                size: 18,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
                 color: theirsDone
-                    ? const Color(0xFFEF6F58)
-                    : const Color(0x33F5EFE6),
+                    ? MilesColors.tint(const Color(0xFFEF6F58), 0.18)
+                    : MilesColors.surface2,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    theirsDone ? Icons.check : Icons.remove,
+                    size: 12,
+                    color: theirsDone
+                        ? const Color(0xFFEF6F58)
+                        : const Color(0x66F5EFE6),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    item.isCounted
+                        ? '$theirs/${item.targetCount}'
+                        : partnerName.split(' ').first,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: theirsDone
+                          ? const Color(0xFFEF6F58)
+                          : const Color(0x66F5EFE6),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
