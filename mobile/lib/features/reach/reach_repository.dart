@@ -43,6 +43,18 @@ class ReachRepository {
     });
   }
 
+  /// How long the server will refuse the next Reach, in seconds; 0 when clear.
+  ///
+  /// The limit is a BEFORE INSERT trigger on reach_events (migration
+  /// 20260601007700), so this is the only number that describes what the next
+  /// insert will actually do — the widget's own countdown described nothing but
+  /// itself. Seconds rather than a deadline: the countdown then needs the
+  /// device's clock rate and never its absolute time.
+  static Future<int> cooldownSeconds() async {
+    final seconds = await _c.rpc<dynamic>('reach_cooldown_seconds');
+    return JsonUtils.parseInt(seconds);
+  }
+
   static Future<void> acknowledge(String id) async {
     await _c.from('reach_events').update(
         {'acknowledged_at': DateTime.now().toUtc().toIso8601String()},).eq('id', id);

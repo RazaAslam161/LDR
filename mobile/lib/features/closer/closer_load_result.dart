@@ -30,11 +30,18 @@ class CloserLoadResult<T> {
     // A reinstall regenerates this device's key, so everything written under
     // the old one is permanently unreadable here. Saying "couldn't be opened"
     // would imply it is coming back; it is not.
+    //
+    // And not only here: `publishMyPublicKey` upserts OVER the old key, so her
+    // `ensureSharedKey` re-derives against the new one and her copy stops
+    // opening too. The per-item wording (`KeyGoneForever` in
+    // `memory_threads/memory_failure.dart`) says so; this said less, and the
+    // two must not contradict each other.
     if (SupabaseRepository.keyWasReplaced) {
       return unreadable == 1
-          ? "1 item was encrypted on your previous install and can't be opened"
-          : '$unreadable items were encrypted on your previous install and '
-              "can't be opened";
+          ? "1 item was encrypted on your previous install. It can't be "
+              'opened here — or on hers'
+          : '$unreadable items were encrypted on your previous install. They '
+              "can't be opened here — or on hers";
     }
     return unreadable == 1
         ? "1 item couldn't be opened — your partner may need to open Closer"

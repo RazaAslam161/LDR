@@ -22,7 +22,6 @@ void main() {
     });
 
     test('humanises hyphenated segments', () {
-      expect(screenNameForPath('/app/closer/body-map'), 'Body Map');
       expect(screenNameForPath('/app/closer/memory-threads'), 'Memory Threads');
       expect(screenNameForPath('/app/games/truth-dare'), 'Truth Dare');
       expect(screenNameForPath('/app/location-map'), 'Location Map');
@@ -61,8 +60,7 @@ void main() {
         '/app/heartbeat', '/app/games', '/app/rituals', '/app/prompt',
         '/app/timeline', '/app/location-map', '/app/closer/touch-trace',
         '/app/closer/mood-lamp', '/app/closer/desire', '/app/closer/vault',
-        '/app/closer/afterglow', '/app/closer/fantasy-jar',
-        '/app/closer/body-map', '/app/closer/pick-for-us',
+        '/app/closer/fantasy-jar', '/app/closer/pick-for-us',
       ];
       for (final r in realRoutes) {
         final name = screenNameForPath(r);

@@ -5,6 +5,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_repository.dart';
 
 /// Today's question + your answer. Both partners' answers are revealed
@@ -72,7 +73,7 @@ class _DailyPromptScreenState extends ConsumerState<DailyPromptScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = friendlyAuthError(e);
         _loading = false;
       });
     }
@@ -92,7 +93,16 @@ class _DailyPromptScreenState extends ConsumerState<DailyPromptScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      // Setting _error here swapped the whole screen for the load-error state
+      // (_body checks it before _prompt), so a failed save also took away the
+      // question and the answer they had just typed. _answer still holds the
+      // text, so Send is the retry.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(friendlyAuthError(e)),
+          action: SnackBarAction(label: 'Retry', onPressed: _submit),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }

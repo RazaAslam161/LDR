@@ -62,8 +62,8 @@ class SupabaseRepository {
     // Recover the encryption key before anything reads encrypted rows.
     //
     // Android wipes FlutterSecureStorage on uninstall, so a reinstall used to
-    // mint a new X25519 keypair and silently orphan every memory, vault item
-    // and afterglow the couple had written. Restoring first means a fresh
+    // mint a new X25519 keypair and silently orphan every memory and vault
+    // item the couple had written. Restoring first means a fresh
     // install adopts the ORIGINAL key rather than generating a replacement that
     // can never open anything.
     //

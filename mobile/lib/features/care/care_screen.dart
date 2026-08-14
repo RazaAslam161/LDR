@@ -5,6 +5,7 @@ import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/care/care_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 
@@ -41,6 +42,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
   ManagedSubscription? _channel;
   List<CareNudge> _nudges = const [];
   bool _loading = true;
+  String? _loadError;
 
   @override
   void initState() {
@@ -71,12 +73,20 @@ class _CareScreenState extends ConsumerState<CareScreen> {
       final n = await CareRepository.list(id);
       if (mounted) {
         setState(() {
-        _nudges = n;
-        _loading = false;
-      });
+          _nudges = n;
+          _loadError = null;
+          _loading = false;
+        });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      // Falling through to _loading = false alone rendered "No reminders yet."
+      // on a failed read — the same screen a genuinely empty history shows.
+      if (mounted) {
+        setState(() {
+          _loadError = friendlyAuthError(e);
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -93,7 +103,21 @@ class _CareScreenState extends ConsumerState<CareScreen> {
         );
       }
       await _load();
-    } catch (_) {}
+    } catch (_) {
+      // The "sent 💛" snackbar is the only feedback this screen gives, so a
+      // swallowed failure was indistinguishable from the tap not registering.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("That didn't send."),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => _send(kind, message),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _custom() async {
@@ -198,7 +222,27 @@ class _CareScreenState extends ConsumerState<CareScreen> {
               Expanded(
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
-                    : _nudges.isEmpty
+                    : _loadError != null
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(_loadError!,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          color: MilesColors.taupe,
+                                          height: 1.5,),),
+                                  const SizedBox(height: 14),
+                                  TextButton(
+                                      onPressed: _load,
+                                      child: const Text('Try again'),),
+                                ],
+                              ),
+                            ),
+                          )
+                        : _nudges.isEmpty
                         ? const Center(
                             child: Text('No reminders yet.',
                                 style: TextStyle(color: MilesColors.taupe),),)

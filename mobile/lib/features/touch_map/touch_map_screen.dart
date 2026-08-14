@@ -849,6 +849,13 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         );
       }
     } catch (_) {
+      // "Snap sent 📸" is the only feedback here, so a swallowed upload was
+      // indistinguishable from never having taken the photo at all.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("That snap didn't send.")),
+        );
+      }
     } finally {
       MilesApp.systemOverlayActive = false;
     }

@@ -20,6 +20,7 @@ import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -373,13 +374,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       await SupabaseRepository.setModestMode(
           coupleId: couple.id, enabled: !newValue,);
       if (newValue == true) {
-        try {
-          await SupabaseRepository.publishMyPublicKey();
-        } catch (_) {}
+        // Swallowing this left Closer switched on with no public key published,
+        // so every Closer screen sat on "waiting for your partner" forever and
+        // nothing here ever said why. Let it fail the whole toggle instead.
+        await SupabaseRepository.publishMyPublicKey();
       }
       await ref.read(sessionProvider.notifier).loadProfile();
     } catch (e) {
-      setState(() => _error = 'Could not update.');
+      setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

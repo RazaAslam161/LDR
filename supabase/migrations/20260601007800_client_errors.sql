@@ -2,7 +2,7 @@
 -- Miles — the app has never been able to say that it is broken.
 --
 -- FlutterError.onError and PlatformDispatcher.onError debugPrinted and stopped
--- there (main.dart:44-51). The other reporting path, Diag, has been a no-op
+-- there. The other reporting path, Diag, has been a no-op
 -- since build 10 — `if (!_enabled) return` over a flag only resetForTest ever
 -- set — so all 75 record/span sites wrote nothing, realtime's CHANNEL_ERROR and
 -- the push-received receipt included. There is no crash reporter in pubspec,
@@ -49,9 +49,10 @@ create table if not exists public.client_errors (
   id          bigserial primary key,
   -- User-scoped, not couple-scoped. A crash belongs to a build and a handset,
   -- not to a relationship — and couple scoping would route the insert through
-  -- current_user_couple_id(), which is precisely what has not resolved when the
-  -- session is the thing that broke. diag.dart:196-201 records that failure
-  -- happening to the trace that was meant to explain it.
+  -- current_user_couple_id(), the way diag_insert_own does (20260601004000:54),
+  -- which is precisely what has not resolved when the session is the thing that
+  -- broke. Diag had that failure happen to the trace meant to explain it: a
+  -- stale binding rejected every row and the first sign was an empty table.
   --
   -- Defaulted rather than sent, so the client never names itself and therefore
   -- cannot name anyone else. auth.users rather than profiles because a crash

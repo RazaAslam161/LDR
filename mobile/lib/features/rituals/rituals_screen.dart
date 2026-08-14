@@ -6,6 +6,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/rituals/create_ritual_screen.dart';
 import 'package:miles/features/rituals/ritual_repository.dart';
 
@@ -45,7 +46,7 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = friendlyAuthError(e);
         _busy = false;
       });
     }

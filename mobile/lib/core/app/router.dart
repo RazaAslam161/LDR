@@ -18,9 +18,6 @@ import 'package:miles/features/capsule/capsule_list_screen.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/features/care/care_screen.dart';
 import 'package:miles/features/chat/camera/rapid_camera_screen.dart';
-import 'package:miles/features/closer/afterglow/afterglow_form_screen.dart';
-import 'package:miles/features/closer/afterglow/afterglow_screen.dart';
-import 'package:miles/features/closer/body_map/body_map_screen.dart';
 import 'package:miles/features/closer/desire/desire_temp_screen.dart';
 import 'package:miles/features/closer/fantasy_jar/fantasy_jar_screen.dart';
 import 'package:miles/features/closer/memory_threads/memory_threads_screen.dart';
@@ -28,6 +25,8 @@ import 'package:miles/features/closer/memory_threads/propose_memory_screen.dart'
 import 'package:miles/features/closer/mood_lamp/mood_lamp_screen.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_screen.dart';
 import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
+import 'package:miles/features/gallery/gallery_screen.dart';
+import 'package:miles/features/routines/routine_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
@@ -298,13 +297,17 @@ GoRouter buildRouter(Ref ref) {
         path: '/app/closer/vault',
         builder: (context, state) => const PrivateVaultScreen(),
       ),
+      // The shared gallery that replaces the vault's grid. Both routes exist
+      // during the changeover: the vault still holds the couple's existing
+      // encrypted items, and removing its route would make them unreachable
+      // before anything has migrated them.
       GoRoute(
-        path: '/app/closer/afterglow',
-        builder: (context, state) => const AfterglowScreen(),
+        path: '/app/gallery',
+        builder: (context, state) => const GalleryScreen(),
       ),
       GoRoute(
-        path: '/app/closer/afterglow/new',
-        builder: (context, state) => const AfterglowFormScreen(),
+        path: '/app/routines',
+        builder: (context, state) => const RoutineScreen(),
       ),
       GoRoute(
         path: '/app/closer/memory-threads',
@@ -317,10 +320,6 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/closer/fantasy-jar',
         builder: (context, state) => const FantasyJarScreen(),
-      ),
-      GoRoute(
-        path: '/app/closer/body-map',
-        builder: (context, state) => const BodyMapScreen(),
       ),
       GoRoute(
         path: '/app/closer/pick-for-us',

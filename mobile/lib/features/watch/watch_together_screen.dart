@@ -10,13 +10,16 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/watch/watch_protocol.dart';
+import 'package:miles/features/watch/watch_source.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 
-/// Watch & listen together — paste a YouTube link (movie, music video, playlist)
-/// and play/pause/seek stay loosely synced on both phones via a broadcast
-/// channel. Whoever touches the controls drives; the other follows.
+/// Watch & listen together — paste any video link. YouTube plays inline;
+/// anything else opens in the browser on both phones. Play, pause and seek stay
+/// synced via a broadcast channel: whoever touches the controls drives, the
+/// other follows.
 class WatchTogetherScreen extends ConsumerStatefulWidget {
   const WatchTogetherScreen({super.key});
 
@@ -24,6 +27,16 @@ class WatchTogetherScreen extends ConsumerStatefulWidget {
   ConsumerState<WatchTogetherScreen> createState() =>
       _WatchTogetherScreenState();
 }
+
+/// Nothing in youtube_player_flutter ever times out: if the iframe API never
+/// calls back, isReady stays false forever and every command is silently
+/// dropped. This is the bound that makes that state visible.
+const Duration kReadyTimeout = Duration(seconds: 8);
+
+/// How long a command may still be echoed back by the player. A backstop, not
+/// the mechanism: a command whose echo never arrives must not gag real
+/// gestures forever.
+const Duration kEchoWindow = Duration(milliseconds: 1500);
 
 class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   YoutubePlayerController? _controller;
@@ -47,12 +60,11 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
   bool get _isLeader => _leader != null && _leader == _myUid;
 
-  /// True while a remote intent is being applied, so the controller listener
-  /// does not re-broadcast what it was just told.
+  /// True for the synchronous duration of a command we issue ourselves.
   ///
-  /// Cleared synchronously after the apply, not on a 600ms timer: the old
-  /// version both swallowed real gestures inside its window and let stale ones
-  /// through outside it.
+  /// Only covers the call itself. The state change it provokes lands later and
+  /// is matched by [_isEcho] instead — see [_applyLocal] for why a flag alone
+  /// was never enough.
   bool _applying = false;
 
   bool _lastPlaying = false;
@@ -64,6 +76,26 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   /// When the partner last told us anything, for stall detection.
   DateTime? _heardAt;
   bool _peerStalled = false;
+
+  /// A load that arrived before the player could accept it.
+  String? _pendingId;
+  Duration _pendingStart = Duration.zero;
+
+  /// Non-null when playback is impossible and we owe the user a sentence.
+  String? _fault;
+
+  /// A link we cannot play inline, held so the card can offer the browser.
+  WatchSource? _handoff;
+
+  Timer? _watchdog;
+
+  /// What we last commanded the player to do, so its echo is recognised by
+  /// identity rather than by a stopwatch. See [_applyLocal].
+  int? _expectPosMs;
+  bool? _expectPlaying;
+  DateTime? _expectUntil;
+
+  bool get _isFollowerHeld => _holdUntil != null && !_isLeader;
 
   @override
   void initState() {
@@ -96,26 +128,78 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   @override
   void dispose() {
     _heartbeat?.cancel();
+    _watchdog?.cancel();
     _channel?.dispose();
     _controller?.dispose();
     _urlInput.dispose();
     super.dispose();
   }
 
-  void _loadVideo(String id, {bool broadcast = true}) {
+  void _loadVideo(String id, {bool broadcast = true, Duration? startAt}) {
     _videoId = id;
+    _fault = null;
+    _pendingId = null;
     if (_controller == null) {
       _controller = YoutubePlayerController(
         initialVideoId: id,
+        // autoPlay:false is deliberate and is the whole reason the spinner can
+        // no longer be permanent. The package hides its play button behind
+        // `!flags.autoPlay || state == playing || state == paused`, so with
+        // autoPlay on, a video that never reaches a playing state leaves a bare
+        // progress wheel and NOTHING to tap. Off, the button appears the moment
+        // the player is ready — and _onReady below still starts playback, so
+        // nothing is lost.
+        //
+        // hideThumbnail closes an Image.network to i3.ytimg.com issued by the
+        // app's own HTTP stack, outside the webview: an unencrypted disclosure
+        // of what the couple is watching, from an app built around a disguise.
+        flags: YoutubePlayerFlags(
+          autoPlay: false,
+          hideThumbnail: true,
+          startAt: (startAt ?? Duration.zero).inSeconds,
+        ),
       )..addListener(_onControllerChange);
       setState(() {});
+    } else if (_controller!.value.isReady) {
+      _controller!.load(id, startAt: (startAt ?? Duration.zero).inSeconds);
     } else {
-      _controller!.load(id);
+      // load() routes through _callMethod, which silently drops every call
+      // before the player is ready. The old code advanced _videoId and told the
+      // partner about a video it had just thrown away — permanent, unsignalled
+      // desync. Hold it and drain on ready instead.
+      _pendingId = id;
+      _pendingStart = startAt ?? Duration.zero;
     }
+    _armWatchdog();
     if (broadcast) {
       _takeLead();
       _send(WatchIntent.load);
     }
+  }
+
+  /// Nothing in the package times out, so a video that never becomes ready
+  /// spins for as long as the user is willing to stare at it. This is what
+  /// turns that into a sentence and a way out.
+  void _armWatchdog() {
+    _watchdog?.cancel();
+    _watchdog = Timer(kReadyTimeout, () {
+      if (!mounted) return;
+      if (_controller?.value.isReady ?? false) return;
+      setState(() => _fault = "This video won't start. It may be blocked from "
+          'playing outside YouTube, or private.');
+    });
+  }
+
+  void _onReady() {
+    _watchdog?.cancel();
+    final queued = _pendingId;
+    if (queued != null) {
+      _pendingId = null;
+      _controller?.load(queued, startAt: _pendingStart.inSeconds);
+      _pendingStart = Duration.zero;
+    }
+    // autoPlay is off so the button exists; playback still starts by itself.
+    if (!_isFollowerHeld) _controller?.play();
   }
 
   /// Paste the clipboard link and play it (robust against the paste menu not
@@ -125,29 +209,83 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     final text = data?.text?.trim();
     if (text == null || text.isEmpty) return;
     _urlInput.text = text;
-    final id = YoutubePlayer.convertUrlToId(text);
-    if (id != null) {
-      _loadVideo(id);
-      _urlInput.clear();
-      if (mounted) FocusScope.of(context).unfocus();
-    } else if (mounted) {
+    _accept(text);
+  }
+
+  void _onUrlSubmit() => _accept(_urlInput.text);
+
+  /// One entry point for every link, however it arrived.
+  void _accept(String text) {
+    final source = resolveWatchLink(text);
+    if (source == null) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Clipboard isn’t a YouTube link.')),
+        const SnackBar(content: Text("That doesn't look like a link.")),
       );
+      return;
+    }
+
+    _urlInput.clear();
+    if (mounted) FocusScope.of(context).unfocus();
+
+    switch (source.kind) {
+      case WatchKind.youtube:
+        setState(() => _handoff = null);
+        _loadVideo(source.key, startAt: source.startAt);
+      case WatchKind.media:
+      case WatchKind.handoff:
+      case WatchKind.blocked:
+        // Not playable in the YouTube surface. Say which it is and why, rather
+        // than rejecting the paste as invalid — he pasted it for a reason.
+        setState(() {
+          _handoff = source;
+          _fault = null;
+        });
     }
   }
 
-  void _onUrlSubmit() {
-    final id = YoutubePlayer.convertUrlToId(_urlInput.text.trim());
-    if (id != null) {
-      _loadVideo(id);
-      _urlInput.clear();
-      FocusScope.of(context).unfocus();
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("That doesn't look like a YouTube link.")),
-      );
+  Future<void> _openInBrowser(WatchSource source) async {
+    final uri = Uri.tryParse(source.key);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Run a command we issued ourselves, and remember what we asked for.
+  ///
+  /// The old guard was a bool set and cleared in the same synchronous turn,
+  /// while the state change it was guarding arrives asynchronously — so it was
+  /// already false when the listener fired and the follower re-broadcast the
+  /// leader's own instruction back at it, taking the lead in the process. The
+  /// two phones then fought each other for control.
+  ///
+  /// Matching on the EXPECTED STATE rather than on a timer is what avoids the
+  /// original sin here too: a 600ms window both swallowed real gestures inside
+  /// it and let stale ones through outside it. An echo is recognised because it
+  /// is what we asked for, not because it arrived quickly.
+  void _applyLocal(void Function() command, {int? expectPosMs, bool? playing}) {
+    _applying = true;
+    command();
+    _applying = false;
+    _expectPosMs = expectPosMs;
+    _expectPlaying = playing;
+    _expectUntil = DateTime.now().add(kEchoWindow);
+  }
+
+  /// True when [pos]/[playing] is the echo of a command we just issued.
+  bool _isEcho(int pos, bool playing) {
+    final until = _expectUntil;
+    if (until == null) return false;
+    if (DateTime.now().isAfter(until)) {
+      _expectUntil = null;
+      return false;
     }
+    final wantPlaying = _expectPlaying;
+    if (wantPlaying != null && wantPlaying != playing) return false;
+    final wantPos = _expectPosMs;
+    if (wantPos != null && (pos - wantPos).abs() > kNudgeMs) return false;
+    // Consumed: a second, genuinely new gesture must not be swallowed too.
+    _expectUntil = null;
+    return true;
   }
 
   /// A local gesture. Anything the USER did makes this device the leader.
@@ -156,6 +294,12 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     if (c == null || _applying) return;
     final playing = c.value.isPlaying;
     final pos = c.value.position.inMilliseconds;
+
+    if (_isEcho(pos, playing)) {
+      _lastPlaying = playing;
+      _lastPosMs = pos;
+      return;
+    }
 
     if (playing != _lastPlaying) {
       _lastPlaying = playing;
@@ -209,22 +353,23 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     final c = _controller;
     if (c == null || _videoId == null) return;
 
+    // Released BEFORE the leader branch, not after it. A follower that paused
+    // itself to shed drift and then became the leader — by the user pressing
+    // play, which is exactly when it happens — skipped this release forever and
+    // sat paused with nothing left to start it again.
+    final hold = _holdUntil;
+    if (hold != null && !DateTime.now().isBefore(hold)) {
+      _holdUntil = null;
+      if (_lastPlaying) _applyLocal(() => c.play());
+    }
+
     if (_isLeader) {
       _send(WatchIntent.beat);
       return;
     }
 
-    // Release a held correction.
-    final hold = _holdUntil;
-    if (hold != null) {
-      if (DateTime.now().isBefore(hold)) return;
-      _holdUntil = null;
-      if (_lastPlaying) {
-        _applying = true;
-        c.play();
-        _applying = false;
-      }
-    }
+    // Still inside a correction: nothing else to do until it expires.
+    if (_holdUntil != null) return;
 
     // The partner has gone quiet mid-playback.
     final heard = _heardAt;
@@ -268,41 +413,51 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
     final id = msg.videoId;
     if (id != null && id != _videoId) {
-      _applying = true;
-      _loadVideo(id, broadcast: false);
-      _applying = false;
+      _applyLocal(() => _loadVideo(id, broadcast: false));
     }
 
     final c = _controller;
     if (c == null) return;
 
-    _applying = true;
+    // Each branch records what it asked the player for, so the state change it
+    // provokes is recognised as our own echo when it arrives a beat later —
+    // rather than being mistaken for the user reaching for the controls.
     switch (msg.intent) {
       case WatchIntent.pause:
         _lastPlaying = false;
-        c
-          ..seekTo(Duration(milliseconds: msg.posMs))
-          // seekTo() calls play() unconditionally in this package, so a pause
-          // that seeks has to put it back down or the follower resumes on
-          // every correction.
-          ..pause();
+        _applyLocal(
+          () => c
+            ..seekTo(Duration(milliseconds: msg.posMs))
+            // seekTo() calls play() unconditionally in this package, so a pause
+            // that seeks has to put it back down or the follower resumes on
+            // every correction.
+            ..pause(),
+          expectPosMs: msg.posMs,
+          playing: false,
+        );
       case WatchIntent.play:
       case WatchIntent.seek:
       case WatchIntent.load:
         _lastPlaying = msg.playing;
-        c.seekTo(Duration(milliseconds: msg.projectedPosMs()));
-        if (!msg.playing) c.pause();
+        final target = msg.projectedPosMs();
+        _applyLocal(
+          () {
+            c.seekTo(Duration(milliseconds: target));
+            if (!msg.playing) c.pause();
+          },
+          expectPosMs: target,
+          playing: msg.playing,
+        );
       case WatchIntent.beat:
         _applyDrift(c, msg);
       case WatchIntent.stall:
         _lastPlaying = false;
-        c.pause();
+        _applyLocal(c.pause, playing: false);
       case WatchIntent.ready:
-        if (msg.playing) c.play();
+        if (msg.playing) _applyLocal(c.play, playing: true);
       case WatchIntent.hello:
         break;
     }
-    _applying = false;
   }
 
   /// The follower's correction, and the only place a correction happens.
@@ -322,14 +477,18 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
         // other product uses is not available here; a micro-pause sheds the
         // same time and costs no rebuffer.
         if (drift > 0) {
-          c.pause();
+          _applyLocal(c.pause, playing: false);
           _holdUntil =
               DateTime.now().add(Duration(milliseconds: drift.clamp(0, kSeekMs)));
         } else {
-          c.seekTo(Duration(milliseconds: msg.projectedPosMs()));
+          final target = msg.projectedPosMs();
+          _applyLocal(() => c.seekTo(Duration(milliseconds: target)),
+              expectPosMs: target,);
         }
       case WatchCorrection.seek:
-        c.seekTo(Duration(milliseconds: msg.projectedPosMs()));
+        final target = msg.projectedPosMs();
+        _applyLocal(() => c.seekTo(Duration(milliseconds: target)),
+            expectPosMs: target,);
     }
   }
 
@@ -365,7 +524,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
                     controller: _urlInput,
                     style: const TextStyle(color: MilesColors.cream50),
                     decoration: const InputDecoration(
-                      hintText: 'Paste a YouTube link…',
+                      hintText: 'Paste any video link…',
                       prefixIcon:
                           Icon(Icons.link, color: MilesColors.taupe, size: 20),
                     ),
@@ -383,11 +542,28 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
               ],
             ),
           ),
-          if (controller != null)
+          if (_handoff != null)
+            _LinkCard(
+              source: _handoff!,
+              onOpen: () => _openInBrowser(_handoff!),
+              onDismiss: () => setState(() => _handoff = null),
+            )
+          else if (_fault != null)
+            _LinkCard.fault(
+              message: _fault!,
+              onDismiss: () => setState(() {
+                _fault = null;
+                _controller?.dispose();
+                _controller = null;
+                _videoId = null;
+              }),
+            )
+          else if (controller != null)
             YoutubePlayer(
               controller: controller,
               showVideoProgressIndicator: true,
               progressIndicatorColor: MilesColors.ember,
+              onReady: _onReady,
             )
           else
             Expanded(
@@ -435,6 +611,94 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// What the user sees instead of a spinner that never resolves.
+///
+/// Three cases share it: a link that plays somewhere else (hand-off), a link
+/// nothing can play (DRM), and a video that failed to start. All three used to
+/// be the same thing on screen — a wheel — and none of them told the user
+/// anything or offered a way out.
+class _LinkCard extends StatelessWidget {
+  const _LinkCard({
+    required this.source,
+    required this.onOpen,
+    required this.onDismiss,
+  }) : message = null;
+
+  const _LinkCard.fault({required String this.message, required this.onDismiss})
+      : source = null,
+        onOpen = null;
+
+  final WatchSource? source;
+  final String? message;
+  final VoidCallback? onOpen;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = source;
+    final canOpen = s != null && s.kind != WatchKind.blocked;
+    return Expanded(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                s == null
+                    ? Icons.error_outline
+                    : s.kind == WatchKind.blocked
+                        ? Icons.lock_outline
+                        : Icons.open_in_new,
+                color: MilesColors.taupe,
+                size: 36,
+              ),
+              const SizedBox(height: 14),
+              if (s?.site != null) ...[
+                Text(
+                  s!.site!,
+                  style: const TextStyle(
+                    color: MilesColors.cream50,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              Text(
+                message ?? s?.reason ?? 'This link cannot be played here.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: MilesColors.taupe,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton(
+                    onPressed: onDismiss,
+                    child: const Text('Try another link'),
+                  ),
+                  if (canOpen) ...[
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: onOpen,
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: const Text('Open in browser'),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

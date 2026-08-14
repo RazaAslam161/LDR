@@ -77,8 +77,9 @@ EncryptedPayload unpackMacAndCiphertext({
 }
 
 /// Packs an [EncryptedPayload] as `nonce || mac || ciphertext` for tables
-/// that only have a single `bytea` column for the encrypted blob
-/// (e.g. `afterglow_entries.photo_a`).
+/// that only have a single `bytea` column for the encrypted blob, and for
+/// storage objects that are a single opaque file (e.g. a vault item's
+/// `.enc` blob).
 Uint8List packFull(EncryptedPayload p) {
   final nonce = base64Decode(p.nonceB64);
   final mac = base64Decode(p.macB64);

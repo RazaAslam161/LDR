@@ -324,23 +324,24 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
         blurb: 'Soft matches, big sparks',
         route: '/app/closer/fantasy-jar',
       ),
+      // Points at the shared gallery, not the vault. The vault's route still
+      // exists so the couple's existing encrypted items stay reachable, but
+      // this tile is the one people open, and the gallery is what replaces it.
+      //
+      // The blurb no longer says "encrypted": gallery objects are stored in the
+      // clear so they can be paged and cached like any other picture, and a
+      // promise the storage does not keep is worse than no promise.
       _FeatureTile(
-        emoji: '🌙',
-        title: 'Afterglow',
-        blurb: 'The tenderness after',
-        route: '/app/closer/afterglow',
+        emoji: '🖼️',
+        title: 'Gallery',
+        blurb: 'Everything, shared',
+        route: '/app/gallery',
       ),
       _FeatureTile(
-        emoji: '🔒',
-        title: 'Private Vault',
-        blurb: 'Yours alone, encrypted',
-        route: '/app/closer/vault',
-      ),
-      _FeatureTile(
-        emoji: '🗺️',
-        title: 'Body Map',
-        blurb: 'Pin what you love',
-        route: '/app/closer/body-map',
+        emoji: '✅',
+        title: 'Today',
+        blurb: 'Your day, side by side',
+        route: '/app/routines',
       ),
       _FeatureTile(
         emoji: '🎲',
@@ -401,8 +402,8 @@ class _FeatureTile extends StatelessWidget {
 
   /// How many things inside are waiting for this person. Zero draws nothing.
   ///
-  /// This tile had nowhere to put a count, and Memory Threads is the ninth of
-  /// nine with a second PIN behind it — so a proposal was undiscoverable even
+  /// This tile had nowhere to put a count, and Memory Threads is the last of
+  /// them with a second PIN behind it — so a proposal was undiscoverable even
   /// by someone standing on this screen looking straight at it.
   final int badgeCount;
 

@@ -74,7 +74,7 @@ class _EscrowDialogState extends State<_EscrowDialog> {
           children: [
             const Text(
               'Reinstalling the app would currently make everything encrypted '
-              'unreadable — your vault, memories and afterglows. Confirming '
+              'unreadable — your vault and memories. Confirming '
               'your password once stores a sealed copy of your key so that '
               "can't happen.\n\n"
               "We can't read it. It's locked with your password, which never "

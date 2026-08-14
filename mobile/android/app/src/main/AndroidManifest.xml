@@ -298,5 +298,12 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <!-- Watch Together hands links it cannot embed to a browser. Without
+             http declared here, Android 11+ package visibility hides every
+             http:// handler and the hand-off silently does nothing. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
     </queries>
 </manifest>

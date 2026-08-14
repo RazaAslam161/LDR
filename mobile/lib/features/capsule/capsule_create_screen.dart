@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 
 class CapsuleCreateScreen extends ConsumerStatefulWidget {
@@ -79,7 +80,7 @@ class _CapsuleCreateScreenState extends ConsumerState<CapsuleCreateScreen> {
     } catch (e) {
       setState(() {
         _saving = false;
-        _error = e.toString();
+        _error = friendlyAuthError(e);
       });
     }
   }

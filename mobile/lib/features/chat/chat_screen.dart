@@ -332,6 +332,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _syncSendStatus(String id, SendStatus status) {
     final i = _messages.indexWhere((m) => m.id == id);
     if (i < 0) return false;
+    // A row that has echoed back exists, whatever the call that wrote it went
+    // on to report: an insert can land and its response still be lost, and
+    // marking that one failed would offer a retry for a message the partner
+    // already has.
+    if (_messages[i].seq > 0) return true;
     if (_messages[i].sendStatus != status) {
       setState(() => _messages[i] = _messages[i].copyWith(sendStatus: status));
     }
@@ -1743,8 +1748,8 @@ class _StatusTick extends StatelessWidget {
   final _MsgStatus status;
 
   /// Set only where the bubble carries no retry of its own — a photo puts a
-  /// pill over the frame (:2019) and a video a caption (:2341), so offering
-  /// one here as well would be two ways to say the same thing.
+  /// pill over the frame (:2075) and a video its own caption (:2392), so
+  /// offering one here as well would be two ways to say the same thing.
   final VoidCallback? onRetry;
 
   @override

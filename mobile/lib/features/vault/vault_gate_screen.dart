@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/vault/pin_pad.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_screen.dart';
@@ -21,6 +22,7 @@ class _VaultGateScreenState extends State<VaultGateScreen>
   bool _hasPin = false;
   bool _unlocked = false;
   bool _busy = false;
+  String? _checkError;
 
   // Setup flow
   String? _firstPin;
@@ -55,7 +57,12 @@ class _VaultGateScreenState extends State<VaultGateScreen>
   Future<void> _check() async {
     try {
       _hasPin = await VaultRepository.hasPin();
-    } catch (_) {}
+      _checkError = null;
+    } catch (e) {
+      // _hasPin stayed false, so _GateBody rendered "Create a vault PIN" at
+      // someone who already has one and _onSetupPin would overwrite it.
+      _checkError = friendlyAuthError(e);
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -160,6 +167,28 @@ class _VaultGateScreenState extends State<VaultGateScreen>
         child: SafeArea(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
+              : _checkError != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_checkError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: MilesColors.taupe, height: 1.5,),),
+                        const SizedBox(height: 14),
+                        TextButton(
+                            onPressed: () {
+                              setState(() => _loading = true);
+                              _check();
+                            },
+                            child: const Text('Try again'),),
+                      ],
+                    ),
+                  ),
+                )
               : _GateBody(
                   setup: !_hasPin,
                   confirming: _firstPin != null,

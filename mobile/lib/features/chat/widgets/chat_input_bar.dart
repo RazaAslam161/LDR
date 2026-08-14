@@ -351,7 +351,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// The catch is the point of this method existing. The upload throws on any
   /// dead connection and nothing here caught it, so it left through main.dart's
   /// platformDispatcher handler: the note was gone and the user was told
-  /// nothing. Failing to START a recording has always said so (:322).
+  /// nothing. Failing to START a recording has always said so (:325).
   Future<void> _sendVoice(File file) async {
     setState(() => _sending = true);
     try {

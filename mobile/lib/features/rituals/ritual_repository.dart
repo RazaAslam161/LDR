@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
 
@@ -25,7 +26,12 @@ class RitualRepository {
     for (final row in (res as List)) {
       try {
         out.add(Ritual.fromJson(row as Map<String, dynamic>));
-      } catch (_) {}
+      } catch (e) {
+        // A ritual the user scheduled disappears from the list entirely when
+        // this hits, so leave a trace — the row is still in Postgres and the
+        // cron will still deliver it.
+        debugPrint('rituals: unreadable row: $e');
+      }
     }
     return out;
   }

@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/features/capsule/proximity_service.dart';
 
@@ -30,6 +31,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   bool _opening = false;
   bool _revealed = false;
   String? _error;
+  String? _itemsError;
 
   ProximityService? _prox;
   ProximityStatus? _proxStatus;
@@ -53,19 +55,34 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   Future<void> _loadSummary() async {
     try {
       _summary = await CapsuleRepository.sealSummary(_capsule.id);
-    } catch (_) {}
+      _itemsError = null;
+    } catch (e) {
+      // _SealedView renders summary.values.fold(...) as "N memories sealed
+      // inside", so a swallowed failure told them the capsule holds nothing.
+      _itemsError = friendlyAuthError(e);
+    }
     if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _revealAlreadyOpen() async {
-    try {
-      _items = await CapsuleRepository.items(_capsule.id);
-    } catch (_) {}
+    await _loadItems();
     if (mounted) {
       setState(() {
         _loading = false;
         _revealed = true;
       });
+    }
+  }
+
+  /// Reads the sealed contents. Never silent: _RevealedView renders "This
+  /// capsule was empty. Next time, fill it up 💫" for an empty list, which is
+  /// the cruellest possible thing to show after months of filling it.
+  Future<void> _loadItems() async {
+    try {
+      _items = await CapsuleRepository.items(_capsule.id);
+      _itemsError = null;
+    } catch (e) {
+      _itemsError = friendlyAuthError(e);
     }
   }
 
@@ -127,9 +144,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
     });
     // Let the ceremony breathe, then reveal.
     await Future<void>.delayed(const Duration(milliseconds: 2600));
-    try {
-      _items = await CapsuleRepository.items(_capsule.id);
-    } catch (_) {}
+    await _loadItems();
     if (mounted) {
       setState(() {
         _opening = false;
@@ -176,10 +191,19 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
             : _opening
                 ? _CeremonyView(title: _capsule.title)
                 : _revealed
-                    ? _RevealedView(items: _items, onPlayVoice: _playVoice)
+                    ? _RevealedView(
+                        items: _items,
+                        loadError: _itemsError,
+                        onRetry: () async {
+                          await _loadItems();
+                          if (mounted) setState(() {});
+                        },
+                        onPlayVoice: _playVoice,
+                      )
                     : _SealedView(
                         capsule: _capsule,
                         summary: _summary,
+                        summaryError: _itemsError,
                         checking: _checking,
                         proxStatus: _proxStatus,
                         canOpen: _canOpen,
@@ -204,6 +228,7 @@ class _SealedView extends StatelessWidget {
   const _SealedView({
     required this.capsule,
     required this.summary,
+    required this.summaryError,
     required this.checking,
     required this.proxStatus,
     required this.canOpen,
@@ -215,6 +240,7 @@ class _SealedView extends StatelessWidget {
 
   final Capsule capsule;
   final Map<CapsuleItemType, int> summary;
+  final String? summaryError;
   final bool checking;
   final ProximityStatus? proxStatus;
   final bool canOpen;
@@ -250,7 +276,10 @@ class _SealedView extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         Center(
-          child: Text('$_total memories sealed inside',
+          child: Text(
+              summaryError == null
+                  ? '$_total memories sealed inside'
+                  : "Couldn't count what's inside",
               style: const TextStyle(
                   color: MilesColors.cream50,
                   fontSize: 16,
@@ -505,12 +534,37 @@ class _CeremonyView extends StatelessWidget {
 // REVEALED
 // ─────────────────────────────────────────────────────────────────────────────
 class _RevealedView extends StatelessWidget {
-  const _RevealedView({required this.items, required this.onPlayVoice});
+  const _RevealedView({
+    required this.items,
+    required this.loadError,
+    required this.onRetry,
+    required this.onPlayVoice,
+  });
   final List<CapsuleItem> items;
+  final String? loadError;
+  final VoidCallback onRetry;
   final Future<void> Function(String path) onPlayVoice;
 
   @override
   Widget build(BuildContext context) {
+    if (loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("It's open — but we couldn't read what's inside.\n$loadError",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: MilesColors.taupe, height: 1.5,),),
+              const SizedBox(height: 14),
+              TextButton(onPressed: onRetry, child: const Text('Try again')),
+            ],
+          ),
+        ),
+      );
+    }
     if (items.isEmpty) {
       return const Center(
         child: Padding(

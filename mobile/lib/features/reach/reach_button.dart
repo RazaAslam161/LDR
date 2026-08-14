@@ -6,7 +6,7 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 
 /// Big hold-to-reach button. Hold ~0.5s (prevents accidental taps) to send a
-/// Reach; 30-second cooldown afterwards (shown as the label).
+/// Reach; the wait afterwards belongs to the server and is read back from it.
 class ReachButton extends StatefulWidget {
   const ReachButton({required this.coupleId, super.key, this.partnerName});
   final String coupleId;
@@ -25,7 +25,13 @@ class _ReachButtonState extends State<ReachButton> {
       _cooldownUntil != null && _cooldownUntil!.isAfter(DateTime.now());
   int get _remaining => _cooldownUntil == null
       ? 0
-      : _cooldownUntil!.difference(DateTime.now()).inSeconds.clamp(0, 30);
+      : _cooldownUntil!.difference(DateTime.now()).inSeconds;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_syncCooldown());
+  }
 
   @override
   void dispose() {
@@ -33,31 +39,67 @@ class _ReachButtonState extends State<ReachButton> {
     super.dispose();
   }
 
+  /// Ask the server how long the wait is, instead of remembering it here.
+  ///
+  /// The countdown used to live only in this State: it was cleared by an app
+  /// restart, so the button came back ready every time Home was rebuilt, and
+  /// it never applied at all to anything talking to PostgREST directly. The
+  /// trigger decides now, and this is how the button finds out before the
+  /// person is told no.
+  Future<void> _syncCooldown() async {
+    final int seconds;
+    try {
+      seconds = await ReachRepository.cooldownSeconds();
+    } catch (_) {
+      return; // Leave the label as it was; the trigger still refuses the send.
+    }
+    if (!mounted) return;
+    setState(() => _cooldownUntil =
+        seconds > 0 ? DateTime.now().add(Duration(seconds: seconds)) : null,);
+    _ticker?.cancel();
+    if (seconds == 0) return;
+    _ticker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() {});
+      if (!_onCooldown) t.cancel();
+    });
+  }
+
   Future<void> _reach() async {
     if (_onCooldown || _sending) return;
     setState(() => _sending = true);
     unawaited(HapticFeedback.mediumImpact());
+    var sent = true;
     try {
       await ReachRepository.reach(widget.coupleId);
-      _cooldownUntil = DateTime.now().add(const Duration(seconds: 30));
-      _ticker?.cancel();
-      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() {});
-        if (!_onCooldown) _ticker?.cancel();
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('Reaching for ${widget.partnerName ?? 'them'}… 💕'),),);
-      }
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not reach right now.')),);
-      }
+      sent = false;
     }
-    if (mounted) setState(() => _sending = false);
+    await _syncCooldown();
+    if (!mounted) return;
+    setState(() => _sending = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          sent
+              ? 'Reaching for ${widget.partnerName ?? 'them'}… 💕'
+              // A refused send and a dead network are different apologies, and
+              // the cooldown the server just handed back tells them apart.
+              : _onCooldown
+                  ? 'That was a lot at once — try again in ${_wait()}.'
+                  : 'Could not reach right now.',
+        ),
+      ),
+    );
   }
+
+  /// The window limit runs to minutes, so the old "${n}s" would have counted
+  /// down from 300.
+  String _wait() =>
+      _remaining >= 60 ? '${(_remaining / 60).ceil()} min' : '${_remaining}s';
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +137,7 @@ class _ReachButtonState extends State<ReachButton> {
         ),
         const SizedBox(height: 12),
         Text(
-          _onCooldown ? 'Wait ${_remaining}s' : 'Hold to reach',
+          _onCooldown ? 'Wait ${_wait()}' : 'Hold to reach',
           style: const TextStyle(color: MilesColors.taupe, fontSize: 13),
         ),
       ],

@@ -67,9 +67,8 @@ Vault upload is **confirmed working** by the user.
 - **Home no longer mounts a map.** `_MapDoor` panel in
   `partner_location_card.dart` — Home used to stream tiles centred on the
   partner on open, with no interaction.
-- **Afterglow** `replaceMySide` — was a hard StateError lockout.
 - **WebView disposed** in `world_map_screen` — its error card was compositing
-  over the Afterglow screen.
+  over the screen behind it.
 - **Vault picker** → `PhotoPickerService` (was a bare `ImagePicker`, so it opened
   the file manager; also brings HEIC/ProRAW support).
 - **Key escrow** (§5).
@@ -273,15 +272,24 @@ the repo files are mirrors.
 | `memory_consent_rpcs` | `20260601007100` | table UPDATE revoked → 8 SECURITY DEFINER RPCs + a column-grant allowlist; the same DELETE hole closed on 4 more tables |
 
 **The sanity-check audit found a fifth instance of the schema-drift bug** (the
-one BRAIN §0 warns about). `afterglow_entries` is missing **all six** delete
-columns — `delete_requested`, `delete_requested_by`, `delete_requested_at`,
-`deleted`, `deleted_by`, `deleted_at`. Two failure modes: `requestDelete`/
-`cancelDelete`/`hardDelete` (`afterglow_screen.dart:839,847,858`) throw
-PGRST204 against live buttons at `:513`/`:520`; and `streamEntries:672`'s
-`if (row['deleted'] == true) continue;` is dead code, so **the delete filter has
-never filtered anything**. 006600 fixed exactly this for threads and rituals,
-cited afterglow in its own header, and did not add afterglow's columns. **Still
-open — next migration.**
+one BRAIN §0 warns about): `afterglow_entries` was missing all six delete
+columns. Closed by `20260601007200`.
+
+**Afterglow and Body Map were then removed from the client entirely.** Both
+Closer tiles, all three routes and the five files under
+`features/closer/afterglow/` and `features/closer/body_map/` are gone.
+`closer_crypto.dart` stays — `packFull` reads as afterglow-owned because its
+docstring cited `afterglow_entries.photo_a`, but Memory Threads photos and
+Vault uploads are its real callers.
+
+The two tables were deliberately **left on the server** with their rows intact
+(3 afterglow entries, all carrying inline `bytea` photos; 1 body-map pin). Any
+DROP is a separate, sequenced decision: `_guard_dual_consent_delete()` is
+attached to `vault_items` and `rituals` as well, so it must survive; and
+001400/006300/006400/007100 each carry unguarded statements against
+`afterglow_entries`, so after a drop they become replay-in-order-only. Older
+sideloaded builds still write to both tables until `app_release.min_build`
+is raised.
 
 Also found, latent: `SupabaseRepository.joinCouple` (`:233`) calls
 `join_couple_by_code`, dropped by 003200. Zero callers, so it is dead code that
@@ -609,7 +617,30 @@ revoked; all three entry points are SECURITY DEFINER and unaffected.
 Verified live, rolled back:
 `vaultDelete=works | resetCounter=blocked | hasVaultPin=works`
 
-### BUILD 22 — built 2026-08-15, NOT installed, NOT market-ready
+### BUILD 23 — built 2026-08-15, NOT installed. Test the gallery on it.
+
+`E:\LDR\Miles.apk`, one universal APK, 218.5 MB (229,162,033 bytes),
+sha256 `1564a80b662d1508c688dfbe79c773843470d288e5fd6da9b913e1a37c6820ed`,
+versionCode 23. Gate: `flutter analyze mobile` 0/0, `flutter test` 564 passing.
+
+Carries: the six hardening streams (chat sending/failed + persisted queue,
+server-side reach rate limits + mute, ErrorReporter → `client_errors`, proguard
+wired, empty-catch sweep, MemoryFailure classification) and **the new shared
+gallery**.
+
+**The Closer tile now opens `/app/gallery`, not the vault.** Without that the
+gallery was unreachable and the build could not test the one thing it was built
+for. The vault ROUTE still exists (`/app/closer/vault`) so the couple's existing
+encrypted items remain reachable — nothing has migrated them yet.
+
+**Gallery is unverified on hardware.** It analyzes clean and 564 unrelated
+assertions still hold; no photograph has been shown to appear. Given the Mapbox
+map has never once rendered on a device in this project, treat "compiles" as
+very weak evidence for a rendering feature. What to check first: does a tile
+paint, does the pager swipe without a spinner, does a partner's upload appear
+without a refresh.
+
+### BUILD 22 — superseded by 23
 
 `E:\LDR\Miles.apk`, one universal APK, 218.4 MB (228,981,716 bytes).
 sha256 `a068b8cd4601c79aa76340518d0615bab459a66b51789ca9cdfd9616c2081bce`.

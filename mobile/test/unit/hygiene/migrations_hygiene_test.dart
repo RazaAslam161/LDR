@@ -220,14 +220,17 @@ void main() {
             'body: ${offenders.join(' | ')}',);
   });
 
-  test('the diag_events insert names only columns the migration creates', () {
-    // PostgREST rejects the WHOLE batch when any named column is missing
-    // (PGRST204), and the upload is best-effort — the failure is one debugPrint
-    // and an empty table. That would be discovered after a field test on two
-    // phones in two cities, which is not a test anyone gets to repeat cheaply.
-    final sql = File('../supabase/migrations/20260601004000_diag_events.sql')
+  test('the client_errors insert names only columns the migration creates', () {
+    // Retargeted from diag_events, which the client no longer writes at all —
+    // Diag was retired and ErrorReporter replaced it. The failure mode is
+    // identical and worth keeping a guard on: PostgREST rejects the whole row
+    // when any named column is missing (PGRST204), and this insert is
+    // deliberately best-effort, so the only symptom is an empty table. An error
+    // reporter that silently reports nothing is worse than none, because it
+    // also stops anyone looking.
+    final sql = File('../supabase/migrations/20260601007800_client_errors.sql')
         .readAsStringSync();
-    final ddl = RegExp(r'create table[^;]*?diag_events\s*\((.*?)\n\);',
+    final ddl = RegExp(r'create table[^;]*?client_errors\s*\((.*?)\n\);',
             dotAll: true, caseSensitive: false,)
         .firstMatch(sql)!
         .group(1)!;
@@ -239,22 +242,19 @@ void main() {
         .toSet();
 
     final dart = File('lib/core/diag/diag.dart').readAsStringSync();
-    final insert = RegExp(r"from\('diag_events'\)\s*\.insert\(\[(.*?)\n\s*\]\)",
-            dotAll: true,)
-        .firstMatch(dart)!
-        .group(1)!;
-    final keys = RegExp(r"'(\w+)':")
-        .allMatches(insert)
-        .map((m) => m[1]!)
-        .toSet();
+    // The row is built as a map literal and inserted by name, so the keys are
+    // read from the literal rather than from the insert() call.
+    final row = RegExp(r'<String, Object\?>\{(.*?)\n\s*\};', dotAll: true)
+        .firstMatch(dart)
+        ?.group(1);
+    expect(row, isNotNull,
+        reason: 'the client_errors payload could not be parsed',);
+    final keys =
+        RegExp(r"'(\w+)':").allMatches(row!).map((m) => m[1]!).toSet();
 
     expect(keys, isNotEmpty, reason: 'the insert payload could not be parsed');
     expect(keys.difference(columns), isEmpty,
-        reason: 'the client writes columns diag_events does not have',);
-    // received_at and id are server-side; everything else must be supplied or
-    // the NOT NULL constraint rejects the row.
-    expect(columns.difference(keys..addAll({'id', 'received_at'})), isEmpty,
-        reason: 'diag_events has NOT NULL columns the client never sends',);
+        reason: 'the client writes columns client_errors does not have',);
   });
 
   test('every dollar-quote tag appears an even number of times', () {

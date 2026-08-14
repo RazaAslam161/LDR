@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/rituals/ritual_repository.dart';
 
 /// Modal sheet for creating a new ritual.
@@ -61,7 +62,7 @@ class _CreateRitualSheetState extends State<CreateRitualSheet> {
     } catch (e) {
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = friendlyAuthError(e);
       });
     }
   }

@@ -241,7 +241,7 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   /// A tapped memory notification. Opens Memory Threads directly rather than
-  /// selecting the Closer tab: the feature is the ninth tile of nine, behind
+  /// selecting the Closer tab: the feature is the last tile in the grid, behind
   /// its own PIN, and "we told you, now go and find it" is most of why nine
   /// proposals were never opened.
   ///

@@ -6,6 +6,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/timeline/timeline_repository.dart';
 
 class TimelineScreen extends ConsumerStatefulWidget {
@@ -52,7 +53,7 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = friendlyAuthError(e);
         _loading = false;
       });
     }
@@ -503,7 +504,7 @@ class _AddPastVisitSheetState extends State<_AddPastVisitSheet> {
     } catch (e) {
       setState(() {
         _saving = false;
-        _error = e.toString();
+        _error = friendlyAuthError(e);
       });
     }
   }

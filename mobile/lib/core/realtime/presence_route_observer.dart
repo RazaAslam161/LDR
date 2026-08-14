@@ -338,7 +338,8 @@ String? screenNameForPath(String path) {
       path.split('/').where((s) => s.isNotEmpty && s != 'app').toList();
   if (segments.isEmpty) return null;
 
-  // '/app/closer/body-map' -> 'Body Map'. The deepest segment is the screen.
+  // '/app/closer/memory-threads' -> 'Memory Threads'. The deepest segment is
+  // the screen.
   return segments.last
       .split('-')
       .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')

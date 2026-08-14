@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+22
+version: 0.1.0+23
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -85,7 +85,7 @@ dependencies:
   # paint, and a pick of photos and videos together is the normal case — without
   # this the grid draws a hole wherever a video landed.
   video_thumbnail: ^0.5.6
-  youtube_player_flutter: 9.1.1
+  youtube_player_flutter: 9.1.3
   camera: ^0.12.0+1
   flutter_foreground_task: ^9.2.2
   lottie: ^3.3.3

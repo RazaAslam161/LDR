@@ -40,7 +40,11 @@ class _CapsuleFillScreenState extends ConsumerState<CapsuleFillScreen> {
     try {
       final s = await CapsuleRepository.sealSummary(_capsule.id);
       if (mounted) setState(() => _summary = s);
-    } catch (_) {}
+    } catch (_) {
+      // _SealedSilhouettes draws one shape per item, so a swallowed failure
+      // rendered the capsule as holding nothing.
+      _toast("Couldn't count what's already inside.");
+    }
     if (mounted) setState(() => _loading = false);
   }
 

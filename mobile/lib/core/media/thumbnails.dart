@@ -96,8 +96,19 @@ class DerivedImage {
   const DerivedImage({
     required this.cover,
     required this.tile,
+    required this.width,
+    required this.height,
     this.capturedAt,
   });
+
+  /// The upright ORIGINAL's dimensions, after bakeOrientation.
+  ///
+  /// Read here because the decode has already happened, and stored on the row
+  /// so a grid can reserve each tile's shape before any bytes arrive. Without
+  /// it every picture that lands reflows the ones below it, which is what makes
+  /// a gallery feel like it is still loading long after it is.
+  final int width;
+  final int height;
 
   /// 1024px longest edge, q75. What the timeline paints.
   final Uint8List cover;
@@ -133,6 +144,8 @@ DerivedImage? _derive(Uint8List bytes) {
   return DerivedImage(
     cover: img.encodeJpg(_fit(upright, kMemoryCoverMaxEdge), quality: 75),
     tile: img.encodeJpg(_fit(upright, kMemoryTileMaxEdge), quality: 72),
+    width: upright.width,
+    height: upright.height,
     capturedAt: _exifDate(decoded),
   );
 }

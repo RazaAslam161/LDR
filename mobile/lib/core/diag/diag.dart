@@ -58,13 +58,14 @@ class ErrorReporter {
     _sent++;
 
     final detail = _detail(error);
-    unawaited(_send({
+    final row = <String, Object?>{
       'build': ReleaseGate.buildNumber,
       'kind': kind,
       'error_type': type,
       if (detail != null) 'detail': _cap(detail, _maxDetailChars),
       'stack': trace,
-    },),);
+    };
+    unawaited(_send(row));
   }
 
   static Future<void> _send(Map<String, Object?> row) async {
@@ -124,9 +125,10 @@ class ErrorReporter {
 /// the test reset ever set, so all 75 call sites have written nothing since —
 /// realtime's CHANNEL_ERROR and the push-received receipt included. The header
 /// that used to sit here claimed three sinks and an opt-in switch, and all
-/// three claims were false: Settings has no switch, `_file` was never assigned
-/// so the disk ring wrote nothing either, and the server copy it promised was
-/// narrowed to own-rows-only and then emptied (20260601005850, 20260601006100).
+/// three claims were false: Settings has no switch, `_file` was left null when
+/// [init] became the retirement chore so the disk ring wrote nothing either,
+/// and the server copy it promised was narrowed to own-rows-only and then
+/// emptied (20260601005850, 20260601006100).
 ///
 /// It is not coming back behind a server flag. One couple produced 21,448 rows
 /// and 9 MB in a single day, and diag_events grew to 65% of the database
@@ -149,10 +151,11 @@ class Diag {
   /// - The stored `diag_enabled` gated the upload, and it is true on any
   ///   handset where it was ever switched on. Without clearing it, an upgrade
   ///   removes the off switch and leaves the uploads running forever.
-  /// - `diag.ndjson` was written on every run regardless of the flag, so a file
-  ///   of call, presence and chat traces is sitting in the documents directory
-  ///   of every install. Nothing can read it now, and an unreadable record of
-  ///   who called whom and when is exactly what this app is meant not to keep.
+  /// - Builds before 10 wrote `diag.ndjson` on every run regardless of the
+  ///   flag, so a file of call, presence and chat traces is sitting in the
+  ///   documents directory of every install. Nothing can read it now, and an
+  ///   unreadable record of who called whom and when is exactly what this app
+  ///   is meant not to keep.
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -166,12 +169,48 @@ class Diag {
     }
   }
 
+  /// In production this records nothing — [ErrorReporter] is what reports now.
+  ///
+  /// It still keeps a bounded in-memory ring WHEN A TEST ASKS FOR ONE, because
+  /// a handful of tests assert on the trace rather than on state, and they are
+  /// right to. `presence_route_observer_test.dart:169` is the example: the
+  /// presence bug it covers was invisible in `myScreenProvider` — the local
+  /// value read correctly either way, which is exactly why two full audits
+  /// refuted every candidate — and only the sequence of recorded events showed
+  /// it. Dropping the ring outright would delete that regression test along
+  /// with the mechanism.
+  ///
+  /// Off unless [resetForTest] turns it on, so no shipped build allocates.
+  static bool _capture = false;
+  static const _ringMax = 200;
+  static final List<DiagEvent> _ring = [];
+
+  @visibleForTesting
+  static List<DiagEvent> get recent => List.unmodifiable(_ring);
+
+  @visibleForTesting
+  static void resetForTest({bool capture = true}) {
+    _capture = capture;
+    _ring.clear();
+  }
+
   static void record(
     DiagArea area,
     String name, {
     String? corr,
     Map<String, Object?> fields = const {},
-  }) {}
+  }) {
+    if (!_capture) return;
+    if (_ring.length >= _ringMax) _ring.removeAt(0);
+    _ring.add(DiagEvent(
+      seq: _ring.length,
+      at: DateTime.now(),
+      area: area,
+      name: name,
+      corr: corr,
+      fields: fields,
+    ),);
+  }
 
   static void Function({String? outcome, Map<String, Object?> fields}) span(
     DiagArea area,
