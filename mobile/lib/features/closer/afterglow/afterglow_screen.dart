@@ -730,6 +730,50 @@ class AfterglowRepository {
     return res['id'] as String;
   }
 
+  /// Replaces MY side of an entry that is still waiting for my partner.
+  ///
+  /// Without this the form threw StateError the moment a pending entry already
+  /// held my contribution — which locked the whole feature, permanently, with
+  /// no way to see the pending entry, edit it, or start again. Production had
+  /// two such rows for one couple. Rewriting my own half is the only sane
+  /// answer: the entry is not sealed, my partner has not seen it, and it is
+  /// mine.
+  static Future<void> replaceMySide({
+    required String entryId,
+    required String myId,
+    required String partnerId,
+    required String gratitude,
+    Uint8List? photoBytes,
+  }) async {
+    final isA = _isPartnerA(myId, partnerId);
+    final side = myId;
+    final encText =
+        await CryptoCore.encryptString(gratitude, associatedData: side);
+    final textBlob = packMacAndCiphertext(encText);
+    final nonceBytes = Uint8List.fromList(base64Decode(encText.nonceB64));
+
+    Uint8List? photoBlob;
+    if (photoBytes != null) {
+      final encPhoto = await CryptoCore.encryptBytes(
+        photoBytes,
+        associatedData: '${side}_photo',
+      );
+      photoBlob = packFull(encPhoto);
+    }
+
+    await _c.from('afterglow_entries').update({
+      if (isA) ...{
+        'gratitude_a': bytesToBytea(textBlob),
+        'nonce_a': bytesToBytea(nonceBytes),
+        if (photoBlob != null) 'photo_a': bytesToBytea(photoBlob),
+      } else ...{
+        'gratitude_b': bytesToBytea(textBlob),
+        'nonce_b': bytesToBytea(nonceBytes),
+        if (photoBlob != null) 'photo_b': bytesToBytea(photoBlob),
+      },
+    }).eq('id', entryId);
+  }
+
   /// Adds the current partner's side to an existing entry and seals it.
   static Future<void> completeAndSeal({
     required String entryId,

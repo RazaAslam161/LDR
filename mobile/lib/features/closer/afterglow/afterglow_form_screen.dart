@@ -96,7 +96,17 @@ class _AfterglowFormScreenState extends ConsumerState<AfterglowFormScreen> {
           ephemeral: _ephemeral,
         );
       } else if (alreadyContributed) {
-        throw StateError('Your gratitude is already waiting for your partner.');
+        // Not an error. The entry is unsealed, my partner has not seen it, and
+        // the half being replaced is mine. Throwing here locked the feature
+        // permanently for anyone who had already written one — which is what
+        // production looked like: two unsealed rows, both waiting, no way in.
+        await AfterglowRepository.replaceMySide(
+          entryId: pending.id,
+          myId: me.id,
+          partnerId: partner.id,
+          gratitude: text,
+          photoBytes: _photo,
+        );
       } else {
         await AfterglowRepository.completeAndSeal(
           entryId: pending.id,

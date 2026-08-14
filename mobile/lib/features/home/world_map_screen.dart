@@ -194,6 +194,18 @@ class _WorldMapScreenState extends State<WorldMapScreen> {
   }
 
   @override
+  void dispose() {
+    // Tear the page down explicitly. A WebView is a platform view living
+    // outside the Flutter tree, so leaving it loaded kept Google's "Oops!
+    // Something went wrong" card alive and compositing over whatever screen
+    // came next — it turned up on the Afterglow form, which has nothing to do
+    // with maps. Navigating away must actually end the page, not just stop
+    // showing it.
+    _controller.loadRequest(Uri.parse('about:blank')).ignore();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final position = LatLng(widget.lat, widget.lon);
     return Scaffold(
