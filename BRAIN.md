@@ -1,0 +1,172 @@
+# BRAIN.md — session handoff
+
+Working state for **Miles** (Flutter + Supabase couples app). Read this instead
+of the chat history. Last updated 2026-08-14.
+
+---
+
+## 0. The thing to get right
+
+**Raza gives a complaint, not a spec.** He has corrected this four times in one
+session. The failure mode, verbatim from the memory file:
+
+> If my change list contains one file and his complaint contains one screen, I
+> have almost certainly done it again.
+
+Before touching anything: grep for **every** call site, every widget that renders
+that kind of thing, every entry point. Fixing one and missing four is the thing
+he keeps catching. See `~/.claude/projects/E--LDR/memory/expand-the-idea-dont-transcribe-it.md`.
+
+**Second lesson, learned expensively this session:** four separate bugs were
+*schema mismatches* — client code writing to columns that were never migrated.
+None are catchable by `flutter test`; they compile perfectly and fail only
+against the real database. **Query `information_schema` before believing a
+client-side diagnosis.**
+
+---
+
+## 1. Where things are
+
+- Repo `E:\LDR`, app in `mobile/`, branch **`fix-sprint`** (no remote, 260+ commits).
+- Supabase prod **`sopictusdonlvuezmfep`** (staging `zqltaobarpcuantrqxha`).
+- Test device: OnePlus 8 / **IN2015**, Android 13, arm64. adb at
+  `C:/Users/razaa/AppData/Local/Android/Sdk/platform-tools/adb.exe`.
+- Current build **16** (`pubspec.yaml` + `lib/core/app/release_gate.dart` must
+  match). APK shipped as `E:\LDR\Miles.apk`, arm64 split, ~70–112 MB.
+- **Debug-signed.** No `android/key.properties`. Release keystore steps were
+  given; he hasn't made one. Debug SHA-1:
+  `A1:05:79:47:08:8B:7A:21:4B:DA:C3:C2:BE:95:B3:03:95:74:64:C7`, package
+  `com.miles.miles`.
+
+---
+
+## 2. Live on the server — already working, no rebuild needed
+
+| Fix | Migration |
+|---|---|
+| `couple_intimate` accepts `application/octet-stream` (vault upload was 415) | `20260601006400` |
+| `vault_items.storage_path` + `media_mime_type` added (was PGRST204) | `20260601006500` |
+| `memory_threads` 4 delete columns (delete threw PGRST204) | `20260601006600` |
+| `rituals` 6 columns incl. `deleted` — **the list query itself was failing** | `20260601006600` |
+| `afterglow_entries` unique index on unsealed rows | `20260601006400` |
+| `key_escrow` table | `20260601006700` |
+
+Vault upload is **confirmed working** by the user.
+
+---
+
+## 3. In code, needs an APK to reach the phone
+
+- **Maps back on Mapbox** (`world_map_screen.dart`, restored from `02350cb`).
+  Token via `map-token` edge function ← `app_secrets.MAPBOX_PUBLIC_TOKEN`. Never
+  in the APK.
+- **Home no longer mounts a map.** `_MapDoor` panel in
+  `partner_location_card.dart` — Home used to stream tiles centred on the
+  partner on open, with no interaction.
+- **Afterglow** `replaceMySide` — was a hard StateError lockout.
+- **WebView disposed** in `world_map_screen` — its error card was compositing
+  over the Afterglow screen.
+- **Vault picker** → `PhotoPickerService` (was a bare `ImagePicker`, so it opened
+  the file manager; also brings HEIC/ProRAW support).
+- **Key escrow** (§5).
+- **`CryptoCore.encryptBytesOffThread`** — 100 MB AES on the UI thread.
+
+---
+
+## 4. Open, with diagnosis
+
+### 4a. Vault read path — THE next job
+He asked for this and it is not done. Current design: thumbnails are encrypted
+`bytea` **inside the `vault_items` row**, so every grid tile costs a decrypt.
+That is why wheels appear on the grid, the pager and while scrolling.
+
+Copy the chat pipeline, which is the working reference:
+`core/media/media_decode.dart` (shared decode widths — **cache-key identity is
+the whole trick**), `core/widgets/net_image.dart` (`thumb`, `decodeWidth`, never
+`memCacheHeight`), `core/media/thumb_backfill.dart` (heal-on-read),
+`features/chat/widgets/media_viewer.dart` (progressive thumb→full, neighbour
+`precacheImage`, unconditional Hero).
+
+`vault_media_cache.dart` already has isolate decrypt + dedup. Needs: thumbnails
+as separate storage objects, decrypt-to-disk cached by item id, progressive
+display, neighbour precache.
+
+### 4b. Google Maps — dead, not fixable in code
+Billing account **closed**, "not in good standing", cannot be reopened. Killed
+both the 3D map and `google_maps_flutter`. Photorealistic 3D needs Google
+billing; there is no free photogrammetry anywhere (Cesium resells Google's).
+Mapbox is the ceiling without it. **Do not re-litigate this.**
+
+### 4c. `google_fonts` leak
+No bundled font assets → Fraunces + Inter fetched from `fonts.gstatic.com` on
+first launch, before login, behind the disguise. Fix: bundle two `.ttf` files.
+Needs him to supply them, or accept a system-font fallback.
+
+### 4d. Unverified on hardware
+Call **glare** (needs two phones dialling within a second) and **Watch Together**
+sync (needs two phones on one video). Logic is unit-tested; the two-device
+behaviour is not.
+
+### 4e. Never verified at all
+The Mapbox map has **never rendered on a device**. Not once, across the whole
+session.
+
+---
+
+## 5. Key escrow — read before touching crypto
+
+`FlutterSecureStorage` is wiped by Android on uninstall, so every reinstall used
+to mint a new X25519 keypair, change the ECDH shared secret, and permanently
+orphan every encrypted row. That is the `SecretBoxAuthenticationError` on memory
+threads, fantasy jar and vault tiles. **The data was never corrupted; the key
+was destroyed.**
+
+`core/data/key_escrow.dart` seals the seed under `HKDF(password, salt)` +
+XChaCha20-Poly1305 and stores it server-side. Server sees ciphertext only.
+
+**`restore` runs BEFORE `backup` in `SupabaseRepository.signIn` — that ordering
+is the entire fix.** Backing up first seals the throwaway key over the good one.
+
+Not retroactive: rows under already-destroyed keys stay unreadable.
+**Unverified — needs a real reinstall + sign-in to prove the round trip.**
+
+---
+
+## 6. Commands that matter
+
+```bash
+cd /e/LDR && flutter analyze mobile      # from ROOT — catches warnings the
+                                         # in-mobile run misses, and the
+                                         # hygiene test uses this
+cd /e/LDR/mobile && flutter test         # 550 passing
+cd /e/LDR/mobile && flutter build apk --release --split-per-abi
+```
+
+- Always `cd /e/LDR/mobile` before flutter build (CWD drifts).
+- Build unprompted once green; **never install without an explicit request.**
+- Repo hygiene tests enforce: 0 analyzer warnings, no translucent surfaces
+  behind text (annotate genuine scrims `// scrim over <what>`), unique migration
+  ordering keys, disguise intact.
+
+**Logcat** (invaluable — it produced three root causes in one pass):
+```bash
+adb logcat -c
+adb logcat -v time flutter:V chromium:W ActivityManager:I AndroidRuntime:E System.err:W *:E
+```
+Filter for `I/flutter` — the app's real errors are there, not on screen.
+
+---
+
+## 7. Standing constraints
+
+- Never handle his API keys/tokens — give him the SQL, let him run it.
+- Secrets go in `app_secrets` + an edge function, never the APK (pattern:
+  `turn-credentials`, `map-token`).
+- The launcher disguise ("News", 9 covers) is deliberate. Never revert it.
+  There's a guard test; its `_tells` wordlist is easy to slip past.
+- Plan for **thousands of users**, not the two test phones. No update channel —
+  breaking changes need the server-side version gate.
+- E2E encryption stays. If crypto is why something is slow, design around it.
+- Verify every checkable claim **before** asserting it. Twice this session I
+  reported a diagnosis that was stale or backwards (billing; the flutter_map
+  disk cache) and had to correct myself to him.
