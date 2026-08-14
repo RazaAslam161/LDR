@@ -521,13 +521,54 @@ now the code, with the reasoning written down.
 
 `flutter analyze mobile` 0/0; `flutter test` **573 passing**.
 
-### Still open
+### The reaper actually deletes now, and vault photos left the disk
 
-1. **Vault photos are still written to disk as plaintext.** The epoch, decode
-   and off-thread fixes landed; moving photographs to RAM-only `ImageProvider`s
-   needs `private_vault_screen` and `vault_media_viewer` restructured and was
-   not attempted — deliberately left whole rather than half-converted. Video and
-   audio need a file regardless (no streaming decrypt exists here).
+Committed to `c5d9f47` was everything up to here. What follows is after it.
+
+**`delete from storage.objects` does not delete a file — it destroys the only
+pointer to one.** Verified on this project: `storage.objects` carries a
+`version` column and Supabase stores the object at `<bucket>/<name>/<version>`.
+That version string lives nowhere else, so deleting the row leaves the bytes in
+the backing store, unreachable, still billed, and now impossible to erase.
+
+Two callers were doing exactly that, both believing the opposite:
+
+- `reap_storage_objects()` — mine, from 007000, mirroring 003400. So §5's
+  "the encrypted files are erased within 30 days" was false.
+- **`delete_my_account()`** — the serious one. It erased a couple's whole media
+  library when the last member left, which means **"delete my account" left
+  every photograph, video and voice note that couple ever sent on the server,
+  permanently.**
+
+Fixed in migration `storage_reaper_actually_deletes` / `20260601007500` plus a
+new `reap-storage` edge function (service role, secret-guarded, `verify_jwt`
+false because the caller is pg_cron). Postgres now only QUEUES and pokes; the
+Storage API does the deleting, because it is the only thing that deletes both
+the row and the object. Account deletion inserts into `storage_reap` instead of
+deleting rows. Drain runs hourly (`23 * * * *`); the memory purge stays nightly.
+
+Verified end to end against production with a throwaway path:
+`{"ok":true,"drained":1}`, queue back to 0, and the 74 real objects untouched.
+Note `pg_net` is asynchronous — checking the queue four seconds later still
+showed the row; `net._http_response` is where the truth is.
+
+**Vault photographs are RAM-only now.** `photoProvider` / `photoBytes` hold
+plaintext in memory keyed by epoch, hand out `ImageProvider`s, and evict from
+`ImageCache` on drop. The grid tile and the viewer both use them; the viewer's
+zoom layer builds its unbounded provider from the same resident bytes. Video and
+audio keep `getDecryptedFile` because a player needs a path and there is no
+streaming decrypt here — that exposure is named, not pretended away.
+
+Two things found while doing it:
+- **The video tile decrypted the preview and wrote it to disk to draw a black
+  rectangle with a play glyph.** It never rendered the file. Now it decrypts
+  nothing at all.
+- `_NotePage` rendered `'Could not decrypt: $e'` — a MAC failure showed
+  `SecretBoxAuthenticationError` to whoever opened the note.
+
+`flutter analyze mobile` 0/0; `flutter test` **573 passing**.
+
+### Still open
 2. **The `MemoryFailure` classification** (spec §6.6). The stream error, the
    empty-vs-unreadable split and every `'Failed: $e'` on the lifecycle paths are
    fixed, but a per-row decrypt failure still has no `KeyGoneForever` /

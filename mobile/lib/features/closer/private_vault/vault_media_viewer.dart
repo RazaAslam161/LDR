@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:miles/core/media/media_decode.dart';
@@ -94,7 +94,8 @@ class _PhotoPage extends StatefulWidget {
 }
 
 class _PhotoPageState extends State<_PhotoPage> {
-  File? _file;
+  ImageProvider? _bounded;
+  ImageProvider? _full;
   String? _error;
 
   /// Whether the full-resolution layer is mounted over the bounded one.
@@ -130,16 +131,22 @@ class _PhotoPageState extends State<_PhotoPage> {
     final want = _zoomed
         ? scale > kZoomRevertScale
         : scale > kZoomUpgradeScale;
-    if (want != _zoomed && mounted) setState(() => _zoomed = want);
+    if (want == _zoomed || !mounted) return;
+    setState(() => _zoomed = want);
+    if (want) unawaited(_loadFull());
   }
 
   Future<void> _load() async {
     try {
-      final file = await VaultMediaCache.getDecryptedOriginal(widget.item)
-          .timeout(const Duration(minutes: 2));
-      if (mounted) {
-        setState(() => _file = file);
-      }
+      // RAM, not a file. A decrypted photograph written to the temp directory
+      // outlives the process kill that backgrounding causes, on a device whose
+      // premise is that nothing on it is readable.
+      final bounded = await VaultMediaCache.photoProvider(
+        widget.item,
+        original: true,
+        decodeWidth: _viewportPx(),
+      ).timeout(const Duration(minutes: 2));
+      if (mounted) setState(() => _bounded = bounded);
     } catch (error) {
       if (mounted) {
         setState(() => _error = 'Could not load this photo. Tap to retry.');
@@ -147,9 +154,30 @@ class _PhotoPageState extends State<_PhotoPage> {
     }
   }
 
+  /// The unbounded layer, built from bytes that are already resident — so this
+  /// costs one decode and no network.
+  Future<void> _loadFull() async {
+    if (_full != null) return;
+    try {
+      final full = await VaultMediaCache.photoProvider(
+        widget.item,
+        original: true,
+      );
+      if (mounted) setState(() => _full = full);
+    } catch (_) {
+      // The bounded copy stays on screen; a failed upgrade is not an error a
+      // person needs to be told about.
+    }
+  }
+
+  int _viewportPx() =>
+      (MediaQuery.sizeOf(context).width *
+              MediaQuery.devicePixelRatioOf(context))
+          .round();
+
   @override
   Widget build(BuildContext context) {
-    if (_file == null) {
+    if (_bounded == null) {
       if (_error != null) {
         return Center(
           child: TextButton(
@@ -163,9 +191,6 @@ class _PhotoPageState extends State<_PhotoPage> {
       }
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    final viewportPx =
-        (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
-            .round();
     return InteractiveViewer(
       transformationController: _transform,
       minScale: 1.0,
@@ -177,10 +202,13 @@ class _PhotoPageState extends State<_PhotoPage> {
         // on the page BEFORE the user has finished swiping to it.
         //
         // The upgrade costs one decode and NO network: the bytes are already
-        // decrypted and resident by the time anyone can pinch.
-        child: _zoomed
-            ? Image.file(_file!, fit: BoxFit.contain)
-            : Image.file(_file!, fit: BoxFit.contain, cacheWidth: viewportPx),
+        // decrypted and resident by the time anyone can pinch. Until it
+        // resolves the bounded copy stays up, so a pinch never shows black.
+        child: Image(
+          image: (_zoomed ? _full : null) ?? _bounded!,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+        ),
       ),
     );
   }
@@ -209,7 +237,12 @@ class _NotePageState extends State<_NotePage> {
       final text = await decryptVaultNote(widget.item);
       if (mounted) setState(() => _text = text);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not decrypt: $e');
+      // Not the exception. A MAC failure here rendered
+      // "Could not decrypt: SecretBoxAuthenticationError: SecretBox has wrong
+      // message authentication code (MAC)" at whoever opened the note.
+      if (mounted) {
+        setState(() => _error = "This note can't be opened on this phone.");
+      }
     }
   }
 

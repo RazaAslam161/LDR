@@ -304,8 +304,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final type = message.data['type'];
   // 'message' was missing here, so message_push.sql's trigger fired, the edge
   // function sent, FCM delivered — and this isolate returned immediately. The
-  // whole push path existed and did nothing for anyone.
-  if (type != 'reach' && type != 'care' && type != 'call' && type != 'message') {
+  // whole push path existed and did nothing for anyone. 'memory' was the same
+  // omission a second time: the branch below builds the notification correctly
+  // and was simply never reached.
+  if (type != 'reach' &&
+      type != 'care' &&
+      type != 'call' &&
+      type != 'message' &&
+      type != 'memory') {
     return;
   }
 

@@ -7,6 +7,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/media_decode_queue.dart';
 import 'package:miles/features/closer/memory_threads/memory_heal.dart';
@@ -1165,8 +1166,15 @@ class _MemoryCoverState extends State<_MemoryCover> {
 
   Future<void> _load() async {
     final path = widget.thread.coverPath;
-    final photoId = widget.thread.coverPhotoId;
-    if (path == null || photoId == null) return;
+    if (path == null) return;
+    // cover_photo_id went unwritten by the sync trigger for a while, and the
+    // decrypt cannot build its associated data without it. The path is
+    // `$coupleId/memory/$photoId/c.enc`, so the id is recoverable from it — a
+    // missing id must not mean a permanently blank cover.
+    final segments = path.split('/');
+    final photoId = widget.thread.coverPhotoId ??
+        (segments.length > 2 ? segments[2] : null);
+    if (photoId == null) return;
 
     // Computed from the SCREEN, not from this card, and therefore identical for
     // every card on it. A width derived per-card gives each one its own
@@ -1275,10 +1283,36 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
 
   Future<void> _load() async {
     try {
+      // Once MemoryHeal has moved a photo out to storage it nulls the inline
+      // photo_cipher/photo_nonce columns, and decryptPhoto returns null without
+      // throwing — which rendered neither image, spinner nor error, just black.
+      // A healed memory must be read from the object it was moved to.
+      if (widget.thread.coverPath != null) {
+        final photos = await MemoryPhotoRepository.listFor(widget.thread.id);
+        if (photos.isNotEmpty) {
+          final photo = photos.first;
+          final bytes = await EncryptedMediaCache.bytes(
+            bucket: intimateBucket,
+            path: photo.fullPath,
+            associatedData:
+                MemoryPhotoRepository.fullAdFor(widget.thread.id, photo.id),
+          );
+          if (!mounted) return;
+          setState(() {
+            _bytes = bytes;
+            _loading = false;
+          });
+          return;
+        }
+      }
+
       final bytes = await decryptPhoto(widget.thread);
       if (!mounted) return;
       setState(() {
         _bytes = bytes;
+        // Never leave all three null: that combination is a black screen with
+        // nothing to tell the user, or a future regression, why.
+        _error = bytes == null ? 'Could not open this photo.' : null;
         _loading = false;
       });
     } catch (e) {

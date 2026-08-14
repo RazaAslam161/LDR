@@ -35,6 +35,8 @@ class SupabaseRepository {
       password: password,
       emailRedirectTo: authCallbackUrl,
     );
+    final uid = _c.auth.currentUser?.id;
+    if (uid != null) await CryptoCore.bindAccount(uid);
     // Escrow at sign-up too.
     //
     // The wrap key is derived from the password, and the password only exists
@@ -50,6 +52,12 @@ class SupabaseRepository {
     required String password,
   }) async {
     await _c.auth.signInWithPassword(email: email, password: password);
+
+    // Bind key storage to this account before any of it is read or written, so
+    // a restore lands under this user's key and not the previous signed-in
+    // account's.
+    final uid = _c.auth.currentUser?.id;
+    if (uid != null) await CryptoCore.bindAccount(uid);
 
     // Recover the encryption key before anything reads encrypted rows.
     //

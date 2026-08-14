@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -404,7 +403,7 @@ class _VaultGridItem extends StatefulWidget {
 }
 
 class _VaultGridItemState extends State<_VaultGridItem> {
-  File? _file;
+  ImageProvider? _provider;
   String? _notePreview;
 
   bool _loading = true;
@@ -420,7 +419,7 @@ class _VaultGridItemState extends State<_VaultGridItem> {
   void didUpdateWidget(covariant _VaultGridItem oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.id != widget.item.id) {
-      _file = null;
+      _provider = null;
       _notePreview = null;
       _loading = true;
       _error = null;
@@ -429,14 +428,24 @@ class _VaultGridItemState extends State<_VaultGridItem> {
   }
 
   Future<void> _load() async {
-    if (widget.item.kind == VaultKind.photo ||
-        widget.item.kind == VaultKind.video) {
+    // A video tile draws a black rectangle and a play glyph — it never renders
+    // the file. It was nevertheless decrypting the preview and WRITING IT TO
+    // DISK to arrive at that, so every video in the grid left plaintext behind
+    // for a picture nobody sees.
+    if (widget.item.kind == VaultKind.video) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    if (widget.item.kind == VaultKind.photo) {
       try {
-        final file = await VaultMediaCache.getDecryptedFile(widget.item)
-            .timeout(const Duration(minutes: 1));
+        final provider = await VaultMediaCache.photoProvider(
+          widget.item,
+          original: false,
+          decodeWidth: kTileDecodePx,
+        ).timeout(const Duration(minutes: 1));
         if (mounted)
           setState(() {
-            _file = file;
+            _provider = provider;
             _loading = false;
           });
       } catch (e) {
@@ -489,31 +498,23 @@ class _VaultGridItemState extends State<_VaultGridItem> {
                       color: Color(0xFFE0553D), size: 30),
                 ),
               )
-            else if (widget.item.kind == VaultKind.photo ||
-                widget.item.kind == VaultKind.video)
-              _file != null
-                  ? (widget.item.kind == VaultKind.video
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Container(color: Colors.black87),
-                            const Center(
-                              child: Icon(Icons.play_circle_fill,
-                                  color: Colors.white, size: 48),
-                            ),
-                          ],
-                        )
-                      : Image.file(
-                          _file!,
-                          fit: BoxFit.cover,
-                          // A grid tile was decoding the preview at source
-                          // resolution — up to ~48MB of raster per cell for a
-                          // thumbnail. Width only: passing both dimensions
-                          // makes the key depend on both, so this tile and the
-                          // viewer's copy of the same photo would stop sharing
-                          // a decode even when the width agrees.
-                          cacheWidth: kTileDecodePx,
-                        ))
+            else if (widget.item.kind == VaultKind.video)
+              Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(color: Colors.black87),
+                  const Center(
+                    child: Icon(Icons.play_circle_fill,
+                        color: Colors.white, size: 48),
+                  ),
+                ],
+              )
+            else if (widget.item.kind == VaultKind.photo)
+              _provider != null
+                  // From RAM, never a file. The decode is bounded at the tile
+                  // width — this used to decode the preview at source
+                  // resolution, up to ~48MB of raster per cell for a thumbnail.
+                  ? Image(image: _provider!, fit: BoxFit.cover)
                   : _loading
                       ? const Center(
                           child: SizedBox(

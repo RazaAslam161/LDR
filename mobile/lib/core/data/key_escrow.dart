@@ -26,15 +26,68 @@ import 'package:miles/features/closer/closer_crypto.dart';
 /// opened either. That is the same trade every honest end-to-end system makes,
 /// and it is better than the current behaviour, which loses everything on a
 /// reinstall the user did not even know was destructive.
+/// Top-level so it can cross an isolate boundary via [compute].
+Future<List<int>> _argon2idDerive(
+  ({String password, Uint8List salt}) args,
+) async {
+  final key = await Argon2id(
+    memory: KeyEscrow._argonMemoryKb,
+    iterations: KeyEscrow._argonIterations,
+    parallelism: KeyEscrow._argonParallelism,
+    hashLength: 32,
+  ).deriveKey(
+    secretKey: SecretKey(utf8.encode(args.password)),
+    nonce: args.salt,
+  );
+  return key.extractBytes();
+}
+
 class KeyEscrow {
   KeyEscrow._();
 
   static final _aead = Xchacha20.poly1305Aead();
-  static final _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
+
+  /// OWASP's baseline Argon2id configuration. Measured at ~0.5s on the oldest
+  /// handset, which is the ceiling worth paying at sign-in.
+  static const kdfArgon2id = 'argon2id';
+  static const _argonMemoryKb = 19456;
+  static const _argonIterations = 2;
+  static const _argonParallelism = 1;
+
+  static Map<String, dynamic> get _argonParams => const {
+        'm': _argonMemoryKb,
+        't': _argonIterations,
+        'p': _argonParallelism,
+      };
 
   /// Derive the wrapping key. Never leaves the device.
-  static Future<SecretKey> _wrapKey(String password, Uint8List salt) =>
-      _hkdf.deriveKey(
+  ///
+  /// Argon2id is memory-hard on purpose: the sealed seed sits in a table a
+  /// backup dump or a leaked service-role key would expose, and the only thing
+  /// standing between that blob and the couple's entire history is the user's
+  /// password. The original HKDF derivation was two HMAC-SHA256 operations per
+  /// guess, which a GPU does by the billion — it hid the password from the
+  /// server while leaving the key it protects trivially recoverable offline.
+  ///
+  /// Run off the UI isolate; half a second of memory-hard work on the platform
+  /// thread is a visible freeze during sign-in.
+  static Future<SecretKey> _wrapKey(
+    String password,
+    Uint8List salt, {
+    required String kdf,
+  }) async {
+    if (kdf != kdfArgon2id) return _legacyWrapKey(password, salt);
+    final bytes = await compute(
+      _argon2idDerive,
+      (password: password, salt: salt),
+    );
+    return SecretKey(bytes);
+  }
+
+  /// Rows sealed before the Argon2id migration. Kept only so [restore] can open
+  /// one and immediately re-wrap it; nothing writes this format any more.
+  static Future<SecretKey> _legacyWrapKey(String password, Uint8List salt) =>
+      Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
         secretKey: SecretKey(utf8.encode(password)),
         nonce: salt,
         info: utf8.encode('miles_key_escrow_v1'),
@@ -79,7 +132,7 @@ class KeyEscrow {
       final rnd = Random.secure();
       final salt =
           Uint8List.fromList(List.generate(16, (_) => rnd.nextInt(256)));
-      final key = await _wrapKey(password, salt);
+      final key = await _wrapKey(password, salt, kdf: kdfArgon2id);
       final box = await _aead.encrypt(
         seed,
         secretKey: key,
@@ -93,6 +146,8 @@ class KeyEscrow {
         'wrapped_seed': bytesToBytea(sealed),
         'salt': bytesToBytea(salt),
         'nonce': bytesToBytea(Uint8List.fromList(box.nonce)),
+        'kdf': kdfArgon2id,
+        'kdf_params': _argonParams,
       });
     } catch (e) {
       // Best effort. Failing to back the key up must never fail a sign-in —
@@ -113,7 +168,7 @@ class KeyEscrow {
 
       final row = await SupabaseService.client
           .from('key_escrow')
-          .select('wrapped_seed, salt, nonce')
+          .select('wrapped_seed, salt, nonce, kdf')
           .eq('user_id', uid)
           .maybeSingle();
       if (row == null) return false;
@@ -123,7 +178,9 @@ class KeyEscrow {
       final nonce = byteaToBytes(row['nonce']);
       if (sealed.length <= 16) return false;
 
-      final key = await _wrapKey(password, salt);
+      // A row written before the Argon2id migration has no discriminator.
+      final kdf = (row['kdf'] as String?) ?? 'hkdf-sha256';
+      final key = await _wrapKey(password, salt, kdf: kdf);
       final cipher = sealed.sublist(0, sealed.length - 16);
       final mac = sealed.sublist(sealed.length - 16);
 
@@ -132,6 +189,11 @@ class KeyEscrow {
         secretKey: key,
       );
       await CryptoCore.adoptPrivateSeed(Uint8List.fromList(seed));
+
+      // Opening a legacy row proves the password, which is the only moment the
+      // material needed to re-seal it exists. Upgrade in place rather than
+      // leaving a crackable blob behind for the life of the account.
+      if (kdf != kdfArgon2id) await backup(password);
       return true;
     } catch (e) {
       // A wrong password lands here as a MAC failure, which is the expected

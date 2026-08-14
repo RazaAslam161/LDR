@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/data/models.dart';
@@ -118,6 +119,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
   Future<void> loadProfile() async {
     state = state.copyWith(loading: true);
     try {
+      // Also here, not just at sign-in: a session restored on launch never
+      // passes through signIn, and until the account is bound its key material
+      // is still readable under the pre-scoping device-wide name.
+      final uid = SupabaseService.currentUserId;
+      if (uid != null) await CryptoCore.bindAccount(uid);
       final profile = await SupabaseRepository.fetchMyProfile()
           .timeout(const Duration(seconds: 10));
       if (profile == null) {
@@ -282,6 +288,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // nothing; signing out is different, because the next account on this
     // handset has no business inheriting the previous couple's objects.
     unawaited(EncryptedMediaCache.clearAll());
+    // The keypair and the derived couple key are process-scoped too, and every
+    // decrypted byte still held anywhere belongs to the account that just left.
+    // The account's sealed seed stays in storage — signing back in must work
+    // offline, and for anyone without an escrow row it is the only copy.
+    CryptoCore.forgetAccount();
     state = const SessionState(loading: false);
   }
 

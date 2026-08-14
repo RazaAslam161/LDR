@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
@@ -43,6 +44,83 @@ class VaultMediaCache {
     unawaited(clear());
   }
 
+  // ── Photographs: RAM only ─────────────────────────────────────────────────
+  //
+  // Every photograph used to be written to getTemporaryDirectory() and deleted
+  // in the screen's dispose(). But the app raises its disguise cover on
+  // backgrounding — which is exactly when Android kills the process — so
+  // dispose frequently never ran, and a directory of decrypted JPEGs outlived
+  // the session on a device whose entire premise is that nothing on it is
+  // readable.
+  //
+  // Video and audio still get a file below, because a player needs a path and
+  // there is no streaming decrypt here. The exposure is accepted only where it
+  // cannot be avoided.
+
+  static final Map<String, Uint8List> _plain = {};
+  static final Map<String, List<ImageProvider>> _providers = {};
+  static final Map<String, Future<Uint8List>> _inFlight = {};
+
+  static String _plainKey(VaultItem item, bool original) =>
+      '${CryptoCore.keyEpoch.value}|${item.id}|${original ? 'full' : 'preview'}';
+
+  /// A provider for a vault photograph, bounded to what will be painted.
+  static Future<ImageProvider> photoProvider(
+    VaultItem item, {
+    required bool original,
+    int? decodeWidth,
+  }) async {
+    final bytes = await photoBytes(item, original: original);
+    final memory = MemoryImage(bytes);
+    final ImageProvider provider =
+        decodeWidth == null ? memory : ResizeImage(memory, width: decodeWidth);
+    (_providers[_plainKey(item, original)] ??= []).add(provider);
+    return provider;
+  }
+
+  /// The decrypted bytes, held in RAM.
+  ///
+  /// Returns the IDENTICAL instance every time: `MemoryImage.==` compares its
+  /// bytes by reference, so handing out a copy would give the grid tile and the
+  /// viewer separate decodes of one photograph.
+  static Future<Uint8List> photoBytes(
+    VaultItem item, {
+    required bool original,
+  }) {
+    _wire();
+    final k = _plainKey(item, original);
+    final hit = _plain[k];
+    if (hit != null) return Future<Uint8List>.value(hit);
+    final flying = _inFlight[k];
+    if (flying != null) return flying;
+
+    final job = (original && item.hasOriginalMedia
+            ? _downloadAndDecryptOriginalBytes(item)
+            : _decrypt(item.payload, item.ad))
+        .then((b) {
+      _plain[k] = b;
+      return b;
+    }).whenComplete(() => _inFlight.remove(k));
+    _inFlight[k] = job;
+    return job;
+  }
+
+  /// Drops decrypted bytes and every frame decoded from them.
+  ///
+  /// Evicting the map alone frees nothing while Flutter's ImageCache still
+  /// holds the provider — up to 1000 entries / 100 MiB, not device-scaled, so
+  /// identical on a 2 GB IN2015.
+  static void dropPlaintext() {
+    for (final list in _providers.values) {
+      for (final p in list) {
+        PaintingBinding.instance.imageCache.evict(p, includeLive: true);
+      }
+    }
+    _providers.clear();
+    _plain.clear();
+    _inFlight.clear();
+  }
+
   static Future<File> getDecryptedFile(VaultItem item) {
     _wire();
     return _previewLoads.putIfAbsent(
@@ -66,8 +144,16 @@ class VaultMediaCache {
     );
   }
 
+  /// Warms a neighbour without decoding it.
+  ///
+  /// Photographs warm into RAM; anything that needs a file warms onto disk,
+  /// because that is what its player will ask for.
   static void prefetchOriginal(VaultItem item) {
     if (!item.hasOriginalMedia) return;
+    if (item.kind == VaultKind.photo) {
+      photoBytes(item, original: true).catchError((_) => Uint8List(0));
+      return;
+    }
     getDecryptedOriginal(item).catchError((_) => File(''));
   }
 
@@ -76,7 +162,13 @@ class VaultMediaCache {
     return _write(item, bytes, role: 'preview');
   }
 
-  static Future<File> _downloadAndDecryptOriginal(VaultItem item) async {
+  static Future<File> _downloadAndDecryptOriginal(VaultItem item) async =>
+      _write(item, await _downloadAndDecryptOriginalBytes(item),
+          role: 'original',);
+
+  /// The original's plaintext, without writing it anywhere.
+  static Future<Uint8List> _downloadAndDecryptOriginalBytes(
+      VaultItem item,) async {
     Uint8List encrypted;
     try {
       encrypted = await SupabaseService.client.storage
@@ -84,8 +176,6 @@ class VaultMediaCache {
           .download(item.resolvedStoragePath)
           .timeout(const Duration(minutes: 2));
     } catch (_) {
-      // Items written by the failed first implementation used this path. Keep
-      // them readable where the original upload did make it to storage.
       if (item.storagePath != null) rethrow;
       encrypted = await SupabaseService.client.storage
           .from('couple_intimate')
@@ -99,12 +189,8 @@ class VaultMediaCache {
     // base64-encoded to build the request and decoded again inside it: +33 %
     // allocation and two extra full passes over the bytes, per view, to move
     // data that was already in exactly the shape the cipher wanted.
-    return _write(
-      item,
-      await CryptoCore.decryptBytesOffThread(encrypted,
-          associatedData: item.ad,),
-      role: 'original',
-    );
+    return CryptoCore.decryptBytesOffThread(encrypted,
+        associatedData: item.ad,);
   }
 
   /// The inline preview column. Small enough that an isolate hop costs more
@@ -162,6 +248,7 @@ class VaultMediaCache {
   }
 
   static Future<void> clear() async {
+    dropPlaintext();
     final files = _files.values.toList(growable: false);
     _previewLoads.clear();
     _originalLoads.clear();

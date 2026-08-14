@@ -35,6 +35,23 @@ class CryptoCore {
   );
   static const _privKeyStoreKey = 'miles_x25519_priv_v1';
 
+  /// Which account claimed the pre-migration, unscoped seed. See [bindAccount].
+  static const _legacySeedOwnerKey = 'miles_x25519_legacy_owner';
+
+  /// The signed-in account the in-memory key material belongs to.
+  ///
+  /// The seed used to be stored under one device-wide key, so signing out and
+  /// signing in as somebody else handed the new account the previous account's
+  /// private key — it would publish that identity as its own and escrow it
+  /// under its own password. Scoping storage per account is what stops that.
+  /// Deliberately *not* deleting on sign-out: an account that never wrote an
+  /// escrow row has no other copy of its key, so erasing it would destroy the
+  /// history it protects.
+  static String? _accountId;
+
+  static String get _seedKey =>
+      _accountId == null ? _privKeyStoreKey : '${_privKeyStoreKey}_$_accountId';
+
   /// The public-key value the old build published for everyone. A partner
   /// still advertising this has no real key, so we cannot encrypt to them yet.
   static const legacyPublicKey = 'plaintext-v1';
@@ -72,18 +89,52 @@ class CryptoCore {
 
   static void _bumpEpoch() => keyEpoch.value++;
 
+  /// Point key material at [uid], migrating a pre-scoping seed exactly once.
+  ///
+  /// The unscoped seed belongs to whoever was signed in when this build landed,
+  /// so the first account to bind after upgrading claims it and every later one
+  /// starts fresh. At sign-in this runs after an escrow restore, so a recovered
+  /// seed is already in place and the claim is skipped.
+  static Future<void> bindAccount(String uid) async {
+    if (_accountId == uid) return;
+    _accountId = uid;
+    _myKeyPair = null;
+    _sharedKey = null;
+    _plaintextAgreed = false;
+    _derivedFrom = null;
+
+    if (await _storage.read(key: _seedKey) == null) {
+      final owner = await _storage.read(key: _legacySeedOwnerKey);
+      final legacy = await _storage.read(key: _privKeyStoreKey);
+      if (legacy != null && owner == null) {
+        await _storage.write(key: _legacySeedOwnerKey, value: uid);
+        await _storage.write(key: _seedKey, value: legacy);
+      }
+    }
+    _bumpEpoch();
+  }
+
+  /// Sign-out. Drops every decrypted byte and every key still held in memory;
+  /// the account's sealed seed stays in storage so signing back in works
+  /// offline. See [_accountId] for why this does not delete.
+  static void forgetAccount() {
+    _accountId = null;
+    _myKeyPair = null;
+    _sharedKey = null;
+    _plaintextAgreed = false;
+    _derivedFrom = null;
+    _bumpEpoch();
+  }
+
   static Future<SimpleKeyPair> _keyPair() async {
     if (_myKeyPair != null) return _myKeyPair!;
-    final stored = await _storage.read(key: _privKeyStoreKey);
+    final stored = await _storage.read(key: _seedKey);
     if (stored != null) {
       _myKeyPair = await _x25519.newKeyPairFromSeed(base64Decode(stored));
     } else {
       final kp = await _x25519.newKeyPair();
       final data = await kp.extract();
-      await _storage.write(
-        key: _privKeyStoreKey,
-        value: base64Encode(data.bytes),
-      );
+      await _storage.write(key: _seedKey, value: base64Encode(data.bytes));
       _myKeyPair = kp;
     }
     return _myKeyPair!;
@@ -94,7 +145,7 @@ class CryptoCore {
   /// Deliberately narrow: this is the ONLY way the seed leaves this class, and
   /// the one caller wraps it before it touches the network.
   static Future<Uint8List?> exportPrivateSeed() async {
-    final stored = await _storage.read(key: _privKeyStoreKey);
+    final stored = await _storage.read(key: _seedKey);
     if (stored == null) return null;
     return Uint8List.fromList(base64Decode(stored));
   }
@@ -105,7 +156,7 @@ class CryptoCore {
   /// replaced, and leaving it would decrypt with the wrong key while looking
   /// perfectly healthy.
   static Future<void> adoptPrivateSeed(Uint8List seed) async {
-    await _storage.write(key: _privKeyStoreKey, value: base64Encode(seed));
+    await _storage.write(key: _seedKey, value: base64Encode(seed));
     _myKeyPair = await _x25519.newKeyPairFromSeed(seed);
     _sharedKey = null;
     _plaintextAgreed = false;
