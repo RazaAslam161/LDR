@@ -2,18 +2,16 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart'; // For Distance
-import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mb;
 import 'package:miles/core/data/models.dart';
-import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/partner_sentence.dart';
 import 'package:miles/features/home/world_map_screen.dart';
+import 'package:geolocator/geolocator.dart'; // For Distance
 
 /// Live partner location on the dashboard. Shows a Google Map
 /// with the partner's marker that animates to each new fix, "updated Xs ago",
@@ -317,20 +315,60 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                 ],
               ),
             ),
-            // The card used to mount a LIVE map here, so merely opening Home
-            // streamed tile requests centred on your partner to a third party
-            // before you touched anything. The map is worth having; having it
-            // render unasked on the home screen of an app whose whole premise
-            // is that nothing leaks is not.
-            GestureDetector(
-              onTap: () => context.push('/app/location-map', extra: {
-                'coupleId': widget.coupleId,
-                'partnerName': widget.partnerName,
-              }),
-              child: _HomeMiniMap(
-                lat: p.latitude!,
-                lon: p.longitude!,
-                label: p.locationLabel,
+            SizedBox(
+              height: 210,
+              child: GestureDetector(
+                onTap: () => context.push('/app/location-map', extra: {
+                  'coupleId': widget.coupleId,
+                  'partnerName': widget.partnerName,
+                }),
+                child: AbsorbPointer(
+                  child: Stack(
+                    children: [
+                      GoogleMap(
+                        initialCameraPosition: CameraPosition(
+                          target: point,
+                          zoom: 15.5,
+                        ),
+                        markers: markers,
+                        polylines: polylines,
+                        zoomControlsEnabled: false,
+                        compassEnabled: false,
+                        mapToolbarEnabled: false,
+                        myLocationButtonEnabled: false,
+                        onMapCreated: (c) => _mapController = c,
+                      ),
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            // scrim over the map tiles behind it
+                  color: Colors.black.withValues(alpha: 0.45),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.fullscreen_rounded,
+                                    color: MilesColors.cream50, size: 14),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Full screen',
+                                  style: TextStyle(
+                                      color: MilesColors.cream50,
+                                      fontSize: 11,
+                                      fontFamily: 'Inter'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
             if (dist != null)
@@ -353,99 +391,3 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     );
   }
 }
-
-/// Home's door to the map, in place of a live one.
-///
-/// Says where she is in words. The sentence above it already says whether you
-/// can talk to her, which is the question people actually open this app to ask
-/// — and neither of them contacts anybody. The map itself is one tap away,
-/// where it is a thing the user chose rather than a thing that happened while
-/// they were looking at Home.
-class _HomeMiniMap extends StatefulWidget {
-  const _HomeMiniMap({required this.lat, required this.lon, this.label});
-
-  final double lat;
-  final double lon;
-  final String? label;
-
-  @override
-  State<_HomeMiniMap> createState() => _HomeMiniMapState();
-}
-
-class _HomeMiniMapState extends State<_HomeMiniMap> {
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_boot());
-  }
-
-  Future<void> _boot() async {
-    final token = await MapToken.ensure();
-    if (!mounted || token == null) return;
-    mb.MapboxOptions.setAccessToken(token);
-    setState(() => _ready = true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: SizedBox(
-        height: 190,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (_ready)
-              // AbsorbPointer so a drag scrolls Home instead of panning a map
-              // the user cannot see enough of to navigate. Tapping opens the
-              // full screen one, which is where panning belongs.
-              AbsorbPointer(
-                child: mb.MapWidget(
-                  key: const ValueKey('home-mini-map'),
-                  styleUri: mb.MapboxStyles.STANDARD_SATELLITE,
-                  cameraOptions: mb.CameraOptions(
-                    center: mb.Point(
-                      coordinates: mb.Position(widget.lon, widget.lat),
-                    ),
-                    zoom: 14.5,
-                    pitch: 45,
-                  ),
-                ),
-              )
-            else
-              const ColoredBox(color: MilesColors.surface1),
-            if (widget.label?.isNotEmpty ?? false)
-              Positioned(
-                left: 10,
-                right: 10,
-                bottom: 10,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    // scrim over the map behind it
-                    color: MilesColors.night.withValues(alpha: 0.82),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    child: Text(
-                      widget.label!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: MilesColors.cream50,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
