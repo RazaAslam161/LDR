@@ -41,6 +41,30 @@ class KeyEscrow {
         info: utf8.encode('miles_key_escrow_v1'),
       );
 
+  /// True when this account has no escrow row and would lose everything on a
+  /// reinstall.
+  ///
+  /// Exists because backup can only happen where the password does — sign-in
+  /// and sign-up. Every user already signed in when this shipped has no escrow
+  /// and no reason to sign out, so the app has to notice and ask them once.
+  /// Telling a fleet to sign out and back in is not a migration strategy.
+  static Future<bool> isMissing() async {
+    try {
+      final uid = SupabaseService.currentUserId;
+      if (uid == null) return false;
+      final row = await SupabaseService.client
+          .from('key_escrow')
+          .select('user_id')
+          .eq('user_id', uid)
+          .maybeSingle();
+      return row == null;
+    } catch (_) {
+      // Offline is not "missing". Prompting on a failed lookup would nag every
+      // user every time their connection dropped.
+      return false;
+    }
+  }
+
   /// Seal this device's seed under [password] and store it.
   ///
   /// Called after a successful sign-in, when the password is in hand and the

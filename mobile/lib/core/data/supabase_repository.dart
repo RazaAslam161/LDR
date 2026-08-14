@@ -35,6 +35,14 @@ class SupabaseRepository {
       password: password,
       emailRedirectTo: authCallbackUrl,
     );
+    // Escrow at sign-up too.
+    //
+    // The wrap key is derived from the password, and the password only exists
+    // in memory at these two moments. Backing up only at sign-in would leave
+    // every user who has never signed out with no escrow at all — and they are
+    // the ones who lose everything on their next reinstall. This is not
+    // something a fleet can be told to do manually.
+    await KeyEscrow.backup(password);
   }
 
   static Future<void> signIn({

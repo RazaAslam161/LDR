@@ -2,16 +2,18 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart'; // For Distance
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mb;
 import 'package:miles/core/data/models.dart';
+import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/partner_sentence.dart';
 import 'package:miles/features/home/world_map_screen.dart';
-import 'package:geolocator/geolocator.dart'; // For Distance
 
 /// Live partner location on the dashboard. Shows a Google Map
 /// with the partner's marker that animates to each new fix, "updated Xs ago",
@@ -325,9 +327,10 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                 'coupleId': widget.coupleId,
                 'partnerName': widget.partnerName,
               }),
-              child: _MapDoor(
+              child: _HomeMiniMap(
+                lat: p.latitude!,
+                lon: p.longitude!,
                 label: p.locationLabel,
-                partnerName: widget.partnerName,
               ),
             ),
             if (dist != null)
@@ -358,50 +361,91 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
 /// — and neither of them contacts anybody. The map itself is one tap away,
 /// where it is a thing the user chose rather than a thing that happened while
 /// they were looking at Home.
-class _MapDoor extends StatelessWidget {
-  const _MapDoor({required this.label, required this.partnerName});
+class _HomeMiniMap extends StatefulWidget {
+  const _HomeMiniMap({required this.lat, required this.lon, this.label});
 
+  final double lat;
+  final double lon;
   final String? label;
-  final String partnerName;
 
   @override
-  Widget build(BuildContext context) => Container(
-        height: 92,
-        decoration: BoxDecoration(
-          color: MilesColors.surface1,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
+  State<_HomeMiniMap> createState() => _HomeMiniMapState();
+}
+
+class _HomeMiniMapState extends State<_HomeMiniMap> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    final token = await MapToken.ensure();
+    if (!mounted || token == null) return;
+    mb.MapboxOptions.setAccessToken(token);
+    setState(() => _ready = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        height: 190,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            const Icon(Icons.map_outlined, color: MilesColors.ember, size: 22),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    (label?.isNotEmpty ?? false)
-                        ? label!
-                        : 'See where $partnerName is',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: MilesColors.cream50,
-                      fontSize: 14.5,
+            if (_ready)
+              // AbsorbPointer so a drag scrolls Home instead of panning a map
+              // the user cannot see enough of to navigate. Tapping opens the
+              // full screen one, which is where panning belongs.
+              AbsorbPointer(
+                child: mb.MapWidget(
+                  key: const ValueKey('home-mini-map'),
+                  styleUri: mb.MapboxStyles.STANDARD_SATELLITE,
+                  cameraOptions: mb.CameraOptions(
+                    center: mb.Point(
+                      coordinates: mb.Position(widget.lon, widget.lat),
+                    ),
+                    zoom: 14.5,
+                    pitch: 45,
+                  ),
+                ),
+              )
+            else
+              const ColoredBox(color: MilesColors.surface1),
+            if (widget.label?.isNotEmpty ?? false)
+              Positioned(
+                left: 10,
+                right: 10,
+                bottom: 10,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    // scrim over the map behind it
+                    color: MilesColors.night.withValues(alpha: 0.82),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Text(
+                      widget.label!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: MilesColors.cream50,
+                        fontSize: 12.5,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Open the map',
-                    style: TextStyle(color: MilesColors.taupe, fontSize: 12),
-                  ),
-                ],
+                ),
               ),
-            ),
-            const Icon(Icons.chevron_right, color: MilesColors.faint, size: 20),
           ],
         ),
-      );
+      ),
+    );
+  }
 }
+
