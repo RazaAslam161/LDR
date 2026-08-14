@@ -315,60 +315,19 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 210,
-              child: GestureDetector(
-                onTap: () => context.push('/app/location-map', extra: {
-                  'coupleId': widget.coupleId,
-                  'partnerName': widget.partnerName,
-                }),
-                child: AbsorbPointer(
-                  child: Stack(
-                    children: [
-                      GoogleMap(
-                        initialCameraPosition: CameraPosition(
-                          target: point,
-                          zoom: 15.5,
-                        ),
-                        markers: markers,
-                        polylines: polylines,
-                        zoomControlsEnabled: false,
-                        compassEnabled: false,
-                        mapToolbarEnabled: false,
-                        myLocationButtonEnabled: false,
-                        onMapCreated: (c) => _mapController = c,
-                      ),
-                      Positioned(
-                        bottom: 8,
-                        right: 8,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
-                            // scrim over the map tiles behind it
-                  color: Colors.black.withValues(alpha: 0.45),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.fullscreen_rounded,
-                                    color: MilesColors.cream50, size: 14),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Full screen',
-                                  style: TextStyle(
-                                      color: MilesColors.cream50,
-                                      fontSize: 11,
-                                      fontFamily: 'Inter'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            // The card used to mount a LIVE map here, so merely opening Home
+            // streamed tile requests centred on your partner to a third party
+            // before you touched anything. The map is worth having; having it
+            // render unasked on the home screen of an app whose whole premise
+            // is that nothing leaks is not.
+            GestureDetector(
+              onTap: () => context.push('/app/location-map', extra: {
+                'coupleId': widget.coupleId,
+                'partnerName': widget.partnerName,
+              }),
+              child: _MapDoor(
+                label: p.locationLabel,
+                partnerName: widget.partnerName,
               ),
             ),
             if (dist != null)
@@ -390,4 +349,59 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
       ),
     );
   }
+}
+
+/// Home's door to the map, in place of a live one.
+///
+/// Says where she is in words. The sentence above it already says whether you
+/// can talk to her, which is the question people actually open this app to ask
+/// — and neither of them contacts anybody. The map itself is one tap away,
+/// where it is a thing the user chose rather than a thing that happened while
+/// they were looking at Home.
+class _MapDoor extends StatelessWidget {
+  const _MapDoor({required this.label, required this.partnerName});
+
+  final String? label;
+  final String partnerName;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 92,
+        decoration: BoxDecoration(
+          color: MilesColors.surface1,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            const Icon(Icons.map_outlined, color: MilesColors.ember, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    (label?.isNotEmpty ?? false)
+                        ? label!
+                        : 'See where $partnerName is',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: MilesColors.cream50,
+                      fontSize: 14.5,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Open the map',
+                    style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: MilesColors.faint, size: 20),
+          ],
+        ),
+      );
 }
