@@ -260,7 +260,7 @@ Still open, in priority order:
 
 Two specs exist:
 - `docs/guides/memory-threads-spec.md` (1264 lines, complete)
-- `docs/guides/vault-read-path-spec.md` (written when its workflow lands)
+- `docs/guides/vault-read-path-spec.md` (813 lines, complete)
 
 **They have the same root cause and must not be implemented twice.** Both store
 encrypted media as `bytea` INLINE in a database row, so every tile costs a
@@ -306,3 +306,33 @@ Run the audit that would have caught four of this session's bugs — every colum
 name the repositories write, diffed against `information_schema`. All four were
 client code shipped against a schema that was never applied, and none were
 catchable by `flutter test`.
+
+### 10a. Traps the vault spec found — do not step in these
+
+Its own critique pass caught twelve defects in the first draft. Four would have
+shipped a broken app, so they are recorded here rather than left inside an
+813-line document:
+
+- **A named-column SELECT must still include `ciphertext`.** `VaultItem.fromJson`
+  starts with `byteaToBytes(json['ciphertext'])`, and `byteaToBytes(null)`
+  throws. Drop the column to save bandwidth and every row fails to parse, the
+  screen counts them unreadable, and an intact vault renders as EMPTY.
+- **Do not put a column list on the realtime publication.** `SupabaseStreamBuilder`
+  replaces a cached row wholesale with `payload.newRecord`; without `ciphertext`
+  that throws and the row silently disappears. It would break build 14, which is
+  on both handsets, with no update channel to fix it.
+- **`storage.objects` has a `protect_delete` BEFORE DELETE trigger** that raises
+  42501 on any direct delete. A server-side reaper cannot work; the existing
+  client-side `storage.remove()` is the mechanism and must not be removed.
+- **`deriveSharedKey` is NOT idempotent** despite a comment saying so — it
+  recomputes ECDH+HKDF and reassigns on every call, and there are 12 call sites.
+  Any cache keyed on a "key epoch" bumped per call thrashes on every navigation.
+
+Two live bugs it surfaced in passing, unrelated to the redesign:
+
+- **Plaintext downgrade is still open.** `deriveSharedKey` returns *normally*
+  with `_sharedKey = null` on a malformed partner key, and `encryptBytes` with a
+  null key emits zero-nonce/zero-MAC CLEARTEXT. A corrupt partner key silently
+  turns encryption off.
+- **One vault row (`f9853e45`) has a 16-byte ciphertext** — an empty payload that
+  passes the length guard. No read path handles it.
