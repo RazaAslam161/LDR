@@ -10,6 +10,7 @@ import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/media_decode_queue.dart';
+import 'package:miles/features/closer/memory_threads/memory_failure.dart';
 import 'package:miles/features/closer/memory_threads/memory_heal.dart';
 import 'package:miles/features/closer/memory_threads/memory_photo_repository.dart';
 import 'package:miles/features/closer/memory_threads/memory_pin_gate.dart';
@@ -484,7 +485,7 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = partnerKeyMessage(e);
       });
     }
   }
@@ -631,7 +632,7 @@ class _MemoryCard extends StatefulWidget {
 class _MemoryCardState extends State<_MemoryCard> {
   String? _title;
   String? _note;
-  String? _error;
+  MemoryFailure? _failure;
   bool _loading = true;
   bool _busy = false;
 
@@ -668,7 +669,11 @@ class _MemoryCardState extends State<_MemoryCard> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not decrypt: $e';
+        // The classification lives here, at the decrypt, and not on the
+        // repository's parse: `title_cipher` is opened long after `fromJson`
+        // has already declared the row readable, so a MAC failure — the only
+        // permanent one — was reported by nothing at all.
+        _failure = MemoryFailure.ofRow(e);
         _loading = false;
       });
     }
@@ -895,15 +900,34 @@ class _MemoryCardState extends State<_MemoryCard> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                _error!,
-                style: const TextStyle(color: Color(0xFFEF6F58), fontSize: 12),
+          else if (_failure != null) ...[
+            // Muted, not red, and the date and badge above it stay: the entry
+            // is still on the thread. The likeliest cause is her key not being
+            // published yet, where nothing is wrong and nothing is lost, and
+            // alarm colour would be a lie about it.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: MilesColors.surface2,
+                borderRadius: BorderRadius.circular(12),
               ),
-            )
-          else ...[
+              child: Text(
+                _failure!.message,
+                style: const TextStyle(
+                  color: Color(0x99F5EFE6),
+                  fontSize: 12,
+                  height: 1.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            // The lifecycle chips read `state` and `proposer`, which are
+            // plaintext and need no key. Dropping them with the body left a
+            // permanently-locked memory with no way to archive or delete it —
+            // a row you can neither read nor be rid of.
+            _actions(),
+          ] else ...[
             Text(
               _title ?? '',
               style: const TextStyle(
@@ -1144,7 +1168,7 @@ class _MemoryCover extends StatefulWidget {
 
 class _MemoryCoverState extends State<_MemoryCover> {
   ImageProvider? _provider;
-  String? _failure;
+  MemoryFailure? _failure;
   bool _mounted = true;
 
   /// 16:10, and the height is reserved from a constant BEFORE the bytes arrive.
@@ -1195,15 +1219,13 @@ class _MemoryCoverState extends State<_MemoryCover> {
             decodeWidth: width,
           );
           if (_mounted) setState(() => _provider = p);
-        } on MediaFailure catch (e) {
-          if (_mounted) setState(() => _failure = e.message);
-        } catch (_) {
-          // Never the exception itself. A MAC failure reads
-          // "SecretBoxAuthenticationError: SecretBox has wrong message
-          // authentication code (MAC)", which is not a sentence to show anyone.
-          if (_mounted) {
-            setState(() => _failure = 'This one is locked to an older install.');
-          }
+        } catch (e) {
+          // A cover is a downloaded object, so a MAC failure on it is a
+          // truncated file as often as a lost key — `ofObject` refuses to call
+          // that permanent. The branch this replaces called EVERY non-media
+          // failure "locked to an older install", including the missing-key
+          // StateError that heals itself.
+          if (_mounted) setState(() => _failure = MemoryFailure.ofObject(e));
         }
       },
     );
@@ -1227,7 +1249,7 @@ class _MemoryCoverState extends State<_MemoryCover> {
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Text(
-                        _failure!,
+                        _failure!.message,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Color(0x99F5EFE6),
@@ -1271,7 +1293,7 @@ class _MemoryPhotoView extends StatefulWidget {
 
 class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
   Uint8List? _bytes;
-  String? _error;
+  MemoryFailure? _failure;
   bool _loading = true;
 
   @override
@@ -1282,6 +1304,10 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
   }
 
   Future<void> _load() async {
+    // Which side of the classification the catch belongs on: the inline column
+    // comes from Postgres over TLS, the object from the CDN through a disk
+    // cache, and only the first can honestly produce KeyGoneForever.
+    var fromObject = false;
     try {
       // Once MemoryHeal has moved a photo out to storage it nulls the inline
       // photo_cipher/photo_nonce columns, and decryptPhoto returns null without
@@ -1291,6 +1317,7 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
         final photos = await MemoryPhotoRepository.listFor(widget.thread.id);
         if (photos.isNotEmpty) {
           final photo = photos.first;
+          fromObject = true;
           final bytes = await EncryptedMediaCache.bytes(
             bucket: intimateBucket,
             path: photo.fullPath,
@@ -1311,14 +1338,18 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
       setState(() {
         _bytes = bytes;
         // Never leave all three null: that combination is a black screen with
-        // nothing to tell the user, or a future regression, why.
-        _error = bytes == null ? 'Could not open this photo.' : null;
+        // nothing to tell the user, or a future regression, why. Both columns
+        // null IS the missing-file case, and it already has a sentence.
+        _failure =
+            bytes == null ? const MemoryMediaFailure(MediaMissing()) : null;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not decrypt: $e';
+        _failure = fromObject
+            ? MemoryFailure.ofObject(e)
+            : MemoryFailure.ofRow(e);
         _loading = false;
       });
     }
@@ -1341,14 +1372,17 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
               const Center(
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            else if (_error != null)
+            else if (_failure != null)
               Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
                   child: Text(
-                    _error!,
+                    _failure!.message,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Color(0xCCF5EFE6)),
+                    style: const TextStyle(
+                      color: Color(0xCCF5EFE6),
+                      height: 1.5,
+                    ),
                   ),
                 ),
               )

@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+21
+version: 0.1.0+22
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -113,5 +113,12 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    # Ships in the APK as assets/flutter_assets/.env, in plaintext - a
+    # sideloaded APK is a zip anyone can open. The Supabase URL and anon key
+    # are fine there; RLS assumes both are known. A value that has to stay
+    # revocable goes to app_secrets behind an edge function instead - see
+    # map-token, and giphy_service.dart for the key that used to be in here.
+    # METERED_TURN_* (call_controller.dart:688) is the one name left that would
+    # publish a credential to every handset if it were ever filled in.
     - .env
     - assets/emoji/

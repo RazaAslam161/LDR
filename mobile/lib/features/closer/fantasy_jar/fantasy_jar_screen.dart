@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/fantasy_jar/add_fantasy_screen.dart';
 import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';
@@ -99,9 +100,20 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = _friendly(e);
       });
     }
+  }
+
+  /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
+  /// (fantasy_jar_repository.dart:78, closer_crypto.dart:24,32,46). Anything
+  /// else landing here is a transport failure, and rendering its toString put
+  /// "Failed host lookup: 'sopictusdonlvuezmfep.supabase.co'" on screen.
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   Future<void> _delete(FantasyEntry entry) async {
@@ -130,14 +142,23 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
       ),
     );
     if (confirmed != true) return;
+    await _deleteEntry(entry);
+  }
 
+  Future<void> _deleteEntry(FantasyEntry entry) async {
     try {
       await FantasyJarRepository.deleteEntry(entryId: entry.id);
       await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete: $e')),
+        SnackBar(
+          content: Text(_friendly(e)),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _deleteEntry(entry),
+          ),
+        ),
       );
     }
   }

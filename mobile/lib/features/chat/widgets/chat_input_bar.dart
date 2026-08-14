@@ -343,9 +343,32 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (cancel || path == null) return;
     final file = File(path);
     if (!await file.exists()) return;
+    await _sendVoice(file);
+  }
+
+  /// Hand a finished recording to the chat.
+  ///
+  /// The catch is the point of this method existing. The upload throws on any
+  /// dead connection and nothing here caught it, so it left through main.dart's
+  /// platformDispatcher handler: the note was gone and the user was told
+  /// nothing. Failing to START a recording has always said so (:322).
+  Future<void> _sendVoice(File file) async {
     setState(() => _sending = true);
     try {
       await widget.onSendVoice(file);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("That voice note didn't send."),
+          // The recording is still on disk, so this offers the note itself
+          // rather than an apology for having lost it.
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _sendVoice(file),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _sending = false);
     }

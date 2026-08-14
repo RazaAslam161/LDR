@@ -10,6 +10,7 @@ import 'package:miles/core/media/media_decode.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
+import 'package:miles/features/closer/memory_threads/memory_failure.dart';
 import 'package:miles/features/closer/private_vault/private_vault_repository.dart';
 import 'package:miles/features/closer/private_vault/vault_media_cache.dart';
 import 'package:miles/features/closer/private_vault/vault_media_viewer.dart';
@@ -60,8 +61,12 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      // Shared with Memory Threads rather than restated: this is the same
+      // ensureSharedKey, and two copies of "waiting for your partner" is two
+      // that can drift. It moves the day the vault's own vault_failure.dart
+      // lands (vault spec §3.6).
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = partnerKeyMessage(e);
       });
     }
   }
@@ -83,8 +88,8 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
         plaintextBytes: Uint8List.fromList(utf8.encode(text.trim())),
         retention: ephemeral ? VaultRetention.ephemeral : VaultRetention.keep,
       );
-    } catch (e) {
-      _toast('Could not save: $e');
+    } catch (_) {
+      _toast("That didn't save. Try again.");
     }
   }
 
@@ -132,8 +137,8 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
           retention: ephemeral ? VaultRetention.ephemeral : VaultRetention.keep,
           mediaMimeType: mimeType,
         );
-      } catch (e) {
-        _toast('Could not save: $e');
+      } catch (_) {
+        _toast("That didn't save. Try again.");
       } finally {
         if (mounted) setState(() => _uploadingItems--);
       }
@@ -272,8 +277,10 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
   Future<void> _guard(Future<void> Function() action) async {
     try {
       await action();
-    } catch (e) {
-      _toast('Failed: $e');
+    } catch (_) {
+      // A delete that 403s used to print the policy name, the SQLSTATE and the
+      // hint into a snackbar.
+      _toast("That didn't go through. Try again.");
     }
   }
 
@@ -318,8 +325,11 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
                           stream: _itemsStream,
                           builder: (context, snapshot) {
                             if (snapshot.hasError) {
+                              // Never snapshot.error.toString(). A dropped
+                              // socket painted a PostgrestException, its
+                              // SQLSTATE and its hint across the screen.
                               return _ErrorState(
-                                message: snapshot.error.toString(),
+                                message: "Couldn't open your vault. Try again.",
                                 onRetry: _ensureKeyAndInitStream,
                               );
                             }
@@ -329,7 +339,18 @@ class _PrivateVaultScreenState extends ConsumerState<PrivateVaultScreen> {
                             }
                             final result = snapshot.data!;
                             if (result.items.isEmpty) {
-                              return const _EmptyVault();
+                              // An empty vault and a vault whose every row
+                              // failed to decrypt rendered identically — the
+                              // exact failure closer_load_result.dart:5-14 was
+                              // written to prevent, with unreadableMessage
+                              // still at zero call sites here. Retry is the
+                              // real fix for the usual cause, so it keeps one.
+                              return result.hasUnreadable
+                                  ? _ErrorState(
+                                      message: result.unreadableMessage,
+                                      onRetry: _ensureKeyAndInitStream,
+                                    )
+                                  : const _EmptyVault();
                             }
                             return GridView.builder(
                               padding: const EdgeInsets.symmetric(

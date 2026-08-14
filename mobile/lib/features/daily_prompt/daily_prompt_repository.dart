@@ -104,6 +104,9 @@ class DailyPromptRepository {
       'user_id': uid,
       'response_text': responseText,
       'responded_at': DateTime.now().toUtc().toIso8601String(),
-    });
+    // Without the natural key the conflict target is the surrogate id, which a
+    // second answer never carries — so editing an answer inserted a duplicate
+    // or failed the unique index instead of replacing the first.
+    }, onConflict: 'prompt_id,user_id');
   }
 }

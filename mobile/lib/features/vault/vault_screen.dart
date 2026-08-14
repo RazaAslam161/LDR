@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -18,6 +19,7 @@ class VaultScreen extends StatefulWidget {
 class _VaultScreenState extends State<VaultScreen> {
   List<VaultItem> _items = const [];
   bool _loading = true;
+  String? _loadError;
 
   @override
   void initState() {
@@ -28,8 +30,26 @@ class _VaultScreenState extends State<VaultScreen> {
   Future<void> _load() async {
     try {
       _items = await VaultRepository.items();
-    } catch (_) {}
+      _loadError = null;
+    } catch (e) {
+      // Swallowing this rendered the "Your vault is empty" copy on a network
+      // blip — the worst possible lie to tell someone about a vault.
+      _loadError = friendlyAuthError(e);
+    }
     if (mounted) setState(() => _loading = false);
+  }
+
+  void _toast(String m, {VoidCallback? onRetry}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(m),
+        behavior: SnackBarBehavior.floating,
+        action: onRetry == null
+            ? null
+            : SnackBarAction(label: 'Retry', onPressed: onRetry),
+      ),
+    );
   }
 
   Future<void> _addNote() async {
@@ -70,10 +90,18 @@ class _VaultScreenState extends State<VaultScreen> {
       ),
     );
     if (text == null || text.isEmpty) return;
+    await _saveNote(text);
+  }
+
+  Future<void> _saveNote(String text) async {
     try {
       await VaultRepository.addNote(text);
       await _load();
-    } catch (_) {}
+    } catch (_) {
+      // The sheet's controller is disposed by now, so the typed note exists
+      // nowhere but this closure — losing it silently loses it for good.
+      _toast("That note didn't save.", onRetry: () => _saveNote(text));
+    }
   }
 
   /// Opens a saved media item. Public couple_media URLs open directly; private
@@ -93,14 +121,8 @@ class _VaultScreenState extends State<VaultScreen> {
             mode: LaunchMode.externalApplication,);
       } catch (_) {}
     }
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Link expired — the original message has the latest version',),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    if (!ok) {
+      _toast('Link expired — the original message has the latest version');
     }
   }
 
@@ -125,10 +147,18 @@ class _VaultScreenState extends State<VaultScreen> {
       ),
     );
     if (ok != true) return;
+    await _deleteItem(item);
+  }
+
+  Future<void> _deleteItem(VaultItem item) async {
     try {
       await VaultRepository.deleteItem(item.id);
       await _load();
-    } catch (_) {}
+    } catch (_) {
+      // The tile stays on screen after a failed delete; say so, or the user
+      // reads the still-present row as the delete having been ignored.
+      _toast("That didn't delete.", onRetry: () => _deleteItem(item));
+    }
   }
 
   bool _isMedia(VaultItem i) => i.type.startsWith('saved_');
@@ -278,19 +308,46 @@ class _VaultScreenState extends State<VaultScreen> {
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : _items.isEmpty
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Text(
-                        'Your vault is empty.\nAdd a private note only you can see.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: MilesColors.taupe, height: 1.5),
-                      ),
-                    ),
-                  )
-                : _buildList(),
+            : _loadError != null
+                ? _LoadFailed(message: _loadError!, onRetry: _load)
+                : _items.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Text(
+                            'Your vault is empty.\nAdd a private note only you can see.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: MilesColors.taupe, height: 1.5,),
+                          ),
+                        ),
+                      )
+                    : _buildList(),
       ),
     );
   }
+}
+
+class _LoadFailed extends StatelessWidget {
+  const _LoadFailed({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: MilesColors.taupe, height: 1.5,),),
+              const SizedBox(height: 14),
+              TextButton(onPressed: onRetry, child: const Text('Try again')),
+            ],
+          ),
+        ),
+      );
 }

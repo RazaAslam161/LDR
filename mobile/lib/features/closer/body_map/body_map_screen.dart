@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/body_map/body_map_repository.dart';
 import 'package:miles/features/closer/body_map/body_silhouette_painter.dart';
 
@@ -64,9 +65,19 @@ class _BodyMapScreenState extends ConsumerState<BodyMapScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = _friendly(e);
       });
     }
+  }
+
+  /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
+  /// (body_map_repository.dart:56, closer_crypto.dart:24,32,46). Anything else
+  /// landing here is a transport failure whose toString names the Supabase host.
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   Future<void> _addPinAt(Offset local, Size canvasSize) async {
@@ -83,20 +94,43 @@ class _BodyMapScreenState extends ConsumerState<BodyMapScreen> {
       builder: (ctx) => const _PinNoteDialog(),
     );
     if (note == null || note.trim().isEmpty) return;
+    await _savePin(coupleId: couple.id, authorId: me.id, x: x, y: y,
+        note: note.trim(),);
+  }
 
+  Future<void> _savePin({
+    required String coupleId,
+    required String authorId,
+    required double x,
+    required double y,
+    required String note,
+  }) async {
     try {
       await BodyMapRepository.addPin(
-        coupleId: couple.id,
-        authorId: me.id,
+        coupleId: coupleId,
+        authorId: authorId,
         x: x,
         y: y,
-        note: note.trim(),
+        note: note,
       );
       await _load();
     } catch (e) {
       if (!mounted) return;
+      // The note dialog is gone by now, so without the retry action the pin
+      // and its text have to be re-typed from scratch.
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not add pin: $e')),
+        SnackBar(
+          content: Text(_friendly(e)),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _savePin(
+                coupleId: coupleId,
+                authorId: authorId,
+                x: x,
+                y: y,
+                note: note,),
+          ),
+        ),
       );
     }
   }
@@ -132,7 +166,10 @@ class _BodyMapScreenState extends ConsumerState<BodyMapScreen> {
       ),
     );
     if (confirmed != true) return;
+    await _deletePin(pin);
+  }
 
+  Future<void> _deletePin(BodyMapPin pin) async {
     try {
       await BodyMapRepository.deletePin(pinId: pin.id);
       setState(() => _selectedPinId = null);
@@ -140,7 +177,13 @@ class _BodyMapScreenState extends ConsumerState<BodyMapScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete: $e')),
+        SnackBar(
+          content: Text(_friendly(e)),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _deletePin(pin),
+          ),
+        ),
       );
     }
   }

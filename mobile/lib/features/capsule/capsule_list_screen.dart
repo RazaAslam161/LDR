@@ -7,6 +7,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 
 /// The shelf of time capsules — sealed boxes the couple fills over months,
@@ -23,6 +24,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
   ManagedSubscription? _channel;
   bool _loading = true;
   String? _coupleId;
+  String? _loadError;
 
   @override
   void initState() {
@@ -47,8 +49,18 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
     if (id == null) return;
     try {
       final list = await CapsuleRepository.list(id);
-      if (mounted) setState(() => _capsules = list);
-    } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _capsules = list;
+          _loadError = null;
+        });
+      }
+    } catch (e) {
+      // Without this the shelf fell through to _EmptyState, so a dropped
+      // connection read as "you have no capsules" — and the FAB invited them
+      // to start another one on top of the ones they already had.
+      if (mounted) setState(() => _loadError = friendlyAuthError(e));
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -87,21 +99,25 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
           ? const _Centered('Link with your partner to start a capsule.')
           : _loading
               ? const Center(child: CircularProgressIndicator())
-              : _capsules.isEmpty
-                  ? const _EmptyState()
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-                      itemCount: _capsules.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 14),
-                      itemBuilder: (_, i) => _CapsuleCard(
-                        capsule: _capsules[i],
-                        onTap: () async {
-                          await context.push('/app/capsule/view',
-                              extra: _capsules[i],);
-                          unawaited(_load());
-                        },
-                      ),
-                    ),
+              : _loadError != null
+                  ? _LoadFailed(message: _loadError!, onRetry: _load)
+                  : _capsules.isEmpty
+                      ? const _EmptyState()
+                      : ListView.separated(
+                          padding:
+                              const EdgeInsets.fromLTRB(20, 12, 20, 100),
+                          itemCount: _capsules.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 14),
+                          itemBuilder: (_, i) => _CapsuleCard(
+                            capsule: _capsules[i],
+                            onTap: () async {
+                              await context.push('/app/capsule/view',
+                                  extra: _capsules[i],);
+                              unawaited(_load());
+                            },
+                          ),
+                        ),
     );
   }
 }
@@ -258,6 +274,30 @@ class _CountdownTextState extends State<_CountdownText> {
     return Text(_fmt(),
         style: TextStyle(color: widget.color, fontSize: 12.5),);
   }
+}
+
+class _LoadFailed extends StatelessWidget {
+  const _LoadFailed({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: MilesColors.taupe, height: 1.5,),),
+              const SizedBox(height: 14),
+              TextButton(onPressed: onRetry, child: const Text('Try again')),
+            ],
+          ),
+        ),
+      );
 }
 
 class _Centered extends StatelessWidget {

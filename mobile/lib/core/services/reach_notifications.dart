@@ -75,7 +75,9 @@ Future<void> showReachNotification({
     title: style.title,
     body: style.body,
     notificationDetails: NotificationDetails(android: android),
-    payload: '$reachId|$fromName|$coupleId',
+    // A display name containing the delimiter shifted every field after it
+    // and the tap routed nowhere.
+    payload: '$reachId|${fromName.replaceAll('|', ' ')}|$coupleId',
   );
 }
 

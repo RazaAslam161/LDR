@@ -120,6 +120,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Send text with INSTANT feedback: show it locally now (optimistic), push it
   /// to the partner over realtime broadcast (fast), and persist to the DB. All
   /// three carry the same id, so the postgres echo + broadcast dedupe cleanly.
+  ///
+  /// The insert belongs to [ChatSendQueue] rather than to this screen. It used
+  /// to be awaited here under an empty catch, which lost the message twice
+  /// over: a failure told nobody, and moving off the chat tab disposed the
+  /// screen holding the only copy of the body.
   Future<void> _sendTextFast(String coupleId, String t) async {
     final body = t.trim();
     if (body.isEmpty) return;
@@ -134,6 +139,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         createdAt: now,
         body: body,
         replyToId: replyId,
+        // Not 'sent' until a row exists: the bubble took the default and the
+        // failure was swallowed, so a message that never left the phone drew
+        // the same single tick as one the partner already had.
+        sendStatus: SendStatus.sending,
       ), source: 'local_send',);
     }
     unawaited(_moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
@@ -143,11 +152,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       'createdAt': now.toUtc().toIso8601String(),
       'replyToId': replyId,
     },),);
-    try {
-      await ChatRepository.sendText(coupleId, body, id: id, replyToId: replyId);
-    } catch (_) {
-      /* it's already on screen; the DB retry isn't worth blocking */
-    }
+    ChatSendQueue.instance
+        .enqueueText(coupleId, body, replyToId: replyId, id: id);
   }
 
   /// A text message pushed by the partner over broadcast — shown immediately,
@@ -272,16 +278,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final coupleId = _coupleId;
     if (myUid == null || coupleId == null || !mounted) return;
 
+    for (final s in ChatSendQueue.instance.pendingText) {
+      if (s.coupleId != coupleId || _syncSendStatus(s.id, s.status)) continue;
+      _onIncoming(Message(
+        id: s.id,
+        senderId: myUid,
+        createdAt: DateTime.now(),
+        body: s.body,
+        sendStatus: s.status,
+        replyToId: s.replyToId,
+      ), source: 'send_queue',);
+    }
+
     for (final s in ChatSendQueue.instance.pending) {
-      if (s.coupleId != coupleId) continue;
-      final i = _messages.indexWhere((m) => m.id == s.id);
-      if (i >= 0) {
-        if (_messages[i].sendStatus != s.status) {
-          setState(() =>
-              _messages[i] = _messages[i].copyWith(sendStatus: s.status),);
-        }
-        continue;
-      }
+      if (s.coupleId != coupleId || _syncSendStatus(s.id, s.status)) continue;
       _onIncoming(Message(
         id: s.id,
         senderId: myUid,
@@ -302,16 +312,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     // Anything the queue has finished with is either reconciled by the DB echo
     // or gone; flip a lingering 'sending' bubble so it can't spin forever.
-    final live = {for (final s in ChatSendQueue.instance.pending) s.id};
+    final live = {
+      for (final s in ChatSendQueue.instance.pending) s.id,
+      for (final s in ChatSendQueue.instance.pendingText) s.id,
+    };
     for (var i = 0; i < _messages.length; i++) {
       final m = _messages[i];
-      if (m.localPath != null &&
-          m.sendStatus == SendStatus.sending &&
-          !live.contains(m.id)) {
+      if (m.sendStatus == SendStatus.sending && !live.contains(m.id)) {
         setState(() =>
             _messages[i] = _messages[i].copyWith(sendStatus: SendStatus.sent),);
       }
     }
+  }
+
+  /// Move an existing bubble onto the queue's view of its send.
+  ///
+  /// Answers whether the bubble was there at all, so the caller can tell an
+  /// update from a send it has never rendered.
+  bool _syncSendStatus(String id, SendStatus status) {
+    final i = _messages.indexWhere((m) => m.id == id);
+    if (i < 0) return false;
+    if (_messages[i].sendStatus != status) {
+      setState(() => _messages[i] = _messages[i].copyWith(sendStatus: status));
+    }
+    return true;
   }
 
   void _startReply(Message m) {
@@ -817,6 +841,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   _MsgStatus _rawStatusFor(Message m) {
+    // The send states its own fate until a row exists. seq alone could not:
+    // it is 0 both for a message still on the wire and for one whose insert
+    // threw, so a message that never reached the server drew the delivered
+    // tick. reconcileWith() clears this back to 'sent' when the row echoes.
+    switch (m.sendStatus) {
+      case SendStatus.sending:
+        return _MsgStatus.sending;
+      case SendStatus.failed:
+        return _MsgStatus.failed;
+      case SendStatus.sent:
+        break;
+    }
     // A message that has not reached the server has no seq and no receipt.
     if (m.seq <= 0) return _MsgStatus.sent;
     final r = _partnerReceipt;
@@ -1425,6 +1461,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                         ? () => _statusFor(
                                                             m, presence,)
                                                         : null,
+                                                    onRetry: m.kind == 'text'
+                                                        ? () => ChatSendQueue
+                                                            .instance
+                                                            .retryText(m.id)
+                                                        : null,
                                                   ),
                                                 ),);
                                           },
@@ -1560,6 +1601,7 @@ class _Bubble extends StatelessWidget {
     this.album,
     this.repliedTo,
     this.status,
+    this.onRetry,
   });
 
   final Message message;
@@ -1586,6 +1628,10 @@ class _Bubble extends StatelessWidget {
   /// isTrulyOnline is freshness-gated, so the same message yields a different
   /// status as time passes with no other state change.
   final _MsgStatus Function()? status;
+
+  /// Send this bubble again after it failed. Null for the kinds that already
+  /// offer their own retry on the media itself.
+  final VoidCallback? onRetry;
 
   /// Bumped every 5s. Only the tick listens.
   final ValueListenable<int> tick;
@@ -1676,7 +1722,8 @@ class _Bubble extends StatelessWidget {
                 // costs one small widget instead of the whole conversation.
                 ValueListenableBuilder<int>(
                   valueListenable: tick,
-                  builder: (_, __, ___) => _StatusTick(status: status!()),
+                  builder: (_, __, ___) =>
+                      _StatusTick(status: status!(), onRetry: onRetry),
                 ),
               ],
             ],
@@ -1687,16 +1734,42 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-/// Read-receipt state for a sent message.
-enum _MsgStatus { sent, delivered, seen }
+/// Read-receipt state for a message, plus the two states a send passes through
+/// before there is a row for anyone to receipt.
+enum _MsgStatus { sending, failed, sent, delivered, seen }
 
 class _StatusTick extends StatelessWidget {
-  const _StatusTick({required this.status});
+  const _StatusTick({required this.status, this.onRetry});
   final _MsgStatus status;
+
+  /// Set only where the bubble carries no retry of its own — a photo puts a
+  /// pill over the frame (:2019) and a video a caption (:2341), so offering
+  /// one here as well would be two ways to say the same thing.
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     switch (status) {
+      case _MsgStatus.sending:
+        return const Icon(Icons.schedule, size: 13, color: MilesColors.faint);
+      case _MsgStatus.failed:
+        if (onRetry == null) {
+          return const Icon(Icons.error_outline,
+              size: 13, color: MilesColors.ember,);
+        }
+        return GestureDetector(
+          onTap: onRetry,
+          behavior: HitTestBehavior.opaque,
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, size: 13, color: MilesColors.ember),
+              SizedBox(width: 3),
+              Text("Didn't send · tap to retry",
+                  style: TextStyle(fontSize: 10, color: MilesColors.ember),),
+            ],
+          ),
+        );
       case _MsgStatus.sent:
         return const Icon(Icons.check, size: 13, color: MilesColors.faint);
       case _MsgStatus.delivered:

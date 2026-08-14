@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/memory_threads/memory_failure.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
 import 'package:miles/main.dart' show MilesApp;
 
@@ -112,7 +113,7 @@ class _ProposeMemoryScreenState extends ConsumerState<ProposeMemoryScreen> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = partnerKeyMessage(e);
       });
     }
   }

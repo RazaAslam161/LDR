@@ -9,7 +9,9 @@ import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/utils/json_utils.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/closer_load_result.dart';
 
 /// Afterglow — the soft wind-down after intimacy. Both partners enter one
 /// gratitude each (and optionally a photo); on "seal" the entry is added to
@@ -27,7 +29,7 @@ class AfterglowScreen extends ConsumerStatefulWidget {
 }
 
 class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
-  Stream<List<AfterglowEntry>>? _entriesStream;
+  Stream<CloserLoadResult<AfterglowEntry>>? _entriesStream;
   String? _error;
 
   @override
@@ -58,9 +60,19 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = _friendly(e);
       });
     }
+  }
+
+  /// ensureSharedKey throws `Exception('<sentence the user can act on>')`
+  /// (closer_crypto.dart:24,32,46). Stripping only that prefix left every other
+  /// throwable rendering raw — a SocketException put the Supabase host on screen.
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   Future<void> _startNew() async {
@@ -94,12 +106,12 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
                   ? _ErrorState(message: _error!, onRetry: _ensureKeyAndLoad)
                   : _entriesStream == null
                       ? const Center(child: CircularProgressIndicator())
-                      : StreamBuilder<List<AfterglowEntry>>(
+                      : StreamBuilder<CloserLoadResult<AfterglowEntry>>(
                           stream: _entriesStream,
                           builder: (context, snapshot) {
                             if (snapshot.hasError) {
                               return _ErrorState(
-                                message: snapshot.error.toString(),
+                                message: _friendly(snapshot.error!),
                                 onRetry: _ensureKeyAndLoad,
                               );
                             }
@@ -107,17 +119,20 @@ class _AfterglowScreenState extends ConsumerState<AfterglowScreen> {
                               return const Center(
                                   child: CircularProgressIndicator());
                             }
-                            final entries = snapshot.data!;
-                            if (entries.isEmpty) {
+                            final result = snapshot.data!;
+                            final entries = result.items;
+                            if (entries.isEmpty && !result.hasUnreadable) {
                               return _emptyState();
                             }
                             return ListView.separated(
                               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                              itemCount: entries.length,
+                              itemCount:
+                                  entries.length + (result.hasUnreadable ? 1 : 0),
                               separatorBuilder: (_, __) =>
                                   const SizedBox(height: 12),
-                              itemBuilder: (context, i) =>
-                                  _AfterglowCard(entry: entries[i]),
+                              itemBuilder: (context, i) => i < entries.length
+                                  ? _AfterglowCard(entry: entries[i])
+                                  : _UnreadableNotice(result.unreadableMessage),
                             );
                           },
                         ),
@@ -212,6 +227,25 @@ class _Header extends StatelessWidget {
       ),
     );
   }
+}
+
+class _UnreadableNotice extends StatelessWidget {
+  const _UnreadableNotice(this.message);
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0x14EF6F58),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(
+          message,
+          style: const TextStyle(
+              color: Color(0xCCF5EFE6), fontSize: 12.5, height: 1.4,),
+        ),
+      );
 }
 
 class _ErrorState extends StatelessWidget {
@@ -319,8 +353,13 @@ class _AfterglowCardState extends ConsumerState<_AfterglowCard> {
       });
     } catch (e) {
       if (!mounted) return;
+      debugPrint('afterglow: card decrypt failed: $e');
+      // The failure here is a MAC or missing-key error, so `$e` printed
+      // "SecretBoxAuthenticationError: SecretBox has wrong message
+      // authentication code (MAC)" onto the card.
       setState(() {
-        _error = 'Could not decrypt: $e';
+        _error = "This one couldn't be opened — your partner may need to "
+            'open Closer.';
         _loading = false;
       });
     }
@@ -660,7 +699,8 @@ class AfterglowRepository {
       v == null ? null : byteaToBytes(v);
 
   /// Returns a real-time stream of ALL afterglow entries for [coupleId], including unsealed ones.
-  static Stream<List<AfterglowEntry>> streamEntries(String coupleId) {
+  static Stream<CloserLoadResult<AfterglowEntry>> streamEntries(
+      String coupleId,) {
     return _c
         .from('afterglow_entries')
         .stream(primaryKey: ['id'])
@@ -668,13 +708,24 @@ class AfterglowRepository {
         .order('happened_at', ascending: false)
         .map((rows) {
           final entries = <AfterglowEntry>[];
+          var unreadable = 0;
           for (final row in rows) {
             if (row['deleted'] == true) continue;
             try {
               entries.add(_entryFromJson(row));
-            } catch (_) {}
+            } catch (e) {
+              // Counted, not silent — same reason as fantasy_jar_repository.dart
+              // :189: a row written before the partner published their key is
+              // legitimately unopenable, and dropping it renders as an empty
+              // Afterglow, which reads as lost data.
+              unreadable++;
+              debugPrint('afterglow: unreadable row: $e');
+            }
           }
-          return List<AfterglowEntry>.unmodifiable(entries);
+          return CloserLoadResult(
+            List<AfterglowEntry>.unmodifiable(entries),
+            unreadable: unreadable,
+          );
         });
   }
 

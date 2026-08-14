@@ -24,7 +24,7 @@ class ReleaseGate {
   /// This build. Bump with every release that a server change will depend on.
   /// Kept here rather than read from pubspec because the number that matters is
   /// the one the SERVER compares against, and it has to be legible in a diff.
-  static const buildNumber = 21;
+  static const buildNumber = 22;
 
   static bool _blocked = false;
   static String? _message;

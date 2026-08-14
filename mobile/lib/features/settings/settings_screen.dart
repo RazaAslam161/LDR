@@ -173,7 +173,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     );
     if (mode == null) return;
     if (mode == 'off') {
-      await PresenceService.setSharingMode(couple.id, 'off');
+      // setSharingMode writes only the mode, so the last precise fix stayed
+      // on the server after the user turned sharing off. This nulls the
+      // coordinates with it.
+      await PresenceService.setLocation(couple.id, mode: 'off');
       if (mounted) setState(() => _locationBlock = LocationBlock.none);
     } else {
       // Written first and unconditionally. The mode used to be a side effect of

@@ -192,7 +192,9 @@ class PrivateVaultRepository {
               items.add(VaultItem.fromJson(row));
             } catch (e) {
               unreadable++;
-              debugPrint('vault: unreadable row: $e');
+              // The type, not the exception: a bytea parse failure prints the
+              // offending value, which is ciphertext from the row.
+              debugPrint('vault: unreadable row: ${e.runtimeType}');
             }
           }
           return CloserLoadResult(

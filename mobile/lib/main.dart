@@ -15,7 +15,6 @@ import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
-import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/app_lock.dart';
@@ -39,14 +38,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Global error nets: surface the FULL exception + stack (Issue 3) and keep
-  //    one bad async error from blanking a whole feature. Permanent safety net.
+  // ── Global error nets. Keep one bad async error from blanking a whole
+  //    feature, and — the part that was missing — tell somebody. Both handlers
+  //    used to debugPrint and stop there, which reaches a logcat, which reaches
+  //    whichever handset has a cable in it. Registered first, before anything
+  //    that can throw.
   FlutterError.onError = (details) {
-    debugPrint('FLUTTER ERROR: ${details.exception}\n${details.stack}');
+    ErrorReporter.report(details.exception, details.stack, kind: 'flutter');
     FlutterError.presentError(details);
   };
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
-    debugPrint('PLATFORM ERROR: $error\n$stack');
+    ErrorReporter.report(error, stack, kind: 'platform');
     return true;
   };
 
@@ -70,10 +72,9 @@ Future<void> main() async {
     Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
     SupabaseService.init(),
     MilesApp.loadSetupFlag(),
-    // Awaited rather than fired off, so the flush timer and the log file exist
-    // before the first ICE callback. Diag.record() already works without it —
-    // events queue — but a cold-start ordering bug is one of the things being
-    // hunted, and losing the first three seconds would hide it.
+    // One-time chore, not instrumentation: clears the retired upload flag and
+    // deletes the trace file every install still carries. Runs until every
+    // handset has run it once.
     Diag.init(),
     // Before anything talks to the backend. A build below the minimum is told
     // to update rather than discovering it as a screen that will not load —
@@ -205,29 +206,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
   /// Foreground-only + best-effort (battery reasonable; a single tiny upsert).
   void _startHeartbeat() {
     _heartbeat?.cancel();
-    // A beat that found no couple wrote nothing and said nothing, so a phone
-    // whose couple never resolved produced the same empty trace as one whose
-    // timer had stopped — and the partner reads offline either way.
-    DateTime? prevBeat;
     void beat() {
       final c = ref.read(currentCoupleProvider);
-      final now = DateTime.now();
-      final prev = prevBeat;
-      Diag.record(DiagArea.presence, 'presence_heartbeat', fields: {
-        'action': c == null ? 'skip_no_couple' : 'beat',
-        'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
-        'has_couple': c != null,
-        if (prev != null)
-          'since_prev_beat_ms': now.difference(prev).inMilliseconds,
-      },);
-      prevBeat = now;
       if (c != null) PresenceService.setOnline(c.id, online: true);
     }
 
-    Diag.record(DiagArea.presence, 'presence_heartbeat', fields: {
-      'action': 'start',
-      'lifecycle': WidgetsBinding.instance.lifecycleState?.name,
-    },);
     beat(); // immediate beat so we read online without waiting a cycle
     _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) => beat());
   }
@@ -239,18 +222,6 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Lifecycle is the backdrop every other trace is read against. "The
-    // heartbeat stopped" and "the app was backgrounded" are the same log line
-    // from two different distances, and without this you cannot tell a presence
-    // bug from a user putting their phone in a pocket.
-    Diag.record(DiagArea.app, 'lifecycle', fields: {'state': state.name});
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      // The last events before a kill are the ones worth having, and Android
-      // gives no warning before it takes the process. Nothing awaits this.
-      unawaited(Diag.flush());
-    }
-
     // SECURITY (cover layer): drop back to the News screen the instant the app
     // leaves the foreground, so returning ALWAYS requires re-authentication.
     // NEVER set it true here — only the entry flow does, after biometric +
@@ -536,12 +507,6 @@ class _MilesAppState extends ConsumerState<MilesApp>
           next.couple != null) {
         MilesApp.markSetupComplete();
       }
-      // Diagnostics can only be uploaded once there is a couple to scope the
-      // rows to. Bound from the session listener rather than read once, because
-      // the couple resolves asynchronously — reading it at startup is precisely
-      // the mistake that leaves presence bound to null forever.
-      Diag.bind(coupleId: next.couple?.id, userId: next.profile?.id);
-
       // The couple resolves LATE, and goes null again on every resume — a
       // traced session skipped seven consecutive heartbeats across three and a
       // half minutes, during which the partner simply read "offline".
@@ -555,13 +520,6 @@ class _MilesAppState extends ConsumerState<MilesApp>
         presenceRouteObserver?.flushDeferred();
       }
     });
-
-    // ref.listen fires on CHANGE only, so a session that had already resolved
-    // before this widget first built would never bind and nothing would ever
-    // upload — the same shape as the presence bug being hunted, in the code
-    // added to hunt it. Diag.bind is a no-op when nothing changed.
-    final session = ref.read(sessionProvider);
-    Diag.bind(coupleId: session.couple?.id, userId: session.profile?.id);
 
     // The cover/real swap is driven by the static showRealApp notifier so the
     // lifecycle handler (and FakeNewsScreen) can flip it without setState.

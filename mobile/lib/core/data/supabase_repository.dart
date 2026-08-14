@@ -91,6 +91,13 @@ class SupabaseRepository {
   /// Sets a new password for the session opened by a recovery link.
   static Future<void> updatePassword(String newPassword) async {
     await _c.auth.updateUser(UserAttributes(password: newPassword));
+    // The escrow is sealed under the OLD password, which in the reset flow is
+    // the one the user has just forgotten. Left alone, the next reinstall fails
+    // to open it, mints a throwaway key, and the following sign-in escrows that
+    // over the good row — losing the history permanently and silently. The
+    // original seed is still on this device, so re-wrapping here is the one
+    // moment both halves exist.
+    await KeyEscrow.backup(newPassword);
   }
 
   static Future<void> signInWithGoogle() async {

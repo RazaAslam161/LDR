@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/afterglow/afterglow_screen.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/main.dart' show MilesApp;
@@ -120,11 +121,23 @@ class _AfterglowFormScreenState extends ConsumerState<AfterglowFormScreen> {
       context.pop(true);
     } catch (e) {
       if (!mounted) return;
+      // The screen only pops on success, so _controller and _photo survive and
+      // Seal is the retry. Stripping only the 'Exception: ' prefix left a
+      // SocketException rendering the Supabase host into the form.
       setState(() {
         _sealing = false;
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = _friendly(e);
       });
     }
+  }
+
+  /// ensureSharedKey throws `Exception('<sentence the user can act on>')`
+  /// (closer_crypto.dart:24,32,46); everything else here is transport.
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   @override

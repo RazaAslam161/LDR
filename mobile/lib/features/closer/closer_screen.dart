@@ -6,6 +6,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
 
@@ -56,7 +57,11 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
       await ensureSharedKey(session);
       if (!mounted) return;
       setState(() => _key = _KeyState.ready);
-    } on Exception catch (e) {
+    } catch (e) {
+      if (!mounted) return;
+      // ensureSharedKey signals "not linked" with StateError, which is not an
+      // Exception — the old `on Exception` branch missed it and dropped it into
+      // the raw-error state instead of the waiting-for-partner one.
       final msg = e.toString();
       if (msg.contains("hasn't enabled") ||
           msg.contains("hasn't published") ||
@@ -65,16 +70,20 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
       } else {
         setState(() {
           _key = _KeyState.error;
-          _error = msg;
+          _error = _friendly(e);
         });
       }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _key = _KeyState.error;
-        _error = e.toString();
-      });
     }
+  }
+
+  /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
+  /// (closer_crypto.dart:24,32,46). Anything else landing here is a transport
+  /// failure whose toString names the Supabase host.
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   @override

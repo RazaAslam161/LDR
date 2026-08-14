@@ -5,6 +5,7 @@ import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/reasons/reasons_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 
@@ -22,6 +23,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
   List<LoveReason> _reasons = const [];
   bool _loading = true;
   bool _adding = false;
+  String? _loadError;
   String? _coupleId;
   String? _myUid;
   ManagedSubscription? _channel;
@@ -57,12 +59,43 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
       final r = await ReasonsRepository.list(id);
       if (mounted) {
         setState(() {
-        _reasons = r;
-        _loading = false;
-      });
+          _reasons = r;
+          _loadError = null;
+          _loading = false;
+        });
       }
+    } catch (e) {
+      // Falling through to _loading = false alone rendered the "add the first
+      // reason" empty state, so a failed list read looked like an empty jar.
+      if (mounted) {
+        setState(() {
+          _loadError = friendlyAuthError(e);
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  void _toast(String m, {VoidCallback? onRetry}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(m),
+        action: onRetry == null
+            ? null
+            : SnackBarAction(label: 'Retry', onPressed: onRetry),
+      ),
+    );
+  }
+
+  Future<void> _delete(LoveReason r) async {
+    try {
+      await ReasonsRepository.delete(r.id);
+      await _load();
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      // This ran uncaught inside the tile's onTap, so a failed delete left the
+      // row on screen with nothing said and only a console-level error.
+      _toast("That didn't delete.", onRetry: () => _delete(r));
     }
   }
 
@@ -86,6 +119,9 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
       _input.clear();
       await _load();
     } catch (_) {
+      // _input is only cleared after the write returns, so the text survives a
+      // failure — but silently, which read as the send button doing nothing.
+      _toast("That didn't send — it's still in the box, try again.");
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -117,7 +153,28 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                   children: [
                     if (featured != null) _FeaturedCard(reason: featured, myUid: _myUid),
                     Expanded(
-                      child: _reasons.isEmpty
+                      child: _loadError != null
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(32),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(_loadError!,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                            color: MilesColors.taupe,
+                                            fontSize: 13,
+                                            height: 1.5,),),
+                                    const SizedBox(height: 14),
+                                    TextButton(
+                                        onPressed: _load,
+                                        child: const Text('Try again'),),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : _reasons.isEmpty
                           ? Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(32),
@@ -159,10 +216,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                                       ),
                                       if (mine)
                                         GestureDetector(
-                                          onTap: () async {
-                                            await ReasonsRepository.delete(r.id);
-                                            await _load();
-                                          },
+                                          onTap: () => _delete(r),
                                           child: const Padding(
                                             padding: EdgeInsets.only(left: 8),
                                             child: Icon(Icons.close,

@@ -1,105 +1,158 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/services/server_clock.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Field evidence for the three mechanisms that keep failing.
+/// The only thing that tells anyone this app is broken.
 ///
-/// Calls, receipts and presence all fail BETWEEN two phones, in two cities, on
-/// two carriers. Every previous round diagnosed them from one side — a cable,
-/// a logcat, a guess — and every previous round was wrong, including one theory
-/// disproved by the user's own terminal. The missing thing was never analysis;
-/// it was a record of what actually happened on BOTH devices, on ONE timeline.
+/// It is sideloaded, so there is no store console; disguised, so there is no
+/// support channel that could name it; and it had no crash reporter at all.
+/// What stood in for one was a debugPrint, which reaches logcat, which reaches
+/// whichever of the two handsets has a cable in it — the same one-sided
+/// blindness that had calls and presence "fixed" three times each. A build that
+/// throws on launch for every user looks exactly like a build nobody opened.
 ///
-/// So this writes to three places, and the redundancy is deliberate:
-///   in memory  — the in-app viewer, so the person holding the failing phone
-///                can see it without a computer.
-///   on disk    — survives the process. A failed call is frequently followed by
-///                the app being killed, which is exactly when the last twenty
-///                events matter most.
-///   on the server — the only copy that can be correlated with the partner's,
-///                and the only one reachable when the partner is 1,000km away.
+/// Best-effort by construction. Nothing here is awaited on a user path, the
+/// send is wrapped, and a report that cannot be delivered is dropped rather
+/// than surfaced: a reporter that can break the app is worse than no reporter.
+class ErrorReporter {
+  ErrorReporter._();
+
+  /// Five a run, and never the same failure twice.
+  ///
+  /// A widget that throws in build() throws on every frame — sixty rows a
+  /// second, from every affected handset at once. The server drops the excess
+  /// (client_errors_rate_limit), but a bound the client does not also keep is
+  /// one paid for in requests.
+  static const _maxPerRun = 5;
+  static final _seen = <String>{};
+  static var _sent = 0;
+
+  /// The answer is in the top frames; below them is the framework stack, which
+  /// is identical for every error of that kind.
+  static const _maxFrames = 16;
+  static const _maxStackChars = 2000;
+
+  /// Matches the column ceilings in 20260601007800. An insert the server
+  /// rejects is a report nobody ever sees.
+  static const _maxTypeChars = 64;
+  static const _maxDetailChars = 64;
+
+  static void report(Object error, StackTrace? stack, {required String kind}) {
+    // The raw text never leaves the device, so a debug build has every reason
+    // to print it and a release build every reason not to: logcat is readable
+    // over adb, the message may hold plaintext, and the product's name is not
+    // something this app writes down.
+    if (kDebugMode) debugPrint('$kind error: $error\n$stack');
+
+    if (_sent >= _maxPerRun) return;
+    final type = _cap(error.runtimeType.toString(), _maxTypeChars);
+    final trace = _stack(stack);
+    if (!_seen.add('$type\n${trace.split('\n').first}')) return;
+    _sent++;
+
+    final detail = _detail(error);
+    unawaited(_send({
+      'build': ReleaseGate.buildNumber,
+      'kind': kind,
+      'error_type': type,
+      if (detail != null) 'detail': _cap(detail, _maxDetailChars),
+      'stack': trace,
+    },),);
+  }
+
+  static Future<void> _send(Map<String, Object?> row) async {
+    try {
+      await SupabaseService.client.from('client_errors').insert(row);
+    } catch (_) {
+      // Signed out, offline, rate-limited, or thrown before SupabaseService
+      // finished initialising — all of which mean the row is lost and the app
+      // carries on. Reporting a reporting failure is a loop with nowhere to
+      // report to.
+    }
+  }
+
+  /// What "redacted" means here.
+  ///
+  /// `error.toString()` is the obvious field to send and the one that can never
+  /// be sent. Every exception in this app is thrown by code holding a couple's
+  /// plaintext, and `StateError('no key for ${m.body}')` is one keystroke from
+  /// shipping a private message inside a crash report. Cleaning that text
+  /// afterwards is the denylist that already lost here once, to a 55-character
+  /// sentence — the reasoning is written out at diag_event.dart:86.
+  ///
+  /// So the message is discarded, not cleaned, and what survives is the machine
+  /// code — read from a typed field rather than parsed out of prose. It is the
+  /// difference between "RLS refused it" and "the column is gone", which the
+  /// exception type alone cannot tell you. Everything else reports as null.
+  static String? _detail(Object error) => switch (error) {
+        PostgrestException(:final code) => code,
+        AuthException(:final code) => code,
+        SocketException(osError: final os?) => 'errno.${os.errorCode}',
+        _ => null,
+      };
+
+  /// Frames name packages, files, lines and symbols — the code's identity,
+  /// never the user's.
+  static String _stack(StackTrace? stack) {
+    if (stack == null) return '';
+    // `package:miles/` opens most lines, costs a fifth of the budget, and is
+    // the one string in a report that names the product.
+    final frames = stack
+        .toString()
+        .split('\n')
+        .take(_maxFrames)
+        .join('\n')
+        .replaceAll('package:miles/', '');
+    return _cap(frames, _maxStackChars);
+  }
+
+  static String _cap(String v, int max) =>
+      v.length <= max ? v : v.substring(0, max);
+}
+
+/// Retired. Nothing below records anything.
 ///
-/// Everything is best-effort and nothing is awaited on a user path. A
-/// diagnostic that can break a call is not a diagnostic.
+/// This was a per-couple field trace for three bugs that have since been fixed,
+/// and it stopped working in build 10: [record] returned on a flag that only
+/// the test reset ever set, so all 75 call sites have written nothing since —
+/// realtime's CHANNEL_ERROR and the push-received receipt included. The header
+/// that used to sit here claimed three sinks and an opt-in switch, and all
+/// three claims were false: Settings has no switch, `_file` was never assigned
+/// so the disk ring wrote nothing either, and the server copy it promised was
+/// narrowed to own-rows-only and then emptied (20260601005850, 20260601006100).
+///
+/// It is not coming back behind a server flag. One couple produced 21,448 rows
+/// and 9 MB in a single day, and diag_events grew to 65% of the database
+/// (20260601005600); a switch that turns that on for a fleet at once is a
+/// larger outage than any bug it would explain, and the events it carries are
+/// dominated by a 30-second presence heartbeat and ICE bursts rather than by
+/// anything that means "broken". [ErrorReporter] is what that was reaching for,
+/// bounded by construction.
+///
+/// [record] and [span] stay as no-ops so their 71 remaining call sites still
+/// compile. Removing them is mechanical and belongs in its own commit.
 class Diag {
   Diag._();
 
   static const _enabledKey = 'diag_enabled';
 
-  /// OFF by default.
+  /// Retires diagnostics on this handset. Still needed on every launch until
+  /// every install has run it once.
   ///
-  /// It shipped on, because instrumentation that is off on the phone that fails
-  /// is useless — which is true for two people and ruinous for a fleet. One
-  /// couple produced 21,448 rows and 9MB in a single day; at five thousand
-  /// couples that is roughly 107 MILLION rows a day, and no retention window
-  /// makes that survivable.
-  ///
-  /// So it is opt-in now: Settings has the switch, and whoever is chasing a
-  /// bug turns it on. The disk ring still records regardless, so a user who
-  /// enables it after something went wrong keeps the last events — what is
-  /// gated is the upload, not the observation.
-  static const _enabledDefault = false;
-
-  static bool _enabled = _enabledDefault;
-  static bool get enabled => _enabled;
-
-  /// One app run. Two sessions from one device mean the app restarted between
-  /// them — itself a fact worth seeing in a call trace.
-  static final String sessionId = const Uuid().v4();
-
-  static int _seq = 0;
-
-  /// The viewer's window. Bounded so a long-running app cannot grow without
-  /// limit; disk and server hold the rest.
-  static const _ringSize = 1000;
-  static final ListQueue<DiagEvent> _ring = ListQueue<DiagEvent>(_ringSize);
-
-  static final List<DiagEvent> _pendingDisk = [];
-  static final List<DiagEvent> _pendingUpload = [];
-
-  /// Dropped rather than allowed to grow. An unbounded upload queue on a phone
-  /// with no connectivity is a memory leak that shows up as a crash days later.
-  static const _uploadQueueMax = 500;
-  static int _dropped = 0;
-
-  static String? _coupleId;
-  static String? _userId;
-
-  static bool _flushing = false;
-  static File? _file;
-
-  /// Rotated, not unbounded: two files of a megabyte each is enough to hold a
-  /// failed call plus the minutes around it, and small enough to paste.
-  static const _fileMaxBytes = 1024 * 1024;
-
-  /// Retires diagnostics on this handset.
-  ///
-  /// The switch and the viewer are gone from Settings, so there is no longer a
-  /// way to turn recording off — which makes leaving it on a trap rather than a
-  /// feature. Two things therefore have to happen here rather than simply not
-  /// reading the flag:
-  ///
-  /// - The stored `diag_enabled` is cleared. It gated the UPLOAD, and it is
-  ///   true right now on any handset where it was ever switched on. Without
-  ///   this, upgrading removes the off switch and leaves the uploads running
-  ///   forever.
-  /// - `diag.ndjson` is deleted. The disk ring wrote on every run regardless of
-  ///   the flag, so a file of call, presence and chat traces is sitting in the
-  ///   documents directory of every install. Nothing can read it now, and an
-  ///   unreadable record of who called whom and when is exactly what this app
-  ///   is supposed not to keep.
-  ///
-  /// [record] is left in place at its ~117 call sites and does nothing. Ripping
-  /// those out is a mechanical change worth doing on its own, not one to make
-  /// in the same commit as a release build.
+  /// - The stored `diag_enabled` gated the upload, and it is true on any
+  ///   handset where it was ever switched on. Without clearing it, an upgrade
+  ///   removes the off switch and leaves the uploads running forever.
+  /// - `diag.ndjson` was written on every run regardless of the flag, so a file
+  ///   of call, presence and chat traces is sitting in the documents directory
+  ///   of every install. Nothing can read it now, and an unreadable record of
+  ///   who called whom and when is exactly what this app is meant not to keep.
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -113,212 +166,17 @@ class Diag {
     }
   }
 
-  /// Uploads cannot start until the session resolves, because the row needs a
-  /// couple to be scoped to. Events recorded before this still reach memory and
-  /// disk, and are uploaded once binding happens — cold-start ordering bugs are
-  /// one of the things being hunted, so losing the first seconds would defeat
-  /// the purpose.
-  static void bind({required String? coupleId, required String? userId}) {
-    if (coupleId == _coupleId && userId == _userId) return;
-    _coupleId = coupleId;
-    _userId = userId;
-    record(DiagArea.app, 'diag_bound', fields: {
-      'has_couple': coupleId != null,
-      'has_user': userId != null,
-    },);
-  }
-
-  /// Record one observation. Synchronous, allocation-light, never throws.
-  ///
-  /// Called from ICE callbacks that fire in bursts and from the chat send path,
-  /// so it does no I/O: the timers below move data off this thread.
   static void record(
     DiagArea area,
     String name, {
     String? corr,
     Map<String, Object?> fields = const {},
-  }) {
-    if (!_enabled) return;
-    final e = DiagEvent(
-      seq: _seq++,
-      // ServerClock, not DateTime.now: the whole point is that this device's
-      // timeline can be laid against the partner's. Before the first clock
-      // observation this is the device clock, which is what the old code used
-      // for everything anyway.
-      at: ServerClock.now(),
-      area: area,
-      name: name,
-      corr: corr,
-      fields: DiagRedact.fields(fields),
-    );
+  }) {}
 
-    if (_ring.length == _ringSize) _ring.removeFirst();
-    _ring.addLast(e);
-    _pendingDisk.add(e);
-    if (_pendingUpload.length >= _uploadQueueMax) {
-      _pendingUpload.removeAt(0);
-      _dropped++;
-    }
-    _pendingUpload.add(e);
-
-    if (kDebugMode) debugPrint('[diag] ${e.line}');
-  }
-
-  /// Measure something whose DURATION is the evidence — a TURN fetch, an ICE
-  /// connect, an ack RPC. Returns a closure that records the elapsed ms.
-  ///
-  /// Latency is most of what is unknown here: "the call failed" and "the call
-  /// took 34 seconds to fail" point at different causes.
   static void Function({String? outcome, Map<String, Object?> fields}) span(
     DiagArea area,
     String name, {
     String? corr,
-  }) {
-    final sw = Stopwatch()..start();
-    var done = false;
-    return ({String? outcome, Map<String, Object?> fields = const {}}) {
-      if (done) return;
-      done = true;
-      sw.stop();
-      record(area, name, corr: corr, fields: {
-        'ms': sw.elapsedMilliseconds,
-        if (outcome != null) 'outcome': outcome,
-        ...fields,
-      },);
-    };
-  }
-
-  /// Newest last, for the viewer.
-  static List<DiagEvent> get recent => _ring.toList(growable: false);
-
-  static int get droppedCount => _dropped;
-
-  /// How the server copy is doing, surfaced because it fails the same silent
-  /// way everything else here does. The insert policy requires couple_id to
-  /// equal current_user_couple_id(), so a stale binding rejects every row — and
-  /// without this the first sign would be an empty table after a field test
-  /// that cannot be repeated. When uploads are failing, the disk copy is the
-  /// one to collect.
-  static int uploadedCount = 0;
-  static String? lastUploadError;
-
-  /// Write what is pending to disk and to the server. Safe to call at any time;
-  /// runs at most once concurrently.
-  static Future<void> flush() async {
-    if (_flushing || !_enabled) return;
-    if (_pendingDisk.isEmpty && _pendingUpload.isEmpty) return;
-    _flushing = true;
-    try {
-      await _flushDisk();
-      await _flushUpload();
-    } finally {
-      _flushing = false;
-    }
-  }
-
-  static Future<void> _flushDisk() async {
-    final f = _file;
-    if (f == null || _pendingDisk.isEmpty) return;
-    final batch = List<DiagEvent>.from(_pendingDisk);
-    try {
-      // flush:true because the process may not survive to close the handle —
-      // an unflushed buffer loses precisely the events that explain the crash.
-      await f.writeAsString(
-        '${batch.map((e) => e.toNdjson()).join('\n')}\n',
-        mode: FileMode.append,
-        flush: true,
-      );
-      // Only now. Clearing before the write loses the batch on a transient
-      // failure, and the batch around a transient failure is the interesting
-      // one. The queue cap keeps a permanent failure (disk full) bounded.
-      _pendingDisk.removeRange(0, batch.length);
-      if (await f.length() > _fileMaxBytes) {
-        await f.rename('${f.path}.1');
-        _file = File(f.path);
-      }
-    } catch (e) {
-      if (_pendingDisk.length > _uploadQueueMax) {
-        _pendingDisk.removeRange(0, _pendingDisk.length - _uploadQueueMax);
-      }
-      debugPrint('[diag] disk flush failed: $e');
-    }
-  }
-
-  static Future<void> _flushUpload() async {
-    final couple = _coupleId;
-    final user = _userId;
-    if (couple == null || user == null || _pendingUpload.isEmpty) return;
-    final batch = List<DiagEvent>.from(_pendingUpload);
-    try {
-      await SupabaseService.client.from('diag_events').insert([
-        for (final e in batch)
-          {
-            'couple_id': couple,
-            'user_id': user,
-            'session_id': sessionId,
-            'seq': e.seq,
-            'at': e.at.toIso8601String(),
-            'area': e.area.name,
-            'name': e.name,
-            'corr': e.corr,
-            'fields': e.fields,
-          },
-      ]);
-      _pendingUpload.removeRange(0, batch.length);
-      uploadedCount += batch.length;
-      lastUploadError = null;
-    } catch (e) {
-      lastUploadError = e.runtimeType.toString();
-      // Kept for the next attempt. The queue cap above stops this growing
-      // forever when the device is offline for a long time.
-      debugPrint('[diag] upload failed: $e');
-    }
-  }
-
-  /// The whole in-memory window as text, for the clipboard.
-  static String dump() => _ring.map((e) => e.line).join('\n');
-
-  /// Everything on disk, including events from previous runs. This is what to
-  /// read after the app was killed.
-  static Future<String> readFile() async {
-    final f = _file;
-    if (f == null) return '';
-    final parts = <String>[];
-    for (final p in ['${f.path}.1', f.path]) {
-      final file = File(p);
-      if (await file.exists()) parts.add(await file.readAsString());
-    }
-    return parts.join();
-  }
-
-  static Future<void> clear() async {
-    _ring.clear();
-    _pendingDisk.clear();
-    _pendingUpload.clear();
-    _dropped = 0;
-    for (final p in ['${_file?.path}.1', _file?.path]) {
-      if (p == null) continue;
-      try {
-        final f = File(p);
-        if (await f.exists()) await f.delete();
-      } catch (_) {}
-    }
-  }
-
-  @visibleForTesting
-  static void resetForTest({bool enabled = true}) {
-    _ring.clear();
-    _pendingDisk.clear();
-    _pendingUpload.clear();
-    _seq = 0;
-    _dropped = 0;
-    _coupleId = null;
-    _userId = null;
-    _file = null;
-    _enabled = enabled;
-  }
-
-  @visibleForTesting
-  static List<DiagEvent> get pendingUploadForTest =>
-      List.unmodifiable(_pendingUpload);
+  }) =>
+      ({String? outcome, Map<String, Object?> fields = const {}}) {};
 }

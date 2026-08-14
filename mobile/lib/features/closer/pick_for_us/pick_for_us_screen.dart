@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_repository.dart';
 
 /// "Pick for us" dice — consensual spontaneity. Three tiers (warm → hot);
@@ -97,9 +98,19 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = _friendly(e);
       });
     }
+  }
+
+  /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
+  /// (closer_crypto.dart:24,32,46). Anything else landing here is a transport
+  /// failure whose toString names the Supabase host.
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   bool _tierUnlocked(String tierId, String myId, String partnerId) {
@@ -145,7 +156,13 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
         tags: tags,
       );
     } catch (_) {
-      // Persist failure shouldn't block the in-screen result.
+      // Persist failure shouldn't block the in-screen result, but the roll then
+      // never appears under "recent" — say so rather than let it just vanish.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("This roll wasn't saved to your history.")),
+        );
+      }
     }
 
     if (!mounted) return;
@@ -187,7 +204,13 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not unlock: $e')),
+        SnackBar(
+          content: Text(_friendly(e)),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _askHotter(tier),
+          ),
+        ),
       );
     }
   }

@@ -31,8 +31,12 @@ client-side diagnosis.**
 - Supabase prod **`sopictusdonlvuezmfep`** (staging `zqltaobarpcuantrqxha`).
 - Test device: OnePlus 8 / **IN2015**, Android 13, arm64. adb at
   `C:/Users/razaa/AppData/Local/Android/Sdk/platform-tools/adb.exe`.
-- Current build **16** (`pubspec.yaml` + `lib/core/app/release_gate.dart` must
-  match). APK shipped as `E:\LDR\Miles.apk`, arm64 split, ~70–112 MB.
+- Current build **22** (`pubspec.yaml` + `lib/core/app/release_gate.dart` must
+  match — nothing enforces that, so check both by hand). APK shipped as
+  `E:\LDR\Miles.apk`, **one universal APK**, 218.4 MB, arm64-v8a + armeabi-v7a
+  + x86_64. Not split per ABI: he asked for a single file, and
+  `build.gradle.kts` already keeps R8 off for exactly that "directly-shared
+  universal APK" case.
 - **Debug-signed.** No `android/key.properties`. Release keystore steps were
   given; he hasn't made one. Debug SHA-1:
   `A1:05:79:47:08:8B:7A:21:4B:DA:C3:C2:BE:95:B3:03:95:74:64:C7`, package
@@ -576,9 +580,132 @@ Two things found while doing it:
 3. **6-digit PINs**, now safe to do — see above for why it was not bundled.
 4. Multi-select composer + persisted queue, gallery pager, timeline redesign,
    visit linking, authored acceptance.
-5. **Nothing has been built or installed this session.** `Miles.apk` on disk is
-   still build 21 from the previous one; the device is on build 20. Everything
-   above is uncommitted in the working tree.
+5. Multi-select composer, gallery pager, timeline redesign, visit linking,
+   authored acceptance — the largest remaining block.
+
+### LIVE REGRESSION FOUND AND FIXED — 006900 revoked DELETE from six tables
+
+`20260601006900`'s predicate was `left join pg_policy p on … and p.polcmd = 'd'`.
+**`polcmd='d'` matches only a `FOR DELETE` policy. A `FOR ALL` policy is
+`polcmd='*'` and covers DELETE too** — so every table whose delete permission
+came from a FOR ALL policy looked identical to a table with no delete policy.
+Six were stripped: `personal_vault_items`, `vault_pin`, `cycle_events`,
+`cycle_logs`, `cycle_settings`, `call_signals`. `love_reasons` and
+`intimacy_signals` survived only because they happen to be written FOR DELETE.
+
+**`vault_repository.dart:98` deletes from `personal_vault_items`, so "delete
+from vault" had been failing in production since that migration shipped.**
+006900's commit claimed "Verified after: 0 tables remain in that state" — it
+re-ran the same wrong predicate, so it confirmed nothing.
+
+Fixed in `restore_delete_and_seal_vault_pin` / `20260601007600`, which also
+closes a second hole in the same table: `verify_vault_pin` implements a real
+bcrypt lockout (5 strikes, 15 min) that was **worthless because `vault_pin_self`
+is FOR ALL, so the person being locked out could PATCH their own
+`failed_attempts` back to 0.** 004900 wrote that exact reasoning down for
+pairing and it was never carried across. Direct DML on `vault_pin` is now
+revoked; all three entry points are SECURITY DEFINER and unaffected.
+
+Verified live, rolled back:
+`vaultDelete=works | resetCounter=blocked | hasVaultPin=works`
+
+### BUILD 22 — built 2026-08-15, NOT installed, NOT market-ready
+
+`E:\LDR\Miles.apk`, one universal APK, 218.4 MB (228,981,716 bytes).
+sha256 `a068b8cd4601c79aa76340518d0615bab459a66b51789ca9cdfd9616c2081bce`.
+versionCode 22, package `com.miles.miles`, minSdk 24, targetSdk 36,
+ABIs arm64-v8a + armeabi-v7a + x86_64. Gate before building: `flutter analyze
+mobile` 0/0, `flutter test` 573 passing.
+
+**Two things must happen together, in this order, or users break:**
+
+1. Install build 22 on every handset that matters.
+2. THEN `update app_release set min_build = 22, latest_build = 22;`
+
+The gate currently reads `min_build = 2`, which waves every old build straight
+through — and today's `memory_consent_rpcs` revoked the table-level UPDATE that
+build 20 uses for accept/archive/delete, so build 20 now 403s on those with no
+forced-update prompt. Raising the gate BEFORE installing locks out the device
+that has to receive the install.
+
+### The industrial-readiness gap list (audited 2026-08-15, evidence attached)
+
+Ranked by what hurts a real user base first. Nothing here is speculative.
+
+1. **Chat silently loses messages.** `chat_screen.dart:145-149` swallows a failed
+   `sendText`; the optimistic bubble lives only in an in-memory `List` (no
+   sqflite/hive/drift/isar in `pubspec.lock`), so it dies with the widget. Worse,
+   `_MsgStatus` (`:1691`) has no `failed`/`sending`, and `_rawStatusFor:819`
+   returns `sent` for `seq <= 0` — **a message that never reached the server
+   renders with the same tick as one that did.** Voice notes are worse:
+   `chat_input_bar.dart:346-351` has no catch at all, so the throw lands in
+   `main.dart`'s handler, the recording is gone, no bubble, no error. The media
+   path next door does this correctly (`chat_send_queue.dart:234` +
+   `chat_screen.dart:2314` "Didn't send · tap to retry") — text was just never
+   given it.
+2. **No observability whatsoever.** `Diag` is dead code: `_enabled` defaults
+   false and is only ever set true by `resetForTest`, so **all 75
+   `Diag.record` call sites are no-ops** — including the realtime subscribe
+   status, the socket-flap counter, and `push_msg_received`. `main.dart:44-51`
+   catches Flutter and platform errors and only `debugPrint`s them. No
+   Crashlytics/Sentry/Bugsnag in `pubspec.yaml`. On a sideloaded fleet with no
+   cable attached, **you cannot know the app is broken for anyone.**
+3. **Zero backups.** Plan is `free` (region ap-south-1): no PITR, no dashboard
+   backups, and no `pg_dump`/export script anywhere in the repo. Current RPO is
+   total loss. Note DB backups never cover Storage objects (471 MB) even after
+   upgrading.
+4. **309 commits, 0 remotes, 0 tags.** Everything exists on one disk with no
+   offsite copy, and build 22 was built from a dirty tree (HEAD `b6b309d` still
+   reads `0.1.0+21`), so no build maps to a commit and none can be reproduced.
+5. **A secret ships inside the APK.** `pubspec.yaml` declares `.env` as an
+   asset; `assets/flutter_assets/.env` is in `Miles.apk` and contains
+   `GIPHY_API_KEY`. (Supabase URL + anon key there are fine — public by design.)
+   No `--dart-define` anywhere: `String.fromEnvironment` has zero hits.
+6. **Rate limiting exists for pairing and nothing else** — no throttle on
+   `reach_events`, `care_nudges`, `messages`, `call_invites`, or signed-URL
+   minting.
+7. **`proguard-rules.pro` is dead config** — `proguardFiles` appears nowhere in
+   gradle, while `build.gradle.kts:83` claims it is "written and ready". Flipping
+   `isMinifyEnabled` today applies R8 defaults only and produces exactly the
+   WebRTC/ML Kit reflection crashes the comment says it avoids.
+8. **`.env.example` has drifted** — it documents `NEXT_PUBLIC_*` and
+   `GOOGLE_MAPS_3D_KEY`, and omits `GIPHY_API_KEY` and the `METERED_TURN_*` trio
+   the code actually reads via `maybeGet(...) ?? ''`. A fresh build machine
+   following it ships with Giphy dead and the TURN fallback missing, silently.
+9. **No block, mute, or report — and Reach is an unbounded screen-waking
+   channel.** The only cooldown is `State` in `reach_button.dart:20-46`: client
+   side, reset by a restart, bypassed entirely by posting to PostgREST.
+   `reach_events` has one trigger straight to a high-priority full-screen-intent
+   push. Zero hits for block/mute/report anywhere in migrations or `mobile/lib`.
+   A partner who turns hostile has an unlimited way to wake the other's screen,
+   plus live location, and the only remedy in the app is dissolving the
+   relationship. **For an intimacy product this is the largest design-level
+   gap**, and it is not a crypto problem.
+10. **`messages.body` is plaintext, and so is location and cycle data** — while
+    `vault_items`, `memory_threads`, `afterglow_entries` and
+    `fantasy_jar_entries` are all bytea ciphertext with working `partner_keys` +
+    `key_escrow` sitting right next to them. `presence.latitude/longitude` is
+    populated at ~32 m accuracy; `cycle_logs`/`cycle_events` are GDPR Art. 9
+    special-category data in the clear. `presence.current_screen` is
+    partner-surveillance telemetry with no feature behind it. Chat is the
+    highest-volume intimate surface in the app and the one users would most
+    assume is covered by the encryption the product advertises.
+11. **118 empty catches swallow user writes** (e.g. `vault_screen.dart:76`
+    `catch (_) {}` around `addNote`), and 16 screens render raw exceptions —
+    `fantasy_jar_screen.dart:102`→`:213` prints
+    `Failed host lookup: 'sopictusdonlvuezmfep.supabase.co'`, leaking the
+    backend host to the user.
+12. Accessibility and localisation are unaddressed (hardcoded English, hardcoded
+    font sizes).
+
+**It is debug-signed, and that is disqualifying for a market release.** Proven,
+not assumed — `apksigner verify --print-certs` reports
+`Signer #1 certificate DN: C=US, O=Android, CN=Android Debug`, SHA-1
+`a1057947088b7a214bdac3c2be95b303957464c7`. The debug keystore's password is the
+documented string `android`, so anyone can re-sign this APK and it will install
+over the real one as an update. Play also rejects it outright. `key.properties`
+does not exist; `build.gradle.kts` falls back deliberately and logs a banner.
+Nothing about the code fixes this — it needs a keystore.
 
 ### Heads-up: this tree had a second writer
 
@@ -674,3 +801,90 @@ Two live bugs it surfaced in passing, unrelated to the redesign:
   turns encryption off.
 - **One vault row (`f9853e45`) has a 16-byte ciphertext** — an empty payload that
   passes the length guard. No read path handles it.
+
+## §11 Pre-ship audit — 2026-08-15 (build 21)
+
+7-dimension multi-agent audit + adversarial verification. 6 findings confirmed,
+0 refuted, 29 lower-severity findings left unverified (not investigated).
+
+**Server (live, no rebuild):**
+- `_memory_cover_sync()` now sets `cover_photo_id`. It never did, so the AD string
+  for the cover decrypt could not be built and every healed memory was a blank
+  tile forever. Its own ORDER BY tiebreak read that same unwritten column.
+- `dice_tier_consents` INSERT/UPDATE/DELETE now require `user_id = auth.uid()`.
+  They were couple-scoped only, so either partner could forge the other's consent
+  to an explicit tier. SELECT stays couple-scoped by design.
+- `key_escrow` gained `kdf` + `kdf_params`, defaulting to `hkdf-sha256`.
+
+**Client (build 22):**
+- Escrow wrapping key is Argon2id (m=19456 kB, t=2, p=1 — OWASP baseline),
+  off-isolate via `compute`. Was HKDF-SHA256: ~2 HMAC ops per guess, so a table
+  dump cracked any human password offline. `restore` dispatches on `kdf` and
+  re-wraps legacy rows in place on the sign-in that opens them.
+- X25519 seed is now stored per account (`miles_x25519_priv_v1_<uid>`).
+  It was device-wide, so account B on the same handset inherited A's private key,
+  published A's identity as its own and escrowed it under B's password.
+  `bindAccount` claims the pre-migration seed for the FIRST account to bind and
+  no other; `forgetAccount` on sign-out clears memory only. **Deliberately does
+  not delete the seed** — anyone without an escrow row has no other copy.
+- Background FCM guard now allows `type == 'memory'`. The memory branch existed
+  and was unreachable, so proposal pushes only ever fired with the app open.
+  This is the SECOND time this guard shipped missing a type ('message' was first).
+- Memory photo viewer reads the storage object when `coverPath != null`.
+  `MemoryHeal` (wired at memory_threads_screen.dart:584) nulls the inline copy,
+  and `decryptPhoto` returns null without throwing — a black screen with no error.
+  Null bytes now always set an error string.
+
+**Cleanup:** removed dead `GOOGLE_MAPS_3D_KEY` (was shipping in the APK — REVOKE
+it in Cloud Console, builds 13/14 leaked it), 3 unused deps incl. `webview_flutter`,
+8 dead symbols, 7 dead imports, orphaned `assets/emoji/heart.json`, 178MB of stale
+root APKs.
+
+**Still open:** the 29 unverified findings; advancement ideas recorded in the audit
+(recovery-code escrow instead of password-derived; envelope-encrypt the couple key
+so identity rotation stops destroying history; `app_release.flags` kill switch for
+destructive client migrations like MemoryHeal; push-type registry instead of the
+hand-maintained allowlist that has now failed twice).
+
+### §11a Second pass — the 28 unverified findings, verified 2026-08-15
+
+21 confirmed, 6 refuted. **5 fixed, 16 still open.**
+
+**Fixed (server, live):**
+- Dual-consent guard trigger on `vault_items`, `afterglow_entries`, `rituals`.
+  The consent check was a client-side `if` plus a plain PATCH; either partner
+  could destroy shared content alone. Done as a BEFORE UPDATE trigger, NOT by
+  revoking UPDATE + RPCs as proposed — a revoke 403s the delete buttons on every
+  installed build, and there is no update channel. 14-day window now uses the
+  SERVER clock (the client derived it from DateTime.now(), so moving the handset
+  clock skipped the wait). Verified: unilateral delete raises 42501.
+- `presence` INSERT/UPDATE now constrain `couple_id`. They checked only user_id,
+  so a user could write presence + coordinates into another couple's feed.
+
+**Fixed (client, build 22):**
+- Turning location sharing off now nulls the coordinates. `setSharingMode` wrote
+  only the mode, leaving the last precise fix readable by the partner.
+- `prompt_responses` upsert gained `onConflict: 'prompt_id,user_id'` — the
+  conflict target was the surrogate key, so editing an answer never replaced it.
+- Reach notification payload strips `|` from the display name (delimiter
+  collision routed the tap nowhere).
+- `updatePassword` now re-wraps the escrow. It was left sealed under the old
+  password — the one a reset flow means the user has forgotten.
+
+**STILL OPEN (16 confirmed, unfixed).** High: escrow prompt seals under an
+unverified password (typo = unopenable row, and the one-shot flag is spent
+before the seal); failed chat text insert renders as delivered with no retry;
+personal vault swallows read AND save errors. Medium: account deletion orphans
+storage objects; AD is the bare author uuid in 3 features (ciphertexts
+interchangeable between rows); all-zero nonce/MAC accepted as authenticated
+plaintext on every read path; vault temp plaintext not purged on process death;
+vault pager prefetches whole VIDEOS; vault photo spinner despite cached preview;
+filmstrip decode bounds differ from grid; recycled memory card shows previous
+cover; vault + afterglow render "empty" when rows are merely unreadable;
+media send queue is memory-only.
+
+**DO NOT apply the proposed fix for the realtime inline-photo finding** (drop
+columns from the publication via a column list). A column list on the realtime
+publication is the exact trap recorded in §10a that made rows silently vanish
+and broke build 14 on both handsets. Drop the legacy columns outright once heal
+has migrated everything instead.

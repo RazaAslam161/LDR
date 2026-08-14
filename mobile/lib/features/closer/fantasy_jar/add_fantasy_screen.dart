@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';
 
 /// Compose a new Fantasy Jar entry. Text is freeform; tags come from the
@@ -65,11 +66,23 @@ class _AddFantasyScreenState extends ConsumerState<AddFantasyScreen> {
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
+      // The screen only pops on success, so _controller still holds the text
+      // and Save is the retry — but the message it showed was the raw
+      // exception, including the Supabase host on a network failure.
       setState(() {
         _saving = false;
-        _error = e.toString();
+        _error = _friendly(e);
       });
     }
+  }
+
+  /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
+  /// (fantasy_jar_repository.dart:78, closer_crypto.dart:24,32,46).
+  String _friendly(Object e) {
+    final s = e.toString();
+    return s.startsWith('Exception: ')
+        ? s.substring('Exception: '.length)
+        : friendlyAuthError(e);
   }
 
   @override
