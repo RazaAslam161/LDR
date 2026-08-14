@@ -4,6 +4,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:miles/core/data/key_escrow.dart';
 
 /// All Supabase queries go through here so the screens stay thin.
 ///
@@ -41,6 +42,19 @@ class SupabaseRepository {
     required String password,
   }) async {
     await _c.auth.signInWithPassword(email: email, password: password);
+
+    // Recover the encryption key before anything reads encrypted rows.
+    //
+    // Android wipes FlutterSecureStorage on uninstall, so a reinstall used to
+    // mint a new X25519 keypair and silently orphan every memory, vault item
+    // and afterglow the couple had written. Restoring first means a fresh
+    // install adopts the ORIGINAL key rather than generating a replacement that
+    // can never open anything.
+    //
+    // Order matters: restore, then back up. Backing up first would seal the
+    // brand-new throwaway key over the good one and make the loss permanent.
+    final recovered = await KeyEscrow.restore(password);
+    if (!recovered) await KeyEscrow.backup(password);
   }
 
   /// Emails a password-reset link.

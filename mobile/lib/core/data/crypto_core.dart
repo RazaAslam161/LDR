@@ -67,6 +67,27 @@ class CryptoCore {
     return _myKeyPair!;
   }
 
+  /// The raw private seed, for [KeyEscrow] to seal under the user's password.
+  ///
+  /// Deliberately narrow: this is the ONLY way the seed leaves this class, and
+  /// the one caller wraps it before it touches the network.
+  static Future<Uint8List?> exportPrivateSeed() async {
+    final stored = await _storage.read(key: _privKeyStoreKey);
+    if (stored == null) return null;
+    return Uint8List.fromList(base64Decode(stored));
+  }
+
+  /// Install a seed recovered from escrow, replacing whatever is local.
+  ///
+  /// Clears the derived shared key too: it was computed from the keypair being
+  /// replaced, and leaving it would decrypt with the wrong key while looking
+  /// perfectly healthy.
+  static Future<void> adoptPrivateSeed(Uint8List seed) async {
+    await _storage.write(key: _privKeyStoreKey, value: base64Encode(seed));
+    _myKeyPair = await _x25519.newKeyPairFromSeed(seed);
+    _sharedKey = null;
+  }
+
   /// This device's X25519 public key, base64. Published through `partner_keys`.
   static Future<String> getMyPublicKeyB64() async {
     final pub = await (await _keyPair()).extractPublicKey();
