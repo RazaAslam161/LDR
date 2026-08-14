@@ -170,3 +170,55 @@ Filter for `I/flutter` — the app's real errors are there, not on screen.
 - Verify every checkable claim **before** asserting it. Twice this session I
   reported a diagnosis that was stale or backwards (billing; the flutter_map
   disk cache) and had to correct myself to him.
+
+---
+
+## 8. NEXT JOB — Memory Threads, full redesign (asked 2026-08-14)
+
+Not started. He asked for a redesign, not patches, and was explicit that
+piecemeal fixing is the thing he keeps having to correct. **Design the whole
+mechanism before writing anything.**
+
+His requirements, verbatim intent:
+
+1. **Attractive alignment / UI.** Current screen is cards with a date, a state
+   chip and raw error text. He called it "ugly line up, not well maintained,
+   not professionally designed."
+2. **Silky smooth — opening, uploading, rendering, closing.** No buffering, no
+   loading wheels, no quality drop.
+3. **Genuinely shared between partners.**
+4. **Delete with BOTH partners' permission** (dual consent). The columns now
+   exist — `20260601006600` — but the UI never surfaced it.
+5. **Gallery-style preview.**
+6. **Multi-select upload, exactly like the chat album flow.**
+7. **Expand it** — he wants invention, not just the literal list.
+
+### What is already known about why it is broken
+
+- Photos are encrypted `bytea` **inline in the row** (`photo_cipher`), so every
+  card costs a decrypt. Same architectural mistake as the vault.
+- `SecretBoxAuthenticationError` cards are rows encrypted under keys destroyed
+  by earlier reinstalls (§5). Escrow stops it recurring; **those rows are
+  permanently unreadable** and the UI must say so honestly instead of printing
+  a crypto exception at the user.
+- Delete columns exist and are unused by the UI.
+
+### The reference implementations to copy
+
+- **Media pipeline:** `core/media/media_decode.dart`, `core/widgets/net_image.dart`,
+  `core/media/thumb_backfill.dart`, `features/chat/widgets/media_viewer.dart`.
+  Cache-key identity is the whole trick — same key AND same decode width, and
+  never `memCacheHeight`.
+- **Multi-select upload + album grouping:** `features/chat/chat_send_queue.dart`
+  (`albumId` when `items.length > 1`), `features/chat/widgets/album_bubble.dart`.
+- **Gallery picker:** `core/services/photo_picker_service.dart` — never a bare
+  `ImagePicker`, or it opens the file manager.
+- **Dual consent already modelled:** `features/closer/private_vault` has
+  request → confirm → hard delete with a 14-day escape hatch. Reuse the shape.
+
+### Do not repeat
+
+Thumbnails must be **separate storage objects**, not encrypted blobs in the
+row. Generate before encryption, cache decrypted-to-disk keyed by item id.
+That is the single decision that makes the difference between the chat pipeline
+(fast) and the vault/threads (wheels everywhere).
