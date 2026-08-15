@@ -3,11 +3,6 @@ import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
 
 /// CRUD wrapper around the `rituals` table.
-///
-/// v1 does not schedule push notifications — we only persist the
-/// couple's chosen delivery time so the list can show upcoming
-/// deliveries. Actual delivery arrives in a later release with
-/// a cron / edge-function worker.
 class RitualRepository {
   RitualRepository._();
 
@@ -28,8 +23,7 @@ class RitualRepository {
         out.add(Ritual.fromJson(row as Map<String, dynamic>));
       } catch (e) {
         // A ritual the user scheduled disappears from the list entirely when
-        // this hits, so leave a trace — the row is still in Postgres and the
-        // cron will still deliver it.
+        // this hits, so leave a trace — the row is still in Postgres.
         debugPrint('rituals: unreadable row: $e');
       }
     }
@@ -75,14 +69,14 @@ class RitualRepository {
     }).eq('id', ritualId);
   }
 
-  static Future<void> hardDelete({
-    required String ritualId,
-    required String deletedBy,
-  }) async {
-    await _c.from('rituals').update({
-      'deleted': true,
-      'deleted_by': deletedBy,
-      'deleted_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', ritualId);
+  /// Confirms a delete that was already requested.
+  ///
+  /// Only `deleted` is sent: a BEFORE UPDATE trigger on the table stamps
+  /// `deleted_by` and `deleted_at` from `auth.uid()` itself, and it rejects the
+  /// write outright (42501) unless a request is standing and the confirmer is
+  /// not the requester — or the 14-day window has run out. Sending our own
+  /// values here claimed an authority the client does not have.
+  static Future<void> confirmDelete(String ritualId) async {
+    await _c.from('rituals').update({'deleted': true}).eq('id', ritualId);
   }
 }

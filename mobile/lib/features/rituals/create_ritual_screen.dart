@@ -37,14 +37,20 @@ class _CreateRitualSheetState extends State<CreateRitualSheet> {
       return;
     }
 
+    // Rolls to tomorrow when today's slot has gone. The default is 10 PM, so
+    // anyone setting a goodnight ritual late in the evening was storing an
+    // instant in the past — and a delivery worker will never fire it.
     final now = DateTime.now();
-    final deliverAt = DateTime(
+    var deliverAt = DateTime(
       now.year,
       now.month,
       now.day,
       _time.hour,
       _time.minute,
     );
+    if (!deliverAt.isAfter(now)) {
+      deliverAt = deliverAt.add(const Duration(days: 1));
+    }
 
     setState(() {
       _loading = true;

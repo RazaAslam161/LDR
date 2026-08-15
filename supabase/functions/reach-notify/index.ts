@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     // Our triggers deliver { kind, record }. Bare rows (an older reach trigger
     // that posted to_jsonb(new) directly) still work and default to "reach".
-    const kind: "reach" | "care" | "call" | "message" | "memory" =
+    const kind: "reach" | "care" | "call" | "message" | "memory" | "ritual" =
       payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
@@ -159,12 +159,24 @@ Deno.serve(async (req) => {
       : kind === "memory"
       ? row?.proposer
       : row?.from_user;
-    const explicitRecipient: string | undefined =
-      kind === "call" ? row?.callee_id : undefined;
+    // A ritual has no author — the couple set it, and it goes to BOTH of them.
+    // The worker addresses each partner in its own call rather than this
+    // function fanning out, so the recipient block below stays exactly as the
+    // other five kinds have always used it.
+    const explicitRecipient: string | undefined = kind === "call"
+      ? row?.callee_id
+      : kind === "ritual"
+      ? payload.recipient
+      : undefined;
     const rowId: string = row?.id ?? "";
 
-    if (!fromUser || !coupleId) {
+    if (!coupleId || (!fromUser && kind !== "ritual")) {
       return new Response(JSON.stringify({ error: "bad payload" }), { status: 400 });
+    }
+    if (kind === "ritual" && !explicitRecipient) {
+      return new Response(JSON.stringify({ error: "ritual needs a recipient" }), {
+        status: 400,
+      });
     }
 
     // Fail clearly if the service-account secret isn't configured (otherwise the
@@ -196,11 +208,16 @@ Deno.serve(async (req) => {
       return OK();
     }
 
-    const { data: sender } = await admin
-      .from("profiles")
-      .select("display_name")
-      .eq("id", fromUser)
-      .single();
+    // Skipped when there is no author: `.eq("id", undefined)` is not a lookup
+    // that returns nothing, it is a filter that matches everything, and
+    // `.single()` on it errors.
+    const { data: sender } = fromUser
+      ? await admin
+        .from("profiles")
+        .select("display_name")
+        .eq("id", fromUser)
+        .single()
+      : { data: null };
     const fromName: string = sender?.display_name ?? "Your partner";
 
     const accessToken = await getAccessToken();
@@ -217,7 +234,9 @@ Deno.serve(async (req) => {
           // partner's real display name travelling through Google in cleartext
           // to be thrown away. The client already falls back when it is
           // absent. Reach/care/message still carry it; those paths read it.
-          ...(kind === "call" || kind === "memory" ? {} : { from_name: fromName }),
+          ...(kind === "call" || kind === "memory" || kind === "ritual"
+            ? {}
+            : { from_name: fromName }),
           couple_id: coupleId,
           ...(kind === "reach" ? { reach_id: rowId } : {}),
           ...(kind === "care" ? { nudge_id: rowId } : {}),
@@ -226,6 +245,7 @@ Deno.serve(async (req) => {
             : {}),
           ...(kind === "message" ? { message_id: rowId } : {}),
           ...(kind === "memory" ? { memory_id: rowId } : {}),
+          ...(kind === "ritual" ? { ritual_id: rowId } : {}),
         },
         // A call is worthless if it arrives late, but a MESSAGE must survive a
         // doze window or an offline stretch — a 30s TTL made FCM discard it
@@ -237,7 +257,13 @@ Deno.serve(async (req) => {
         // them ended up waiting forever.
         android: {
           priority: "high",
-          ttl: kind === "message" || kind === "memory" ? "86400s" : "30s",
+          // A ritual is the least urgent and the longest-lived of all of them:
+          // it is worth having whenever the phone next comes back, and a 30s
+          // TTL would drop it for anyone whose handset was dozing at 10 PM —
+          // which is most people, at 10 PM.
+          ttl: kind === "message" || kind === "memory" || kind === "ritual"
+            ? "86400s"
+            : "30s",
         },
         apns: {
           headers: { "apns-priority": "10" },

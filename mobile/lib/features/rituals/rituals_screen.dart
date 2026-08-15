@@ -58,7 +58,7 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0B0F16),
+      backgroundColor: MilesColors.surface1,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -81,8 +81,8 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFFEF6F58),
-        foregroundColor: const Color(0xFF0B0F16),
+        backgroundColor: MilesColors.ember,
+        foregroundColor: MilesColors.night,
         onPressed: _openCreate,
         child: const Icon(Icons.add),
       ),
@@ -118,17 +118,50 @@ class _RitualsScreenState extends ConsumerState<RitualsScreen> {
         actionLabel: 'Add ritual',
       );
     }
+    // Soonest upcoming first, then what has already gone by, newest of those
+    // first. The query orders by deliver_at ascending, which on this data put
+    // eighteen past-due rows above the one the user just made.
+    final now = DateTime.now();
+    final upcoming = list
+        .where((r) => r.deliverAt == null || !r.deliverAt!.toLocal().isBefore(now))
+        .toList()
+      ..sort(
+        (a, b) =>
+            (a.deliverAt ?? DateTime(0)).compareTo(b.deliverAt ?? DateTime(0)),
+      );
+    final past = list
+        .where((r) => r.deliverAt != null && r.deliverAt!.toLocal().isBefore(now))
+        .toList()
+      ..sort((a, b) => b.deliverAt!.compareTo(a.deliverAt!));
+
     return RefreshIndicator(
-      color: const Color(0xFFEF6F58),
+      color: MilesColors.ember,
       onRefresh: _load,
-      child: ListView.separated(
+      child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 96),
-        itemCount: list.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, i) => _RitualCard(
-          ritual: list[i],
-          onRefresh: _load,
-        ),
+        children: [
+          for (final r in upcoming) ...[
+            _RitualCard(ritual: r, onRefresh: _load),
+            const SizedBox(height: 12),
+          ],
+          if (past.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'ALREADY PAST',
+              style: TextStyle(
+                fontSize: 11,
+                letterSpacing: 2,
+                fontWeight: FontWeight.w600,
+                color: MilesColors.faint,
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final r in past) ...[
+              _RitualCard(ritual: r, onRefresh: _load),
+              const SizedBox(height: 12),
+            ],
+          ],
+        ],
       ),
     );
   }
@@ -150,50 +183,48 @@ class _RitualCard extends ConsumerStatefulWidget {
 class _RitualCardState extends ConsumerState<_RitualCard> {
   bool _busy = false;
 
-  Future<void> _cancelDelete() async {
+  /// Runs a write and puts the failure on screen.
+  ///
+  /// Every one of these used to end in `catch (e) { // Ignore }`, and the
+  /// server rejects a delete far more often than it accepts one — deleting is
+  /// guarded by a trigger that wants both partners. Swallowing that turned a
+  /// refusal the user could have acted on into a button that does nothing.
+  Future<void> _run(Future<void> Function() write) async {
     setState(() => _busy = true);
     try {
-      await RitualRepository.cancelDelete(widget.ritual.id);
+      await write();
       widget.onRefresh();
     } catch (e) {
-      // Ignore
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_deleteError(e))),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _confirmDelete() async {
-    final me = ref.read(sessionProvider).profile?.id;
-    if (me == null) return;
-    setState(() => _busy = true);
-    try {
-      await RitualRepository.hardDelete(
-        ritualId: widget.ritual.id,
-        deletedBy: me,
-      );
-      widget.onRefresh();
-    } catch (e) {
-      // Ignore
-    } finally {
-      if (mounted) setState(() => _busy = false);
+  /// The guard raises two distinct refusals; both read as gibberish raw.
+  String _deleteError(Object e) {
+    final s = e.toString();
+    if (s.contains('must be requested')) {
+      return 'Ask to delete this one first.';
     }
+    if (s.contains('only your partner')) {
+      final them = ref.read(sessionProvider).partner?.displayName ?? 'Your partner';
+      return '$them has to confirm this one — or you can remove it yourself '
+          'in 14 days.';
+    }
+    return friendlyAuthError(e);
   }
 
   Future<void> _requestDelete() async {
     final me = ref.read(sessionProvider).profile?.id;
     if (me == null) return;
-    setState(() => _busy = true);
-    try {
-      await RitualRepository.requestDelete(
-        ritualId: widget.ritual.id,
-        requestedBy: me,
-      );
-      widget.onRefresh();
-    } catch (e) {
-      // Ignore
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await _run(() => RitualRepository.requestDelete(
+          ritualId: widget.ritual.id,
+          requestedBy: me,
+        ),);
   }
 
   @override
@@ -230,25 +261,46 @@ class _RitualCardState extends ConsumerState<_RitualCard> {
               children: [
                 Row(
                   children: [
-                    Text(
-                      _labelFor(type),
-                      style: const TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 2,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFF4937E),
+                    Flexible(
+                      child: Text(
+                        _labelFor(type),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          letterSpacing: 2,
+                          fontWeight: FontWeight.w600,
+                          color: MilesColors.emberSoft,
+                        ),
                       ),
                     ),
                     if (ritual.delivered) ...[
                       const SizedBox(width: 8),
                       const Text(
-                        '· delivered',
+                        '· sent',
                         style: TextStyle(
                           fontSize: 10,
-                          color: Color(0x80F5EFE6),
+                          color: MilesColors.taupe,
                         ),
                       ),
                     ],
+                    const Spacer(),
+                    // Sits on the title line rather than floating under the
+                    // message: appended to the bottom of the column it lined up
+                    // with nothing and added 48dp of ragged height per card.
+                    if (!ritual.deleteRequested)
+                      SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          iconSize: 18,
+                          icon: const Icon(Icons.delete_outline,
+                              color: MilesColors.faint,),
+                          tooltip: 'Ask to delete',
+                          onPressed: _busy ? null : _requestDelete,
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -257,83 +309,50 @@ class _RitualCardState extends ConsumerState<_RitualCard> {
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Color(0xFFFBF8F4),
+                    color: MilesColors.cream50,
                     fontSize: 15,
                     height: 1.35,
                   ),
                 ),
-                const SizedBox(height: 10),
-                if (ritual.deliverAt != null)
+                if (ritual.deliverAt != null) ...[
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       const Icon(
                         Icons.access_time,
                         size: 14,
-                        color: Color(0x80F5EFE6),
+                        color: MilesColors.taupe,
                       ),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
-                          'delivers ${DateFormat('h:mm a').format(ritual.deliverAt!.toLocal())}',
+                          _whenLabel(ritual.deliverAt!),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
-                            color: Color(0x80F5EFE6),
+                            color: MilesColors.taupe,
                           ),
                         ),
                       ),
                     ],
                   ),
-                if (!ritual.deleteRequested)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: IconButton(
-                      icon: const Icon(Icons.delete_outline,
-                          color: Color(0x66F5EFE6), size: 20),
-                      tooltip: 'Request delete',
-                      onPressed: _busy ? null : _requestDelete,
-                    ),
-                  ),
+                ],
                 if (ritual.deleteRequested) ...[
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Text(
-                        'Delete pending',
-                        style: TextStyle(
-                          color: Color(0xFFEF6F58),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (_busy)
-                        const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                      else ...[
-                        if (ritual.deleteRequestedBy == me)
-                          TextButton(
-                            onPressed: _cancelDelete,
-                            child: const Text('Cancel request',
-                                style: TextStyle(
-                                    color: Color(0x80F5EFE6), fontSize: 12)),
-                          )
-                        else
-                          FilledButton(
-                            onPressed: _confirmDelete,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFEF6F58),
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                            ),
-                            child: const Text('Confirm Delete',
-                                style: TextStyle(fontSize: 12)),
-                          ),
-                      ]
-                    ],
+                  const SizedBox(height: 14),
+                  _DeleteConsent(
+                    mine: ritual.deleteRequestedBy == me,
+                    windowElapsed: ritual.deleteWindowElapsed,
+                    partnerName:
+                        ref.read(sessionProvider).partner?.displayName ??
+                            'Your partner',
+                    busy: _busy,
+                    onCancel: () =>
+                        _run(() => RitualRepository.cancelDelete(ritual.id)),
+                    onConfirm: () =>
+                        _run(() => RitualRepository.confirmDelete(ritual.id)),
                   ),
-                ]
+                ],
               ],
             ),
           ),
@@ -366,6 +385,111 @@ class _RitualCardState extends ConsumerState<_RitualCard> {
       case RitualType.custom:
         return 'RITUAL';
     }
+  }
+
+  /// Says which day as well as which time, and does not promise a delivery
+  /// that is already in the past.
+  String _whenLabel(DateTime utc) {
+    final at = utc.toLocal();
+    final time = DateFormat('h:mm a').format(at);
+    if (at.isBefore(DateTime.now())) {
+      return 'was due ${DateFormat('d MMM').format(at)}, $time';
+    }
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final isTomorrow = at.year == tomorrow.year &&
+        at.month == tomorrow.month &&
+        at.day == tomorrow.day;
+    if (isTomorrow) return 'tomorrow, $time';
+    return 'arrives ${DateFormat('d MMM').format(at)}, $time';
+  }
+}
+
+/// The standing delete request, and whichever control this person may use.
+///
+/// The server decides, not this widget: a request has to exist, and the
+/// partner is the one who confirms it unless 14 days have passed. Laying the
+/// buttons out in a Column rather than a Row is what stops a long name from
+/// overflowing the card.
+class _DeleteConsent extends StatelessWidget {
+  const _DeleteConsent({
+    required this.mine,
+    required this.windowElapsed,
+    required this.partnerName,
+    required this.busy,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+
+  final bool mine;
+  final bool windowElapsed;
+  final String partnerName;
+  final bool busy;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final String status;
+    if (!mine) {
+      status = '$partnerName asked to delete this.';
+    } else if (windowElapsed) {
+      status = 'Waited 14 days — you can remove this yourself now.';
+    } else {
+      status = 'You asked to delete this. $partnerName needs to agree.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MilesColors.surface2,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            status,
+            style: const TextStyle(
+              color: MilesColors.cream100,
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (busy)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Row(
+              children: [
+                if (!mine || windowElapsed)
+                  TextButton(
+                    onPressed: onConfirm,
+                    style: TextButton.styleFrom(
+                      foregroundColor: MilesColors.ember,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      minimumSize: const Size(0, 40),
+                    ),
+                    child: const Text('Delete', style: TextStyle(fontSize: 13)),
+                  ),
+                TextButton(
+                  onPressed: onCancel,
+                  style: TextButton.styleFrom(
+                    foregroundColor: MilesColors.taupe,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    minimumSize: const Size(0, 40),
+                  ),
+                  child: Text(mine ? 'Cancel request' : 'Keep it',
+                      style: const TextStyle(fontSize: 13),),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
   }
 }
 

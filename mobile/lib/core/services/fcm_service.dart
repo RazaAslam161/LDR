@@ -339,6 +339,10 @@ class FcmService {
       return;
     }
     if (tag == 'care') return; // care taps just open the app
+    // ritual|ritualId|coupleId — the ritual has already been delivered by
+    // arriving. Like care, the tap just opens the app; falling through would
+    // ring the full-screen Reach overlay with a ritual id in the reach slot.
+    if (tag == 'ritual') return;
     if (tag == 'memory') {
       // memory|memoryId|coupleId — opens the thread. Without this branch it
       // falls through to the Reach default below and pops the full-screen

@@ -194,6 +194,7 @@ class Ritual {
     this.deliverAt,
     this.deleteRequested = false,
     this.deleteRequestedBy,
+    this.deleteRequestedAt,
   });
 
   factory Ritual.fromJson(Map<String, dynamic> json) {
@@ -207,9 +208,11 @@ class Ritual {
       cron: JsonUtils.parseStringOrNull(json['cron']),
       deliverAt: JsonUtils.parseDateOrNull(json['deliver_at'])?.toUtc(),
       delivered: JsonUtils.parseBool(json['delivered']),
-      deleteRequested: (json['delete_requested'] as bool?) ?? false,
+      deleteRequested: JsonUtils.parseBool(json['delete_requested']),
       deleteRequestedBy:
           JsonUtils.parseStringOrNull(json['delete_requested_by']),
+      deleteRequestedAt:
+          JsonUtils.parseDateOrNull(json['delete_requested_at'])?.toUtc(),
     );
   }
 
@@ -222,13 +225,35 @@ class Ritual {
   final bool delivered;
   final bool deleteRequested;
   final String? deleteRequestedBy;
+
+  /// When the request was made. The server's guard lets the requester confirm
+  /// alone once this is 14 days old, and without the timestamp the client
+  /// cannot tell that state from "still waiting on her".
+  final DateTime? deleteRequestedAt;
+
+  /// True once the requester may confirm their own request.
+  bool get deleteWindowElapsed =>
+      deleteRequestedAt != null &&
+      DateTime.now().toUtc().difference(deleteRequestedAt!) >
+          const Duration(days: 14);
 }
 
+/// The exact inverse of [ritualTypeToJson]. Written out rather than matched
+/// against `e.name`, which silently disagreed: the enum identifier is
+/// `weeklyHighlow` and the DB label is `weekly_highlow`, so every one of those
+/// rows came back as [RitualType.custom] and the card showed a type the user
+/// never picked.
 RitualType _parseRitualType(String raw) {
-  return RitualType.values.firstWhere(
-    (e) => e.name == raw,
-    orElse: () => RitualType.custom,
-  );
+  switch (raw) {
+    case 'goodnight':
+      return RitualType.goodnight;
+    case 'goodmorning':
+      return RitualType.goodmorning;
+    case 'weekly_highlow':
+      return RitualType.weeklyHighlow;
+    default:
+      return RitualType.custom;
+  }
 }
 
 /// The serialized name used in the DB enum.

@@ -274,6 +274,40 @@ Future<void> showCareNotification({
 /// asked for "She proposed a memory."; that would put the word *memory* on the
 /// lock screen of a disguised handset, which is the same defect as the care
 /// reminder that once arrived reading "News update" on a calculator.
+/// A ritual arriving at the hour the couple set for it.
+///
+/// Wears the disguise like everything else here: the message the two of them
+/// wrote is the whole point of the ritual, and putting it on a lock screen is
+/// exactly what this app must not do. Opening the app shows it.
+///
+/// Shares the care channel — a ritual is a gentle arrival, not an alarm, and
+/// giving it its own channel would put the word "ritual" in Android's own
+/// notification settings, where the disguise cannot reach.
+Future<void> showRitualNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String ritualId,
+  required String coupleId,
+}) async {
+  final style = await currentNotificationStyle();
+  final android = AndroidNotificationDetails(
+    kCareChannelId,
+    kCareChannelName,
+    channelDescription: kCareChannelDesc,
+    importance: Importance.high,
+    priority: Priority.high,
+    icon: style.smallIcon,
+    ticker: style.ticker,
+    visibility: NotificationVisibility.secret,
+  );
+  await plugin.show(
+    id: ritualId.hashCode & 0x7fffffff,
+    title: style.title,
+    body: style.body,
+    notificationDetails: NotificationDetails(android: android),
+    payload: 'ritual|$ritualId|$coupleId',
+  );
+}
+
 Future<void> showMemoryNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String memoryId,
@@ -313,7 +347,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       type != 'care' &&
       type != 'call' &&
       type != 'message' &&
-      type != 'memory') {
+      type != 'memory' &&
+      type != 'ritual') {
     return;
   }
 
@@ -384,6 +419,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await showMemoryNotification(
       plugin: plugin,
       memoryId: (message.data['memory_id'] as String?) ?? '',
+      coupleId: coupleId ?? '',
+    );
+    return;
+  }
+
+  if (type == 'ritual') {
+    await androidPlugin?.createNotificationChannel(buildCareChannel());
+    await showRitualNotification(
+      plugin: plugin,
+      ritualId: (message.data['ritual_id'] as String?) ?? '',
       coupleId: coupleId ?? '',
     );
     return;
