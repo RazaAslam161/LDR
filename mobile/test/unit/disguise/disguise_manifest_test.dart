@@ -47,11 +47,20 @@ void main() {
         reason: '${enabled.length} aliases are enabled; exactly 1 must be',);
   });
 
-  test('the enabled alias is the catalog default', () {
-    final block = aliasBlock(kDefaultDisguise.aliasId).firstMatch(manifest);
+  test('the enabled alias is Miles — the app installs as itself', () {
+    // Both channels now install under the app's own name and offer the covers
+    // on first open, so the identity on the launcher is always one the owner
+    // picked. A cover shipping enabled="true" would put an identity nobody
+    // chose on the phone, which is the thing the picker exists to avoid.
+    final block = aliasBlock(kPlainProfile.aliasId).firstMatch(manifest);
     expect(block, isNotNull,
-        reason: 'no <activity-alias> for ${kDefaultDisguise.aliasId}',);
+        reason: 'no <activity-alias> for ${kPlainProfile.aliasId}',);
     expect(block!.group(0)!.contains('android:enabled="true"'), isTrue);
+    for (final d in kDisguises) {
+      final cover = aliasBlock(d.aliasId).firstMatch(manifest)!.group(0)!;
+      expect(cover.contains('android:enabled="false"'), isTrue,
+          reason: '${d.label} ships enabled; only Miles may',);
+    }
   });
 
   test('every offered disguise has a manifest alias', () {
@@ -156,15 +165,19 @@ void main() {
         isFalse,);
   });
 
-  test('the application label is the default disguise, never the real name', () {
-    // Android shows THIS in Settings > Apps, and it cannot be changed at
-    // runtime — the aliases only rename the launcher entry. It must therefore
-    // be a disguise, and the picker tells the user it stays put.
-    final application =
-        RegExp(r'<application[^>]*>', dotAll: true).firstMatch(manifest);
-    expect(application, isNotNull);
-    expect(application!.group(0)!,
-        contains('android:label="${kDefaultDisguise.label}"'),);
+  test('the application label is the app itself, on both channels', () {
+    // Android shows THIS in Settings > Apps and it cannot be changed at
+    // runtime — the aliases only rename the launcher entry. It used to be a
+    // cover name so the disguise held up under inspection; it is the real name
+    // now, because the app installs as itself and the cover is something the
+    // owner turns on afterwards. The picker says the Settings entry stays put.
+    for (final m in [manifest, playManifest]) {
+      final application =
+          RegExp(r'<application[^>]*>', dotAll: true).firstMatch(m);
+      expect(application, isNotNull);
+      expect(application!.group(0)!,
+          contains('android:label="${kPlainProfile.label}"'),);
+    }
   });
 
   test('each offered disguise declares a launcher label and icon', () {
@@ -230,12 +243,14 @@ void main() {
             'intent-filter, that is a launcher entry no alias can turn off',);
   });
 
-  test('the play launcher icon exists and survives pre-API-26', () {
+  test('the Miles launcher icon exists and survives pre-API-26', () {
     final name = RegExp('android:icon="@mipmap/([a-z0-9_]+)"')
         .firstMatch(playManifest)
         ?.group(1);
     expect(name, isNotNull, reason: 'play declares no launcher icon');
-    final res = Directory('android/app/src/play/res');
+    // Shared: both channels install as Miles now, so the icon moved out of the
+    // play source set into main/ where each can reach it.
+    final res = Directory('android/app/src/main/res');
     final buckets = res
         .listSync()
         .whereType<Directory>()

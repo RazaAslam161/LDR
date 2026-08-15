@@ -9,6 +9,8 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/features/gallery/gallery_repository.dart';
 import 'package:miles/features/gallery/gallery_viewer.dart';
+import 'package:miles/features/safety/report_service.dart';
+import 'package:miles/features/safety/safety_sheets.dart';
 
 /// The couple's shared gallery — one roll, both of them, like the gallery
 /// already on the phone.
@@ -146,6 +148,19 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
               tooltip: 'Ask to delete',
               onPressed: _busy ? null : _askToDelete,
               icon: const Icon(Icons.delete_outline),
+            ),
+          if (_selecting)
+            IconButton(
+              tooltip: 'Report',
+              // One id even when several are picked. The report is about a
+              // thing, and a list of ids in a 200-character field would be
+              // truncated into something nobody could line up with a row.
+              onPressed: _busy
+                  ? null
+                  : () => showReportSheet(context,
+                      target: ReportTarget.galleryItem,
+                      targetRef: _selected.first,),
+              icon: const Icon(Icons.flag_outlined),
             ),
           if (_uploading > 0)
             Center(

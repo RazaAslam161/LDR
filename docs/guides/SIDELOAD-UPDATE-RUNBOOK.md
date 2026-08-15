@@ -10,6 +10,20 @@ its own APK is a policy strike).
 
 ---
 
+## Bootstrap: the first build cannot update itself
+
+A build can only self-update if it already contains the updater. Build 28 and
+everything before it does not, so the feature cannot install itself onto them.
+
+- **Once**: build the first version that contains the updater and install it on
+  each phone by hand — the last transfer you will ever do.
+- **After that**: every later build is a `release.sh` run plus one row.
+
+Publishing an APK to `app_release` before any phone runs a build that carries
+the updater is harmless but does nothing: older builds never read `apk_url`.
+
+---
+
 ## The one rule that makes or breaks it: same signing key
 
 Android only updates an APK **in place** when the new one is signed with the
@@ -50,7 +64,17 @@ this is a couples-intimacy app. The APK URL itself being public is fine: the
 security model already assumes the APK is readable by anyone (all secrets live
 server-side behind RLS). Just don't put couple data in the filename.
 
-### One-time R2 setup
+### Uploading without an API token
+
+The R2 dashboard uploads objects directly: bucket → **Objects** → **Upload** →
+drag the APK in. R2's single-PUT ceiling is 5 GiB, so a ~220 MB APK is nowhere
+near a limit. Name the object exactly `news.apk` so the stored `apk_url` keeps
+working.
+
+That is the whole upload. The API token below only exists to make it scriptable;
+for an occasional release, dragging the file in is a legitimate permanent answer.
+
+### One-time R2 setup (only needed for scripted uploads)
 
 No CLI to install: the release script uploads with **curl's built-in SigV4**
 (`--aws-sigv4`), so `curl` is the only tool involved. No aws-cli, no rclone.
@@ -71,17 +95,34 @@ No CLI to install: the release script uploads with **curl's built-in SigV4**
    export MILES_R2_BUCKET=miles-releases
    export MILES_R2_KEY=<access key id>
    export MILES_R2_SECRET=<secret access key>
-   export MILES_APK_URL=https://<your-r2-public-base>/news.apk
+   export MILES_APK_URL=https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/Miles.apk
    ```
    Optional: `MILES_R2_OBJECT` to rename the object (default `news.apk`).
+
+---
+
+## Credentials: tool/.release-env
+
+Copy `tool/.release-env.example` to `tool/.release-env` and fill it in. That file
+is gitignored and `release.sh` sources it automatically.
+
+Use the file rather than `~/.bashrc`: a **non-interactive** shell — an agent, a
+cron job, anything not a terminal — never sources `~/.bashrc`, so exports kept
+there are invisible to it and `--ship` stops at the first missing variable.
+Verified: the agent shell reports flags `hBc` (no `i`) with `BASH_ENV` unset.
+Anything already exported in the environment still wins.
 
 ---
 
 ## Every release: one command
 
 ```bash
-cd /e/LDR/mobile && bash tool/release.sh --upload --verify
+cd /e/LDR/mobile && bash tool/release.sh --ship
 ```
+
+`--ship` = bump + build + upload + verify + publish. Use
+`--upload --verify --publish` to ship without bumping, or no flags to build and
+hash only.
 
 What it does, in order:
 

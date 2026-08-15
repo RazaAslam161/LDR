@@ -17,6 +17,8 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/legal/terms_gate.dart';
+import 'package:miles/features/safety/contact_pause.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 
@@ -144,6 +146,13 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // is still readable under the pre-scoping device-wide name.
       final uid = SupabaseService.currentUserId;
       if (uid != null) await CryptoCore.bindAccount(uid);
+      // Both are per-ACCOUNT and both are read here rather than only at
+      // startup, because a second person signing in on the same handset never
+      // passes through main() again — and inheriting the first person's terms
+      // acceptance, or their contact pause, is the device-scoped leak this
+      // codebase has already paid for twice (FCM tokens, cached couple ids).
+      await TermsGate.load();
+      unawaited(ContactPause.load());
       final profile = await SupabaseRepository.fetchMyProfile()
           .timeout(const Duration(seconds: 10));
       if (profile == null) {
@@ -333,6 +342,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // The account's sealed seed stays in storage — signing back in must work
     // offline, and for anyone without an escrow row it is the only copy.
     CryptoCore.forgetAccount();
+    // Process-scoped answers about the account that just left. Left standing,
+    // the next person to sign in on this handset walks past a terms gate they
+    // never saw and inherits a pause they never set.
+    TermsGate.reset();
+    ContactPause.reset();
     state = const SessionState(loading: false);
   }
 

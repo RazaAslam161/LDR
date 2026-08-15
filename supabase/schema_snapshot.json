@@ -611,6 +611,30 @@
       "start_ms",
       "started_at",
       "started_by"
+    ],
+    "notification_mutes": [
+      "expires_at",
+      "kind",
+      "muted_at",
+      "partner_id",
+      "user_id"
+    ],
+    "content_reports": [
+      "build",
+      "created_at",
+      "id",
+      "note",
+      "reason",
+      "reported_user_id",
+      "reporter_id",
+      "target_kind",
+      "target_ref"
+    ],
+    "tos_acceptances": [
+      "accepted_at",
+      "build",
+      "user_id",
+      "version"
     ]
   },
   "functions": [
@@ -681,6 +705,7 @@
     "redeem_pairing_invite",
     "send_next_allowed_at",
     "set_vault_pin",
+    "submit_report",
     "sync_presence_couple_id",
     "unlock_capsule",
     "unmute_partner",

@@ -29,10 +29,31 @@ import 'package:path_provider/path_provider.dart';
 class UpdateService {
   static const _channel = MethodChannel('miles/updater');
 
+  /// Whether this channel may install its own APK at all. Read once at startup
+  /// from the sideload/play BuildConfig.
+  ///
+  /// Defaults to false so a channel that cannot answer never offers a download.
+  /// This used to piggyback on [DisguiseService.enabled], which was a mistake:
+  /// that flag describes what the launcher shows, and when the play channel
+  /// started shipping the covers as an opt-in it became true there too — which
+  /// would have put a self-update prompt inside a Play build.
+  static bool allowed = false;
+
+  static Future<void> loadAllowed() async {
+    try {
+      allowed = await _channel
+              .invokeMethod<bool>('isAllowed')
+              .timeout(const Duration(seconds: 2)) ??
+          false;
+    } catch (_) {
+      // Non-Android host, or the query failed — stay off.
+    }
+  }
+
   /// A newer build exists, we know where to get it, and this channel is allowed
   /// to self-update. False on the play build and when no APK has been published.
   static bool get available =>
-      DisguiseService.enabled &&
+      allowed &&
       (ReleaseGate.apkUrl?.isNotEmpty ?? false) &&
       ReleaseGate.latestBuild > ReleaseGate.buildNumber;
 

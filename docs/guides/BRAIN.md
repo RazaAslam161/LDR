@@ -1558,3 +1558,468 @@ Touch is proof the tab exists, since modest mode is a property of the couple.
 Verified: `flutter analyze mobile` 0/0, `flutter test` 699 pass.
 **Unverified:** vector gradients only truly render at build time — look at the
 launcher on the next build.
+- **Standing instruction (2026-08-15): auto-ship after every build.** Once an
+  APK is built, upload + publish without being asked —
+  `cd /e/LDR/mobile && bash tool/release.sh --ship`. Saved to memory as
+  `auto-ship-every-build`. Does NOT override "never build unprompted"; it
+  governs what happens once a build exists. Never raise `min_build` as part of it.
+- Credentials live in `mobile/tool/.release-env` (gitignored, template at
+  `.release-env.example`), NOT `~/.bashrc`: a non-interactive shell never sources
+  bashrc, so an agent/cron sees nothing. release.sh sources the file itself.
+- **Builds 29 and 30 shipped WITHOUT the self-updater.** A stuck dart process
+  (PID 19992) held `.dart_tool`, so Flutter compiled stale sources — old strings
+  present in libapp.so, new ones absent, in the same file. `flutter clean` failed
+  with "a program may still be using a file"; killing the process and re-cleaning
+  fixed it. release.sh now asserts `Update available` is in libapp.so and REFUSES
+  to ship a build without it. If a feature is mysteriously absent on device,
+  check the artifact before the logic.
+- Build 31 (`2c255a6e…`, 229414703 bytes) is the first VERIFIED-good build.
+
+---
+
+## §16 Play UGC compliance — pause, report, terms — 2026-08-16
+
+Three features, all UNCOMMITTED in the working tree. Gates at the end of the
+session: `flutter analyze mobile` → **0 errors, 0 warnings** (476 issues, all
+info, none of them in the new files); `flutter test` → **727 tests, All tests
+passed!**, exit 0.
+
+An adversarial skeptic pass was launched over this work and never returned — its
+transcript was still 0 bytes 42 minutes in. **This work has NOT been
+independently reviewed.** Worth re-running before the next build.
+
+**The migration is WRITTEN, NOT APPLIED.**
+`supabase/migrations/20260816120000_ugc_terms_reports_and_contact_pause.sql`.
+Nothing was run against staging or production — the file is unverified against
+any database and its rollback SQL is a comment block at the bottom. Additive
+only: the `notification_mutes` kind CHECK is WIDENED to add `'contact'`,
+functions are `create or replace`, two new tables. Build 31 keeps working.
+
+- **The pause reuses 20260601007700, which had ZERO Dart call sites.** Every
+  line of that migration — `notification_mutes`, `mute_partner`,
+  `unmute_partner`, `push_muted` — has been dead since it shipped. This is the
+  call site, widened to a `'contact'` umbrella kind that `push_muted` reads
+  *in addition to* whichever kind a notifier asks about, so one row covers
+  reach, care, message and call.
+- **`notify_message` and `notify_call` bodies were taken from
+  `pg_get_functiondef` on production, not from a file in this repo** — 004700
+  rewrote both by catalogue to add `x-notify-secret`, and restoring an older
+  file would silently drop that header. Verified byte-for-byte equal after
+  stripping the one added guard line.
+- **The ring also arrives over realtime, not only over push.** A server-side
+  push mute silences the notification and the app still rings if it is open:
+  `call_controller.dart` subscribes `onBroadcast(event: 'signal')`. `_onSignal`
+  now drops an inbound `offer` while the pause is on, before the state machine
+  sees it, so nothing adopts the call id. `handlePendingCall` got the same
+  guard for a push that outlived the pause.
+- **UI labels are neutral everywhere.** "Pause notifications", never "Block".
+  This may be read over the user's shoulder by the person it is about — the
+  same reasoning 007700 used for making the mute silent server-side.
+- **`content_reports` has NO select policy for anybody, deliberately.** RLS
+  denies what it does not permit, and a screen listing "reports you filed about
+  your partner" on a phone that partner may pick up is the most dangerous thing
+  this app could render. Written only through `submit_report`, which resolves
+  `reported_user_id` from the couple server-side and rate-limits to 5 per 24h
+  with `PT429`.
+- **ToS is a TABLE (`tos_acceptances`), not a column on `profiles`** —
+  20260601003700 rebuilds the profiles column UPDATE grant from
+  information_schema AT RUN TIME, so any column added later is created but not
+  writable. Keyed on `auth.users`, not `profiles`: the gate runs before the
+  onboarding funnel.
+- **Enforcement is ONE `if` in `router.dart`'s redirect**, between the
+  `!isAuthenticated` branch and `needsProfile`. Not per-call-site: there are
+  ~35 upload paths. Client-side only this release; the server-side insert gate
+  waits until `min_build` names a build that carries the client half.
+- `TermsGate` fails closed — a `load()` that throws leaves `needsAcceptance`
+  true, pinned by its own test. It reads the local marker BEFORE the server so
+  a returning user is not locked out by a dead network, and `accept()` writes
+  the marker first so a failed insert is not a lockout with no way past it;
+  `load()` re-files the row on the next launch that reaches the server.
+- Giphy `rating` `r` → `pg-13`.
+- Report entry points: Settings › Safety, the Chat AppBar menu, the Chat
+  selection toolbar, the Gallery selection toolbar. About card gained Terms
+  (in-app, const string — a WebView or a URL would throw the user into Chrome
+  and break the disguise) and Privacy Policy.
+- `supabase/schema_snapshot.json` gained `notification_mutes`,
+  `content_reports`, `tos_acceptances` and `submit_report`. It now describes
+  the schema AFTER the migration is applied — the only way schema_drift_test
+  can gate the client code that ships with it.
+
+### Found, NOT fixed — two real defects, both off-task
+
+1. **`ReleaseGate.check()` has never run.** It sits in `main.dart`'s
+   `Future.wait` beside `SupabaseService.init()`, and `SupabaseService.client`
+   is a `static late final` assigned on the LAST line of `init()`. `Future.wait`
+   evaluates its argument list eagerly, so `check()` reads `client` while
+   `init()` is still suspended at its first await → `LateInitializationError`
+   → caught by the gate's own fail-open catch → `[release] gate unreachable,
+   allowing`. The version gate, the block screen and the self-update prompt are
+   all downstream of it. `TermsGate.load()` is deliberately placed AFTER the
+   wait for exactly this reason. Not fixed here because repairing it ACTIVATES
+   a gate that has been dormant, which is a behaviour change on installed
+   handsets and belongs in its own change.
+2. **`notify_message` has no trigger on production.** `public.messages` carries
+   ZERO triggers there, so the function has been orphaned since some point
+   after 20260601003100 created `message_notify_on_insert`. Message push cannot
+   be firing from the database. The mute guard is still in the body (a fresh
+   replay gets the trigger), but on production the pause covers reaches, nudges
+   and calls only. Re-attaching turns message push back on for two live
+   handsets — a behaviour change, not a compliance fix.
+   **Diagnosed 2026-08-16 — see §17. Fix verified on STAGING, not on prod.**
+
+### Version
+
+**Left at whatever the concurrent session set it to — do not fight it.**
+
+The number moved three times inside one session: 31 when this work started,
+32 an hour later, 33 (bumped here), then 34 — all by another agent building and
+shipping in the same tree. Verified on production before each decision:
+`app_release.latest_build` was already **32** with `apk_sha256`
+`7c9ca6a1cfdd3aa1622475a6c706a23c5045571bf5402dd5341744e6414cdc72`, published
+2026-08-15 20:28 UTC, so 32 was NOT free — two binaries behind one build number
+is precisely what the self-updater compares and verifies.
+
+Before building, re-read BOTH `pubspec.yaml` and `ReleaseGate.buildNumber` and
+confirm they agree AND that the number is greater than `app_release.latest_build`
+on production. `min_build` is still **2**; do not raise it as part of shipping
+this.
+
+Lesson: the working tree cannot tell you whether a build number is free. Read
+`app_release.latest_build` on production.
+
+### A test failure in this window was NOT this work
+
+The full suite failed once on
+`test/unit/core/update_service_test.dart: available when a newer build is
+published on the sideload channel`. It passes in isolation (5/5). The concurrent
+session wrote `update_service.dart` at 01:47 and `update_service_test.dart` at
+01:59, inside the run. Same hazard §13 records — check whose work a failure
+belongs to before fixing it.
+
+### Placeholders the user still has to fill
+
+- `{{CONTACT_EMAIL}}` in `terms_text.dart` (same token style as the privacy
+  policy's three).
+- `milesPrivacyPolicyUrl` is `''` because nothing hosts the policy yet. The
+  About row says "not published yet" rather than opening a 404.
+
+---
+
+## §17 The missing message-push trigger — diagnosed 2026-08-16
+
+`supabase/migrations/20260816140000_restore_message_push_trigger.sql`.
+**APPLIED TO STAGING 2026-08-16, verified. NOT applied to production.**
+Gates: `flutter analyze mobile` → **0 errors, 0 warnings** (476 infos,
+unchanged); `cd mobile && flutter test` → **+727, All tests passed!**, exit 0.
+
+### Staging replay — done, with a red→green pair
+
+Applied to `zqltaobarpcuantrqxha` in this order. Staging was missing
+`notification_mutes`/`push_muted`, so **20260601007700 had to go first** — it is
+the only dependency gap, and it needs nothing staging lacked.
+
+| # | file | applied as |
+|---|---|---|
+| 1 | `20260601007700_reach_limits_and_blocking.sql` | `20260815215008_reach_limits_and_blocking` |
+| 2 | `20260816120000_ugc_terms_reports_and_contact_pause.sql` | `20260815215054_ugc_terms_reports_and_contact_pause` |
+| 3 | `20260816140000_restore_message_push_trigger.sql` | `20260815215112_restore_message_push_trigger` |
+
+The MCP assigns its own version, so the ledger names do **not** match the local
+filenames — the same drift §1.5 already tracks. Recorded here so the mapping is
+not lost.
+
+Four things were proven rather than assumed:
+
+- **The guard refuses.** Running 140000 *before* 120000 raised
+  `P0001: notify_message() does not consult push_muted - apply 20260816120000
+  before restoring message push`. It cannot land in the wrong order.
+- **Red→green on the real fault.** After 120000, staging's trigger was dropped
+  by hand to reproduce production exactly (`messages_triggers → (none)`), then
+  140000 restored it (`message_notify_on_insert -> notify_message`).
+- **Nothing regressed.** All four notifiers still carry BOTH `push_muted` AND
+  the `x-notify-secret` header 004700 added by catalogue (4/4 and 4/4).
+  `notification_mutes` kind CHECK is `reach, care, contact`. `content_reports`
+  has RLS on and **0 policies**, as designed.
+- **Second run is a no-op**, tested not claimed: re-running both files left
+  1 trigger, 1 kind CHECK, 2 tos policies, 2 report indexes — no duplicates.
+
+The rollback line is proven too — dropping the trigger by hand is exactly the
+rollback SQL in the file's footer, and it worked.
+
+### Staging is ~43 migrations behind — NOT fixed here
+
+Staging's ledger stops at `20260811173828`; local has 102+ files. Everything
+from `20260601005600` (diag_events_bounded) through `20260815100000`
+(app_release_apk_url) is absent, and `20260601003800_unblock_account_deletion`
+is missing entirely while 003900+ are applied. Only 007700 was replayed, because
+it was the blocker; replaying the other ~42 is the §1.5 reconciliation job and
+was deliberately not started as a side effect of this task.
+
+### Root cause — it was dropped on purpose, out of band
+
+An out-of-band statement recorded on prod ONLY as ledger version
+**`20260812013012_no_message_push`** dropped `message_notify_on_insert`. There
+is no file for it in `supabase/migrations`, no commit, and no BRAIN entry
+saying why. Sole description in the repo:
+`docs/guides/PRODUCTION-AUDIT-2026-08-15.md:216`, which refuted a reported
+"per-message push fanout, 1.44M invocations/day" on the grounds that the
+trigger no longer exists.
+
+- **Not a repo migration.** Only `20260601003100` names the trigger, and it
+  CREATES it. No `drop trigger` on `messages` exists anywhere in the directory.
+- **Not a partial apply of 003100.** Commit `8302bce` (2026-08-11) traced a
+  live message push end to end — "Every hop worked - trigger, edge function,
+  FCM, the background isolate, the notification" — so the trigger existed and
+  fired the day before the drop. That same commit argued *against* killing it:
+  "killing the trigger would hand back 'she never texted me / the app is
+  broken' to every couple."
+- **Why 003100 never put it back.** Prod was baselined 2026-08-10 with
+  `supabase migration repair --status applied` (commit `194f134`,
+  `migrations/README.md`), so every `20260601*` version is recorded applied and
+  can never replay — and `db push` is not the deployment mechanism here anyway
+  (§1.5 of the release runbook). Nothing was ever going to re-create it.
+- **Timing, unverified.** `20260812013012` sits inside the 2026-08-11→12
+  cross-couple-push-leak window (`ce5a902`, `c504979`, build 5). Whether the
+  drop was deliberate containment during that window or collateral is NOT
+  recorded. Only the ledger row settles it:
+  `select version, name, statements from supabase_migrations.schema_migrations
+  where version = '20260812013012';`
+
+### The observable symptom was NOT confirmed
+
+Nobody sent a message and nobody read `net._http_response`. Do this before
+applying, so there is a red-to-green pair rather than a hopeful patch:
+
+```sql
+select t.tgname from pg_trigger t
+ where t.tgrelid = 'public.messages'::regclass and not t.tgisinternal;
+-- expect [] before, one row after
+
+-- send one message, other handset backgrounded, then:
+select status_code, content, created
+  from net._http_response order by created desc limit 10;
+-- expect NO new row before (nothing posts), a 200 after
+```
+
+`supabase/diagnostics/verify_applied.sql` already carries this check and has
+been reporting `MISSING -> message_push.sql` since 2026-08-12 with nobody
+running it.
+
+### Restoring it also switches the contact pause on for messages
+
+`20260816120000` put `push_muted(couple_id, sender_id, 'message')` in
+`notify_message`'s body, but a guard inside an unattached function guards
+nothing. The new migration therefore **refuses to run** if `notify_message()`
+does not already mention `push_muted` — restoring an unguarded message push
+would hand a paused contact back the one channel they could still interrupt
+with. Apply `20260816120000` first.
+
+Rollback is one line, in the file's footer:
+`drop trigger if exists message_notify_on_insert on public.messages;`
+
+---
+
+## §COORDINATION — who is doing what (multi-session board)
+
+**Several Claude sessions edit this repo at the same time.** This section is the
+shared board. Every session: read it before starting, append to it after every
+completed piece of work. Do not rewrite other sessions' entries.
+
+**Rules that came out of actually colliding:**
+- **Never `git add -A`.** Stage only what you touched. Check `git diff --stat`
+  on shared files (this file, `build.gradle.kts`, `pubspec.yaml`,
+  `release_gate.dart`, the manifests) and confirm the hunks are yours. Say in
+  the commit body what you deliberately left for someone else.
+- **Re-read before editing.** Anchored edit scripts that assert `count == 1`
+  and abort on drift are the correct shape — an aborted script is a success.
+- **Never report a green gate you did not just run.** Another session can red it
+  between your run and your message.
+- **Version bumps collide.** Check the built APK's real `versionCode` before
+  bumping — two builds sharing a number breaks the R2 self-update flow. This
+  already happened once: build 29 existed as an APK while the tree said 29.
+- **`create or replace` silently discards another session's version** of the
+  same function. Check before touching a DB function.
+
+### In flight as of 2026-08-16
+
+| Session | Working on | Touches | Status |
+|---|---|---|---|
+| Play/UGC (this one) | Contact pause, content reports, ToS gate | `notification_mutes` kind widen, `push_muted`, **`notify_message`**, **`notify_call`**, new `content_reports` + `tos_acceptances`, router redirect, Settings/Chat/Gallery UI, `giphy_service` rating | migration written, NOT applied |
+| R2 self-update | In-app APK update | `update_service.dart`, `update_sheet.dart`, `tool/release.sh`, sideload manifest FileProvider, `app_release.apk_url` | committed |
+| — | `ReleaseGate.check()` never runs at startup | `main.dart`, `release_gate.dart` | background task |
+| — | Restore missing `message_notify` trigger | trigger only — NOT the `notify_message` body | **applied + verified on STAGING**, incl. `007700` and `20260816120000`; prod untouched — §17 |
+
+### ⚠ LIVE COLLISION — `notify_message`
+
+Two sessions are on the same function right now. The UGC work adds a
+`push_muted` guard to `notify_message`; the trigger-restore task recreates it.
+Whichever applies second wins and silently drops the other's change.
+
+**Whoever lands second must:** read the LIVE body first
+(`pg_get_functiondef` on prod `sopictusdonlvuezmfep`), keep BOTH the
+`x-notify-secret` header that `20260601004700` added by catalogue AND the
+`push_muted` guard, and re-run the verification block that asserts all four
+notifiers still mention `push_muted`.
+
+**RESOLVED 2026-08-16 — the collision does not exist.** The trigger-restore
+migration `20260816140000` contains no `create or replace function`. It creates
+the trigger and nothing else, and opens with a guard that RAISES if the live
+`notify_message()` does not already mention `push_muted` — so it cannot
+overwrite the UGC body, and it cannot land before it either. Apply order:
+`20260816120000` first, `20260816140000` second. See §17.
+
+### §16 UGC compliance — built, SKEPTIC SAID FAIL, one fixed 2026-08-16
+
+Contact pause + content reports + ToS gate are implemented. Migration
+`20260816120000_ugc_terms_reports_and_contact_pause.sql` is WRITTEN, **NOT
+APPLIED**. Gate green: analyze 0/0, `flutter test` 727 pass.
+
+**PRODUCTION BUG CONFIRMED BY ME, NOT RELAYED — chat push has been dead.**
+`select tgname from pg_trigger where tgrelid='public.messages'` returns **NONE**
+on sopictusdonlvuezmfep. `notify_message` exists and nothing calls it, while
+`call_invites` has `call_notify_on_insert` and `reach_events` has
+`reach_notify_on_insert`. So calls and reaches push; MESSAGES DO NOT, and have
+not since 2026-08-12. Fix written by another session as
+`20260816140000_restore_message_push_trigger.sql` — unapplied.
+
+**Second production bug, found by the implementer:** `ReleaseGate.check()` has
+never run. It sat in `main.dart`'s `Future.wait` beside `SupabaseService.init()`,
+and `client` is a `late final` assigned on init's LAST line — so it threw
+`LateInitializationError` into its own fail-open catch on every launch for ~30
+builds. min_build gate, block screen and self-updater were all dead. Another
+session fixed it and added `startup_order_test.dart`.
+
+**SKEPTIC VERDICT: FAIL.** Fixed so far: **1 of 4 HIGH**.
+- FIXED — the About card claimed "Everything ... is encrypted ... Nobody else
+  can read it — including us." False, and contradicted by the Terms link
+  fifteen lines below it, by `privacy-policy.md` §2, and by
+  `chat_repository.dart:371` inserting `'body'` in the clear. Replaced with the
+  honest split. **This was my sentence and it was the worst kind of bug: a
+  security claim the app itself disproves.**
+- OPEN — a ToS version bump discards an offline acceptance AND downgrades the
+  local marker (`terms_gate.dart:66-76`); the `server == null` branch only
+  covers a first-ever acceptance, so every later version re-prompts forever.
+- OPEN — every sign-in shows the full ToS to users who accepted months ago:
+  `main.dart:104` only settles it for a cold-start restored session, and
+  `loadProfile()` sets `loading:false` BEFORE the terms load resolves.
+- OPEN — users must agree to a literal `{{CONTACT_EMAIL}}` and to a privacy
+  policy that is not published (`milesPrivacyPolicyUrl` is empty).
+- OPEN (medium) — `/terms` has no back and no sign-out, so signing into the
+  wrong account means accept or uninstall. `onboarding_escape_test.dart`
+  litigated exactly this for `/couple`; `/terms` sits above it with less escape.
+- OPEN (medium) — `schema_snapshot.json` was HAND-EDITED to describe the schema
+  after the unapplied migration, so the drift guard now vouches for a claim
+  nobody checked. `generated_on` still says 2026-08-15.
+  `scripts/dump_schema_snapshot.sql` referenced in its header does not exist.
+- OPEN (medium) — the verify block at `20260816120000:295-307` cannot detect a
+  DELETED function: `NULL not like '%…%'` is NULL and the `if` never fires. Its
+  sibling `20260816140000:57` wraps it in `coalesce(…,'')` correctly.
+- OPEN (medium) — "Pause notifications" renders with no partner, where
+  `mute_partner` raises `no partner`; the Report tile ten lines below guards the
+  same state correctly.
+
+**Version churn:** pubspec and ReleaseGate both read 35; production
+`app_release.latest_build = 32`, `min_build = 2`. Check both against production
+before the next build — several sessions bumped this file today.
+
+---
+
+## §18 ReleaseGate.check() had never run — fixed 2026-08-16
+
+**Root cause.** `ReleaseGate.check()` sat inside the startup `Future.wait` in
+`mobile/lib/main.dart`, in the same list as `SupabaseService.init()`.
+`SupabaseService.client` is `static late final` (supabase_service.dart:11)
+assigned on the LAST line of `init()`. Dart evaluates a `Future.wait` argument
+list eagerly left-to-right, and an `async` body runs synchronously only as far
+as its first `await` — so `check()` read `client` before it was assigned,
+threw `LateInitializationError`, and its own fail-open `catch` logged
+`[release] gate unreachable, allowing: LateError`. Every launch, since the gate
+was written. Deterministic, not a race.
+
+Reproduced mechanically (two class pairs, one per arrangement):
+broken → `gate unreachable, allowing: LateError`, gate ran: false;
+fixed → gate read client as CLIENT, gate ran: true.
+
+**What was dead the whole time** — everything downstream of that one call:
+- the `min_build` block screen (`main.dart` reads `ReleaseGate.isBlocked`);
+- `UpdateService.available`, which requires `ReleaseGate.apkUrl` — assigned
+  ONLY inside `check()`. So the in-app self-updater from §14 has never been
+  able to fire in any shipped build.
+
+**Fix.** Moved out of the wait, onto the line below it beside `TermsGate.load()`
+(which was already placed there for exactly this reason, with a comment saying
+so):
+
+    await Future.wait([TermsGate.load(), ReleaseGate.check()]);
+
+Both need to complete before `runApp` — `_blocked` is a plain static with no
+listenable, so a late check leaves the first frame ungated. Folding it into the
+existing awaited line adds zero extra serial round-trips versus the old code.
+
+**Siblings audited — all four are clean.** `MilesApp.loadSetupFlag`,
+`DisguiseService.loadEnabled`, `UpdateService.loadAllowed` and `Diag.init` do
+not touch `SupabaseService.client` anywhere in their call graphs; each one's
+first `await` is SharedPreferences or a MethodChannel.
+
+**found, not fixed** — `ErrorReporter._send` (`lib/core/diag/diag.dart:73`)
+reads `SupabaseService.client` inside a bare `catch (_)`, and both global error
+handlers are installed at `main.dart:51-58`, *before* `init()` is called. Any
+error between those two points is silently unreportable — including the
+`StateError('Supabase env missing')` thrown at `main.dart:68`, i.e. exactly the
+launch failure the reporter exists to catch. Not a race, a fixed window. Off
+this task's scope; separate fix.
+
+**Regression test.** `mobile/test/unit/hygiene/startup_order_test.dart`, in the
+existing hygiene idiom. Three assertions: the gate does not share the wait, the
+gate is awaited before `runApp`, and no class called in that wait reads the
+client (per class body, not per file — `diag.dart` holds both the innocent
+`Diag` and the guilty `ErrorReporter`). Proven to go RED on the old arrangement
+and green on the new; the bug is silent by construction, so a test is the only
+thing that would ever catch it again.
+
+**Production checked before activating the gate** (`sopictusdonlvuezmfep`):
+`min_build = 2`, `latest_build = 32`, `apk_url`/`apk_sha256` non-null.
+`buildNumber` is 35, so `_blocked = 35 < 2` is **false — nobody is blocked**.
+Activating the gate is safe at these values. `tool/release.sh` only ever moves
+`latest_build` (it says so at line 171); `min_build` changes by hand only.
+
+**The bootstrap problem — read before shipping.** Every installed build has the
+dead gate, so `UpdateService.available` is false on all of them and no handset
+will ever be *offered* the fixed build. Publishing `latest_build` does nothing
+for them. The first fixed build has to be sideloaded by hand; self-update works
+from that install onward. Do not raise `min_build` above 2 until the fixed
+build is actually on the handsets, or they will be blocked with no in-app way
+out (the block screen's "Update now" is gated on `UpdateService.available`).
+
+**Gates.** `flutter analyze mobile` → 0 errors, 0 warnings (infos only; the two
+touched files contribute none — `main.dart` keeps its one pre-existing
+`require_trailing_commas`, the new test file is clean). `flutter test` → 727
+passed. Not committed.
+
+### §16a Push scope decided by the owner — 2026-08-16
+
+**"i don't want message and call notifications."** Acted on, minimally:
+
+- `20260816120000` no longer rewrites `notify_message` / `notify_call`. A mute
+  guard on a channel that never fires is dead code, so both functions are left
+  exactly as production has them. The verify block now checks two functions,
+  not four.
+- **NOTHING was removed from production.** `message_notify_on_insert` is already
+  absent (that is why chat push is off); `call_notify_on_insert` is still
+  attached and still works. Dropping it is a separate deliberate act, not a side
+  effect of a compliance migration — and it would mean her phone cannot ring
+  unless the app is already open. Left for the owner.
+- Do NOT apply `20260816140000_restore_message_push_trigger.sql`. It restores
+  the message push he does not want.
+- Fixed while in there: the verify block used `NULL not like '%…%'`, which is
+  NULL, so `if NULL then` never fired — it could not detect a DELETED function,
+  the loudest failure it existed to catch. Now `coalesce(…, '')`.
+
+The contact pause therefore covers reach + care on the server, and drops
+incoming call OFFERS on the client (`call_controller`) — which is the channel
+that actually rings while the app is open. That is its honest scope; the ToS
+copy should not claim more.
+
+**App otherwise frozen at owner's request.** The three open HIGH findings in
+§16 (offline ToS acceptance downgrade, re-prompt on every sign-in, placeholder
+contact email) are UNFIXED and still block a Play submission.

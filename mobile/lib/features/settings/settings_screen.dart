@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/release_gate.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
@@ -24,6 +25,12 @@ import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/features/legal/terms_screen.dart';
+import 'package:miles/features/legal/terms_text.dart';
+import 'package:miles/features/safety/contact_pause.dart';
+import 'package:miles/features/safety/report_service.dart';
+import 'package:miles/features/safety/safety_sheets.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -239,6 +246,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
     }
+  }
+
+  /// Local time, because the row is telling the user when their own phone
+  /// starts ringing again. Indefinite pauses have no end to name.
+  String _pauseSubtitle() {
+    final until = ContactPause.expiresAt;
+    if (until == null) return 'On until you turn it back on';
+    final local = until.toLocal();
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    return 'On until $hh:$mm';
   }
 
   Future<void> _saveProfile() async {
@@ -747,6 +765,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
             const SizedBox(height: 28),
 
+            // ── Safety ───────────────────────────────────────────
+            // Every label here is neutral, and that is the design rather than
+            // squeamishness: this list may be read over the user's shoulder by
+            // the person the pause is about. Nothing says "block", nothing
+            // names anybody, and nothing shows a report after it is filed.
+            const _SectionHeader(label: 'Safety'),
+            ValueListenableBuilder<bool>(
+              valueListenable: ContactPause.active,
+              builder: (context, paused, _) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  paused
+                      ? Icons.notifications_off
+                      : Icons.notifications_off_outlined,
+                  color: paused ? MilesColors.gilt : MilesColors.taupe,
+                ),
+                title: const Text('Pause notifications',
+                    style: TextStyle(color: MilesColors.cream50),),
+                subtitle: Text(
+                  paused
+                      ? _pauseSubtitle()
+                      : 'Quiet for a while, without ending anything',
+                  style:
+                      const TextStyle(color: MilesColors.taupe, fontSize: 12),
+                ),
+                onTap: () => showContactPauseSheet(context),
+              ),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading:
+                  const Icon(Icons.flag_outlined, color: MilesColors.taupe),
+              title: const Text('Report a problem',
+                  style: TextStyle(color: MilesColors.cream50),),
+              subtitle: const Text('Something here that should not be',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
+              // partner while paired, so submit_report can resolve who the
+              // report is about; app_content otherwise, which files it against
+              // Miles rather than against a person who does not exist yet.
+              onTap: () => showReportSheet(
+                context,
+                target: partner == null
+                    ? ReportTarget.appContent
+                    : ReportTarget.partner,
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
             // ── Account ──────────────────────────────────────────
             const _SectionHeader(label: 'Account'),
             ListTile(
@@ -767,13 +834,183 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onTap: _busy ? null : _deleteAccount,
             ),
 
+            const SizedBox(height: 28),
+
+            // ── About ────────────────────────────────────────────
+            const _SectionHeader(label: 'About'),
+            const _AboutCard(),
+
             const SizedBox(height: 40),
-            const Center(
-              child: Text('Miles · v0.1.0',
-                  style: TextStyle(fontSize: 11, color: MilesColors.faint),),
-            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Who made this, and which build you are actually holding.
+///
+/// The version is read from [ReleaseGate] rather than typed here. The line it
+/// replaces said `v0.1.0` in a build numbered 30 — a hardcoded string in a
+/// footer nobody looks at is exactly the thing that drifts, and it is also the
+/// first thing anyone reports a bug with.
+class _AboutCard extends StatelessWidget {
+  const _AboutCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: MilesColors.surface1,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Wordmark(size: 22),
+          const SizedBox(height: 10),
+          const Text(
+            'Feel close, even from here.',
+            style: TextStyle(color: MilesColors.taupe, fontSize: 13),
+          ),
+          const SizedBox(height: 18),
+          const _AboutRow(label: 'Developed by', value: 'R&D Dev'),
+          const _AboutRow(
+            label: 'Version',
+            value: '${ReleaseGate.versionName} (${ReleaseGate.buildNumber})',
+          ),
+          // What the release check actually came back with. "No prompt
+          // appeared" was three separate causes over two days and none of them
+          // could be told apart from the outside — a stale build with no
+          // updater in it, a channel flag, and a version that was already
+          // current all look identical. This says which.
+          _AboutRow(
+            label: 'Latest available',
+            value: ReleaseGate.latestBuild > ReleaseGate.buildNumber
+                ? '${ReleaseGate.latestBuild} — update ready'
+                : ReleaseGate.apkUrl == null
+                    ? 'not reachable'
+                    : '${ReleaseGate.latestBuild} — up to date',
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            // The honest split, and it has to stay honest: the Terms link is
+            // fifteen lines below this and says the same thing. Chat text and
+            // media are stored where the operator could read them; the vault,
+            // memory threads and the wish jar are sealed on this phone with a
+            // key the server never holds. Claiming all of it was encrypted was
+            // a sentence this screen contradicted with its own second link.
+            'Your vault, memory threads and wish jar are sealed on this phone '
+            'with a key we never hold. Chat and its media are not — they are '
+            'stored, and never read. The Terms below say exactly which is '
+            'which.',
+            style: TextStyle(
+              color: MilesColors.taupe,
+              fontSize: 12,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              // In-app, not a URL: opening Chrome throws the user out of an app
+              // whose launcher identity is a cover, and the terms have to be
+              // readable with no connection — they gate the app on first run.
+              _AboutLink(
+                label: 'Terms',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TermsScreen(readOnly: true),
+                  ),
+                ),
+              ),
+              const Text(' · ',
+                  style: TextStyle(color: MilesColors.faint, fontSize: 12),),
+              _AboutLink(
+                label: 'Privacy Policy',
+                onTap: () => _openPrivacyPolicy(context),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The policy is written (docs/legal, web/privacy-policy.html) and not yet
+  /// hosted, so [milesPrivacyPolicyUrl] is empty. Say that, rather than open a
+  /// browser onto a 404 and leave the user wondering what else is missing.
+  Future<void> _openPrivacyPolicy(BuildContext context) async {
+    final url = Uri.tryParse(milesPrivacyPolicyUrl);
+    if (milesPrivacyPolicyUrl.isEmpty || url == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('The privacy policy is not published yet.'),),
+      );
+      return;
+    }
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't open that link.")),
+        );
+      }
+    }
+  }
+}
+
+class _AboutLink extends StatelessWidget {
+  const _AboutLink({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: MilesColors.gilt,
+          fontSize: 12,
+          decoration: TextDecoration.underline,
+          decorationColor: MilesColors.gilt,
+        ),
+      ),
+    );
+  }
+}
+
+class _AboutRow extends StatelessWidget {
+  const _AboutRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 104,
+            child: Text(
+              label,
+              style: const TextStyle(color: MilesColors.faint, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }

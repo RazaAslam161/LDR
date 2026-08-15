@@ -38,6 +38,8 @@ import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/home/location_map_screen.dart';
+import 'package:miles/features/legal/terms_gate.dart';
+import 'package:miles/features/legal/terms_screen.dart';
 import 'package:miles/features/profile/partner_profile_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
@@ -58,8 +60,8 @@ PresenceRouteObserver? presenceRouteObserver;
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {
   return GoRouter(
-    refreshListenable:
-        Listenable.merge([_SessionListenable(ref), CryptoCore.keyless]),
+    refreshListenable: Listenable.merge(
+        [_SessionListenable(ref), CryptoCore.keyless, TermsGate.accepted],),
     // Presence is published from here rather than from each screen, so every
     // route reports — including the 31 that never did, and any added later.
     observers: [presenceRouteObserver = PresenceRouteObserver(ref)],
@@ -82,6 +84,21 @@ GoRouter buildRouter(Ref ref) {
       // ── Not signed in → only the auth pages are reachable. ──
       if (!session.isAuthenticated) {
         return isAuthRoute ? null : '/signin';
+      }
+
+      // ── Signed in: the terms, before anything can be posted. ──
+      // This one `if` is the whole enforcement. There are around thirty-five
+      // paths that put content into this app; checking at each of them is how
+      // thirty-four end up unchecked, and how the next one added is the
+      // thirty-fifth. Above the onboarding funnel because agreeing to the terms
+      // precedes having a profile or a partner, and because a brand-new account
+      // is exactly the one that has agreed to nothing.
+      //
+      // Enforced only here, client-side, this release: build 31 has never heard
+      // of tos_acceptances, and a server-side gate would lock it out of its own
+      // account with no update channel to escape through.
+      if (TermsGate.needsAcceptance) {
+        return path == '/terms' ? null : '/terms';
       }
 
       // ── Signed in: walk the onboarding funnel profile → couple → app. ──
@@ -125,6 +142,7 @@ GoRouter buildRouter(Ref ref) {
           path == '/welcome' ||
           path == '/couple' ||
           path == '/role-setup' ||
+          path == '/terms' ||
           path == '/') {
         return '/app';
       }
@@ -157,6 +175,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/role-setup',
         builder: (context, state) => const RoleSetupScreen(),
+      ),
+      GoRoute(
+        path: '/terms',
+        builder: (context, state) => const TermsScreen(),
       ),
       // Deliberately outside the funnel's sweep-to-/app list: a phone that
       // reached here has no key, and bouncing it into the app is how that

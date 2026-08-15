@@ -12,3 +12,6 @@ build/
 pubspec.lock
 /android/key.properties
 *.keystore
+
+# Release credentials for tool/release.sh --ship. Never committed.
+tool/.release-env

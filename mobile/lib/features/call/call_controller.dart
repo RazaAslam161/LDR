@@ -12,6 +12,7 @@ import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/features/call/call_foreground.dart';
 import 'package:miles/features/call/call_stats.dart';
+import 'package:miles/features/safety/contact_pause.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -373,6 +374,15 @@ class CallController extends ChangeNotifier {
   Future<void> handlePendingCall(
       String callId, String fromName, bool fallbackVideo,) async {
     if (state != CallState.idle || callId.isEmpty) return;
+    // notify_call already refuses to send this push while the pause is on, so
+    // reaching here means a payload that outlived the pause being set — a push
+    // delivered late, or one sitting in pendingCall from before the app was
+    // resumed. Ringing off a stale payload is the same interruption by a
+    // slower route.
+    if (ContactPause.isActive) {
+      Diag.record(DiagArea.call, 'pending_call_paused', corr: callId);
+      return;
+    }
     unawaited(reconnect()); // make sure the call channel is live for the answer + ICE
     try {
       final row = await SupabaseService.client
@@ -1338,6 +1348,21 @@ class CallController extends ChangeNotifier {
   void _onSignal(Map<String, dynamic> payload) {
     if (payload['from'] == _myUid) return; // ignore our own echo
     final kind = payload['kind']?.toString();
+    // The pause is enforced in notify_call, which stops the PUSH — and the ring
+    // does not only arrive by push. An offer also comes down this broadcast
+    // channel, which is subscribed for the whole time the app is open, so a
+    // server-side mute alone leaves a paused partner able to light up the
+    // screen with a full-screen incoming call. That is the loudest channel in
+    // the app; silencing the quiet one and not this one is not a pause.
+    //
+    // Dropped before the state machine sees it, so nothing adopts the call id
+    // or leaves `ended` for it. To the caller it looks like a phone that did
+    // not answer, which is exactly what the pause promises to look like.
+    if (kind == 'offer' && ContactPause.isActive) {
+      Diag.record(DiagArea.call, 'offer_dropped_paused',
+          corr: payload['call_id']?.toString(),);
+      return;
+    }
     final data = payload['data'];
     final map =
         data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};

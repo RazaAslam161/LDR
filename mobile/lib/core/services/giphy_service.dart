@@ -78,7 +78,11 @@ class GiphyService {
     final url = Uri.https('api.giphy.com', '/v1/gifs/$endpoint', {
       ...params,
       'api_key': key,
-      'rating': 'r',
+      // Was 'r' — the most permissive rating Giphy offers below X, on
+      // third-party content this app has no control over and every user can
+      // surface with one tap. Nothing here is moderated by us, so the ceiling
+      // has to come from the source.
+      'rating': 'pg-13',
       'bundle': 'messaging_non_clips',
     });
     try {

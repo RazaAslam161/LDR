@@ -51,6 +51,8 @@ import 'package:miles/features/chat/widgets/mood_selector.dart';
 import 'package:miles/features/chat/widgets/selectable_message.dart';
 import 'package:miles/features/chat/widgets/typing_indicator.dart';
 import 'package:miles/features/chat/widgets/voice_note_bubble.dart';
+import 'package:miles/features/safety/report_service.dart';
+import 'package:miles/features/safety/safety_sheets.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1365,6 +1367,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       showChatThemePicker(context);
                     case 'clear':
                       _clearConversation();
+                    case 'report':
+                      // No ref: this is the conversation, not one message. The
+                      // per-message route is the selection toolbar below.
+                      showReportSheet(context, target: ReportTarget.partner);
                   }
                 },
                 itemBuilder: (_) => const [
@@ -1373,6 +1379,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   PopupMenuItem(value: 'theme', child: Text('Chat theme')),
                   PopupMenuItem(
                       value: 'clear', child: Text('Clear conversation'),),
+                  PopupMenuItem(
+                      value: 'report', child: Text('Report a problem'),),
                 ],
               ),
           ],
@@ -1442,6 +1450,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                           _saveMessageMedia(one);
                                         },
                                       ),
+                                    IconButton(
+                                      tooltip: 'Report',
+                                      icon: const Icon(Icons.flag_outlined,
+                                          color: MilesColors.cream50,),
+                                      onPressed: () {
+                                        _clearSelection();
+                                        showReportSheet(context,
+                                            target: ReportTarget.message,
+                                            targetRef: one.id,);
+                                      },
+                                    ),
                                   ],
                                   IconButton(
                                     tooltip: 'Delete selected',

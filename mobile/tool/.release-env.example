@@ -1,0 +1,26 @@
+# Copy to tool/.release-env and fill in. That file is gitignored — no key here.
+#
+# release.sh sources tool/.release-env if it exists, so `--ship` runs unattended
+# without anything being exported by hand. A non-interactive shell (an agent, a
+# cron job) never reads ~/.bashrc, which is why the file exists at all.
+
+# ── Cloudflare R2 ───────────────────────────────────────────────────────────
+# Account ID: R2 → Overview, or the bucket's Settings → General → S3 API.
+export MILES_R2_ACCOUNT_ID=
+export MILES_R2_BUCKET=miles-releases
+# R2 → Manage API Tokens → Object Read & Write, scoped to the bucket above.
+# The secret is shown once, at creation.
+export MILES_R2_KEY=
+export MILES_R2_SECRET=
+
+# The public URL the app downloads from. The object name is taken from the end
+# of this, so the upload target and the published URL can never drift apart —
+# they did once, and every phone was pointed at a 404.
+export MILES_APK_URL=https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/Miles.apk
+
+# ── Supabase ────────────────────────────────────────────────────────────────
+# Publishing PATCHes public.app_release, which RLS refuses to anon — this is the
+# service_role key, from Supabase → Settings → API. It bypasses RLS entirely, so
+# it lives here and nowhere else.
+export MILES_SUPABASE_URL=https://sopictusdonlvuezmfep.supabase.co
+export MILES_SUPABASE_SERVICE_KEY=

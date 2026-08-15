@@ -35,6 +35,8 @@ import 'package:miles/features/call/call_pip.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
+import 'package:miles/features/legal/terms_gate.dart';
+import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -79,15 +81,33 @@ Future<void> main() async {
     // because the answer decides whether the first frame is a cover at all —
     // asking later would flash one on a build that has no disguise to show.
     DisguiseService.loadEnabled(),
+    // Whether this channel may install its own APK. Read here rather than at
+    // the point of use so the answer is settled before AppShell can offer one.
+    UpdateService.loadAllowed(),
     // One-time chore, not instrumentation: clears the retired upload flag and
     // deletes the trace file every install still carries. Runs until every
     // handset has run it once.
     Diag.init(),
-    // Before anything talks to the backend. A build below the minimum is told
-    // to update rather than discovering it as a screen that will not load —
-    // this app is sideloaded, so old versions never go away on their own.
-    ReleaseGate.check(),
   ]);
+  // Deliberately AFTER that group rather than inside it. SupabaseService.client
+  // is a `late final` assigned on the LAST line of init(), so anything sharing
+  // the same Future.wait reads it before it is assigned. ReleaseGate.check sat
+  // in that group and had therefore never once run: it threw
+  // LateInitializationError into its own fail-open catch on every launch,
+  // logging "gate unreachable, allowing" and taking the min_build block with
+  // it — and UpdateService.available, which needs the apkUrl only check()
+  // assigns.
+  //
+  // Both awaited, because the first frame consults both and neither has
+  // anything to rebuild it later: the redirect reads TermsGate on its very
+  // first evaluation (unawaited, an account that agreed months ago is bounced
+  // to the terms for a frame and back out again), and MilesApp.build reads
+  // ReleaseGate.isBlocked, a plain static with no listenable.
+  await Future.wait([TermsGate.load(), ReleaseGate.check()]);
+  // Not awaited: nothing before the first frame reads it, and the server-side
+  // mute is the real enforcement — this copy only exists so the ring that
+  // arrives over the realtime channel can be dropped too.
+  unawaited(ContactPause.load());
   // No disguise on this channel means no door to come through: the real app is
   // the first frame, and MilesApp.raiseCover keeps it that way.
   if (!DisguiseService.enabled) MilesApp.showRealApp.value = true;

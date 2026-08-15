@@ -14,8 +14,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
-        android:label="News"
-        android:icon="@mipmap/ic_launcher">
+        android:label="Miles"
+        android:icon="@mipmap/ic_launcher_play">
 
         <!-- Hands the downloaded APK to the system installer as a content:// URI.
              Authority matches MainActivity's install(): "$packageName.fileprovider".
@@ -31,18 +31,34 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
-        <!-- ── Launcher disguises ────────────────────────────────────────────
+        <!-- ── Launcher identities ───────────────────────────────────────────
              One alias per identity the user can choose; MainActivity.kt enables
              exactly one at a time over the `miles/disguise` channel. The label
              and icon a launcher shows come from HERE, not from Dart, so
              lib/features/disguise/disguise_profile.dart must be kept in step.
 
-             EXACTLY ONE may ship with android:enabled="true". News is it, so an
-             upgrade keeps the identity the app was installed with. -->
+             EXACTLY ONE may ship with android:enabled="true". Miles is it: the
+             app installs as itself and offers the covers on first open, so the
+             identity on the launcher is always one the owner picked. An upgrade
+             keeps whichever identity the app is currently wearing, because the
+             enabled state lives on the device, not in this file. -->
+        <activity-alias
+            android:name=".AliasMiles"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Miles"
+            android:icon="@mipmap/ic_launcher_play">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <activity-alias
             android:name=".AliasNews"
             android:targetActivity=".MainActivity"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
             android:label="News"
             android:icon="@mipmap/ic_launcher">

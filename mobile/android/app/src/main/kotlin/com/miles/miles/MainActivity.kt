@@ -308,6 +308,11 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/updater")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // Whether this channel may self-update at all. Its own
+                    // BuildConfig flag, not inferred from the disguise ones:
+                    // those describe what the launcher shows and have already
+                    // changed meaning once.
+                    "isAllowed" -> result.success(BuildConfig.SELF_UPDATE)
                     "canInstall" -> {
                         result.success(
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

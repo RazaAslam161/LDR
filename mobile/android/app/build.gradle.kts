@@ -100,9 +100,18 @@ android {
             dimension = "channel"
             isDefault = true
             buildConfigField("boolean", "DISGUISE_ENABLED", "true")
-            // Installs already disguised. This channel never goes near Play,
-            // where an identity the user did not pick is the whole violation.
-            buildConfigField("boolean", "PLAIN_DEFAULT", "false")
+            // Installs as Miles, under its own name and icon, and offers the
+            // covers on first open — the same arrangement as the play channel.
+            // An identity nobody chose is a worse default even where no policy
+            // forbids it: the owner picks the cover, having been shown what it
+            // does.
+            buildConfigField("boolean", "PLAIN_DEFAULT", "true")
+            // Only this channel may install its own APK. Kept as its own flag
+            // rather than inferred from the two above, both of which have
+            // legitimately changed meaning already — DISGUISE_ENABLED is now
+            // true on BOTH channels, and a self-updater gated on it would have
+            // started offering downloads inside a Play build.
+            buildConfigField("boolean", "SELF_UPDATE", "true")
             // The debug keystore's password is the literally-documented string
             // "android" on every machine on earth, and anything signed with it
             // can be re-signed by anyone. Falling back is tolerable only
@@ -128,6 +137,10 @@ android {
             // Installs as Miles, under its own name and icon, and stays that
             // way until the owner asks otherwise.
             buildConfigField("boolean", "PLAIN_DEFAULT", "true")
+            // Never. An app that downloads and installs its own APK is a Device
+            // and Network Abuse strike, and the permission plus FileProvider
+            // that back it are declared only in src/sideload.
+            buildConfigField("boolean", "SELF_UPDATE", "false")
             // No fallback: the taskGraph check below stops the build instead of
             // handing back an artifact Play will reject.
             if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
