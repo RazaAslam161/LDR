@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer: Android tints this to the wallpaper palette and only
+     reads its alpha, so the two-tone flame collapses to one silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,26 C66,42 74,52 74,62 C74,73 65,82 54,82 C43,82 34,73 34,62 C34,52 42,42 54,26 Z" />
+</vector>

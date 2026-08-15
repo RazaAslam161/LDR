@@ -84,6 +84,18 @@ class AppLock {
   /// Prompt biometrics (with device-credential fallback). Returns true on
   /// success. On any failure returns false (caller falls back to the PIN) — and
   /// logs the real reason instead of swallowing it.
+  /// Whether this device can put up ANY system unlock at all. False means no
+  /// screen lock is enrolled — a state where [authenticate] can only ever
+  /// return false, and telling the user "that needs your unlock" is advice
+  /// that cannot be followed.
+  static Future<bool> available() async {
+    try {
+      return await _auth.isDeviceSupported();
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> authenticate() async {
     try {
       final ok = await _auth.authenticate(

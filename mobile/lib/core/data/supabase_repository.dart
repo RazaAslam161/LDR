@@ -69,8 +69,36 @@ class SupabaseRepository {
     //
     // Order matters: restore, then back up. Backing up first would seal the
     // brand-new throwaway key over the good one and make the loss permanent.
-    final recovered = await KeyEscrow.restore(password);
-    if (!recovered) await KeyEscrow.backup(password);
+    if (!await KeyEscrow.restore(password)) {
+      // Nothing came back, so ask the seed — not the write below — whether this
+      // device is stranded. A failed upsert is a retry; a phone that holds its
+      // key and hit one bad response would otherwise be marked keyless, routed
+      // into the ceremony from every screen, and refused escrow from then on.
+      // Recorded rather than navigated, because a `context.go` from the sign-in
+      // page loses the race with the redirect the auth event has already
+      // started — and a cold start never comes back through here at all.
+      final stranded =
+          !await CryptoCore.hasSeed() || await CryptoCore.isKeyless();
+      await KeyEscrow.backup(password);
+      if (stranded) await CryptoCore.markKeyless();
+    }
+  }
+
+  /// Confirms [password] really belongs to the signed-in account.
+  ///
+  /// The escrow prompt is the one place a password arrives unverified, and the
+  /// wrap it produces can never be checked afterwards by anybody: a typo seals
+  /// a row that opens for nobody and looks exactly like a good one. Signing in
+  /// again is the only check a client has.
+  static Future<bool> reauthenticate(String password) async {
+    final email = _c.auth.currentUser?.email;
+    if (email == null) return false;
+    try {
+      await _c.auth.signInWithPassword(email: email, password: password);
+      return true;
+    } on AuthException {
+      return false;
+    }
   }
 
   /// Emails a password-reset link.
@@ -90,7 +118,26 @@ class SupabaseRepository {
 
   /// Sets a new password for the session opened by a recovery link.
   static Future<void> updatePassword(String newPassword) async {
+    // Bound first, like sign-in: key material is stored per account, and a
+    // recovery link can land here before loadProfile has bound anything — in
+    // which case both the question below and the mark further down would go to
+    // the unscoped names, where nothing reads them again.
+    final uid = _c.auth.currentUser?.id;
+    if (uid != null) await CryptoCore.bindAccount(uid);
+    // Asked before anything changes, because the answer decides whether the
+    // escrow row may be touched at all — and reading the seed is what mints one
+    // when it is absent, so a moment later this can no longer be answered.
+    final hasSeed = await CryptoCore.hasSeed();
     await _c.auth.updateUser(UserAttributes(password: newPassword));
+    if (!hasSeed) {
+      // A reset from a reinstall or a new phone. The row is sealed under the
+      // password they have just forgotten and there is nothing here to re-seal
+      // it with; writing anyway would replace the only copy of their key with
+      // a stand-in minted on the first Closer screen, silently and for good.
+      // Leave the row alone and send them to the partner, who still has it.
+      await CryptoCore.markKeyless();
+      return;
+    }
     // The escrow is sealed under the OLD password, which in the reset flow is
     // the one the user has just forgotten. Left alone, the next reinstall fails
     // to open it, mints a throwaway key, and the following sign-in escrows that
@@ -187,6 +234,15 @@ class SupabaseRepository {
   /// history simply rendered as an empty screen with no explanation. Detect
   /// the replacement so the UI can say what happened.
   static Future<void> publishMyPublicKey() async {
+    // Refused, not deferred — and FIRST, before keyWasReplaced can be set. A
+    // rewrap in flight means the partner is about to seal the OLD couple key
+    // to this device's new public key; publishing it first rotates the key
+    // they are sealing against, and the blob that lands opens nothing.
+    // Checked before the replacement probe too: flagging keyWasReplaced
+    // mid-ceremony makes Closer announce "gone forever" about the exact
+    // content the ceremony is minutes from restoring.
+    if (await CryptoCore.publicationHeld()) return;
+
     final uid = SupabaseService.currentUserId;
     if (uid == null) throw StateError('Not signed in');
     final pub = await CryptoCore.getMyPublicKeyB64();

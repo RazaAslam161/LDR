@@ -37,9 +37,13 @@ class _SignInPageState extends ConsumerState<SignInPage> {
         email: _email.text.trim(),
         password: _password.text,
       );
-      if (mounted) {
-        context.go(widget.redirect ?? '/app');
-      }
+      // Deliberately not deciding on /rewrap here. The auth event fires inside
+      // signIn and the router sweeps this page away before the Argon2id tail
+      // finishes, so `if (mounted)` silently dropped that navigation for the
+      // exact cohort that needed it. The router reads CryptoCore.keyless
+      // instead — which signIn has just written, and which a cold start reads
+      // back from storage.
+      if (mounted) context.go(widget.redirect ?? '/app');
     } catch (e) {
       setState(() {
         _loading = false;

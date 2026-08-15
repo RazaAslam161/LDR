@@ -30,6 +30,34 @@ class DisguiseService {
   /// "never asked".
   static const _chosenKey = 'disguise_chosen';
 
+  /// Whether this build carries the disguise at all.
+  ///
+  /// The play channel declares no `<activity-alias>` and installs under the
+  /// app's own name and icon, so nothing there is being hidden: a cover screen
+  /// would front an honest app with a fake news reader, and the picker's nine
+  /// invented identities are the Deceptive Behavior finding that channel exists
+  /// to avoid.
+  ///
+  /// True until [loadEnabled] says otherwise. The wrong answer that way costs a
+  /// build that has never shipped a moment of cover; the wrong answer the other
+  /// way strips the disguise off a sideloaded phone mid-session.
+  static bool enabled = true;
+
+  /// Reads [enabled] from the native BuildConfig, once. Must complete before
+  /// runApp — see main().
+  static Future<void> loadEnabled() async {
+    try {
+      // Same hard timeout as reconcile(), for the same reason: this is on the
+      // cold-start path and nothing may block the first frame on it.
+      enabled = await _channel
+              .invokeMethod<bool>('isEnabled')
+              .timeout(const Duration(seconds: 2)) ??
+          true;
+    } catch (_) {
+      // Non-Android host, or the query failed — keep the disguise.
+    }
+  }
+
   /// The active profile. Reads the persisted choice rather than the platform,
   /// because Android cannot tell us which alias is enabled without a query per
   /// component, and the two are kept in lockstep by [apply].
@@ -44,8 +72,11 @@ class DisguiseService {
     }
   }
 
+  /// Answers true unasked when there is no disguise to offer, so AppShell's
+  /// one-time onboarding prompt never pushes a picker with nothing in it.
   static Future<bool> hasChosen() async =>
-      (await SharedPreferences.getInstance()).getBool(_chosenKey) ?? false;
+      !enabled ||
+      ((await SharedPreferences.getInstance()).getBool(_chosenKey) ?? false);
 
   /// Marks the picker as answered without changing the identity — for the user
   /// who taps "Keep it as it is".

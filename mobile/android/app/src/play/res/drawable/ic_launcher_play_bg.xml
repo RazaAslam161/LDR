@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full-bleed on purpose: an adaptive-icon background is masked by the
+     launcher, and rounded corners here would show as light gaps at the mask
+     edge. MilesColors.night. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FF120A0C" />
+</shape>

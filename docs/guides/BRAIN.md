@@ -1,7 +1,7 @@
 # BRAIN.md — session handoff
 
 Working state for **Miles** (Flutter + Supabase couples app). Read this instead
-of the chat history. Last updated 2026-08-14.
+of the chat history. Last updated 2026-08-15.
 
 ---
 
@@ -25,9 +25,33 @@ client-side diagnosis.**
 
 ---
 
+## 0b. Instruction system rebuilt (2026-08-15)
+
+- **`~/.claude/CLAUDE.md` is now the single live rulebook** — 26 sections, global
+  (every project, every model, every message). It contains everything that used
+  to be scattered: the working agreement, all session instructions, LDR + Us
+  project rules, plus 8 new engineering sections from a 14-agent mythos-run
+  synthesis (No silent failures, Round-trip every serialization boundary, Least
+  privilege and secrets, Rollback before rollout, Debugging one-hypothesis, Red
+  gate is a wall, Conflicts resolve by rank, A reversed "fixed" amends the file).
+- New standing rule: **"Mythos-peak intelligence, every message"** — max depth +
+  multi-agent orchestration on every substantive task.
+- Readable snapshot with verbatim quotes: `docs/guides/instructions.md`.
+- **Precedence: CLAUDE.md > this file.** BRAIN.md records state; CLAUDE.md
+  records what he wants. This file already burned one session by carrying a
+  stale "build unprompted once green" line — when they disagree, CLAUDE.md wins.
+- Nothing app-side changed in this session: no code, no migrations, no build.
+  Working tree additions: `docs/guides/instructions.md` (this repo), CLAUDE.md
+  edits (outside the repo). Nothing committed.
+
+---
+
 ## 1. Where things are
 
 - Repo `E:\LDR`, app in `mobile/`, branch **`fix-sprint`** (no remote, 260+ commits).
+- New since the audit: `docs/guides/PLAY-RELEASE-RUNBOOK.md`,
+  `docs/legal/privacy-policy.md`, and a top-level `web/` holding the two pages
+  that must be publicly hosted (`privacy-policy.html`, `delete-account.html`).
 - Supabase prod **`sopictusdonlvuezmfep`** (staging `zqltaobarpcuantrqxha`).
 - Test device: OnePlus 8 / **IN2015**, Android 13, arm64. adb at
   `C:/Users/razaa/AppData/Local/Android/Sdk/platform-tools/adb.exe`.
@@ -78,6 +102,91 @@ Vault upload is **confirmed working** by the user.
 
 ## 4. Open, with diagnosis
 
+### 4-0. FULL PRODUCTION AUDIT — 2026-08-15 — read this first
+
+`docs/guides/PRODUCTION-AUDIT-2026-08-15.md`. 8 dimensions, every critical/high
+adversarially re-verified against live prod + the working tree. **6 critical, 21
+high.** Two findings were REFUTED in verification and are listed there as
+do-not-action (per-message push fanout; redeem_pairing_invite couple-splitting).
+
+**The fixes are IN THE WORKING TREE, UNCOMMITTED**, across six tracks — `sql`,
+`edge`, `android`, `crypto`, `scale`, `docs`. Nothing was committed and nothing
+was built. `git status` before assuming a file is yours; six tracks touched this
+tree in one day.
+
+**The ordered release procedure is now written: `docs/guides/PLAY-RELEASE-RUNBOOK.md`.**
+It carries the real commands (keystore, `key.properties`, `maps.properties`, the
+AAB build for the new `play` flavor), every Play Console declaration, the
+Supabase upgrade, the NOTIFY_SHARED_SECRET seeding, and the sideload→Play
+migration sequence. Do not reconstruct any of that from this file.
+
+The six criticals, short form, with where each now stands:
+1. Launcher disguise = Play Deceptive Behavior → account strike, not just
+   rejection. **Addressed:** the android track added a `play` product flavor
+   (`src/play/AndroidManifest.xml` strips the nine aliases and the disguised
+   label/icon; `BuildConfig.DISGUISE_ENABLED=false` stops the Dart covers
+   mounting). `sideload` is unchanged.
+2. Release build is debug-signed (no `key.properties`) → upload rejected.
+   **Addressed in build config:** `play` now *fails the build* with an explicit
+   GradleException when the key is missing, rather than falling back to debug.
+   The keystore itself still does not exist — that is a human step.
+3. 218 MB universal APK, not an AAB → format rejected before review.
+   **Addressed:** `flutter build appbundle --release --flavor play`, R8 +
+   resource shrink on for that flavor only. **Never built or device-tested.**
+4. No privacy policy anywhere. **Written:** `docs/legal/privacy-policy.md` +
+   `web/privacy-policy.html`. Derived from the code, honest about what is *not*
+   E2EE. Needs three placeholders filled and hosting.
+5. No **web** account-deletion URL. **Built:** `web/delete-account.html`, wired
+   to the deployed `account-delete` edge function (email → 6-digit code →
+   `delete_my_account` on the caller's own JWT). Contract verified live:
+   `{"ok":true}` on request, 401 `invalid_code` on a bad code. Needs the Magic
+   Link email template to contain `{{ .Token }}` or step two has nothing to
+   verify.
+6. **Prod Supabase is on the FREE plan.** Verified again 2026-08-15: org
+   `fpmfuptznczuuksqybnx` plan=free, storage **525 MB / 1 GB across 651
+   objects**, DB 35 MB. 200-connection realtime ceiling; auto-pause. **Still
+   free. Blocks everything else** and no code change touches it.
+
+Three things the audit found broken on prod — **all three now fixed and verified
+live** (`rewrap_table=t | notify_secret=1 | cron_jobs=10 | deliver_rituals=1`):
+- `partner_rewrap_requests` now exists, applied as `20260815065624_partner_rewrap`.
+  Note the ledger name: prod records migrations under **different timestamps than
+  the local filenames**, which is why `db push` is not the deployment mechanism
+  here.
+- `deliver_rituals` proc + cron job now exist.
+- `care-notify` now has `verify_jwt=true`; `reach-notify` and `reap-storage`
+  **fail closed** on a missing `NOTIFY_SHARED_SECRET` (403). The secret IS seeded
+  on prod today — a restored or rebuilt project must seed it or pushes and
+  storage reaping die silently.
+
+Also still open and unfixed at release time: HIBP leaked-password protection is
+disabled in Auth settings, and `reach_notifications.dart:65,157` still dresses
+**Reach** as `AndroidNotificationCategory.call` with a full-screen intent — which
+is exactly what Play's USE_FULL_SCREEN_INTENT declaration refuses.
+
+**Root process problem — STILL UNFIXED, and it is the one that will bite.** Local
+migrations and prod have drifted BOTH ways. The two previously-unapplied files
+(008400 `deliver_rituals`, 008700 `partner_rewrap`) have now landed, but the
+ledger records them under **different timestamps than the local filenames**
+(`20260815070944_deliver_rituals`, `20260815065624_partner_rewrap`) — 102 local
+files against a differently-numbered `supabase_migrations.schema_migrations`. On
+top of that: SQL applied on prod with no local file (`no_message_push`, the
+pairing-retirement statements), and `20260601006000` is 18 lines of comments and
+zero SQL. A rebuild from `supabase/migrations` produces a different and in places
+more vulnerable schema than prod, and `supabase db push` is NOT how this project
+deploys. Reconcile before any release — runbook phase 1.5.
+
+The audit found `release_gate.dart:27` at `buildNumber = 26` against pubspec
+`+27` (broken at commit 5d70262). **Re-checked 2026-08-15: both now read 27.**
+prod `app_release.min_build` is still 2, so the trap is unarmed — but the first
+real min_build raise locks out the entire fleet, and nothing enforces that the
+two numbers stay in lockstep. Check both by hand every build.
+
+Baseline at audit time: `flutter analyze` exit 0 (470 info lints, no
+errors/warnings), `flutter test` `+680: All tests passed!`. Both are green and
+caught none of the above. **Re-run both before believing the tree is clean** —
+six tracks edited it after that baseline was taken.
+
 ### 4a. Vault read path — THE next job
 He asked for this and it is not done. Current design: thumbnails are encrypted
 `bytea` **inside the `vault_items` row**, so every grid tile costs a decrypt.
@@ -124,8 +233,16 @@ orphan every encrypted row. That is the `SecretBoxAuthenticationError` on memory
 threads, fantasy jar and vault tiles. **The data was never corrupted; the key
 was destroyed.**
 
-`core/data/key_escrow.dart` seals the seed under `HKDF(password, salt)` +
-XChaCha20-Poly1305 and stores it server-side. Server sees ciphertext only.
+`core/data/key_escrow.dart` seals the seed and stores it server-side. Server
+sees ciphertext, a salt and a nonce only.
+
+**The KDF line above is out of date — read §11 and §11a for the current one.**
+It is now `Argon2id(HMAC(password, 'miles/key-escrow/wrap/v2'), salt)` at
+m=19456 kB / t=2 / p=1, and every row carries its own `kdf` + `kdf_params` so
+hardening the constants later cannot orphan existing rows. The labelled HMAC
+buys domain separation and nothing more: **the same password goes to GoTrue in
+plaintext on every sign-in**, so anyone holding the password holds the escrow.
+The privacy policy states that plainly — do not soften it there.
 
 **`restore` runs BEFORE `backup` in `SupabaseRepository.signIn` — that ordering
 is the entire fix.** Backing up first seals the throwaway key over the good one.
@@ -1101,3 +1218,97 @@ row delete, which `_restore` now acts on, for the partner who arrives later.
 This repo is NOT dart-formatted (verified against HEAD), so that added ~90 lines
 of pure whitespace churn to an otherwise small diff. Do not run `dart format`
 here.
+
+### §13 Partner Rewrap — skeptic round 2, fixed 2026-08-15
+
+Round-1 verdict FAIL → 12 findings fixed → round-2 re-verify: 10/12 PASS,
+1 FAIL (H3) + 2 new highs (N1, N2). All three now fixed:
+
+- **H3 (real fix this time):** the current-key exclusion in `adoptRetiredKeys`
+  read `_sharedKey`, which is null on the entire claim path — the guard was
+  dead code. `claim()` now calls `deriveSharedKey` BEFORE adopting, so the
+  disaster shape (chain whose only key is the already-rotated one) counts
+  added == 0 and the screen refuses to say "your history is back" over it.
+- **N1:** the 15s poll ran `claim()` ~40×/window and its blanket catch tore the
+  ceremony down on any dropped packet, then told the user "start again" — into
+  the 60s rate limiter. Now only `SecretBoxAuthenticationError`/`ArgumentError`
+  abort; everything else retries silently (claim is idempotent up to the delete).
+- **N2 (archive-fatal chain):** `open()`'s failure path released a hold it did
+  not create — rate-limited second tap destroyed the FIRST request's publication
+  guard; opening Closer then rotated the key. Now captures the prior hold and
+  restores it on failure.
+- **N3/N4:** `_rewrapOpen` re-checked after awaits (two stacked screens claiming
+  over each other); all screen exits use pop-when-pushed so AppShell's offer
+  flag actually resets.
+
+**CONCURRENT SESSION WARNING, verified twice:** another session is editing this
+tree at the same time — it moved `android:label` out of `<application>` (its own
+comment says deliberate), added `ServerClock.observe` inside `PartnerRewrap.open`
+(good fix: presence never feeds the clock on the pre-shell path), added
+`deferRecovery()` + a "Not now" button to `rewrap_screen`. Two of my edit scripts
+aborted safely on drifted anchors. Full-suite failures in disguise/manifest/
+sync_state/permissions_bootstrap belong to THAT session's in-flight work, not
+rewrap. Verify which failures are yours before fixing anything.
+
+Migration 20260601008700 is APPLIED to production (verified live: 4 policies,
+column-grant-only UPDATE, rate case, trigger, realtime). Staging not touched.
+
+---
+
+## §12 Audit fixes — end state, 2026-08-15
+
+Full audit: `docs/guides/PRODUCTION-AUDIT-2026-08-15.md`. Release procedure:
+`docs/guides/PLAY-RELEASE-RUNBOOK.md`. Everything below is UNCOMMITTED in the
+working tree; HEAD is still `a650c1f`.
+
+**Gates, actual output at end of session:**
+- `flutter analyze` → exit 0, 473 issues, **0 errors, 0 warnings**
+- `flutter test` → **692 tests, All tests passed!**, exit 0
+
+**Applied to prod `sopictusdonlvuezmfep` (9 migrations, local files match versions):**
+deliver_rituals worker (171 successful cron runs) + a catch-up loop so a ritual
+that slips >1h is not trapped forever; pairing invites consumed on leave_couple
+and redeem refuses dissolved couples (0 live codes on dead couples, 5 dissolved
+couples existed); 20 FK indexes on the delete_my_account cascade; RLS initplans
+and duplicate cycle SELECT policies merged; couples UPDATE narrowed to
+name/anniversary_date/modest_mode/primary_tz; orphaned notify_care_nudge dropped.
+Performance advisor now returns only `unused_index` INFO.
+
+**Edge functions:** care-notify → 410 tombstone (was anon-reachable, no secret,
+acted on caller-supplied couple_id); turn-credentials → 401 for anon + real
+auth check; reach-notify/reap-storage fail CLOSED with constant-time compare;
+account-delete deployed for the Play-required web deletion path.
+
+### TWO THINGS ARE STAGED, NOT DONE — read before touching escrow
+
+1. **The escrow wrap-key fix is half-shipped ON PURPOSE.** Build 27 READS the
+   new `argon2id-v2` format but still WRITES `argon2id`. Flipping the write now
+   would brick recovery for every phone still on build 26: it cannot open a v2
+   row, mints a stand-in seed, and seals the stand-in over the real one. Order
+   is the protocol in `release_gate.dart` — ship 27, raise `min_build` to 27,
+   THEN flip the write in 28. `min_build` is still **2**.
+2. **`ReleaseGate.buildNumber` is now 27 and matches pubspec `0.1.0+27`.** They
+   drifted at commit `5d70262` (pubspec went 25→27, gate went 25→26). Nothing
+   enforces this; check both by hand every release.
+
+### Still open, and why
+- **Supabase org is on the FREE plan.** One couple already uses 520 MB of the
+  1 GB storage cap; 200 concurrent realtime connections; auto-pause after ~7
+  days idle. Thousands of users is impossible until this is Pro. Payment — user only.
+- **No release keystore.** The `play` flavor now FAILS the build without one
+  (sideload keeps the debug fallback deliberately). Keystore creation needs a
+  password — user only.
+- **Maps API key is still live in git history** and cannot be pinned to a release
+  SHA-1 until the keystore exists. Rotate + restrict in GCP — user only.
+- **`--flavor sideload` is now required** for `flutter run` and `flutter build apk`.
+  A bare `assembleRelease` enters the play graph and fails on the missing key.
+- **The play flavor's R8 output is UNVERIFIED on device.** Tap through calls,
+  touch-map and ML Kit before shipping an AAB.
+- **Chat is not E2EE.** `chat_repository.dart:371` inserts `'body'` in the clear;
+  there is no `CryptoCore.encrypt` anywhere under `lib/features/chat/`. Only
+  Memory Threads, the Closer vault and Fantasy Jar text are encrypted. The new
+  privacy policy states this honestly. Encrypting chat is a large separate job
+  (search, media, push previews, decode pipeline all touch it).
+- **Vault previews are still in-row bytea** (avg 64 KB, max 323 KB). The list
+  query is now projected and paginated, but moving previews to storage objects
+  is still the §4a job.

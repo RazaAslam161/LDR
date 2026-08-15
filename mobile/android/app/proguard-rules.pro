@@ -1,13 +1,17 @@
 # R8 keep rules for the release build.
 #
-# Wired into the release buildType in build.gradle.kts, but inert until
-# isMinifyEnabled flips to true there - R8 never reads a keep file it is not
-# running for. Not dead: it is what makes that flip a one-line change.
+# LIVE for the play channel (minifyEnabled is turned on for it in
+# build.gradle.kts) and inert for sideload, which still ships unminified - R8
+# never reads a keep file it is not running for.
 #
 # R8 shrinks and obfuscates. Anything reached by reflection or JNI is invisible
 # to it and gets stripped or renamed unless kept here. These plugins all do
 # one or the other, so each is a class of runtime crash R8 would otherwise
 # introduce silently — invisible to unit tests, only reproducible on-device.
+#
+# flutter_webrtc, image_cropper (uCrop + OkHttp) and flutter_inappwebview ship
+# their own rules as consumerProguardFiles, so they are applied from the AARs
+# and deliberately not repeated here.
 
 # Flutter engine and embedding (reflection from native).
 -keep class io.flutter.** { *; }

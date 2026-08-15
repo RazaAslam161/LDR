@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
@@ -42,9 +44,16 @@ class SessionState {
   bool get hasProfile => profile != null;
   bool get isLinked => couple != null;
 
+  /// Deliberately without `session`.
+  ///
+  /// It used to take one, as `session: session ?? this.session` — which meant
+  /// the null gotrue delivers on a signedOut event (a revoked, expired or
+  /// reused refresh token) was swallowed and the app stayed authenticated
+  /// against a dead token: every call 401s, the router's guard never fires,
+  /// and nothing changes until the process is killed. A session now only ever
+  /// changes where the whole state is rebuilt, in view.
   SessionState copyWith({
     bool? loading,
-    Session? session,
     Profile? profile,
     Couple? couple,
     Profile? partner,
@@ -53,7 +62,7 @@ class SessionState {
   }) {
     return SessionState(
       loading: loading ?? this.loading,
-      session: session ?? this.session,
+      session: session,
       profile: profile ?? this.profile,
       couple: couple ?? this.couple,
       partner: partner ?? this.partner,
@@ -75,9 +84,20 @@ class SessionNotifier extends StateNotifier<SessionState> {
     state = SessionState(loading: false, session: current);
 
     _authSub = SupabaseService.authChanges.listen((event) async {
-      state = state.copyWith(
+      // The server ended it: a revoked, expired or reused refresh token. Not a
+      // state to patch — everything held for that session has to go, the same
+      // way it goes when the user asks.
+      if (event.event == AuthChangeEvent.signedOut) {
+        await _endSession();
+        return;
+      }
+      state = SessionState(
         loading: false,
         session: event.session,
+        profile: state.profile,
+        couple: state.couple,
+        partner: state.partner,
+        partnerOnline: state.partnerOnline,
       );
       // A password-reset link opens a short-lived session and fires this. It
       // has to be surfaced, or the router's onboarding funnel sweeps the user
@@ -268,6 +288,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // caller can forget — and it must happen while the session is still valid,
     // because the token is cleared with an authenticated write.
     await FcmService.forgetDevice();
+    await SupabaseRepository.signOut();
+    // The signedOut event does this too. Called here as well because a sign-out
+    // that threw on the way to the server must still not leave the previous
+    // couple's bytes on this handset; everything below is idempotent.
+    await _endSession();
+  }
+
+  /// Everything that must not outlive a session, however it ended.
+  Future<void> _endSession() async {
     final ch = _presenceChannel;
     _presenceChannel = null;
     if (ch != null) {
@@ -275,7 +304,6 @@ class SessionNotifier extends StateNotifier<SessionState> {
         await SupabaseService.client.removeChannel(ch);
       } catch (_) {}
     }
-    await SupabaseRepository.signOut();
     // Both are process-scoped and outlive the session: a map of live signed
     // URLs to this couple's storage objects, and uploads accepted for it.
     // Neither belongs to whoever signs in on this handset next.
@@ -288,6 +316,18 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // nothing; signing out is different, because the next account on this
     // handset has no business inheriting the previous couple's objects.
     unawaited(EncryptedMediaCache.clearAll());
+    // And the PLAINTEXT layer beside it, which nothing ever emptied. Chat
+    // photos and gallery images render through CachedNetworkImage, so the
+    // decrypted bytes sit in flutter_cache_manager's store under stable keys —
+    // readable at the filesystem level by whoever signs in next, and in the
+    // image cache until something evicts them.
+    unawaited(DefaultCacheManager().emptyCache());
+    imageCache
+      ..clear()
+      ..clearLiveImages();
+    // A push that arrived for the couple that just left. Left standing it
+    // opens their memory on the next account's first frame.
+    pendingMemory.value = null;
     // The keypair and the derived couple key are process-scoped too, and every
     // decrypted byte still held anywhere belongs to the account that just left.
     // The account's sealed seed stays in storage — signing back in must work

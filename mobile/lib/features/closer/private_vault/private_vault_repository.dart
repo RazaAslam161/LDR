@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -5,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
@@ -175,33 +177,150 @@ class PrivateVaultRepository {
 
   static final _c = SupabaseService.client;
 
-  /// Streams all non-deleted vault items for the current couple, newest first,
-  /// syncing in real-time.
-  static Stream<CloserLoadResult<VaultItem>> streamItems(String coupleId) {
-    return _c
+  /// Named columns, and deliberately NOT `select()`.
+  ///
+  /// `deleted_by` and `deleted_at` are never rendered, and every byte of a
+  /// vault row is expensive: `ciphertext` holds the in-row preview — 64 KB on
+  /// average and 323 KB at the top end in production — which PostgREST sends as
+  /// `\x`+hex, two characters per byte.
+  static const _columns = 'id,couple_id,kind,ad,ciphertext,nonce,created_by,'
+      'created_at,retention,reconfirm_due,delete_requested,delete_requested_by,'
+      'delete_requested_at,storage_path,media_mime_type';
+
+  /// A grid's worth of rows plus a margin, so the first screen paints from one
+  /// request and the rest arrive underneath it.
+  static const _pageSize = 30;
+
+  /// One page of live items, oldest bound by [before] on `created_at`.
+  ///
+  /// Deleted rows are excluded server-side. They used to be filtered on the
+  /// device, which meant their preview ciphertext was downloaded in full and
+  /// then thrown away.
+  static Future<CloserLoadResult<VaultItem>> _page(
+    String coupleId, {
+    DateTime? before,
+  }) async {
+    var q = _c
         .from('vault_items')
-        .stream(primaryKey: ['id'])
+        .select(_columns)
         .eq('couple_id', coupleId)
-        .order('created_at', ascending: false)
-        .map((rows) {
-          final items = <VaultItem>[];
-          var unreadable = 0;
-          for (final row in rows) {
-            if (row['deleted'] == true) continue;
-            try {
-              items.add(VaultItem.fromJson(row));
-            } catch (e) {
-              unreadable++;
-              // The type, not the exception: a bytea parse failure prints the
-              // offending value, which is ciphertext from the row.
-              debugPrint('vault: unreadable row: ${e.runtimeType}');
+        .eq('deleted', false);
+    if (before != null) q = q.lt('created_at', before.toIso8601String());
+
+    final res = await q.order('created_at', ascending: false).limit(_pageSize);
+    final items = <VaultItem>[];
+    var unreadable = 0;
+    for (final row in res) {
+      try {
+        items.add(VaultItem.fromJson(JsonUtils.asMap(row)));
+      } catch (e) {
+        unreadable++;
+        // The type, not the exception: a bytea parse failure prints the
+        // offending value, which is ciphertext from the row.
+        debugPrint('vault: unreadable row: ${e.runtimeType}');
+      }
+    }
+    return CloserLoadResult(
+      List<VaultItem>.unmodifiable(items),
+      unreadable: unreadable,
+    );
+  }
+
+  /// All non-deleted vault items for the couple, newest first, syncing live.
+  ///
+  /// `.stream()` used to do this in one unbounded request that re-ran on every
+  /// connect AND every reconnect — every row's preview ciphertext, hex-doubled,
+  /// down the wire again because the socket had blinked. Here the seed is read
+  /// a page at a time and each realtime change patches ONE entry, so a
+  /// reconnect costs a rejoin and nothing else.
+  ///
+  /// Pages are chased rather than waited for: the first emits as soon as it
+  /// lands and the grid fills downward, so nothing pops and no spinner appears
+  /// between them.
+  static Stream<CloserLoadResult<VaultItem>> streamItems(String coupleId) {
+    final byId = <String, VaultItem>{};
+    var unreadable = 0;
+    var open = false;
+    ManagedSubscription? sub;
+    late final StreamController<CloserLoadResult<VaultItem>> controller;
+
+    CloserLoadResult<VaultItem> snapshot() {
+      final live = byId.values.toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return CloserLoadResult(
+        List<VaultItem>.unmodifiable(live),
+        unreadable: unreadable,
+      );
+    }
+
+    void apply(supabase.PostgresChangePayload payload) {
+      try {
+        switch (payload.eventType) {
+          case supabase.PostgresChangeEvent.delete:
+            final id = payload.oldRecord['id'];
+            if (id != null) byId.remove(JsonUtils.parseString(id));
+          case supabase.PostgresChangeEvent.insert:
+          case supabase.PostgresChangeEvent.update:
+            final row = payload.newRecord;
+            final id = JsonUtils.parseString(row['id']);
+            if (row['deleted'] == true) {
+              byId.remove(id);
+            } else {
+              byId[id] = VaultItem.fromJson(row);
             }
+          case supabase.PostgresChangeEvent.all:
+            return;
+        }
+      } catch (e) {
+        debugPrint('vault delta: ${e.runtimeType}');
+        return;
+      }
+      if (open) controller.add(snapshot());
+    }
+
+    controller = StreamController<CloserLoadResult<VaultItem>>.broadcast(
+      onListen: () async {
+        // Subscribe BEFORE the seed read, so a change landing between the two
+        // is applied on top of it rather than lost in the gap.
+        open = true;
+        sub = ManagedSubscription.start(
+          () => RealtimeService.coupleTable(
+            channelName: 'vault:$coupleId',
+            table: 'vault_items',
+            coupleId: coupleId,
+            onChange: apply,
+          ),
+        );
+        DateTime? cursor;
+        try {
+          while (open) {
+            final page = await _page(coupleId, before: cursor);
+            if (!open) return;
+            unreadable += page.unreadable;
+            for (final item in page.items) {
+              byId.putIfAbsent(item.id, () => item);
+            }
+            controller.add(snapshot());
+            // items + unreadable is the raw row count, so a short page is the
+            // end of the vault. A page that yielded nothing readable leaves no
+            // timestamp to page past, and the banner already says so.
+            if (page.items.length + page.unreadable < _pageSize) return;
+            if (page.items.isEmpty) return;
+            cursor = page.items.last.createdAt;
           }
-          return CloserLoadResult(
-            List<VaultItem>.unmodifiable(items),
-            unreadable: unreadable,
-          );
-        });
+        } catch (e) {
+          if (open) controller.addError(e);
+        }
+      },
+      onCancel: () {
+        // Backing out of the vault mid-page has to stop the pager too, or it
+        // keeps reading a screen nobody is looking at to its last row.
+        open = false;
+        sub?.dispose();
+        sub = null;
+      },
+    );
+    return controller.stream;
   }
 
   /// Inserts a new encrypted item. The bytes passed in are encrypted

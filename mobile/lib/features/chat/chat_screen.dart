@@ -75,7 +75,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _loading = true;
   String? _coupleId;
   Timer? _typingTimer;
-  Timer? _readTimer;
+  Timer? _tickTimer;
+  Timer? _readAckTimer;
   bool _typingActive = false;
   bool _hasNewMessage = false;
   Message? _replyingTo;
@@ -389,11 +390,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // in-chat again immediately on return.
     if (s == AppLifecycleState.resumed && _coupleId != null) {
       PresenceService.setOnline(_coupleId!, online: true);
-      PresenceService.setChatLastRead(_coupleId!);
       // Android freezes the process on background, so the socket was dead the
       // whole time. Anything sent during that window exists only in Postgres.
       unawaited(_catchUp(trigger: 'resume'));
       unawaited(_refreshPartnerReceipt(source: 'resume'));
+    } else if (s == AppLifecycleState.paused) {
+      // Whatever the coalescing window is still holding has to be written now:
+      // the broadcast that already moved the partner's tick lives only in their
+      // running process, so a cold open on their side reads the row.
+      _flushReadAck('background');
     }
   }
 
@@ -408,13 +413,82 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   int get _maxSeq =>
       _messages.fold<int>(0, (a, m) => m.seq > a ? m.seq : a);
 
-  /// Tell the server we have read up to here. Idempotent and monotonic
+  /// Tell the partner we have read up to here. Idempotent and monotonic
   /// server-side, so a lost or out-of-order ack cannot un-read anything.
-  void _ackRead(String trigger) {
+  ///
+  /// Two halves. The instant one is a broadcast: it moves their tick in
+  /// milliseconds, is never written down, and costs no WAL and no per-row
+  /// policy evaluation. The durable one is coalesced onto a trailing timer,
+  /// because it used to fire every five seconds for every open chat whether or
+  /// not a single message had been read — a heartbeat through postgres_changes,
+  /// which is the path Supabase documents as the one that does not scale.
+  ///
+  /// [flush] for the transitions where the written value has to be right before
+  /// this screen stops existing: open, catch-up, background, close.
+  void _ackRead(String trigger, {bool flush = false}) {
     final seq = _maxSeq;
-    if (seq > 0) {
-      unawaited(ChatReceiptRepository.ackRead(seq, trigger: trigger));
+    if (seq <= 0) return;
+    if (seq > _broadcastReadSeq) {
+      _broadcastReadSeq = seq;
+      unawaited(_moodChannel
+          ?.sendBroadcastMessage(event: 'read', payload: {'seq': seq}),);
     }
+    if (flush) {
+      _flushReadAck(trigger);
+    } else if (seq > _ackedSeq) {
+      _readAckTimer ??= Timer(const Duration(seconds: 15),
+          () => _flushReadAck('read_coalesced'),);
+    }
+  }
+
+  /// Write the watermark down, whether or not this seq has been sent before.
+  /// `ack_read` takes the max server-side, so re-sending costs one row and
+  /// recovers an ack that was dropped — the reason the old timer re-sent an
+  /// unchanged seq, except that it did so twelve times a minute rather than at
+  /// the four moments where being wrong would outlive the screen.
+  void _flushReadAck(String trigger) {
+    _readAckTimer?.cancel();
+    _readAckTimer = null;
+    final seq = _broadcastReadSeq;
+    if (seq <= 0) return;
+    _ackedSeq = seq;
+    unawaited(ChatReceiptRepository.ackRead(seq, trigger: trigger));
+  }
+
+  /// Highest seq sent to `chat_receipts`, and the highest the partner has been
+  /// told about over broadcast. They differ by whatever the coalescing window
+  /// is still holding.
+  int _ackedSeq = 0;
+  int _broadcastReadSeq = 0;
+
+  /// The partner read up to here, over the ephemeral path. Read implies
+  /// delivered.
+  void _onReadBroadcast(Map<String, dynamic> payload) {
+    final seq = payload['seq'];
+    if (seq is! int || seq <= 0) return;
+    _applyPartnerReceipt(ChatReceipt(deliveredSeq: seq, readSeq: seq));
+  }
+
+  /// The partner's position, clamped upward.
+  ///
+  /// Three sources feed it now — the broadcast fast path, the receipts channel
+  /// and the refetch — and they do not arrive in order. A tick that has gone
+  /// green must never turn black again because the slowest of the three
+  /// answered last with what it knew a moment ago.
+  void _applyPartnerReceipt(ChatReceipt r) {
+    if (!mounted) return;
+    final prev = _partnerReceipt;
+    if (prev == null) {
+      setState(() => _partnerReceipt = r);
+      return;
+    }
+    final delivered = r.deliveredSeq > prev.deliveredSeq
+        ? r.deliveredSeq
+        : prev.deliveredSeq;
+    final read = r.readSeq > prev.readSeq ? r.readSeq : prev.readSeq;
+    if (delivered == prev.deliveredSeq && read == prev.readSeq) return;
+    setState(() =>
+        _partnerReceipt = ChatReceipt(deliveredSeq: delivered, readSeq: read),);
   }
 
   Future<void> _refreshPartnerReceipt({required String source}) async {
@@ -435,7 +509,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'prev_delivered_seq': prev?.deliveredSeq,
           'prev_read_seq': prev?.readSeq,
         },);
-    if (r != null && mounted) setState(() => _partnerReceipt = r);
+    if (r != null) _applyPartnerReceipt(r);
   }
 
   /// Pull anything that landed while the socket was down.
@@ -458,7 +532,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // they are also read.
       unawaited(
           ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger),);
-      _ackRead(trigger);
+      _ackRead(trigger, flush: true);
     } catch (e) {
       debugPrint('[chat] catch-up failed: $e');
     }
@@ -503,6 +577,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           .onBroadcast(event: 'mood', callback: _onMoodBurst)
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
+          .onBroadcast(event: 'read', callback: _onReadBroadcast)
           .onBroadcast(event: 'cleared', callback: _onClearedBroadcast)
           // subscribe() took no status callback, so a CHANNEL_ERROR here was
           // silent: the whole broadcast fast path — typing, the instant msg,
@@ -549,7 +624,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       'prev_delivered_seq': prev?.deliveredSeq,
                       'prev_read_seq': prev?.readSeq,
                     },);
-                setState(() => _partnerReceipt = r);
+                _applyPartnerReceipt(r);
               },
             )
             // Same silent join as the mood channel, and worse: this is the only
@@ -575,7 +650,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         },);
       }
 
-      unawaited(PresenceService.setChatLastRead(id));
       // Rejoining a channel does not replay what it missed while gone.
       await _catchUp(trigger: trigger);
       await _refreshPartnerReceipt(source: trigger);
@@ -623,17 +697,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _adoptPending();
     unawaited(PresenceService.setOnline(couple.id, online: true));
     unawaited(PresenceService.setTypingInChat(couple.id, inChat: true));
-    // Read-receipts + "in chat" avatar: mark read now and keep it fresh while
-    // the chat is open (the shell only keeps this screen alive while viewing).
+    // The durable read watermark, written on the two transitions that define it
+    // — arriving and leaving. It used to be re-written every five seconds for
+    // the whole time a chat was open: two upserts per user per 5s, each one
+    // fanned out to the partner through postgres_changes, for a column no
+    // screen in the app reads. The heartbeat that keeps a partner reading as
+    // online is main.dart's 30s app_last_active_at beat, and always was.
     unawaited(PresenceService.setChatLastRead(couple.id));
     await _refreshPartnerReceipt(source: 'chat_open');
-    _ackRead('chat_open');
-    _readTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _ackRead('chat_open', flush: true);
+    _tickTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
-      PresenceService.setChatLastRead(couple.id);
-      // Acks are cheap and idempotent (the server takes the max), so a dropped
-      // one self-corrects rather than stranding a tick forever.
-      _ackRead('read_timer');
       // A tick, not a rebuild. isTrulyOnline is freshness-gated, so a receipt
       // really can decay with nothing else changing — but a bare setState here
       // rebuilt the entire screen every 5 seconds: the full-screen background
@@ -697,6 +771,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             'source': source,
             'was_optimistic': wasOptimistic,
           },);
+          // Their message came over broadcast carrying seq 0, so its arrival
+          // acked nothing. This is the first moment it has a watermark to send.
+          if (wasOptimistic && !m.isMine(SupabaseService.currentUserId)) {
+            _ackRead('seq_bound');
+          }
         }
       }
       trace();
@@ -708,15 +787,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
     final mine = m.isMine(SupabaseService.currentUserId);
-    // I'm viewing the chat, so the partner's new message is read immediately.
-    if (!mine && _coupleId != null) {
-      PresenceService.setChatLastRead(_coupleId!);
-    }
     final atBottom = _isAtBottom();
     setState(() {
       _messages.insert(0, m); // newest-first ordering
       _sortMessages();
     });
+    // I'm looking at the chat, so their message is read the moment it lands.
+    // Edge-triggered, where the old 5s timer re-acked a seq that had not moved
+    // twelve times a minute.
+    if (!mine) _ackRead('incoming');
     // Don't yank a user who's reading history; show a chip instead.
     if (mine || atBottom) {
       _scrollToNewest();
@@ -1158,11 +1237,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     ChatSendQueue.instance.removeListener(_adoptPending);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
-    _readTimer?.cancel();
+    _tickTimer?.cancel();
+    _flushReadAck('chat_close');
     final id = _coupleId;
     if (id != null) {
       PresenceService.setTyping(id, typing: false);
       PresenceService.setTypingInChat(id, inChat: false);
+      PresenceService.setChatLastRead(id);
     }
     final client = SupabaseService.client;
     final c1 = _channel;

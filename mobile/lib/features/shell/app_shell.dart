@@ -6,10 +6,13 @@ import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/partner_rewrap.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
@@ -40,6 +43,8 @@ class AppShell extends ConsumerStatefulWidget {
 class _AppShellState extends ConsumerState<AppShell>
     with WidgetsBindingObserver {
   RealtimeChannel? _reachChannel;
+  ManagedSubscription? _rewrapSub;
+  bool _rewrapOpen = false;
   final Set<String> _shownReach = {};
   CallState _lastCallState = CallState.idle;
 
@@ -148,6 +153,40 @@ class _AppShellState extends ConsumerState<AppShell>
     ref.read(sessionProvider.notifier).reconnectPresence();
   }
 
+  Future<void> _resumeOwnRewrap() async {
+    if (_rewrapOpen || await CryptoCore.heldRequest() == null) return;
+    // Re-checked after the await: this and _offerRewrap fire unawaited side by
+    // side, and both passing the entry guard before either sets the flag ends
+    // with two rewrap screens claiming over each other.
+    if (!mounted || _rewrapOpen) return;
+    _rewrapOpen = true;
+    await context.push('/rewrap');
+    _rewrapOpen = false;
+  }
+
+  /// Opens the rewrap screen when the partner has a live request waiting.
+  ///
+  /// Not a push notification, and none should be added: an FCM payload saying
+  /// "your partner is reinstalling" hands the event to Google, and the voice
+  /// call the ceremony already requires IS the notification.
+  Future<void> _offerRewrap(String coupleId) async {
+    if (_rewrapOpen) return;
+    final RewrapRequest? req;
+    try {
+      req = await PartnerRewrap.pending(coupleId);
+    } catch (_) {
+      // Offline, or a socket that delivered before the session had a token.
+      // Swallowed rather than thrown: this runs unawaited from a realtime
+      // callback, the subscription fires again on the next change, and the
+      // request stands for ten minutes.
+      return;
+    }
+    if (req == null || !mounted || _rewrapOpen) return;
+    _rewrapOpen = true;
+    await context.push('/rewrap');
+    _rewrapOpen = false;
+  }
+
   /// Shows the disguise picker the first time only. Deliberately after pairing
   /// rather than at sign-up: before there is a partner there is nothing on the
   /// phone worth disguising, and an icon-change prompt during onboarding reads
@@ -173,6 +212,25 @@ class _AppShellState extends ConsumerState<AppShell>
     // encrypted memory on their next reinstall. Asked once, here, because this
     // is the first point past login and pairing.
     unawaited(EscrowPrompt.maybeShow(context));
+    // The other half is setting up a new phone and cannot open anything the two
+    // of them wrote. This device still holds the key, so it is the only thing
+    // that can give it back — and a request lives ten minutes, which is why it
+    // is looked for here rather than waited for somewhere quieter.
+    _rewrapSub = ManagedSubscription.start(
+      () => RealtimeService.coupleTable(
+        channelName: 'rewrap:${couple.id}',
+        table: 'partner_rewrap_requests',
+        coupleId: couple.id,
+        onChange: (_) => unawaited(_offerRewrap(couple.id)),
+      ),
+    );
+    unawaited(_offerRewrap(couple.id));
+    // The other direction of the same ceremony: THIS phone asked and then the
+    // process died. The session persists, so a relaunch never crosses sign-in
+    // and its held-check — this is the only place a restarted asker passes
+    // through. pending() cannot surface it (it filters own requests out), so
+    // the hold is the one record that this phone owes the screen a code.
+    unawaited(_resumeOwnRewrap());
     _onPendingChat();
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
@@ -280,6 +338,7 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingChat.removeListener(_onPendingChat);
     pendingMemory.removeListener(_onPendingMemory);
     realtimeResumed.removeListener(_rearmAlwaysOn);
+    _rewrapSub?.dispose();
     final ch = _reachChannel;
     _reachChannel = null;
     if (ch != null) SupabaseService.client.removeChannel(ch);

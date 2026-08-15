@@ -1,0 +1,14 @@
+-- notify_care_nudge() is a loaded gun with nothing holding it. It posts to
+-- /functions/v1/care-notify — a slug retired to a 410 tombstone — carrying an
+-- anon JWT hardcoded in its body and no x-notify-secret header. It is bound to
+-- no trigger: care_nudges fires care_notify_on_insert -> notify_care(), which
+-- posts to reach-notify with the shared secret, and that is the whole live care
+-- path. Being SECURITY DEFINER it is one CREATE TRIGGER away from running as
+-- the owner again, and until then the credential sits in plain prosrc for
+-- anything that can read the catalog.
+--
+-- It was created by no file in this repo — only ever on prod — so this drop is
+-- also the point where the two stop disagreeing about it. 20260601003500
+-- revokes execute on it inside a per-function `exception when
+-- undefined_function` guard, which is why that migration still replays clean.
+drop function if exists public.notify_care_nudge();

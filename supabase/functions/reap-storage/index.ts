@@ -50,6 +50,17 @@ async function notifySecret(): Promise<string | null> {
   return _secret;
 }
 
+// Constant time. `!==` stops at the first byte that differs, and this endpoint
+// will answer as many guesses as anyone cares to send it.
+function secretMatches(got: string | null, expected: string): boolean {
+  const a = new TextEncoder().encode(got ?? "");
+  const b = new TextEncoder().encode(expected);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
 const OK = (drained: number) =>
   new Response(JSON.stringify({ ok: true, drained }), {
     status: 200,
@@ -58,8 +69,11 @@ const OK = (drained: number) =>
 
 Deno.serve(async (req) => {
   try {
+    // No secret configured means no caller can be told apart from an attacker,
+    // and this one deletes files. A restored project drains nothing until an
+    // operator seeds app_secrets; the queue is durable and waits.
     const expected = await notifySecret();
-    if (expected && req.headers.get("x-notify-secret") !== expected) {
+    if (!expected || !secretMatches(req.headers.get("x-notify-secret"), expected)) {
       return new Response(JSON.stringify({ error: "forbidden" }), {
         status: 403,
         headers: { "Content-Type": "application/json" },

@@ -16,27 +16,56 @@ import 'package:miles/features/closer/closer_crypto.dart';
 /// and the vault tiles. Nothing was corrupted. The key that opened it was
 /// thrown away, by the operating system, on purpose.
 ///
-/// The seed is sealed under a key derived from the user's own password and the
-/// sealed form is kept server-side. The server holds ciphertext and a salt; it
-/// never receives the password, so it can never derive the wrapping key. That
-/// keeps the end-to-end property intact while making the history survive a
-/// reinstall.
+/// The seed is sealed under a key derived from the user's own password, and the
+/// sealed form is kept server-side. The server holds ciphertext, a salt and a
+/// nonce, and can derive nothing from those alone.
+///
+/// What is NOT true — and what this file and the migration both used to claim —
+/// is that the server never receives the password. GoTrue receives it in
+/// plaintext on every auth request, and the wrap is derived from that exact
+/// string, so one logged request is the escrowed seed. The wrap that fixes it
+/// has a label of its own ([KeyEscrow._wrapLabel]) and opens here already; it
+/// is not yet what gets WRITTEN, because a build still in the field cannot open
+/// it — see [KeyEscrow.backup]. Against somebody who has captured the password
+/// neither form buys anything: escrow is only ever as strong as the password
+/// and the auth endpoint.
 ///
 /// The cost, stated plainly: a forgotten password means the escrow cannot be
 /// opened either. That is the same trade every honest end-to-end system makes,
 /// and it is better than the current behaviour, which loses everything on a
 /// reinstall the user did not even know was destructive.
-/// Top-level so it can cross an isolate boundary via [compute].
-Future<List<int>> _argon2idDerive(
-  ({String password, Uint8List salt}) args,
+/// Top-level so it can cross an isolate boundary via [compute]. Shared with
+/// PartnerRewrap, which commits to six digits the same memory-hard way rather
+/// than with a hash a row-reader could exhaust.
+Future<List<int>> argon2idDerive(
+  ({String secret, Uint8List salt}) args,
+) =>
+    argon2idDeriveWith(
+      (
+        secret: args.secret,
+        salt: args.salt,
+        m: KeyEscrow._argonMemoryKb,
+        t: KeyEscrow._argonIterations,
+        p: KeyEscrow._argonParallelism,
+      ),
+    );
+
+/// The same derivation at the parameters a stored row was sealed with.
+///
+/// Every escrow row carries its own m/t/p. Deriving with today's constants
+/// instead of the row's makes every existing row underivable the day those
+/// constants are hardened — the same silent, permanent loss escrow exists to
+/// prevent, arriving on a fleet with no update channel.
+Future<List<int>> argon2idDeriveWith(
+  ({String secret, Uint8List salt, int m, int t, int p}) args,
 ) async {
   final key = await Argon2id(
-    memory: KeyEscrow._argonMemoryKb,
-    iterations: KeyEscrow._argonIterations,
-    parallelism: KeyEscrow._argonParallelism,
+    memory: args.m,
+    iterations: args.t,
+    parallelism: args.p,
     hashLength: 32,
   ).deriveKey(
-    secretKey: SecretKey(utf8.encode(args.password)),
+    secretKey: SecretKey(utf8.encode(args.secret)),
     nonce: args.salt,
   );
   return key.extractBytes();
@@ -49,16 +78,46 @@ class KeyEscrow {
 
   /// OWASP's baseline Argon2id configuration. Measured at ~0.5s on the oldest
   /// handset, which is the ceiling worth paying at sign-in.
-  static const kdfArgon2id = 'argon2id';
   static const _argonMemoryKb = 19456;
   static const _argonIterations = 2;
   static const _argonParallelism = 1;
+
+  /// Argon2id over the password itself, and still what [backup] writes.
+  static const kdfArgon2id = 'argon2id';
+
+  /// The same Argon2id over [_escrowSecret] instead of the string GoTrue is
+  /// sent. Read-only until every build that can still seal a row can also open
+  /// one — see [backup].
+  static const kdfArgon2idV2 = 'argon2id-v2';
+
+  /// The column default, and what a row from before the Argon2id migration
+  /// carries — those predate the discriminator entirely.
+  static const _kdfLegacyHkdf = 'hkdf-sha256';
 
   static Map<String, dynamic> get _argonParams => const {
         'm': _argonMemoryKb,
         't': _argonIterations,
         'p': _argonParallelism,
       };
+
+  /// Domain separation, and the whole of what it is worth.
+  ///
+  /// The password goes to GoTrue in plaintext on every auth request. Deriving
+  /// the wrap from that same string meant the two secrets were one secret, so
+  /// an endpoint that logs its request body holds the key to every escrowed
+  /// seed. One HMAC under a label nothing else uses makes them different bytes.
+  /// It does not make them independent — anyone holding the password can run
+  /// this line too — and nothing available on a phone whose user may be
+  /// standing in front of a new one can.
+  static const _wrapLabel = 'miles/key-escrow/wrap/v2';
+
+  static Future<String> _escrowSecret(String password) async {
+    final mac = await Hmac.sha256().calculateMac(
+      utf8.encode(password),
+      secretKey: SecretKey(utf8.encode(_wrapLabel)),
+    );
+    return base64Encode(mac.bytes);
+  }
 
   /// Derive the wrapping key. Never leaves the device.
   ///
@@ -75,14 +134,28 @@ class KeyEscrow {
     String password,
     Uint8List salt, {
     required String kdf,
+    Map<String, dynamic>? params,
   }) async {
-    if (kdf != kdfArgon2id) return _legacyWrapKey(password, salt);
+    // Anything this build does not recognise is a row from before the Argon2id
+    // migration, which carried no discriminator at all.
+    if (kdf != kdfArgon2id && kdf != kdfArgon2idV2) {
+      return _legacyWrapKey(password, salt);
+    }
     final bytes = await compute(
-      _argon2idDerive,
-      (password: password, salt: salt),
+      argon2idDeriveWith,
+      (
+        secret: kdf == kdfArgon2id ? password : await _escrowSecret(password),
+        salt: salt,
+        m: _param(params, 'm', _argonMemoryKb),
+        t: _param(params, 't', _argonIterations),
+        p: _param(params, 'p', _argonParallelism),
+      ),
     );
     return SecretKey(bytes);
   }
+
+  static int _param(Map<String, dynamic>? params, String key, int fallback) =>
+      (params?[key] as num?)?.toInt() ?? fallback;
 
   /// Rows sealed before the Argon2id migration. Kept only so [restore] can open
   /// one and immediately re-wrap it; nothing writes this format any more.
@@ -117,21 +190,41 @@ class KeyEscrow {
     }
   }
 
-  /// Seal this device's seed under [password] and store it.
+  /// Seal this device's seed under [password] and store it. True when a row was
+  /// actually written.
   ///
   /// Called after a successful sign-in, when the password is in hand and the
   /// keypair is known. Idempotent: re-wrapping with the same password simply
   /// replaces the row, which is also what makes a password change recoverable
   /// as long as it happens while the old key is still on the device.
-  static Future<void> backup(String password) async {
+  ///
+  /// The return value is the point. Every no-op here used to be indistinguish-
+  /// able from a success, so a reset on a phone with no seed reported "done"
+  /// over a row still sealed under the forgotten password.
+  static Future<bool> backup(String password) async {
     try {
       final uid = SupabaseService.currentUserId;
       final seed = await CryptoCore.exportPrivateSeed();
-      if (uid == null || seed == null) return;
+      if (uid == null || seed == null) return false;
+      // A device in recovery holds a stand-in key that opens nothing the couple
+      // wrote. Sealing it over the row that still holds the real one is the
+      // difference between a recovery that is merely pending and a history that
+      // is gone — but where there is no row at all there is nothing to lose,
+      // and content written from here on deserves somewhere to be recovered
+      // from. isMissing() reports false when it cannot reach the server, which
+      // lands on the refusing side.
+      if (await CryptoCore.isKeyless() && !await isMissing()) return false;
 
       final rnd = Random.secure();
       final salt =
           Uint8List.fromList(List.generate(16, (_) => rnd.nextInt(256)));
+      // Sealed in the OLD format deliberately. Build 26 is still permitted and
+      // still out there, and it hands anything that is not exactly `argon2id`
+      // to the HKDF derivation — so a v2 row fails its MAC there, restore
+      // returns false, and the next sign-in seals the stand-in key minted on
+      // the first Closer screen over the only copy of the real one. [_wrapKey]
+      // goes on OPENING v2 for any row already written that way; the write
+      // flips to kdfArgon2idV2 once app_release.min_build is 27.
       final key = await _wrapKey(password, salt, kdf: kdfArgon2id);
       final box = await _aead.encrypt(
         seed,
@@ -149,10 +242,13 @@ class KeyEscrow {
         'kdf': kdfArgon2id,
         'kdf_params': _argonParams,
       });
+      return true;
     } catch (e) {
       // Best effort. Failing to back the key up must never fail a sign-in —
-      // the user simply keeps the behaviour they have today.
+      // the user simply keeps the behaviour they have today. The one caller
+      // that asked the user for a password reports it instead of pretending.
       debugPrint('[escrow] backup skipped: ${e.runtimeType}');
+      return false;
     }
   }
 
@@ -166,9 +262,20 @@ class KeyEscrow {
       final uid = SupabaseService.currentUserId;
       if (uid == null) return false;
 
+      // Never over a live seed. After a rewrap ceremony THIS device holds the
+      // newest key while the row still holds the one it replaced, so adopting
+      // from the row reverts the seed and leaves everything written since in a
+      // key neither phone has. The caller re-seals instead, which is what makes
+      // the row converge on the newest key rather than the oldest. A device
+      // that has declared itself keyless is the exception: whatever seed it
+      // holds was minted as a stand-in, and is exactly what needs replacing.
+      if (await CryptoCore.hasSeed() && !await CryptoCore.isKeyless()) {
+        return false;
+      }
+
       final row = await SupabaseService.client
           .from('key_escrow')
-          .select('wrapped_seed, salt, nonce, kdf')
+          .select('wrapped_seed, salt, nonce, kdf, kdf_params')
           .eq('user_id', uid)
           .maybeSingle();
       if (row == null) return false;
@@ -178,9 +285,17 @@ class KeyEscrow {
       final nonce = byteaToBytes(row['nonce']);
       if (sealed.length <= 16) return false;
 
-      // A row written before the Argon2id migration has no discriminator.
-      final kdf = (row['kdf'] as String?) ?? 'hkdf-sha256';
-      final key = await _wrapKey(password, salt, kdf: kdf);
+      // A row written before the Argon2id migration has no discriminator, and
+      // every row carries the parameters it was actually sealed at — reading
+      // them from the row is what keeps it openable after the constants above
+      // are ever hardened.
+      final kdf = (row['kdf'] as String?) ?? _kdfLegacyHkdf;
+      final key = await _wrapKey(
+        password,
+        salt,
+        kdf: kdf,
+        params: row['kdf_params'] as Map<String, dynamic>?,
+      );
       final cipher = sealed.sublist(0, sealed.length - 16);
       final mac = sealed.sublist(sealed.length - 16);
 
@@ -189,10 +304,14 @@ class KeyEscrow {
         secretKey: key,
       );
       await CryptoCore.adoptPrivateSeed(Uint8List.fromList(seed));
+      // This device can read the couple's history again, so whatever sent it
+      // towards the ceremony is answered — and backup below is allowed again.
+      await CryptoCore.clearKeyless();
 
-      // Opening a legacy row proves the password, which is the only moment the
-      // material needed to re-seal it exists. Upgrade in place rather than
-      // leaving a crackable blob behind for the life of the account.
+      // Opening the row proves the password, which is the only moment the
+      // material needed to re-seal it exists. Re-wrap anything that is not the
+      // current write format: an HKDF row is a crackable blob, and a v2 row is
+      // one the builds still in the field cannot open at all.
       if (kdf != kdfArgon2id) await backup(password);
       return true;
     } catch (e) {

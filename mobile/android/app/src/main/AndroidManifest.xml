@@ -41,15 +41,17 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Camera for photo + video capture -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- Gallery access for sharing photos + videos (private app, not Play-bound) -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <!-- No READ_MEDIA_IMAGES / READ_MEDIA_VIDEO. Every gallery entry point is
+         image_picker, and neither of its two paths needs them: PickVisualMedia
+         (the system photo picker, which PhotoPickerService switches on) and
+         ACTION_GET_CONTENT (the default, still used by capsule_fill,
+         propose_memory and touch_map) both hand back a URI carrying its own
+         read grant. Nothing in lib/ scans the gallery, so broad media access
+         has no justification to give Play's Photo and Video Permissions
+         declaration. -->
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <!-- Save-to-gallery on legacy Android (API ≤28); 29+ uses MediaStore (gal) -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
     <!-- Reach: full-screen wake alert (foreground now; FCM background later) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -57,17 +59,23 @@
     <!-- Android 13+ runtime notification permission -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- android:label and android:icon are NOT here. They are the one thing the
+         two channels must disagree about, so each flavour's manifest supplies
+         its own — src/sideload (the disguise) and src/play (the honest name and
+         icon). Adding either attribute back here would need a tools:replace on
+         both sides to override it. -->
     <application
-        android:label="News"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false">
 
+        <!-- Substituted from android/maps.properties (untracked). The Maps SDK
+             reads the key from the merged manifest and nowhere else, so it
+             cannot live behind an edge function like the Mapbox token does. -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyBa6XGzV-g28HSX9rp3AeVs2YPzSlDTyH4" />
+            android:value="${mapsApiKey}" />
         <meta-data
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
@@ -95,9 +103,12 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme" />
 
-            <!-- MAIN/LAUNCHER deliberately lives on the aliases below, not here.
-                 An activity plus its aliases would each show their own launcher
-                 entry, which is the opposite of a disguise. -->
+            <!-- No MAIN/LAUNCHER here. The sideload channel puts it on its
+                 activity-aliases (an activity plus its aliases would each show
+                 their own launcher entry, which is the opposite of a disguise);
+                 the play channel, which has no aliases, puts it back on this
+                 activity. Declaring it here would give the sideload build two
+                 entries. -->
 
             <!-- Pairing deep link: tethered://join?code=ABCDEF -->
             <intent-filter>
@@ -135,131 +146,6 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
-
-        <!-- ── Launcher disguises ────────────────────────────────────────────
-             One alias per identity the user can choose; MainActivity.kt enables
-             exactly one at a time over the `miles/disguise` channel. The label
-             and icon a launcher shows come from HERE, not from Dart, so
-             lib/features/disguise/disguise_profile.dart must be kept in step.
-
-             EXACTLY ONE may ship with android:enabled="true". News is it, so an
-             upgrade keeps the identity the app was installed with. -->
-        <activity-alias
-            android:name=".AliasNews"
-            android:targetActivity=".MainActivity"
-            android:enabled="true"
-            android:exported="true"
-            android:label="News"
-            android:icon="@mipmap/ic_launcher">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasCalculator"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Calculator"
-            android:icon="@mipmap/ic_disguise_calculator">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasNotes"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Notes"
-            android:icon="@mipmap/ic_disguise_notes">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasWeather"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Weather"
-            android:icon="@mipmap/ic_disguise_weather">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasConvert"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Convert"
-            android:icon="@mipmap/ic_disguise_convert">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasRecorder"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Recorder"
-            android:icon="@mipmap/ic_disguise_recorder">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasTimer"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Timer"
-            android:icon="@mipmap/ic_disguise_timer">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasLevel"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Level"
-            android:icon="@mipmap/ic_disguise_level">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".AliasDevice"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Device Info"
-            android:icon="@mipmap/ic_disguise_device">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
 
         <meta-data
             android:name="flutterEmbedding"

@@ -231,17 +231,31 @@ class MemoryThreadRepository {
       'photo_count,last_photo_at,visit_id,place_cipher,place_nonce,'
       'partner_note_cipher,partner_note_nonce';
 
-  /// Live + archived threads for [coupleId], newest first. Deleted rows are
-  /// excluded server-side.
+  /// Two screens' worth of cards. A short page is the end of the shelf.
+  static const _pageSize = 60;
+
+  /// One page of live + archived threads for [coupleId], newest first, from
+  /// [before] on `happened_on` back. Deleted rows are excluded server-side.
+  ///
+  /// The bound is inclusive because `happened_on` is a DATE and a day can hold
+  /// several memories: an exclusive cursor would step over every one of them
+  /// that fell after a page boundary. The caller keys by id, so the overlap
+  /// costs one repeated row and loses none.
   static Future<CloserLoadResult<MemoryThread>> fetchThreads(
-    String coupleId,
-  ) async {
-    final res = await _c
+    String coupleId, {
+    DateTime? before,
+  }) async {
+    var q = _c
         .from('memory_threads')
         .select(_columns)
         .eq('couple_id', coupleId)
-        .neq('state', _stringifyState(MemoryState.deleted))
-        .order('happened_on', ascending: false);
+        .neq('state', _stringifyState(MemoryState.deleted));
+    if (before != null) {
+      q = q.lte('happened_on', before.toIso8601String().split('T').first);
+    }
+
+    final res =
+        await q.order('happened_on', ascending: false).limit(_pageSize);
 
     final threads = <MemoryThread>[];
     var unreadable = 0;
@@ -297,6 +311,7 @@ class MemoryThreadRepository {
   static Stream<CloserLoadResult<MemoryThread>> streamThreads(String coupleId) {
     final byId = <String, MemoryThread>{};
     var unreadable = 0;
+    var open = false;
     ManagedSubscription? sub;
     late final StreamController<CloserLoadResult<MemoryThread>> controller;
 
@@ -328,13 +343,14 @@ class MemoryThreadRepository {
         debugPrint('memory threads delta: ${e.runtimeType}');
         return;
       }
-      if (!controller.isClosed) controller.add(snapshot());
+      if (open) controller.add(snapshot());
     }
 
     controller = StreamController<CloserLoadResult<MemoryThread>>.broadcast(
       onListen: () async {
         // Subscribe BEFORE the seed read, so a change landing between the two
         // is applied on top of it rather than lost in the gap.
+        open = true;
         sub = ManagedSubscription.start(
           () => RealtimeService.coupleTable(
             channelName: 'memories:$coupleId',
@@ -343,18 +359,34 @@ class MemoryThreadRepository {
             onChange: apply,
           ),
         );
+        DateTime? cursor;
         try {
-          final seed = await fetchThreads(coupleId);
-          unreadable = seed.unreadable;
-          for (final t in seed.items) {
-            byId.putIfAbsent(t.id, () => t);
+          // Pages are chased, not waited for: the first emits the moment it
+          // lands and the list grows underneath it, so a long history costs a
+          // constant amount per round trip without a spinner between them.
+          while (open) {
+            final seed = await fetchThreads(coupleId, before: cursor);
+            if (!open) return;
+            unreadable += seed.unreadable;
+            for (final t in seed.items) {
+              byId.putIfAbsent(t.id, () => t);
+            }
+            controller.add(snapshot());
+            if (seed.items.length + seed.unreadable < _pageSize) return;
+            final next = seed.items.isEmpty ? null : seed.items.last.happenedOn;
+            // A whole page sitting on one date, or none of it readable: there
+            // is nothing left to key on and asking again returns the same rows.
+            if (next == null || next == cursor) return;
+            cursor = next;
           }
-          if (!controller.isClosed) controller.add(snapshot());
         } catch (e) {
-          if (!controller.isClosed) controller.addError(e);
+          if (open) controller.addError(e);
         }
       },
       onCancel: () {
+        // Leaving the screen mid-page has to stop the pager too, or it keeps
+        // reading a list nobody is looking at to its last row.
+        open = false;
         sub?.dispose();
         sub = null;
       },

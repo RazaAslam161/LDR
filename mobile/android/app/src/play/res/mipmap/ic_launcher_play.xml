@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 24-25 only: no adaptive icons before 26, so the two layers are flattened
+     here. The v26 folder wins on everything newer. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_play_bg" />
+    <item android:drawable="@drawable/ic_launcher_play_fg" />
+</layer-list>

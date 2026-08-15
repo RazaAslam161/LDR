@@ -112,14 +112,19 @@ void main() {
       }
     });
 
-    test('location is not in the cold startup permission blast', () {
-      // requestAllOnce runs in the first frame of main.dart — before sign-up,
-      // before pairing. A location request there is refused, and Android turns
-      // the second refusal into a permanent one, so the blast could burn the
-      // permission before the feature had been mentioned once.
-      final bootstrap = codeOnly(read('lib/core/services/permissions_bootstrap.dart'));
-      expect(bootstrap.contains('Permission.location'), isFalse,
-          reason: 'ask during onboarding, with a reason, not in frame one',);
+    test('no permission is asked for at startup', () {
+      // PermissionsBootstrap.requestAllOnce ran in the first frame of main.dart
+      // — before sign-up, before pairing. Location was deliberately kept out of
+      // that list, and the reason applied just as well to the six that were in
+      // it: a cold request is refused, and Android turns the second refusal
+      // into a permanent one, so the blast burned camera, microphone and
+      // notifications for deny-first users before the features were mentioned
+      // once. The blast is gone rather than trimmed, so the invariant is no
+      // longer about one permission in one file — nothing in the cold-start
+      // path may name a permission at all, including a call out to a helper
+      // that does the asking.
+      expect(codeOnly(main_).contains('ermission'), isFalse,
+          reason: 'frame one is before sign-up: there is no reason to show yet',);
       expect(location, contains('static Future<void> onboard('),
           reason: 'the explained first-run ask has to live somewhere',);
     });

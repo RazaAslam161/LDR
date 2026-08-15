@@ -7,12 +7,24 @@ import 'package:miles/features/disguise/disguise_profile.dart';
 /// are only expressible there and getting one wrong is not a cosmetic bug:
 /// ship two enabled aliases and the user has two launcher icons; ship none and
 /// the app has no icon at all and cannot be opened.
+///
+/// The disguise lives in the `sideload` source set, not `main`. Play's
+/// Misrepresentation policy treats an app that presents itself as a Calculator
+/// as an account strike, so the two channels are built from different manifests
+/// and each needs its own guard: sideload must keep every alias, play must have
+/// none. A test that read only `main` would pass while either one rotted.
 void main() {
   late String manifest;
+  late String mainManifest;
+  late String playManifest;
 
   setUpAll(() {
     manifest =
+        File('android/app/src/sideload/AndroidManifest.xml').readAsStringSync();
+    mainManifest =
         File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+    playManifest =
+        File('android/app/src/play/AndroidManifest.xml').readAsStringSync();
   });
 
   RegExp aliasBlock(String id) => RegExp(
@@ -60,12 +72,14 @@ void main() {
   });
 
   test('MainActivity itself is not a launcher entry', () {
-    // It has aliases; if it also carried MAIN/LAUNCHER the app would show an
-    // extra, undisguised icon.
+    // Declared in main/, shared by both channels. On sideload the aliases carry
+    // MAIN/LAUNCHER, so carrying it here too would show an extra, undisguised
+    // icon; play adds it back in its own manifest, where there is no alias left
+    // to carry it.
     final activity = RegExp(
       r'<activity\s+android:name="\.MainActivity".*?</activity>',
       dotAll: true,
-    ).firstMatch(manifest);
+    ).firstMatch(mainManifest);
     expect(activity, isNotNull);
     expect(activity!.group(0)!.contains('android.intent.category.LAUNCHER'),
         isFalse,);
@@ -162,5 +176,56 @@ void main() {
           reason: '${d.aliasId} label does not match the catalog',);
       expect(block.contains('android:icon="'), isTrue);
     }
+  });
+
+  test('the play channel carries no disguise at all', () {
+    // The whole reason the flavors exist. One alias reaching this manifest is
+    // an account strike, not a rejection, so it is worth asserting three ways:
+    // no alias, no cover label, and nothing borrowed from the disguise icons.
+    expect(playManifest.contains('<activity-alias'), isFalse,
+        reason: 'an alias in the play manifest is Deceptive Behavior',);
+    for (final d in kDisguises) {
+      expect(playManifest.contains('android:label="${d.label}"'), isFalse,
+          reason: '${d.label} is a cover identity and cannot ship to Play',);
+    }
+    expect(playManifest.contains('ic_disguise'), isFalse);
+  });
+
+  test('the play channel still has exactly one way in', () {
+    // Stripping the aliases takes MAIN/LAUNCHER with them. Without it restored
+    // on MainActivity the app installs with no launcher entry and cannot be
+    // opened at all — the failure the sideload manifest avoids by the opposite
+    // arrangement.
+    final launchers =
+        'android.intent.category.LAUNCHER'.allMatches(playManifest).length;
+    expect(launchers, 1, reason: '$launchers launcher entries on play');
+    final activity = RegExp(
+      r'<activity\s+android:name="\.MainActivity".*?</activity>',
+      dotAll: true,
+    ).firstMatch(playManifest);
+    expect(activity, isNotNull, reason: 'play declares no MainActivity');
+    expect(activity!.group(0)!.contains('android.intent.category.LAUNCHER'),
+        isTrue,);
+  });
+
+  test('the play launcher icon exists and survives pre-API-26', () {
+    final name = RegExp('android:icon="@mipmap/([a-z0-9_]+)"')
+        .firstMatch(playManifest)
+        ?.group(1);
+    expect(name, isNotNull, reason: 'play declares no launcher icon');
+    final res = Directory('android/app/src/play/res');
+    final buckets = res
+        .listSync()
+        .whereType<Directory>()
+        .where((d) => d.path.split(RegExp(r'[\\/]')).last.startsWith('mipmap'))
+        .toList();
+    final fallback = buckets
+        .where((d) => !d.path.endsWith('mipmap-anydpi-v26'))
+        .any((d) => d
+            .listSync()
+            .whereType<File>()
+            .any((f) => f.uri.pathSegments.last.split('.').first == name),);
+    expect(fallback, isTrue,
+        reason: '@mipmap/$name has no pre-API-26 fallback; minSdk is below 26',);
   });
 }

@@ -47,17 +47,29 @@ class VaultRepository {
     return res?.toString() ?? 'wrong';
   }
 
+  static const _pageSize = 200;
+
+  /// Everything in the personal vault, newest first, read a page at a time.
+  ///
+  /// The cursor is `created_at` rather than an offset: OFFSET makes the server
+  /// walk rows it then discards, and it shifts under anything saved while the
+  /// list is open.
   static Future<List<VaultItem>> items() async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return [];
-    final res = await _c
-        .from('personal_vault_items')
-        .select()
-        .eq('owner_id', uid)
-        .order('created_at', ascending: false);
-    return (res as List)
-        .map((e) => VaultItem.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final out = <VaultItem>[];
+    DateTime? cursor;
+    while (true) {
+      var q = _c.from('personal_vault_items').select().eq('owner_id', uid);
+      if (cursor != null) {
+        q = q.lt('created_at', cursor.toUtc().toIso8601String());
+      }
+      final res =
+          await q.order('created_at', ascending: false).limit(_pageSize);
+      out.addAll(res.map(VaultItem.fromJson));
+      if (res.length < _pageSize) return out;
+      cursor = out.last.createdAt;
+    }
   }
 
   static Future<void> addNote(String content) async {

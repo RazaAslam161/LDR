@@ -187,6 +187,12 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/disguise")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // The play channel ships no aliases (src/play/AndroidManifest.xml)
+                    // because a launcher entry that claims to be a Calculator is
+                    // a Play policy strike. Dart must ask this BEFORE offering
+                    // any cover or the picker: with the aliases gone, the covers
+                    // would still open over an honestly-named app.
+                    "isEnabled" -> result.success(BuildConfig.DISGUISE_ENABLED)
                     "setAlias" -> {
                         val target = call.argument<String>("aliasId")
                         val all = call.argument<List<String>>("all")

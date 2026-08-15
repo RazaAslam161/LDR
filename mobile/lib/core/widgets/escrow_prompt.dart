@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/data/key_escrow.dart';
+import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -35,12 +36,38 @@ class EscrowPrompt {
       builder: (ctx) => const _EscrowDialog(),
     );
 
-    // Recorded whether or not they typed anything. Asking again on the next
-    // launch turns a one-time migration into nagging.
-    await prefs.setBool(_askedKey, true);
+    if (password == null || password.isEmpty) {
+      // They said no, and that answer is recorded. Asking again on the next
+      // launch turns a one-time migration into nagging.
+      await prefs.setBool(_askedKey, true);
+      return;
+    }
 
-    if (password == null || password.isEmpty) return;
-    await KeyEscrow.backup(password);
+    final failure = await _seal(password);
+    // Only a real row counts as asked. A typo used to be recorded as one, so
+    // the migration never came round again and the user was left believing
+    // they were protected by something nobody alive can open.
+    if (failure == null) await prefs.setBool(_askedKey, true);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(failure ?? 'Your key is protected.')),
+    );
+  }
+
+  /// Why it did not work, or null.
+  ///
+  /// Nothing here has ever checked what they typed, and nothing ever could
+  /// afterwards — a wrap that opens for nobody looks exactly like a good one.
+  /// The two failures are told apart because the answers differ: one is "type
+  /// it again", the other is "we will ask you later".
+  static Future<String?> _seal(String password) async {
+    if (!await SupabaseRepository.reauthenticate(password)) {
+      return "That isn't your password. Nothing was saved.";
+    }
+    if (!await KeyEscrow.backup(password)) {
+      return "Couldn't save it just now. We'll ask again next time.";
+    }
+    return null;
   }
 }
 

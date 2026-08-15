@@ -43,6 +43,16 @@ async function notifySecret(): Promise<string | null> {
   return _secret;
 }
 
+// Constant time. `!==` stops at the first byte that differs, and this endpoint
+// will answer as many guesses as anyone cares to send it.
+function secretMatches(got: string | null, expected: string): boolean {
+  const a = new TextEncoder().encode(got ?? "");
+  const b = new TextEncoder().encode(expected);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
 
 // ── base64url helpers ────────────────────────────────────────────────────────
 function b64url(bytes: Uint8Array): string {
@@ -128,12 +138,13 @@ Deno.serve(async (req) => {
     // names, and pushes them a notification. On a build that disguises itself
     // as a news app, that is a usable phishing channel.
     //
-    // The triggers now carry a secret minted in the database. Enforced only
-    // when one is configured, so a fresh project that has not seeded it yet
-    // loses no notifications while it is being set up — an attacker cannot
-    // un-set it, so there is nothing to gain from that path.
+    // The triggers now carry a secret minted in the database. No secret
+    // configured means no caller can be told apart from an attacker, so the
+    // answer is 403: a restored project sends nothing until an operator seeds
+    // app_secrets, which is the failure that gets noticed rather than the one
+    // that does not.
     const expected = await notifySecret();
-    if (expected && req.headers.get("x-notify-secret") !== expected) {
+    if (!expected || !secretMatches(req.headers.get("x-notify-secret"), expected)) {
       return new Response(JSON.stringify({ error: "forbidden" }), {
         status: 403,
         headers: { "Content-Type": "application/json" },
@@ -208,18 +219,6 @@ Deno.serve(async (req) => {
       return OK();
     }
 
-    // Skipped when there is no author: `.eq("id", undefined)` is not a lookup
-    // that returns nothing, it is a filter that matches everything, and
-    // `.single()` on it errors.
-    const { data: sender } = fromUser
-      ? await admin
-        .from("profiles")
-        .select("display_name")
-        .eq("id", fromUser)
-        .single()
-      : { data: null };
-    const fromName: string = sender?.display_name ?? "Your partner";
-
     const accessToken = await getAccessToken();
     const message = {
       message: {
@@ -227,16 +226,17 @@ Deno.serve(async (req) => {
         // DATA-only: the Android background handler builds the notification (and
         // wears this device's disguise). The keys per kind match exactly what
         // fcm_service.dart / firebaseMessagingBackgroundHandler read.
+        //
+        // No from_name, for any kind. Every notification is built on the
+        // RECEIVING device wearing that device's disguise, and the client falls
+        // back to "Your partner" wherever the key is missing
+        // (fcm_service.dart:199, :267, :291, reach_notifications.dart:388,
+        // :449) — so sending it only put the partner's real display name
+        // through Google in cleartext to be thrown away at the far end. That
+        // was already the reasoning for call/memory/ritual; it was never
+        // narrower than that.
         data: {
           type: kind,
-          // Omitted for calls and memories. Nothing renders it — both wear the
-          // RECEIVING device's disguise and are built there — so it was the
-          // partner's real display name travelling through Google in cleartext
-          // to be thrown away. The client already falls back when it is
-          // absent. Reach/care/message still carry it; those paths read it.
-          ...(kind === "call" || kind === "memory" || kind === "ritual"
-            ? {}
-            : { from_name: fromName }),
           couple_id: coupleId,
           ...(kind === "reach" ? { reach_id: rowId } : {}),
           ...(kind === "care" ? { nudge_id: rowId } : {}),

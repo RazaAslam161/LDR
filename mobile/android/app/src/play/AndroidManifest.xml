@@ -1,0 +1,24 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The Google Play build. No activity-aliases, no disguised label, no
+         disguised icon — the app is what it says it is. MAIN/LAUNCHER comes back
+         onto MainActivity because there is no alias left to carry it, and
+         without it the app would install with no launcher entry at all.
+
+         The covers themselves are Dart, and they are switched off by
+         BuildConfig.DISGUISE_ENABLED (see MainActivity.kt, `miles/disguise`
+         channel). Stripping the aliases here without that gate would leave the
+         app opening on a fake news reader under an honest icon, which is worse
+         than either. -->
+    <application
+        android:label="Miles"
+        android:icon="@mipmap/ic_launcher_play">
+
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

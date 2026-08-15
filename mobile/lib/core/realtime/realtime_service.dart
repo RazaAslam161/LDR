@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
@@ -126,16 +127,47 @@ class ManagedSubscription {
   bool _busy = false;
   bool _disposed = false;
 
+  /// One timer for both jobs — a rebuild is never wanted while a join check is
+  /// pending, and vice versa.
+  Timer? _timer;
+  int _attempt = 0;
+
+  static final _rand = Random();
+
+  /// Longer than the client's 10s join timeout, so a join that is merely slow
+  /// is never counted as a failure.
+  static const _joinCheck = Duration(seconds: 12);
+  static const _maxAttempts = 5;
+
   static ManagedSubscription start(RealtimeChannel Function() build) {
     final s = ManagedSubscription._(build);
     s._resubscribe();
-    realtimeResumed.addListener(s._resubscribe);
+    realtimeResumed.addListener(s._onResumed);
     return s;
+  }
+
+  /// Realtime restarts are routine, and they reconnect every client on the
+  /// platform within the same second. This notifier then fans that one tick out
+  /// to every subscription in the app at once, so the join rate limiter meets
+  /// the whole fleet's channels together and refuses the overflow with a plain
+  /// `error` reply — which schedules no rejoin anywhere in the client library.
+  /// Spreading the rejoin is what stops a routine restart from leaving a slice
+  /// of the fleet with dead channels until the next socket cycle.
+  void _onResumed() {
+    _attempt = 0;
+    _schedule(Duration(milliseconds: _rand.nextInt(1200)), _resubscribe);
+  }
+
+  void _schedule(Duration d, void Function() action) {
+    if (_disposed) return;
+    _timer?.cancel();
+    _timer = Timer(d, action);
   }
 
   Future<void> _resubscribe() async {
     if (_disposed || _busy) return;
     _busy = true;
+    _timer?.cancel();
     // A reconnect leaves a window in which _channel is null and every send
     // through it is dropped by the `?.` below. Counting them is how a call that
     // failed "for no reason" gets tied to a socket that was rebuilding at the
@@ -155,9 +187,55 @@ class ManagedSubscription {
       }
       if (_disposed) return;
       _channel = _build();
+      _schedule(_joinCheck, _verifyJoin);
     } finally {
       _busy = false;
     }
+  }
+
+  /// The channel's own view of its join, and its name.
+  ///
+  /// Both are marked @internal by realtime_client, and there is no public
+  /// alternative: `_build` owns `.subscribe()`, and each of the two dozen call
+  /// sites passes its own status handler or none at all, so the channel itself
+  /// is the only thing that can answer for all of them. Same standing risk as
+  /// `realtime.connect()` in AppShell — a package upgrade may remove it, and
+  /// the replacement is a two-phone test, not a deletion.
+  // ignore: invalid_use_of_internal_member
+  bool get _joined => _channel?.isJoined ?? false;
+
+  // ignore: invalid_use_of_internal_member
+  String? get _topic => _channel?.topic;
+
+  /// Did the join actually land?
+  ///
+  /// A refused join is not retried by the client library — the rate limiter
+  /// answers with a plain `error` reply, which schedules nothing — and
+  /// `subscribe()` throws on a second call for the same channel, so recovery
+  /// has to be a fresh channel, exactly as a reconnect builds one.
+  void _verifyJoin() {
+    if (_disposed) return;
+    if (_joined) {
+      _attempt = 0;
+      return;
+    }
+    if (_attempt >= _maxAttempts) {
+      // A channel that never joined delivers nothing and looks exactly like a
+      // partner who never writes. Nothing else in the app separates them.
+      Diag.record(DiagArea.app, 'rt_join_dead',
+          fields: {'topic': _topic, 'attempts': _attempt},);
+      return;
+    }
+    // Equal jitter: clients that lost the same socket otherwise retry on the
+    // same schedule, which reproduces the storm at every step of the backoff.
+    final base = 1000 << _attempt.clamp(0, 4);
+    _attempt++;
+    Diag.record(DiagArea.app, 'rt_join_retry',
+        fields: {'topic': _topic, 'attempt': _attempt},);
+    _schedule(
+      Duration(milliseconds: base ~/ 2 + _rand.nextInt(base ~/ 2)),
+      _resubscribe,
+    );
   }
 
   int _rebuilds = 0;
@@ -168,7 +246,8 @@ class ManagedSubscription {
 
   void dispose() {
     _disposed = true;
-    realtimeResumed.removeListener(_resubscribe);
+    _timer?.cancel();
+    realtimeResumed.removeListener(_onResumed);
     final c = _channel;
     _channel = null;
     if (c != null) SupabaseService.client.removeChannel(c);

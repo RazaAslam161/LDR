@@ -107,11 +107,7 @@ class Presence {
   final DateTime? checkinPhotoAt;
   final DateTime? chatLastRead;
 
-  /// GETTER 2 — is the partner actively reading the chat RIGHT NOW?
-  /// Source: chat_last_read (written every 5s while the chat is open). Window
-  /// 20s (> the 5s write cadence, tolerates a missed cycle without flicker).
-  /// Drives: "is here" avatar + seen tick.
-  /// Is the partner looking at the chat RIGHT NOW?
+  /// GETTER 2 — is the partner looking at the chat RIGHT NOW?
   ///
   /// Ephemeral, and deliberately separate from [chatLastRead]. Deriving it from
   /// the read watermark meant the two had to be kept in sync by moving the
@@ -291,8 +287,9 @@ class PresenceService {
       _upsert(coupleId, {'typing_in_chat': inChat},
           op: 'set_typing_in_chat', isAppActivity: true,);
 
-  /// Marks the chat read "now" — refreshed periodically while the chat is open.
-  /// Drives the partner's read-receipts (seen) and the "in chat" avatar.
+  /// Marks the chat read "now" — on entering and on leaving, the two moments
+  /// the watermark is defined. The live read position rides the chat's own
+  /// broadcast channel and `chat_receipts`; this is the durable trace.
   static Future<void> setChatLastRead(String coupleId) => _upsert(
         coupleId,
         {'chat_last_read': DateTime.now().toUtc().toIso8601String()},
@@ -501,33 +498,30 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
       final id = next?.id;
       if (id == null) {
         _coupleId = null;
-        // Nothing else happens here: the channel stays joined and the poll goes
-        // on ticking against an id that is now null, returning early every 15s
-        // forever. From the outside that is identical to a partner who never
-        // writes, so it gets its own phase.
+        // Nothing else happens here: the channel stays joined against an id
+        // that is now null. From the outside that is identical to a partner who
+        // never writes, so it gets its own phase.
         Diag.record(DiagArea.presence, 'presence_bind', fields: {
           'phase': 'couple_null',
           'has_couple': false,
-          'chan_live': _channel != null,
-          'poll_started': _poll != null,
+          'chan_live': _sub?.channel != null,
         },);
       } else if (id != _coupleId) {
         _bind(id);
       }
     }, fireImmediately: true,);
-    realtimeResumed.addListener(_subscribe); // rejoin + refetch on reconnect
+    realtimeResumed.addListener(_refetchOnResume); // read the gap on reconnect
   }
 
   final Ref ref;
-  RealtimeChannel? _channel;
+  ManagedSubscription? _sub;
   String? _coupleId;
-  bool _subscribing = false;
-  Timer? _poll;
+  Timer? _expiry;
   Timer? _refetchDebounce;
 
-  /// Binds to a (now-resolved) couple: fetch the partner row, subscribe to the
-  /// presence channel, and start the liveness poll. Called reactively when the
-  /// couple becomes available — never with a null id.
+  /// Binds to a (now-resolved) couple: fetch the partner row and subscribe to
+  /// the presence channel. Called reactively when the couple becomes available
+  /// — never with a null id.
   Future<void> _bind(String coupleId) async {
     final isFirst = _coupleId == null;
     _coupleId = coupleId;
@@ -539,7 +533,7 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     var fetchOk = true;
     try {
       final p = await PresenceService.fetchPartner(coupleId, src: 'bind');
-      if (mounted) state = p;
+      if (mounted) _apply(p);
     } catch (e) {
       // The initial read is a convenience; realtime is the actual mechanism.
       // Letting a failed fetch skip _subscribe() is what turned one bad row
@@ -547,44 +541,50 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
       fetchOk = false;
       debugPrint('[presence] initial partner fetch failed: $e');
     }
-    await _subscribe();
-    // Re-evaluate liveness even when no presence event fires (e.g. a hard-killed
-    // partner writes nothing): refetch a fresh row so the freshness-gated getters
-    // tick over and the UI drops to "offline" within the window. One shared poll
-    // (autoDispose stops it when no screen is watching).
-    final pollStarted = _poll == null;
-    _poll ??= Timer.periodic(const Duration(seconds: 15), (_) async {
-      final id = _coupleId;
-      if (id == null) return;
-      final fresh = await PresenceService.fetchPartner(id, src: 'poll');
-      if (mounted) state = fresh;
-    });
+    _subscribe();
     Diag.record(DiagArea.presence, 'presence_bind', fields: {
       'phase': 'done',
       'has_couple': true,
       'is_first': isFirst,
       'fetch_ok': fetchOk,
-      'poll_started': pollStarted,
     },);
   }
 
-  Future<void> _subscribe() async {
+  /// Publish [p] and re-arm the liveness timer for it.
+  void _apply(Presence? p) {
+    state = p;
+    _expiry?.cancel();
+    final ts = p?.appLastActiveAt;
+    if (ts == null) return;
+    final left = const Duration(seconds: 45) - ServerClock.now().difference(ts);
+    if (left <= Duration.zero) return;
+    // A 15s REST poll used to run here for the life of every session — four
+    // reads a minute, per online user, to notice a change that can only happen
+    // at one knowable instant. isTrulyOnline is a pure function of
+    // app_last_active_at and the 45s window, so the single moment liveness can
+    // turn over without an event is when that window closes. A partner who
+    // keeps beating pushes this timer forward and costs no read at all; one who
+    // was force-killed costs exactly one, which also re-reads anything the
+    // socket missed.
+    _expiry = Timer(left + const Duration(seconds: 1), () async {
+      final id = _coupleId;
+      if (id == null) return;
+      final fresh = await PresenceService.fetchPartner(id, src: 'expiry');
+      if (mounted) _apply(fresh);
+    });
+  }
+
+  void _subscribe() {
     final id = _coupleId;
-    if (id == null || _subscribing) return;
-    _subscribing = true;
-    try {
-      // Fully REMOVE the old channel (awaited) before re-creating, so we never
-      // leave a duplicate-topic 'presence:<id>' channel joined-but-dead — that
-      // bug stopped the partner's presence updates (is_online=false on close)
-      // from ever arriving, leaving a stale "online"/"delivered".
-      final old = _channel;
-      _channel = null;
-      if (old != null) {
-        try {
-          await SupabaseService.client.removeChannel(old);
-        } catch (_) {}
-      }
-      _channel = RealtimeService.coupleTable(
+    if (id == null) return;
+    _sub?.dispose();
+    // ManagedSubscription, so a socket reconnect rebuilds the channel cleanly
+    // (awaited removeChannel before re-creating, never a duplicate-topic
+    // 'presence:<id>' left joined-but-dead) and a refused join is retried. That
+    // bug stopped the partner's presence updates (is_online=false on close)
+    // from ever arriving, leaving a stale "online"/"delivered".
+    _sub = ManagedSubscription.start(
+      () => RealtimeService.coupleTable(
         channelName: 'presence:$id',
         table: 'presence',
         coupleId: id,
@@ -606,33 +606,36 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
                     SupabaseService.currentUserId,
                 'has_app_active': activeAt != null,
               },);
-          // The partner's client re-stamps presence every ~5s while their chat
-          // is open, and every one of those writes used to trigger a full
-          // SELECT here. Only the newest value matters, so coalesce bursts —
-          // still authoritative, just not once per keystroke-era write.
+          // A single move can produce several writes in a row — leaving the
+          // chat clears typing and stamps the watermark, arriving somewhere
+          // sets the screen — and each one used to trigger a full SELECT here.
+          // Only the newest value matters, so coalesce the burst.
           _refetchDebounce?.cancel();
           _refetchDebounce =
               Timer(const Duration(milliseconds: 800), () async {
             final p = await PresenceService.fetchPartner(id, src: 'realtime');
-            if (mounted) state = p;
+            if (mounted) _apply(p);
           });
         },
-      );
-      // Pull current presence on (re)connect so we don't sit on a stale value.
-      final p = await PresenceService.fetchPartner(id, src: 'subscribe');
-      if (mounted) state = p;
-    } finally {
-      _subscribing = false;
-    }
+      ),
+    );
+  }
+
+  /// Pull current presence after a socket reconnect so we don't sit on a stale
+  /// value. The channel itself is rebuilt by [ManagedSubscription].
+  Future<void> _refetchOnResume() async {
+    final id = _coupleId;
+    if (id == null) return;
+    final p = await PresenceService.fetchPartner(id, src: 'subscribe');
+    if (mounted) _apply(p);
   }
 
   @override
   void dispose() {
-    _poll?.cancel();
+    _expiry?.cancel();
     _refetchDebounce?.cancel();
-    realtimeResumed.removeListener(_subscribe);
-    final c = _channel;
-    if (c != null) SupabaseService.client.removeChannel(c);
+    realtimeResumed.removeListener(_refetchOnResume);
+    _sub?.dispose();
     super.dispose();
   }
 }

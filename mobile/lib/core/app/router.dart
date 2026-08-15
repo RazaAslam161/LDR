@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/realtime/presence_route_observer.dart';
 import 'package:miles/features/auth/couple_page.dart';
 import 'package:miles/features/auth/new_password_page.dart';
+import 'package:miles/features/auth/rewrap_screen.dart';
 import 'package:miles/features/auth/role_setup_screen.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
 import 'package:miles/features/auth/sign_up_page.dart';
@@ -59,7 +61,8 @@ PresenceRouteObserver? presenceRouteObserver;
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {
   return GoRouter(
-    refreshListenable: _SessionListenable(ref),
+    refreshListenable:
+        Listenable.merge([_SessionListenable(ref), CryptoCore.keyless]),
     // Presence is published from here rather than from each screen, so every
     // route reports — including the 31 that never did, and any added later.
     observers: [presenceRouteObserver = PresenceRouteObserver(ref)],
@@ -105,6 +108,21 @@ GoRouter buildRouter(Ref ref) {
         return path == '/role-setup' ? null : '/role-setup';
       }
 
+      // This device cannot read a line of what the two of them wrote. Sending
+      // it into the app is how that becomes blank encrypted screens with no
+      // explanation and no route back — and the route back has to be decided
+      // here, because the sign-in page is unmounted by this very redirect
+      // before its own navigation can run, and a relaunch (the ordinary case,
+      // since the cover backgrounds the app and Android kills it) never passes
+      // through that page at all. Below the funnel because an account with no
+      // partner has nobody to ask.
+      //
+      // '/call' is the one exception: the ceremony's own instructions are to
+      // get on a call, and blocking that is a deadlock, not a guard.
+      if (CryptoCore.keyless.value && path != '/rewrap' && path != '/call') {
+        return '/rewrap';
+      }
+
       // Fully set up → keep them out of the auth + onboarding routes.
       if (isAuthRoute ||
           path == '/welcome' ||
@@ -142,6 +160,14 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/role-setup',
         builder: (context, state) => const RoleSetupScreen(),
+      ),
+      // Deliberately outside the funnel's sweep-to-/app list: a phone that
+      // reached here has no key, and bouncing it into the app is how that
+      // becomes an empty screen nobody can explain. The funnel still moves an
+      // unpaired account on to /couple, where there is nobody to ask anyway.
+      GoRoute(
+        path: '/rewrap',
+        builder: (context, state) => const RewrapScreen(),
       ),
       GoRoute(
         path: '/app',

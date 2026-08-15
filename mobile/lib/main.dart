@@ -20,7 +20,6 @@ import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
-import 'package:miles/core/services/permissions_bootstrap.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/time/tz_helper.dart';
@@ -33,6 +32,7 @@ import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_pip.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
+import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -73,6 +73,10 @@ Future<void> main() async {
     Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
     SupabaseService.init(),
     MilesApp.loadSetupFlag(),
+    // Which channel this is. Awaited here rather than read where it is needed
+    // because the answer decides whether the first frame is a cover at all —
+    // asking later would flash one on a build that has no disguise to show.
+    DisguiseService.loadEnabled(),
     // One-time chore, not instrumentation: clears the retired upload flag and
     // deletes the trace file every install still carries. Runs until every
     // handset has run it once.
@@ -82,6 +86,9 @@ Future<void> main() async {
     // this app is sideloaded, so old versions never go away on their own.
     ReleaseGate.check(),
   ]);
+  // No disguise on this channel means no door to come through: the real app is
+  // the first frame, and MilesApp.raiseCover keeps it that way.
+  if (!DisguiseService.enabled) MilesApp.showRealApp.value = true;
   // Must be registered before runApp; runs in its own isolate when a push
   // arrives while the app is backgrounded or terminated. Needs Firebase ready.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -108,7 +115,21 @@ class MilesApp extends ConsumerStatefulWidget {
   /// re-authentication; only FakeNewsScreen sets it true after the biometric +
   /// splash. Static so the cover screen and the lifecycle handler
   /// share one source of truth.
+  ///
+  /// On a channel with no disguise it starts true in main() and stays true —
+  /// see [raiseCover].
   static final ValueNotifier<bool> showRealApp = ValueNotifier<bool>(false);
+
+  /// Puts the cover back up.
+  ///
+  /// The only way down — the panic gestures, each lifecycle transition, and
+  /// sign-out — because the play channel ships no disguise at all, and a flag
+  /// lowered anywhere ungated there hands a Play reviewer an honestly-named app
+  /// that opens on a fake news reader. Missing one caller is missing all of
+  /// them, and the failure is a screen nobody can get past.
+  static void raiseCover() {
+    if (DisguiseService.enabled) showRealApp.value = false;
+  }
 
   /// True only while the biometric prompt is on screen. The prompt itself makes
   /// the app `inactive`; this guards that transition from resetting
@@ -158,9 +179,13 @@ class _MilesAppState extends ConsumerState<MilesApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // First launch (any device): ask for all permissions at once.
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => PermissionsBootstrap.requestAllOnce());
+    // No first-frame permission blast. Camera, microphone, notifications and
+    // media were all requested here, before sign-up and before the user had
+    // seen a screen — the same reasoning the old bootstrap gave for leaving
+    // location OUT of it. Android makes a second refusal permanent, so a
+    // deny-first user lost calls, voice notes and capture for good, silently.
+    // Every one of them is asked for at its point of use instead.
+    //
     // If the user enabled the biometric app-lock, raise it on launch. The
     // LockScreen auto-prompts biometrics when it appears.
     WidgetsBinding.instance
@@ -173,7 +198,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // Detection only runs while the real app is visible and not already covered.
     EmergencyLockService.init(
       onLock: _emergencyLock,
-      shouldDetect: () => MilesApp.showRealApp.value && !stealthActive.value,
+      shouldDetect: () =>
+          DisguiseService.enabled &&
+          MilesApp.showRealApp.value &&
+          !stealthActive.value,
     );
     // Bridge native hardware volume keys (Android consumes them before they
     // reach Flutter's key pipeline) for the combo + stealth dismiss.
@@ -182,7 +210,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   /// Instantly drop to the News cover (shake / volume combo). No animation.
   void _emergencyLock() {
-    MilesApp.showRealApp.value = false;
+    MilesApp.raiseCover();
     stealthActive.value = false;
   }
 
@@ -243,10 +271,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // call — showing News where her face should be, which is both useless
         // and a louder tell than the call was.
         if (!MilesApp.systemOverlayActive && !PipMode.active.value) {
-          MilesApp.showRealApp.value = false;
+          MilesApp.raiseCover();
         }
       case AppLifecycleState.detached:
-        MilesApp.showRealApp.value = false;
+        MilesApp.raiseCover();
       case AppLifecycleState.inactive:
         // Transient focus loss: a picker grabbing focus, the notification-shade
         // peek, the biometric prompt. Defer the check a beat so the overlay
@@ -282,7 +310,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
           }
           if (WidgetsBinding.instance.lifecycleState ==
               AppLifecycleState.inactive) {
-            MilesApp.showRealApp.value = false;
+            MilesApp.raiseCover();
           }
         });
       case AppLifecycleState.resumed:
@@ -505,7 +533,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // didChangeAppLifecycleState from stranding a logged-out session
       // uncovered.
       if ((previous?.isAuthenticated ?? false) && !next.isAuthenticated) {
-        MilesApp.showRealApp.value = false;
+        MilesApp.raiseCover();
       }
       // Setup finished → the first-run exemption is spent, permanently.
       if (next.isAuthenticated &&

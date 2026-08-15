@@ -248,6 +248,11 @@ void main() {
     // right call — the one here guards a package-internal reconnect that only
     // a two-phone test could safely replace — but it has to stay a decision
     // rather than a habit, so adding one means deliberately moving this number.
+    //
+    // Moved 1 -> 3 for the rejoin retry: realtime_client reports a refused join
+    // through the caller's callback only, leaving the channel in `joining` with
+    // nothing scheduled, and `isJoined` is the only probe that tells the two
+    // apart. It is @internal, so reading it is the price of noticing.
     final ignores = Directory('lib')
         .listSync(recursive: true)
         .whereType<File>()
@@ -258,7 +263,7 @@ void main() {
             .where((l) => l.contains('// ignore:'))
             .map((l) => '${f.uri.pathSegments.last}: ${l.trim()}'),)
         .toList();
-    expect(ignores.length, lessThanOrEqualTo(1),
+    expect(ignores.length, lessThanOrEqualTo(3),
         reason: 'each suppression needs a reason in a comment above it, and '
             'this bound moved on purpose: $ignores',);
   });
@@ -738,9 +743,10 @@ void main() {
   test('the launcher disguise is intact', () {
     // Not cleanup-adjacent, deliberately. The label looks like a placeholder
     // somebody forgot to change, which is exactly why a well-meaning tidy-up
-    // would "fix" it and quietly undo the app's whole threat model.
+    // would "fix" it and quietly undo the app's whole threat model. It lives in
+    // the sideload source set because Play would strike the account for it.
     final manifest =
-        File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+        File('android/app/src/sideload/AndroidManifest.xml').readAsStringSync();
     expect(manifest, contains('android:label="News"'),
         reason: 'the launcher name is a disguise and is intentional',);
     expect(root.existsSync(), isTrue);

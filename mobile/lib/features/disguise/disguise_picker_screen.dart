@@ -73,6 +73,29 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Settings links here on every channel; only this screen knows whether
+    // there is anything behind the link. On the play channel there is not —
+    // the app ships one launcher entry under its own name, and a list of nine
+    // invented identities is the misrepresentation that channel avoids.
+    if (!DisguiseService.enabled) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('How this app looks')),
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: Text(
+            'This version of the app appears under its own name and icon. '
+            'There is nothing to change here.',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              height: 1.5,
+              color: MilesColors.taupe,
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(

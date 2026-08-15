@@ -2,8 +2,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 // Mints short-lived WebRTC ICE (TURN) credentials from Cloudflare Realtime TURN.
 // The Cloudflare key id + API token live ONLY in the service-role-locked
-// `app_secrets` table (never in the app binary). JWT-gated: only signed-in
-// couple members can call this.
+// `app_secrets` table (never in the app binary).
+//
+// verify_jwt is satisfied by the anon key, which ships inside an APK anyone can
+// unzip — so on its own it proves nothing about the caller, and this endpoint
+// spends someone else's Cloudflare bill by the gigabyte. The caller's own JWT
+// is checked here the way map-token does it, which bounds minting to people who
+// hold an account. It does NOT bound how many one account may mint; that needs a
+// counter this function has nowhere to keep.
 //
 // Secrets (set once in the DB, NOT in code):
 //   insert into app_secrets(key,value) values
@@ -27,6 +33,15 @@ function json(body: unknown, status = 200) {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const caller = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const { data: { user } } = await caller.auth.getUser();
+    if (!user) return json({ error: "unauthenticated" }, 401);
+
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -43,7 +58,13 @@ Deno.serve(async (req: Request) => {
     const token = map["CF_TURN_API_TOKEN"];
     if (!keyId || !token) return json({ error: "turn_not_configured" }, 500);
 
-    const ttl = 86400; // 24h
+    // 24h, and it has to stay 24h until the app stops outliving it: the client
+    // serves _cachedTurn for 12h without asking again and restores credentials
+    // up to 20h old from disk (call_controller.dart:438, :469). A shorter TTL
+    // would hand every one of those calls a credential Cloudflare has already
+    // expired, on a fleet with no update channel. Lower it once a build that
+    // caches for less than the new TTL is enforced by app_release.min_build.
+    const ttl = 86400;
     const cf = await fetch(
       `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
       {

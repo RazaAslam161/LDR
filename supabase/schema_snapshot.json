@@ -381,6 +381,18 @@
       "updated_at",
       "user_id"
     ],
+    "partner_rewrap_requests": [
+      "code_hash",
+      "couple_id",
+      "created_at",
+      "expires_at",
+      "from_user",
+      "id",
+      "new_public_key",
+      "wrapped_at",
+      "wrapped_by",
+      "wrapped_keys"
+    ],
     "personal_vault_items": [
       "content",
       "created_at",
@@ -703,6 +715,11 @@
       "title_cipher",
       "title_nonce",
       "visit_id"
+    ],
+    "partner_rewrap_requests": [
+      "wrapped_at",
+      "wrapped_by",
+      "wrapped_keys"
     ],
     "profiles": [
       "avatar_url",

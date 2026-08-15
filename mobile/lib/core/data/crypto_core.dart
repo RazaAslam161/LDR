@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:miles/core/services/server_clock.dart';
 
 /// Couple-shared authenticated encryption for the Closer module.
 ///
@@ -51,6 +52,132 @@ class CryptoCore {
 
   static String get _seedKey =>
       _accountId == null ? _privKeyStoreKey : '${_privKeyStoreKey}_$_accountId';
+
+  /// Couple keys this device has retired but can still read with, newest first,
+  /// as `base64(k0 || k1 || …)`. Scoped per account exactly like the seed: a
+  /// device-wide ring would hand the next account keys that open the previous
+  /// one's history.
+  static const _ringStoreKey = 'miles_key_ring_v1';
+  static String get _ringKey =>
+      _accountId == null ? _ringStoreKey : '${_ringStoreKey}_$_accountId';
+
+  /// Set while a rewrap is in flight, and the reason it has to outlive the
+  /// process.
+  ///
+  /// Publishing this device's new public key rotates the couple key on BOTH
+  /// phones. Do it before the old keys are in hand and the partner seals a key
+  /// that opens nothing, while the ceremony reports success — the archive is
+  /// gone and both screens say it worked. It also survives a restart because
+  /// the seed exists by then, so the sign-in `noKey` gate stops firing and a
+  /// device mid-ceremony would otherwise have no way back to its own code.
+  static const _holdStoreKey = 'miles_rewrap_hold_v1';
+  static String get _holdKey =>
+      _accountId == null ? _holdStoreKey : '${_holdStoreKey}_$_accountId';
+
+  /// True while this device is mid-ceremony.
+  ///
+  /// Lapses with the request rather than needing a "give up" button. A hold
+  /// that outlived an abandoned ceremony would lock this device out of Closer
+  /// with no way back — a worse trap than the bug it prevents.
+  static Future<bool> publicationHeld() async => await heldRequest() != null;
+
+  /// The code is persisted beside the id because it is what the human reads
+  /// aloud: a process death mid-ceremony without it leaves a request the
+  /// partner can see and this phone can no longer voice. It lives where the
+  /// seed lives, and it protects nothing by itself — the commitment on the
+  /// server is what it is checked against.
+  static Future<void> holdPublication(
+    String requestId,
+    String code,
+    DateTime until,
+  ) =>
+      _storage.write(
+        key: _holdKey,
+        value: '$requestId|$code|${until.toUtc().toIso8601String()}',
+      );
+
+  /// The ceremony this device is waiting on, so a restart resumes it rather
+  /// than stranding the user with a live request and no code to show. Null once
+  /// it has lapsed.
+  ///
+  /// The server's clock, not the device's: lapsing EARLY is the dangerous
+  /// direction — a fresh reset with a fast clock would drop the hold the moment
+  /// it was written, and the first ensureSharedKey would rotate the couple key
+  /// mid-ceremony. ServerClock corrects for skew as soon as any response has
+  /// been observed and falls back to the device clock before that.
+  static Future<({String id, String code, DateTime until})?>
+      heldRequest() async {
+    final raw = await _storage.read(key: _holdKey);
+    if (raw == null) return null;
+    final parts = raw.split('|');
+    final until = parts.length == 3 ? DateTime.tryParse(parts[2]) : null;
+    if (until == null || ServerClock.now().isAfter(until)) {
+      await releasePublication();
+      return null;
+    }
+    return (id: parts[0], code: parts[1], until: until);
+  }
+
+  static Future<void> releasePublication() => _storage.delete(key: _holdKey);
+
+  /// Set while this account's history cannot be read on this device.
+  ///
+  /// Written when a sign-in ends with no seed and no escrow to produce one, or
+  /// when a password reset lands on a phone with nothing left to re-seal;
+  /// cleared when escrow hands the seed back or a ceremony finishes. Durable
+  /// and account-scoped because the ROUTER is what acts on it, and the ordinary
+  /// way into the app is a cold start that never passes through sign-in — the
+  /// disguise cover backgrounds the app and Android kills the process.
+  ///
+  /// `1` while the ceremony is still being offered, `deferred` once the user
+  /// has tapped past it. Escrow reads both the same way; they differ only in
+  /// whether the router keeps sending them back.
+  static const _keylessStoreKey = 'miles_key_missing_v1';
+  static String get _keylessKey => _accountId == null
+      ? _keylessStoreKey
+      : '${_keylessStoreKey}_$_accountId';
+
+  /// The router's view of the above, synchronously — a redirect cannot await a
+  /// keystore read. Refreshed by [bindAccount], the one place every entry into
+  /// an account goes through, sign-in and session restore alike.
+  static final ValueNotifier<bool> keyless = ValueNotifier<bool>(false);
+
+  static Future<void> markKeyless() async {
+    await _storage.write(key: _keylessKey, value: '1');
+    keyless.value = true;
+  }
+
+  static Future<void> clearKeyless() async {
+    await _storage.delete(key: _keylessKey);
+    keyless.value = false;
+  }
+
+  /// The stored fact, whatever the user has since said about it.
+  ///
+  /// [KeyEscrow] asks this one rather than the notifier: a device that cannot
+  /// read the couple's history must not seal the stand-in key it mints on the
+  /// first Closer screen over the row that still holds the real one.
+  static Future<bool> isKeyless() async =>
+      await _storage.read(key: _keylessKey) != null;
+
+  /// Stop routing to the ceremony until a sign-in offers it again.
+  ///
+  /// The fact is kept and only the routing stops: tapping past the offer does
+  /// not put the key back on the phone, and escrow goes on refusing to seal the
+  /// stand-in one. Without it that screen IS the app — a phone the router
+  /// returns to it from every route can reach neither settings nor sign-out.
+  static Future<void> deferRecovery() async {
+    await _storage.write(key: _keylessKey, value: 'deferred');
+    keyless.value = false;
+  }
+
+  /// Eight, then the oldest falls off — see [adoptRetiredKeys].
+  static const _ringMax = 8;
+  static List<SecretKey>? _ring;
+
+  /// The ring index that last opened something, or -1. Content is written in
+  /// eras, so consecutive items overwhelmingly share a key.
+  static int _ringHit = -1;
 
   /// The public-key value the old build published for everyone. A partner
   /// still advertising this has no real key, so we cannot encrypt to them yet.
@@ -102,6 +229,10 @@ class CryptoCore {
     _sharedKey = null;
     _plaintextAgreed = false;
     _derivedFrom = null;
+    // Keyed on the account that just left, and read under the new one's key
+    // from here on.
+    _ring = null;
+    _ringHit = -1;
 
     if (await _storage.read(key: _seedKey) == null) {
       final owner = await _storage.read(key: _legacySeedOwnerKey);
@@ -111,6 +242,12 @@ class CryptoCore {
         await _storage.write(key: _seedKey, value: legacy);
       }
     }
+    // Both halves of "this device cannot read what they wrote": the stored fact
+    // and a ceremony still in flight. Here rather than at sign-in because a
+    // cold start restores a session without ever passing through it — and under
+    // the SCOPED keys, which is what a read before binding got wrong.
+    keyless.value =
+        await _storage.read(key: _keylessKey) == '1' || await publicationHeld();
     _bumpEpoch();
   }
 
@@ -123,6 +260,9 @@ class CryptoCore {
     _sharedKey = null;
     _plaintextAgreed = false;
     _derivedFrom = null;
+    _ring = null;
+    _ringHit = -1;
+    keyless.value = false;
     _bumpEpoch();
   }
 
@@ -140,6 +280,15 @@ class CryptoCore {
     return _myKeyPair!;
   }
 
+  /// True when this account already has a private key on this device.
+  ///
+  /// False is a reinstall, a cleared keystore or a new phone — the moment
+  /// [_keyPair] would silently mint a replacement identity and orphan every
+  /// encrypted row the couple wrote. Asked BEFORE that happens, so the loss can
+  /// be offered a recovery rather than discovered later as an empty screen.
+  static Future<bool> hasSeed() async =>
+      await _storage.read(key: _seedKey) != null;
+
   /// The raw private seed, for [KeyEscrow] to seal under the user's password.
   ///
   /// Deliberately narrow: this is the ONLY way the seed leaves this class, and
@@ -154,7 +303,8 @@ class CryptoCore {
   ///
   /// Clears the derived shared key too: it was computed from the keypair being
   /// replaced, and leaving it would decrypt with the wrong key while looking
-  /// perfectly healthy.
+  /// perfectly healthy. The ring is deliberately left standing — those keys are
+  /// retired rather than derived, so a different seed does not invalidate them.
   static Future<void> adoptPrivateSeed(Uint8List seed) async {
     await _storage.write(key: _seedKey, value: base64Encode(seed));
     _myKeyPair = await _x25519.newKeyPairFromSeed(seed);
@@ -247,6 +397,8 @@ class CryptoCore {
     // cleartext" — and this is the state after sign-out.
     _plaintextAgreed = false;
     _derivedFrom = null;
+    _ring = null;
+    _ringHit = -1;
     // Sign-out. Every decrypted byte still held anywhere belongs to the account
     // that just left.
     _bumpEpoch();
@@ -256,6 +408,117 @@ class CryptoCore {
     if (_sharedKey == null) return null;
     return _sharedKey!.extractBytes();
   }
+
+  // ─── The key ring ────────────────────────────────────────────────────────
+  // A reinstall changes the derived couple key, so everything written before it
+  // stops opening on BOTH phones. The partner's device still holds the old key;
+  // PartnerRewrap carries it across and these keep it usable.
+
+  /// A key agreed with [otherPublicKeyB64] for WRAPPING, never for content.
+  ///
+  /// Its own HKDF label is what holds it apart from the couple key. Wrapping
+  /// under the content key would mean one opened wrap hands over everything the
+  /// key was protecting.
+  static Future<SecretKey> rewrapKey(String otherPublicKeyB64) async {
+    final pub = base64Decode(otherPublicKeyB64);
+    if (pub.length != 32) {
+      throw StateError('rewrap key is ${pub.length} bytes, expected 32');
+    }
+    final shared = await _x25519.sharedSecretKey(
+      keyPair: await _keyPair(),
+      remotePublicKey: SimplePublicKey(pub, type: KeyPairType.x25519),
+    );
+    return _hkdf.deriveKey(
+      secretKey: shared,
+      info: utf8.encode('miles-rewrap-v1'),
+    );
+  }
+
+  /// Every key this device can decrypt with, newest first: the derived couple
+  /// key, then the ring. Empty when nothing is derived — there is then nothing
+  /// worth handing to a partner.
+  static Future<List<List<int>>> exportKeyChainBytes() async {
+    final key = _sharedKey;
+    if (key == null) return const [];
+    final current = await key.extractBytes();
+    final chain = [current];
+    // After this device has ANSWERED a ceremony its own ring already holds the
+    // derived key, so a naive concat ships it twice — and a duplicate slot in a
+    // fixed eight is a real era pushed off the far end with nothing to show.
+    for (final k in await _ringBytes()) {
+      if (chain.any((held) => listEquals(held, k))) continue;
+      chain.add(k);
+    }
+    return chain;
+  }
+
+  /// Retire [keys], newest first. Returns how many fell off the end of the ring.
+  ///
+  /// Called on BOTH phones during a rewrap, and it has to be: publishing the new
+  /// public key changes what X25519 agrees on for the pair, so the key the
+  /// partner is handing over is one IT is also about to stop deriving. Retiring
+  /// on the giving side is the whole difference between "the history survives"
+  /// and "the history moved to the other phone".
+  ///
+  /// These only ever widen what opens — the current key is whatever this
+  /// device's seed derives, and that is unaffected. A key pushed off the end
+  /// takes its era's content with it, on this device, permanently.
+  static Future<({int added, int dropped})> adoptRetiredKeys(
+    List<List<int>> keys,
+  ) async {
+    final before = await _ringBytes();
+    final merged = <List<int>>[];
+    for (final key in [...keys, ...before]) {
+      if (key.length != 32) {
+        throw ArgumentError('a couple key is 32 bytes, got ${key.length}');
+      }
+      // A repeated ceremony hands back keys already held. Without this the ring
+      // fills with copies of one key and pushes real ones off the end.
+      if (merged.any((held) => listEquals(held, key))) continue;
+      merged.add(key);
+    }
+    final kept = merged.take(_ringMax).toList();
+    final flat = Uint8List(kept.length * 32);
+    for (var i = 0; i < kept.length; i++) {
+      flat.setRange(i * 32, (i + 1) * 32, kept[i]);
+    }
+    await _storage.write(key: _ringKey, value: base64Encode(flat));
+    _ring = [for (final k in kept) SecretKey(k)];
+    _ringHit = -1;
+    // The one bump for this ceremony, and the only place the ring bumps at all.
+    // Widening the set of keys that can open a box never changes what an
+    // already-decrypted box decrypted TO, so cached plaintext stays correct;
+    // what the caches hold from before is failure state, and this drops it.
+    _bumpEpoch();
+    // `added` is what this ceremony actually delivered BEYOND what this device
+    // already derives or held. The current derived key is stored (the giving
+    // side retires it on purpose) but never counted: in the one failure this
+    // number exists to expose — the partner answered with an already-rotated
+    // chain — the arriving key IS the derived key, and counting it would print
+    // "your history is back" over a recovery that recovered nothing.
+    final cur =
+        _sharedKey == null ? null : await _sharedKey!.extractBytes();
+    final added = kept
+        .where((k) =>
+            !(cur != null && listEquals(k, cur)) &&
+            !before.any((held) => listEquals(held, k)),)
+        .length;
+    return (added: added, dropped: merged.length - kept.length);
+  }
+
+  static Future<List<SecretKey>> _loadRing() async {
+    final cached = _ring;
+    if (cached != null) return cached;
+    final stored = await _storage.read(key: _ringKey);
+    final raw = stored == null ? Uint8List(0) : base64Decode(stored);
+    return _ring = [
+      for (var i = 0; i + 32 <= raw.length; i += 32)
+        SecretKey(raw.sublist(i, i + 32)),
+    ];
+  }
+
+  static Future<List<List<int>>> _ringBytes() async =>
+      Future.wait((await _loadRing()).map((k) => k.extractBytes()));
 
   static bool _isLegacy(Uint8List nonce, Uint8List mac) =>
       nonce.every((b) => b == 0) && mac.every((b) => b == 0);
@@ -347,12 +610,18 @@ class CryptoCore {
           'carry a nonce and a MAC');
     }
     final keyBytes = await exportSharedKeyBytes();
+    // With no couple key this is a legacy blob or a throw, and the ring can
+    // help with neither — loading it here would put a keystore read on every
+    // plaintext-era object.
+    final ring = keyBytes == null ? const <List<int>>[] : await _ringBytes();
     if (packed.length < 256 * 1024) {
-      return _decryptPacked(_DecryptRequest(packed, associatedData, keyBytes));
+      return _decryptPacked(
+        _DecryptRequest(packed, associatedData, keyBytes, ring),
+      );
     }
     return compute(
       _decryptPacked,
-      _DecryptRequest(packed, associatedData, keyBytes),
+      _DecryptRequest(packed, associatedData, keyBytes, ring),
     );
   }
 
@@ -377,12 +646,15 @@ class CryptoCore {
     if (key == null) {
       throw StateError('encrypted row but no couple key — partner key missing');
     }
-    final clear = await _aead.decrypt(
+    final (clear, hit) = await openWithChain(
       SecretBox(ct, nonce: nonce, mac: Mac(mac)),
-      secretKey: key,
-      aad: associatedData == null ? const <int>[] : utf8.encode(associatedData),
+      key,
+      await _loadRing(),
+      associatedData == null ? const <int>[] : utf8.encode(associatedData),
+      _ringHit,
     );
-    return Uint8List.fromList(clear);
+    _ringHit = hit;
+    return clear;
   }
 
   /// Deterministic, keyless tag hash so Fantasy-Jar tag matching still works
@@ -420,11 +692,12 @@ class EncryptedPayload {
 /// Arguments for [_decryptPacked]. Top-level for the same reason as
 /// [_EncryptRequest].
 class _DecryptRequest {
-  const _DecryptRequest(this.packed, this.ad, this.keyBytes);
+  const _DecryptRequest(this.packed, this.ad, this.keyBytes, this.ring);
 
   final Uint8List packed;
   final String? ad;
   final List<int>? keyBytes;
+  final List<List<int>> ring;
 }
 
 /// Splits `nonce || mac || ciphertext` and opens it.
@@ -445,13 +718,56 @@ Future<Uint8List> _decryptPacked(_DecryptRequest r) async {
   if (r.keyBytes == null) {
     throw StateError('encrypted media but no couple key — partner key missing');
   }
-  final clear = await Xchacha20.poly1305Aead().decrypt(
+  final (clear, _) = await openWithChain(
     SecretBox(ct, nonce: nonce, mac: Mac(mac)),
-    secretKey: SecretKey(r.keyBytes!),
-    aad: r.ad == null ? const <int>[] : utf8.encode(r.ad!),
+    SecretKey(r.keyBytes!),
+    [for (final k in r.ring) SecretKey(k)],
+    r.ad == null ? const <int>[] : utf8.encode(r.ad!),
+    // No memo survives an isolate boundary. The ring is newest-first, so
+    // starting at 0 is the best guess available on this side.
+    -1,
   );
-  return Uint8List.fromList(clear);
+  return clear;
 }
+
+/// Try [key], then [ring] in [ringOrder]; the first clean open wins, and the
+/// index that worked comes back so the caller can try it first next time.
+///
+/// Trying keys in turn is safe because a wrong one cannot yield plaintext here:
+/// XChaCha20-Poly1305 verifies the Poly1305 tag and throws, and a wrong 256-bit
+/// key producing a tag that verifies is 2^-128 per attempt. The fallback can
+/// only turn a failure into a success, never a success into a different one.
+Future<(Uint8List clear, int hit)> openWithChain(
+  SecretBox box,
+  SecretKey key,
+  List<SecretKey> ring,
+  List<int> aad,
+  int prefer,
+) async {
+  final aead = Xchacha20.poly1305Aead();
+  try {
+    return (Uint8List.fromList(await aead.decrypt(box, secretKey: key, aad: aad)), -1);
+  } on SecretBoxAuthenticationError {
+    for (final i in ringOrder(ring.length, prefer)) {
+      try {
+        final clear = await aead.decrypt(box, secretKey: ring[i], aad: aad);
+        return (Uint8List.fromList(clear), i);
+      } on SecretBoxAuthenticationError {
+        continue;
+      }
+    }
+    // Exhausted. The ORIGINAL failure is what leaves, because that exact type
+    // is what memory_failure.dart classifies as gone rather than transient.
+    rethrow;
+  }
+}
+
+/// [prefer] first when it is a real index, then 0..[n]-1 skipping it.
+List<int> ringOrder(int n, int prefer) => [
+      if (prefer >= 0 && prefer < n) prefer,
+      for (var i = 0; i < n; i++)
+        if (i != prefer) i,
+    ];
 
 /// Arguments for [_isolateEncrypt]. Top-level because `compute` sends the
 /// callback by reference and it must not close over anything.
