@@ -1,14 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The candle the whole app is themed around (MilesColors.ember over
-     emberSoft). 108dp viewport with the flame kept inside the centre 66dp, so
-     no launcher mask can clip it. -->
+<!-- Two lights and the line between them: the whole app in one mark.
+
+     Drawn in Android's 108-unit adaptive grid. The two cores sit inside the
+     66-unit safe square so no launcher mask can clip them; the glows are
+     allowed to run past it, because a soft falloff losing its last few percent
+     at the mask edge is invisible, and keeping them inside would have shrunk
+     the cores to dots.
+
+     The lower-left light is the larger one. Two lights of equal size read as a
+     symbol; unequal ones read as two people, one nearer than the other. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
+
+    <!-- Bloom under the near light. Painted before the thread so the line
+         emerges from the glow rather than sitting on top of it. -->
+    <path android:pathData="M18,70 a22,22 0 1,0 44,0 a22,22 0 1,0 -44,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="40" android:centerY="70"
+                android:gradientRadius="22">
+                <item android:offset="0.0" android:color="#B8FF8A5E" />
+                <item android:offset="0.35" android:color="#5CE8674A" />
+                <item android:offset="1.0" android:color="#00E8674A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Bloom under the far light: smaller radius and a lower peak, so the
+         distance reads as distance rather than as two different marks. -->
+    <path android:pathData="M57,38 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="73" android:centerY="38"
+                android:gradientRadius="16">
+                <item android:offset="0.0" android:color="#A6FF8A5E" />
+                <item android:offset="0.35" android:color="#4DE8674A" />
+                <item android:offset="1.0" android:color="#00E8674A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- The thread. Stroked rather than filled so it keeps an even weight, and
+         round-capped so it disappears into each core instead of ending in a
+         visible flat edge. Brightest at the near end, which is what makes the
+         curve read as travelling away. -->
     <path
-        android:fillColor="#FFE8674A"
-        android:pathData="M54,26 C66,42 74,52 74,62 C74,73 65,82 54,82 C43,82 34,73 34,62 C34,52 42,42 54,26 Z" />
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M40,70 C44,54 56,42 73,38">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="40" android:startY="70"
+                android:endX="73" android:endY="38">
+                <item android:offset="0.0" android:color="#FFFFA981" />
+                <item android:offset="1.0" android:color="#CCE8674A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
     <path
-        android:fillColor="#FFFCEFE6"
-        android:pathData="M54,48 C60,56 64,60 64,65 C64,71 59,76 54,76 C49,76 44,71 44,65 C44,60 48,56 54,48 Z" />
+        android:fillColor="#FFFFF1E8"
+        android:pathData="M34.6,70 a5.4,5.4 0 1,0 10.8,0 a5.4,5.4 0 1,0 -10.8,0 Z" />
+
+    <path
+        android:fillColor="#FFFFE4D2"
+        android:pathData="M69.4,38 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0 Z" />
 </vector>

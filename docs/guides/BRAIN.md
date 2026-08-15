@@ -1488,3 +1488,73 @@ alias behind it would throw on apply.
 1. The store listing must describe the cover feature in plain words.
 2. A screenshot of the picker in the listing.
 Without disclosure this becomes the exact violation it was designed to avoid.
+- R2 is live: bucket `miles-releases` (APAC, jurisdiction default → endpoint is
+  the standard `<account>.r2.cloudflarestorage.com`), public dev URL
+  `https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev` verified reachable
+  (404 on /news.apk = bucket up, object not yet uploaded).
+- **No API token is strictly required.** The R2 dashboard uploads objects by
+  drag-and-drop and R2's single-PUT ceiling is 5 GiB, so a ~220 MB APK is fine.
+  The token only makes uploads scriptable via `release.sh`.
+- **BOOTSTRAP: the updater cannot install itself.** Build 28 and earlier do not
+  contain it, so the first build carrying `update_service.dart` must be
+  hand-installed on both phones once; every build after that self-updates.
+  Publishing apk_url before then is harmless but inert.
+- The Cloudflare MCP is bucket-level only (create/get/list/delete). It exposes
+  no object-upload and no API-token tool, so the upload half cannot be done
+  from here — but verification and publishing (Supabase MCP) can.
+
+### §15 Miles icon, gating, and dead-route removal — 2026-08-16
+
+**New launcher mark for the honest identity** (`src/play/res/drawable/
+ic_launcher_play_{fg,bg,mono}.xml`). Two glowing points and the thread between
+them — the app in one mark. Written as VECTORS, not through
+`tool/generate_icon.dart`: that tool exists for the nine disguise tiles, where
+180 hand-maintained PNGs would drift. This is one icon with radial-gradient
+blooms, which a vector does natively and a PNG pipeline would have to fake.
+
+Craft notes so nobody "fixes" them later:
+- The lower-left light is DELIBERATELY larger. Equal dots read as a symbol;
+  unequal ones read as two people, one nearer than the other.
+- The cores sit inside the 66-unit safe square; the glows deliberately run past
+  it. A soft falloff losing its last few percent at the mask edge is invisible,
+  and containing it would have shrunk the cores to specks.
+- The mono layer is authored FLAT. Android tints themed icons by ALPHA, so a
+  gradient bloom smears into a grey cloud.
+- The background is a warm radial rising from the lower-left light, not the old
+  flat night — it does part of the glow's work.
+
+**First-open picker now runs on the play build too.** `hasChosen()` no longer
+short-circuits on `plainDefault`. Installs as Miles, then asks. This is better
+for policy than the earlier "Settings only": the user explicitly choosing IS
+the disclosure Behavior Transparency wants.
+
+**Touch and Games gated** on `isAdult && !modestMode` — the same switch Closer
+uses. Both were reachable with nothing but the signup age check.
+
+**Deleted (routes AND their modules, nothing else referenced them):**
+`/app/mood-signal` + `/prefs` and `lib/features/mood_signal/` (4 files);
+`/app/closer/vault` and `lib/features/closer/private_vault/` (4 files, replaced
+by the Gallery tile long ago). Their DB tables remain and are harmless — dead
+schema is invisible to a reviewer.
+
+**TWO REAL BUGS the gating introduced, both found before shipping. Touch sits
+in the MIDDLE of the nav bar, so hiding it slides Closer down one index:**
+1. `joinableTabIndex` returned `Closer: 4`. With Touch hidden Closer is at 3 —
+   it landed correctly ONLY because the shell clamps an out-of-range index.
+   Accidental correctness that breaks the moment anyone adds a tab.
+2. `publishActiveTab` used `kTabScreens[i]`, where index 3 is `'Touch'` — so
+   standing in Closer published "they are in Touch" to the partner, and offered
+   a join that goes somewhere else.
+Both now derive from one `visibleTabScreens(showTouch:)` list instead of two
+hand-written tables. The presence test walks BOTH bar shapes.
+
+**Design note worth keeping:** `publishActiveTab` briefly read `sessionProvider`
+to get the flag, which made naming a tab depend on `SupabaseService.client`
+being initialised — 18 tests died on `LateInitializationError`. The flag is a
+FIELD on the observer now, set by AppShell, which is the only thing that
+decides it. And the badge does not need the flag at all: a partner standing in
+Touch is proof the tab exists, since modest mode is a property of the couple.
+
+Verified: `flutter analyze mobile` 0/0, `flutter test` 699 pass.
+**Unverified:** vector gradients only truly render at build time — look at the
+launcher on the next build.

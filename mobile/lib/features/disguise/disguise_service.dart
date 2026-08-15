@@ -114,9 +114,6 @@ class DisguiseService {
   /// one-time onboarding prompt never pushes a picker with nothing in it.
   static Future<bool> hasChosen() async =>
       !enabled ||
-      // A build that installs as itself does not propose a cover; it waits to
-      // be asked, from Settings.
-      plainDefault ||
       ((await SharedPreferences.getInstance()).getBool(_chosenKey) ?? false);
 
   /// Marks the picker as answered without changing the identity — for the user

@@ -186,7 +186,21 @@ class PartnerHereBadge extends ConsumerWidget {
     // Where tapping would take us. Null when they are somewhere private or
     // somewhere that is not a place — the avatar is then inert, not broken.
     final joinRoute = joinableRouteFor(partnerScreen);
-    final joinTab = joinableTabIndex(partnerScreen);
+    // Same two flags the shell builds its bar from, read from the same
+    // provider — an index derived from a different answer points at a tab that
+    // is not on screen.
+    // From the observer, which AppShell keeps in step with the bar. Reading
+    // the session again here would be a second answer to the same question,
+    // and the two could disagree for a frame.
+    // A partner standing IN Touch is proof the tab exists — modest mode is a
+    // property of the couple, so it cannot be on the bar for one of them and
+    // not the other. That covers the case the flag is needed for; the observer
+    // answers the rest, which is only ever "where does Closer sit".
+    final joinTab = joinableTabIndex(
+      partnerScreen,
+      showTouch:
+          partnerScreen == 'Touch' || (presenceRouteObserver?.showTouch ?? false),
+    );
     final canJoin = !isHere && fresh && (joinRoute != null || joinTab != null);
 
     // Two distinct states, one widget: WITH you (breathing, warm) or ELSEWHERE

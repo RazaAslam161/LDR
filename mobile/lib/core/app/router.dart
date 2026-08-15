@@ -26,7 +26,6 @@ import 'package:miles/features/closer/memory_threads/memory_threads_screen.dart'
 import 'package:miles/features/closer/memory_threads/propose_memory_screen.dart';
 import 'package:miles/features/closer/mood_lamp/mood_lamp_screen.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_screen.dart';
-import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/reels/reel_queue_screen.dart';
 import 'package:miles/features/routines/routine_screen.dart';
@@ -39,8 +38,6 @@ import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/home/location_map_screen.dart';
-import 'package:miles/features/mood_signal/mood_signal_prefs_screen.dart';
-import 'package:miles/features/mood_signal/mood_signal_screen.dart';
 import 'package:miles/features/profile/partner_profile_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
@@ -220,14 +217,6 @@ GoRouter buildRouter(Ref ref) {
             CapsuleFillScreen(capsule: state.extra! as Capsule),
       ),
       GoRoute(
-        path: '/app/mood-signal',
-        builder: (context, state) => const MoodSignalScreen(),
-      ),
-      GoRoute(
-        path: '/app/mood-signal/prefs',
-        builder: (context, state) => const MoodSignalPrefsScreen(),
-      ),
-      GoRoute(
         path: '/app/vault',
         builder: (context, state) => const VaultGateScreen(),
       ),
@@ -314,10 +303,6 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/closer/warmth',
         builder: (context, state) => const WarmthMeterScreen(),
-      ),
-      GoRoute(
-        path: '/app/closer/vault',
-        builder: (context, state) => const PrivateVaultScreen(),
       ),
       // The shared gallery that replaces the vault's grid. Both routes exist
       // during the changeover: the vault still holds the couple's existing

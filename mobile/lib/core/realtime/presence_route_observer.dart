@@ -95,9 +95,19 @@ class PresenceRouteObserver extends NavigatorObserver {
 
   /// Publish the bottom-nav tab the user is on. The navigator cannot see a tab
   /// change, so AppShell calls this directly.
+  /// Whether the Touch tab is currently on the bar.
+  ///
+  /// Set by AppShell, which is the only thing that decides it. Held here
+  /// rather than derived: reading sessionProvider from inside the observer
+  /// built SessionNotifier, which touches SupabaseService.client — so naming a
+  /// tab came to depend on the backend being up, and every test that pushes a
+  /// route had to stand up Supabase to do it.
+  bool showTouch = false;
+
   void publishActiveTab() {
-    final i = _ref.read(shellTabProvider).clamp(0, kTabScreens.length - 1);
-    publish(kTabScreens[i], src: 'tab');
+    final tabs = visibleTabScreens(showTouch: showTouch);
+    final i = _ref.read(shellTabProvider).clamp(0, tabs.length - 1);
+    publish(tabs[i], src: 'tab');
   }
 
   /// Publish [name] as the room this user is in, or null for "somewhere".
@@ -271,17 +281,22 @@ const Map<String, String> kJoinableRoutes = {
   'Prompt': '/app/prompt',
   'Timeline': '/app/timeline',
   'Capsule': '/app/capsule',
-  'Mood Signal': '/app/mood-signal',
 };
 
 /// Tab screens live inside the shell, so joining one means selecting its tab
 /// rather than pushing a route. Index matches [kTabScreens].
-const Map<String, int> kJoinableTabs = {
-  'Home': 0,
-  'Chat': 1,
-  'Touch': 3,
-  'Closer': 4,
-};
+/// Nav index per tab, given which optional tabs this build is showing.
+///
+/// NOT a const map. Touch sits in the middle of the bar and is hidden while
+/// modest mode is on, which slides Closer down one — a fixed 'Closer': 4 was
+/// landing on the right tab only because the shell clamps an out-of-range
+/// index, and a clamp that happens to be correct is a bug waiting for someone
+/// to add a tab. Camera is index 2 and has no body; every index past it counts
+/// it anyway, because it is a real destination in the bar.
+Map<String, int> joinableTabs({required bool showTouch}) => {
+      for (final (i, name) in visibleTabScreens(showTouch: showTouch).indexed)
+        if (name != 'Camera') name: i,
+    };
 
 /// The route to push to join [screenName], or null if it is not joinable.
 ///
@@ -293,8 +308,11 @@ String? joinableRouteFor(String? screenName) =>
     screenName == null ? null : kJoinableRoutes[screenName];
 
 /// The shell tab index to select to join [screenName], or null.
-int? joinableTabIndex(String? screenName) =>
-    screenName == null ? null : kJoinableTabs[screenName];
+///
+/// [showTouch] must be the same value the shell used to build the bar, or this
+/// returns an index for a tab that is not there.
+int? joinableTabIndex(String? screenName, {required bool showTouch}) =>
+    screenName == null ? null : joinableTabs(showTouch: showTouch)[screenName];
 
 /// Human-facing name for a route, derived from its path.
 ///

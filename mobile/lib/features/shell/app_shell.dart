@@ -53,15 +53,6 @@ class _AppShellState extends ConsumerState<AppShell>
   /// Nav index of the Chat destination (Home, Chat, Camera, Touch, [Closer]).
   static const int _chatTab = 1;
 
-  // Bottom-nav bodies. The Camera tab (nav index 2) is a push with no body, so
-  // it is intentionally absent here. Indices map past it in build().
-  static const List<Widget> _screens = <Widget>[
-    HomeScreen(),
-    ChatScreen(),
-    TouchMapScreen(),
-    CloserScreen(),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -393,11 +384,24 @@ class _AppShellState extends ConsumerState<AppShell>
     final index = ref.watch(shellTabProvider);
 
     final showCloser = isAdult;
-    // Bottom-nav bodies (Home, Chat, Touch, [Closer]). The Camera tab is a
+    // Touch rides the same switch as Closer rather than being always-on. Body
+    // photos with a heat meter are the same register as the rest of that
+    // module, and it was the one intimate surface reachable without either
+    // partner having agreed to reveal any of it.
+    final showTouch = isAdult && !isModest;
+    // The observer names tabs by index, so it needs the same answer the bar
+    // was built from — otherwise standing in Closer publishes "Touch".
+    presenceRouteObserver?.showTouch = showTouch;
+    // Bottom-nav bodies (Home, Chat, [Touch], [Closer]). The Camera tab is a
     // full-screen PUSH inserted at nav index 2 — it has no body, so nav indices
-    // map past it.
-    final bodies =
-        showCloser ? _screens : _screens.sublist(0, _screens.length - 1);
+    // map past it. Built rather than sliced: Touch sits in the MIDDLE, so
+    // dropping it with sublist would have silently shifted Closer's index.
+    final bodies = <Widget>[
+      const HomeScreen(),
+      const ChatScreen(),
+      if (showTouch) const TouchMapScreen(),
+      if (showCloser) const CloserScreen(),
+    ];
     const cameraTab = 2;
     final destCount = bodies.length + 1; // + the Camera tab
     final selected = index.clamp(0, destCount - 1);
@@ -442,11 +446,12 @@ class _AppShellState extends ConsumerState<AppShell>
               selectedIcon: Icon(Icons.camera_alt),
               label: 'Camera',
             ),
-            const NavigationDestination(
-              icon: Icon(Icons.touch_app_outlined),
-              selectedIcon: Icon(Icons.touch_app),
-              label: 'Touch',
-            ),
+            if (showTouch)
+              const NavigationDestination(
+                icon: Icon(Icons.touch_app_outlined),
+                selectedIcon: Icon(Icons.touch_app),
+                label: 'Touch',
+              ),
             if (showCloser)
               NavigationDestination(
                 icon: const Icon(Icons.lock_outline),

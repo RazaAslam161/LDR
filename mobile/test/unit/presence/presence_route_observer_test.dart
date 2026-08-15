@@ -104,31 +104,45 @@ void main() {
         'Prefs',
       ]) {
         expect(joinableRouteFor(private), isNull, reason: '$private is private');
-        expect(joinableTabIndex(private), isNull, reason: '$private is private');
+        expect(joinableTabIndex(private, showTouch: true), isNull, reason: '$private is private');
       }
     });
 
     test('a screen nobody published is not joinable', () {
       expect(joinableRouteFor(null), isNull);
-      expect(joinableTabIndex(null), isNull);
+      expect(joinableTabIndex(null, showTouch: true), isNull);
       expect(joinableRouteFor('Some Future Screen'), isNull);
     });
 
     test('tab screens join by index, not by route', () {
       // They live inside the shell, so pushing '/app/chat' would 404.
-      expect(joinableTabIndex('Chat'), 1);
+      expect(joinableTabIndex('Chat', showTouch: true), 1);
       expect(joinableRouteFor('Chat'), isNull);
       // Index 2 is the camera button — a capture action, not a room.
-      expect(kJoinableTabs.values, isNot(contains(2)));
+      for (final showTouch in [true, false]) {
+        expect(joinableTabs(showTouch: showTouch).values, isNot(contains(2)),
+            reason: 'camera is joinable with showTouch: $showTouch',);
+      }
     });
 
-    test('tab indices match the bottom nav', () {
-      // Two hand-written tables pointing at the same tabs: if someone reorders
-      // the nav, joining "Chat" would silently open Breath.
-      kJoinableTabs.forEach((name, index) {
-        expect(kTabScreens[index], name,
-            reason: 'tab $index is ${kTabScreens[index]}, not $name',);
-      });
+    test('tab indices match the bottom nav in BOTH shapes', () {
+      // Touch sits in the middle and disappears with modest mode, sliding
+      // Closer down one. A fixed table landed on the right tab only because the
+      // shell clamps an out-of-range index — so this walks both shapes.
+      for (final showTouch in [true, false]) {
+        final visible = visibleTabScreens(showTouch: showTouch);
+        joinableTabs(showTouch: showTouch).forEach((name, index) {
+          expect(visible[index], name,
+              reason: 'showTouch: $showTouch — tab $index is ${visible[index]}, '
+                  'not $name',);
+        });
+      }
+    });
+
+    test('Touch is unjoinable exactly when it is not on the bar', () {
+      expect(joinableTabs(showTouch: true).containsKey('Touch'), isTrue);
+      expect(joinableTabs(showTouch: false).containsKey('Touch'), isFalse,
+          reason: 'joining a tab that is not rendered lands on another one',);
     });
   });
 

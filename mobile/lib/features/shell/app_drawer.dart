@@ -13,6 +13,12 @@ class AppDrawer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(sessionProvider);
     final partner = session.partner;
+    // Truth or Dare is the one drawer entry whose content the app itself
+    // wrote. Cute and Flirty are all that is left in it, but it belongs behind
+    // the same switch as everything else the two of them opted into rather
+    // than one tap from the home screen.
+    final showGames =
+        (session.profile?.isAdult ?? false) && !(session.couple?.modestMode ?? true);
 
     return Drawer(
       // The fill comes from drawerTheme. It used to be overridden to
@@ -163,14 +169,15 @@ class AppDrawer extends ConsumerWidget {
                           context.push('/app/heartbeat');
                         },
                       ),
-                      _DrawerTile(
-                        icon: Icons.casino_outlined,
-                        label: 'Games',
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          context.push('/app/games');
-                        },
-                      ),
+                      if (showGames)
+                        _DrawerTile(
+                          icon: Icons.casino_outlined,
+                          label: 'Games',
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            context.push('/app/games');
+                          },
+                        ),
                       _DrawerTile(
                         icon: Icons.schedule,
                         label: 'Rituals',

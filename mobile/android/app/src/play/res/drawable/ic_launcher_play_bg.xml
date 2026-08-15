@@ -1,8 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Full-bleed on purpose: an adaptive-icon background is masked by the
      launcher, and rounded corners here would show as light gaps at the mask
-     edge. MilesColors.night. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <solid android:color="#FF120A0C" />
-</shape>
+     edge.
+
+     Not the flat night the candle sat on. The warmth rises from the lower-left
+     light, which is what stops the tile reading as a black square with two
+     specks on it — the background is doing part of the glow's work. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M0,0 h108 v108 h-108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="40" android:centerY="70"
+                android:gradientRadius="86">
+                <item android:offset="0.0" android:color="#FF2E1418" />
+                <item android:offset="0.55" android:color="#FF1C0D11" />
+                <item android:offset="1.0" android:color="#FF120A0C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
