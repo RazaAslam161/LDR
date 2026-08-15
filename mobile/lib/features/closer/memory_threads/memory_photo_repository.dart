@@ -73,7 +73,7 @@ class MemoryPhoto {
 class MemoryPhotoRepository {
   MemoryPhotoRepository._();
 
-  static const _bucket = intimateBucket;
+  static const _bucket = privateBucket;
 
   /// 40 MB. The bucket's own limit is 104857600, verified; this leaves room for
   /// the nonce, the MAC and a base64-free margin rather than discovering the

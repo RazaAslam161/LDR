@@ -120,9 +120,9 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: kDisguises.length,
+                itemCount: DisguiseService.choices.length,
                 itemBuilder: (context, i) {
-                  final d = kDisguises[i];
+                  final d = DisguiseService.choices[i];
                   final selected = d.aliasId == _selected?.aliasId;
                   return _DisguiseTile(
                     profile: d,

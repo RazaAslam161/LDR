@@ -125,7 +125,7 @@ class SharedMediaWindow extends MediaSource {
       final path = m.videoPath;
       return path == null
           ? null
-          : MediaItem.stored(intimateBucket, path,
+          : MediaItem.stored(privateBucket, path,
               thumbPath: m.videoThumbPath,
               messageId: m.id,
               isVideo: true,

@@ -1312,3 +1312,179 @@ account-delete deployed for the Play-required web deletion path.
 - **Vault previews are still in-row bytea** (avg 64 KB, max 323 KB). The list
   query is now projected and paginated, but moving previews to storage objects
   is still the §4a job.
+
+---
+
+## §13 Addiction slate — 2026-08-15
+
+He asked for big habit-forming mechanics ("nicotine"), beyond the product brief's
+slate. 9-agent tournament ran; full specs with judge scores in
+`docs/guides/addiction-slate-2026-08-15.md`. Top of the board: **The Pull** (C8 N9 F7 —
+gacha rarity ladder over the couple's own archive, extends Rerun), **The Mint**
+(C8 N8 F6 — the archive minted into a shared collectible binder), **The Cellar**
+(C6 N8 F8 — Drift's stockpile inverted from push to pull; fixes Drift's stated
+"refill has no reward" bet), **Flare** (C6 N8 F9 — one rationed luminous send on an
+unpredictable grant schedule, cheapest build), **The Vow** (C6 N9 F8 — private
+streak wager against your own escrowed gift). Recommended order: Pull → Flare →
+Cellar → Mint; they share one archive-read + app_config-tuning substrate.
+**The Chain** scored C7 but N3 — perpetual reciprocal obligation; do not build.
+Nothing from this slate is implemented yet.
+
+---
+
+## §14 In-app self-update (sideload) — 2026-08-15
+
+Built. The sideload build downloads and installs its own APK, so an update is
+"upload one APK + flip an app_release row" instead of hand-transferring to every
+phone. Full release steps: `docs/guides/SIDELOAD-UPDATE-RUNBOOK.md`.
+
+- Server: `app_release` gained `apk_url`, `apk_sha256`, `latest_version_name`
+  (migration `20260815100000`, applied to prod; nullable/additive, RLS unchanged).
+- Client: `ReleaseGate.check()` now also reads those + `latest_build`.
+  `UpdateService` (core/services) streams the APK to cache, verifies SHA-256 as
+  it streams (never 220 MB in RAM), hands it to the OS installer via a native
+  `miles/updater` channel + FileProvider. `UpdateSheet` (core/widgets) is the UI.
+- Entry points: **Update now** button on the block screen (a min_build-gated
+  client can self-rescue now), a once-per-launch dismissible prompt in AppShell,
+  and a Settings row. All three gated on `UpdateService.available`.
+- **Sideload only, by construction.** Gated on `DisguiseService.enabled` (false
+  on play), and `REQUEST_INSTALL_PACKAGES` + the FileProvider live in
+  `src/sideload/` — the play AAB never declares self-update (Play strike).
+- **Signature caveat (load-bearing):** in-place update needs the SAME signing
+  key. Still debug-signed → updates work only from the same PC. Make the release
+  keystore before relying on hosted updates, or a key change orphans every
+  install and wipes its secure-storage E2EE key.
+- Gates: `flutter analyze` clean on changed files; `update_service_test.dart`
+  (5 tests) pins the play-channel guard. Kotlin channel added to MainActivity.
+- Not built: no APK is hosted yet and `app_release.apk_url` is still null, so the
+  feature is dormant until you upload one and set the row (runbook step 3-4).
+- **Hosting: use Cloudflare R2, NOT Supabase Storage.** Verified 2026-08-15 —
+  Supabase free caps uploads at 50 MB/file and the APK is ~220 MB (project's
+  largest object ever: 33 MB, so nothing contradicts the cap). R2 stays right
+  even on Pro: APK distribution is pure egress and R2 charges none, while one
+  release to 1000 phones (~220 GB) would consume Pro's entire monthly 250 GB.
+- `mobile/tool/release.sh` makes a release one command:
+  `bash tool/release.sh --upload --verify`. It aborts if pubspec's `+N` and
+  `ReleaseGate.buildNumber` disagree (the drift that already bit at 26/27) and
+  checks env vars BEFORE the ten-minute build, builds the sideload flavour,
+  prints sha256 + size, uploads to R2, re-downloads the public URL and proves
+  the served bytes match, then prints the `app_release` SQL.
+- **Uploads use curl's built-in `--aws-sigv4`** against R2's S3 API — verified
+  present in the installed curl 8.21. No aws-cli, no rclone, no new dependency
+  (neither is installed on this machine anyway). Credentials come from
+  `MILES_R2_*` env vars and never touch the repo.
+- Raising `min_build` stays a separate, deliberate act, and only after
+  `--verify` passes: a gated phone's only escape is that URL, so a bad object
+  there bricks the fleet with no other way back.
+
+### §14 Play Store preparation — content and naming, 2026-08-15
+
+**Verdict on the disguise, verified against live policy (not memory):** an
+OPT-IN disguise is publishable. Play's Deceptive Behavior policy protects the
+INSTALLING user, and a user who enables the cover themselves is not deceived.
+Live proof: HideU Calculator Lock (100M+ installs), Calculator Vault (40M), Clock
+Vault — all advertise launcher-icon swapping in their listings, all updated 2026.
+Google banned icon-hiding exactly once, in the stalkerware policy, scoped to apps
+that transmit a THIRD PARTY's data off-device. Miles is out of scope.
+Conditions: ship as Miles by default, disclose the cover in the listing, show it
+in screenshots, keep it reversible, and drop any cover icon resembling a real
+product (Impersonation is a separate policy).
+
+**The real blocker was never the disguise — it was app-supplied content.**
+
+DONE this session:
+- **Truth-or-Dare `spicy` tier deleted entirely** (4 blocks, EN + Roman Urdu,
+  ~70 strings). Not just the dares: the spicy TRUTHS were equally explicit, and
+  removing one half would have left a tier with no dares in it. `TDTier` is now
+  `{cute, flirty}`. `TDCard.fromJson` returns null for an unknown tier, so a
+  spicy card broadcast from build 26 renders nothing rather than crashing —
+  pinned by a test.
+- **Touch tab relabelled**: Lick/Spank/Bite/Grab -> Tickle/Tap/Nudge/Hold, new
+  emoji. The wire KEYS (`tongue`,`spank`,`bite`,`grab`) are unchanged on purpose
+  — they are written into `touch_type` on every row.
+- **Intimate moods gated.** `MoodData.intimate` existed from the start and
+  NOTHING read it, so "Turned on / Aching for you" sat in the ordinary chat mood
+  sheet for every user. `moodsFor({intimateAllowed})` is the missing reader;
+  chat gates on `!couple.modestMode`, the same condition Closer uses.
+- **Renames (all CLIENT-ONLY, no schema touched):** `fake_news/`->`covers/`,
+  `intimacy/`->`mood_signal/`, `closer/desire/`->`closer/warmth/`,
+  `closer/fantasy_jar/`->`closer/wish_jar/`; classes, routes, and the
+  partner-facing presence room names with them. `intimateBucket`->`privateBucket`
+  (32 uses).
+- **Emoji assets renamed** `horny/devilish/kissmark` -> `yearning/mischief/
+  lipstick`, via a new `MoodData.asset` field so the FILENAME changes while
+  `key` stays on the wire. These filenames were visible from a bare `unzip -l`
+  with no tooling — the cheapest real exposure in the whole app.
+
+**WHY the wire values stay (do not "finish the job" later without staging):**
+the APK ships WITHOUT obfuscation — verified twice: no `--obfuscate` anywhere in
+the build, and grepping the shipped `libapp.so` finds `DesireTempScreen`,
+`desire_temps`, `couple_intimate`, `horny`, `spank`, `/app/intimacy` as
+plaintext. A reviewer therefore sees the DART CONSTANT NAME, not the table.
+Renaming `intimateBucket` removed 32 visible occurrences at zero cost; renaming
+the bucket STRING would break every stored object path and both installed
+phones. Same for `desire_temps`, `fantasy_jar_entries`, `intimacy_signals`,
+`body_touches`, mood key `horny`, touch keys, and the `intimate:` vault prefix.
+All seven verified still present after the rename sweep.
+
+**Server-side names are invisible to a reviewer** — policy names, index names,
+RLS function names, migration filenames. `afterglow_entries`, `body_map_pins`
+and `fantasy_jar_reveals` have ZERO Dart references (dead schema). Not worth
+renaming.
+
+**THE ITEM RENAMING CANNOT FIX, ranked first on real exposure:** the entire
+disguise implementation compiles into the PLAY flavour. `DISGUISE_ENABLED=false`
+gates the launcher aliases and runtime behaviour, not the Dart — so a Play AAB
+still contains Calculator/Weather covers and an identity-swapping picker.
+The fix is a conditional import or a `src/play` Dart split so those screens never
+compile in. Not done.
+
+**Still unfixed, his explicit decision:** chat is NOT E2EE — `chat_repository.dart`
+`sendText` inserts `'body': trimmed` in plaintext, zero CryptoCore references in
+the file, and production held 169 plaintext rows when checked. He said "i don't
+want encryption on that". Recorded so nobody re-discovers it as a bug.
+
+**Distribution:** Limited Distribution Accounts (free, 20 devices, no ID, no
+review) are "coming soon" — NOT open as of 2026-08-15; early access closed, more
+info promised this month. `adb install` stays exempt from verification
+permanently. Hard enforcement 30 Sept 2026 in BR/ID/SG/TH, global 2027.
+
+### §14a Play flavour carries the covers, opt-in — 2026-08-15
+
+**Decision reversed on purpose.** The play channel used to ship NO aliases at
+all, and `disguise_manifest_test` asserted exactly that. The problem: the Dart
+still compiled in, so the AAB contained Calculator/Weather covers and an
+identity-swapping picker that the listing never mentioned — a Behavior
+Transparency finding ("hidden, dormant, or undocumented features"), which
+renaming cannot fix. Excluding the Dart was the alternative and it costs two
+code paths forever.
+
+**What ships now:**
+- `src/play/AndroidManifest.xml` declares `.AliasMiles` (**enabled**, real name,
+  `ic_launcher_play`) plus all nine covers at `android:enabled="false"`.
+- `MainActivity` in the play manifest is SELF-CLOSING — no intent-filter of its
+  own. A filter there would be a tenth identity the switcher cannot disable, so
+  the app could never fully return to plain. The test asserts this.
+- New BuildConfig field `PLAIN_DEFAULT` (play=true, sideload=false), read over
+  the existing `miles/disguise` channel as `isPlainDefault`.
+- `DisguiseService.plainDefault` drives three things: `_allAliases` includes
+  `Miles` so switching away disables it; `choices` puts the plain identity first
+  so it is the way BACK; `hasChosen()` returns true so a store build never
+  proposes a cover unasked — it waits to be asked, from Settings.
+- `kPlainProfile` lives in `disguise_profile.dart` and is deliberately NOT in
+  `kDisguises` — that list answers "which covers exist", and the plain identity
+  is the absence of one. Tests walking `kDisguises` stay correct.
+
+**Sideload is untouched.** Still installs as News, same nine covers, same
+default. Verified: full suite 698 pass, analyze 0/0.
+
+**The guard test was REPLACED, not deleted.** Old: "the play channel carries no
+disguise at all". New: exactly one enabled alias, it must be `.AliasMiles`, it
+must not wear a cover icon, and EVERY cover must be declared AND disabled. The
+new one catches a bug the old could not — a cover offered in the picker with no
+alias behind it would throw on apply.
+
+**REQUIRED BEFORE SUBMITTING, and the whole basis of this being legal:**
+1. The store listing must describe the cover feature in plain words.
+2. A screenshot of the picker in the listing.
+Without disclosure this becomes the exact violation it was designed to avoid.

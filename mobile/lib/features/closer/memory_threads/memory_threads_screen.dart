@@ -1381,7 +1381,7 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
           final photo = photos.first;
           fromObject = true;
           final bytes = await EncryptedMediaCache.bytes(
-            bucket: intimateBucket,
+            bucket: privateBucket,
             path: photo.fullPath,
             associatedData:
                 MemoryPhotoRepository.fullAdFor(widget.thread.id, photo.id),

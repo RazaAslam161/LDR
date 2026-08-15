@@ -353,7 +353,7 @@ class _Tile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = MediaUrls.cached(intimateBucket, item.gridPath);
+    final url = MediaUrls.cached(privateBucket, item.gridPath);
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -373,7 +373,7 @@ class _Tile extends StatelessWidget {
                 // Keyed by PATH, not by the signed URL — a token expires daily
                 // and would re-download every picture the day after it was
                 // first seen.
-                cacheKey: '$intimateBucket/${item.gridPath}',
+                cacheKey: '$privateBucket/${item.gridPath}',
                 // The object is already ~400px, so bounding its decode buys
                 // nothing and costs sharing: unbounded, every surface painting
                 // this thumbnail shares one decode.

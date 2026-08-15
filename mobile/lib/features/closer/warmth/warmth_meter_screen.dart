@@ -8,14 +8,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Desire Temperature — daily private 1–10 slider.
 /// App only reveals when BOTH scored ≥7. Protects egos from mismatched states.
-class DesireTempScreen extends ConsumerStatefulWidget {
-  const DesireTempScreen({super.key});
+class WarmthMeterScreen extends ConsumerStatefulWidget {
+  const WarmthMeterScreen({super.key});
 
   @override
-  ConsumerState<DesireTempScreen> createState() => _DesireTempScreenState();
+  ConsumerState<WarmthMeterScreen> createState() => _WarmthMeterScreenState();
 }
 
-class _DesireTempScreenState extends ConsumerState<DesireTempScreen> {
+class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
   double _myScore = 5;
   int? _partnerScore; // null = not yet today OR hidden by reveal logic
   bool _submittedToday = false;

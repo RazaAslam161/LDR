@@ -271,7 +271,7 @@ const Map<String, String> kJoinableRoutes = {
   'Prompt': '/app/prompt',
   'Timeline': '/app/timeline',
   'Capsule': '/app/capsule',
-  'Intimacy': '/app/intimacy',
+  'Mood Signal': '/app/mood-signal',
 };
 
 /// Tab screens live inside the shell, so joining one means selecting its tab

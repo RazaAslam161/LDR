@@ -82,17 +82,24 @@ class _TouchType {
   final Color color;
 }
 
+/// The keys are the wire format — they go into `touch_type` on every row and
+/// are read back by both phones, so they stay exactly as they are. Only the
+/// label and the emoji are user-facing, and those are what changed: the app
+/// used to ship 'Lick', 'Spank', 'Bite' and 'Grab' as its own vocabulary,
+/// applied to a photograph of a real person. What the feature DOES is send a
+/// touch to a spot; these words describe that just as accurately without the
+/// app putting those particular ones in anyone's mouth.
 const List<_TouchType> _types = [
   _TouchType('caress', '🫳', 'Caress', MilesColors.gilt),
   _TouchType('glow', '💫', 'Glow', MilesColors.blush),
   _TouchType('kiss', '💋', 'Kiss', Color(0xFFD45A77)),
   _TouchType('hug', '🤗', 'Hug', MilesColors.emberSoft),
-  _TouchType('grab', '✊', 'Grab', Color(0xFFC85B7A)),
+  _TouchType('grab', '🤝', 'Hold', Color(0xFFC85B7A)),
   _TouchType('pinch', '🤏', 'Pinch', Color(0xFFE08AA0)),
-  _TouchType('tongue', '👅', 'Lick', Color(0xFFE0566B)),
+  _TouchType('tongue', '🪶', 'Tickle', Color(0xFFE0566B)),
   _TouchType('poke', '👉', 'Poke', MilesColors.gilt),
-  _TouchType('spank', '🖐️', 'Spank', Color(0xFFD45A77)),
-  _TouchType('bite', '🫦', 'Bite', Color(0xFFB23A5A)),
+  _TouchType('spank', '👋', 'Tap', Color(0xFFD45A77)),
+  _TouchType('bite', '✨', 'Nudge', Color(0xFFB23A5A)),
 ];
 
 /// A live pan/zoom frame applied to a body photo, synced to both phones so you
@@ -197,7 +204,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     _loadPhotos();
   }
 
-  // ── Neon "hot lines" — draw glowing trails that fade like a comet tail ──
+  // ── Neon trails — glowing lines that fade like a comet tail ──
   bool _drawing =
       false; // draw-mode toggle (drag draws neon instead of touches)
   final List<_NP> _neon = [];
@@ -978,7 +985,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           ),
           IconButton(
             tooltip:
-                _drawing ? 'Drawing hot lines — tap to stop' : 'Draw hot lines',
+                _drawing ? 'Drawing — tap to stop' : 'Draw a line',
             icon: Icon(Icons.gesture,
                 color: _drawing ? MilesColors.ember : MilesColors.gilt,),
             onPressed: () => setState(() => _drawing = !_drawing),
@@ -998,8 +1005,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
               children: [
                 const SizedBox(height: 8),
                 const Text(
-                  'Touch each other. They feel where you touch them —\n'
-                  'you feel where they touch you. Both at once.',
+                  'Tap where you want them to feel it. A glow lands there on\n'
+                  'their screen too, and you feel theirs. Both at once.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12),
                 ),
@@ -1580,7 +1587,7 @@ class _NP {
   final String stroke;
 }
 
-/// Glowing neon "hot lines" that fade with age — connects consecutive points of
+/// Glowing neon trails that fade with age — connects consecutive points of
 /// the same stroke; newer segments are brighter (a comet tail).
 class _NeonPainter extends CustomPainter {
   _NeonPainter(this.points, this.now);

@@ -27,8 +27,8 @@ const List<String> kFantasyTaxonomy = [
 ];
 
 /// One decrypted entry — shown only to its author.
-class FantasyEntry {
-  FantasyEntry({
+class WishEntry {
+  WishEntry({
     required this.id,
     required this.authorId,
     required this.text,
@@ -48,8 +48,8 @@ class FantasyEntry {
 /// All entry text is XChaCha20-Poly1305 encrypted client-side. Tags are
 /// HMAC-SHA256 hashed with the couple-shared key before upload so the server
 /// can compare sets without ever learning the plaintext tag.
-class FantasyJarRepository {
-  FantasyJarRepository._();
+class WishJarRepository {
+  WishJarRepository._();
 
   static final _c = SupabaseService.client;
 
@@ -153,7 +153,7 @@ class FantasyJarRepository {
   }
 
   /// Fetches and decrypts the current user's own entries.
-  static Future<CloserLoadResult<FantasyEntry>> fetchMyEntries({
+  static Future<CloserLoadResult<WishEntry>> fetchMyEntries({
     required String coupleId,
     required String myId,
   }) async {
@@ -167,7 +167,7 @@ class FantasyJarRepository {
     final tagHashMap = await buildTagHashMap();
     final hashToTag = {for (final e in tagHashMap.entries) e.value: e.key};
 
-    final out = <FantasyEntry>[];
+    final out = <WishEntry>[];
     var unreadable = 0;
     for (final row in rows as List) {
       try {
@@ -179,7 +179,7 @@ class FantasyJarRepository {
             .map((e) => e.toString())
             .toList();
         final tags = hashes.map((h) => hashToTag[h]).whereType<String>().toList();
-        out.add(FantasyEntry(
+        out.add(WishEntry(
           id: JsonUtils.parseString(row['id']),
           authorId: JsonUtils.parseString(row['author']),
           text: plain,

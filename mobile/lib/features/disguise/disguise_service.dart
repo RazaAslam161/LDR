@@ -43,6 +43,34 @@ class DisguiseService {
   /// way strips the disguise off a sideloaded phone mid-session.
   static bool enabled = true;
 
+  /// Whether this build installs as itself.
+  ///
+  /// The Play channel declares `.AliasMiles` alongside the nine covers, all of
+  /// them disabled, and starts on Miles — so a cover is something the owner
+  /// switches ON from Settings, never the state they were handed. The sideload
+  /// channel has no such component and starts on News, which is the point of
+  /// that channel.
+  ///
+  /// Two things follow: the plain identity has to be in the `all` list so
+  /// switching away from it disables it, and nothing may prompt for a cover
+  /// unasked — a store build that opens a disguise picker on first run is
+  /// offering something the user did not come for.
+  static bool plainDefault = false;
+
+  /// Every alias this build declares, plain identity included.
+  static List<String> get _allAliases => [
+        if (plainDefault) kPlainProfile.aliasId,
+        ...kDisguises.map((d) => d.aliasId),
+      ];
+
+  /// What the picker may offer. The plain identity leads, because on a build
+  /// that starts there it is also the way back.
+  static List<DisguiseProfile> get choices =>
+      [if (plainDefault) kPlainProfile, ...kDisguises];
+
+  static DisguiseProfile get _installedIdentity =>
+      plainDefault ? kPlainProfile : kDefaultDisguise;
+
   /// Reads [enabled] from the native BuildConfig, once. Must complete before
   /// runApp — see main().
   static Future<void> loadEnabled() async {
@@ -53,6 +81,10 @@ class DisguiseService {
               .invokeMethod<bool>('isEnabled')
               .timeout(const Duration(seconds: 2)) ??
           true;
+      plainDefault = await _channel
+              .invokeMethod<bool>('isPlainDefault')
+              .timeout(const Duration(seconds: 2)) ??
+          false;
     } catch (_) {
       // Non-Android host, or the query failed — keep the disguise.
     }
@@ -65,10 +97,16 @@ class DisguiseService {
     try {
       final prefs = await SharedPreferences.getInstance()
           .timeout(const Duration(seconds: 2));
-      return disguiseForAlias(prefs.getString(_prefsKey));
+      final stored = prefs.getString(_prefsKey);
+      // Nothing stored means nothing was ever chosen, and what the launcher is
+      // showing then is whichever alias the manifest enabled — News on
+      // sideload, Miles on Play. Answering kDefaultDisguise for both would tell
+      // a Play install it is wearing a cover it is not.
+      if (stored == null) return _installedIdentity;
+      return disguiseForAlias(stored);
     } catch (_) {
       // Disk contention on a slow device must not hold up the first frame.
-      return kDefaultDisguise;
+      return _installedIdentity;
     }
   }
 
@@ -76,6 +114,9 @@ class DisguiseService {
   /// one-time onboarding prompt never pushes a picker with nothing in it.
   static Future<bool> hasChosen() async =>
       !enabled ||
+      // A build that installs as itself does not propose a cover; it waits to
+      // be asked, from Settings.
+      plainDefault ||
       ((await SharedPreferences.getInstance()).getBool(_chosenKey) ?? false);
 
   /// Marks the picker as answered without changing the identity — for the user
@@ -103,7 +144,7 @@ class DisguiseService {
     try {
       final ok = await _channel.invokeMethod<bool>('setAlias', {
         'aliasId': profile.aliasId,
-        'all': kDisguises.map((d) => d.aliasId).toList(),
+        'all': _allAliases,
       });
       if (ok ?? false) return true;
     } on PlatformException catch (e) {
@@ -137,7 +178,7 @@ class DisguiseService {
       // no way forward. A stale identity is survivable; an app that never
       // starts is not.
       final alias = await _channel.invokeMethod<String>('currentAlias', {
-        'all': kDisguises.map((d) => d.aliasId).toList(),
+        'all': _allAliases,
       }).timeout(const Duration(seconds: 2));
       if (alias != null && alias.isNotEmpty) {
         final prefs = await SharedPreferences.getInstance();

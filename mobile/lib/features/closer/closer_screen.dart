@@ -316,13 +316,13 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
         emoji: '🌡️',
         title: 'Desire',
         blurb: 'How much today?',
-        route: '/app/closer/desire',
+        route: '/app/closer/warmth',
       ),
       _FeatureTile(
         emoji: '🍯',
         title: 'Fantasy Jar',
         blurb: 'Soft matches, big sparks',
-        route: '/app/closer/fantasy-jar',
+        route: '/app/closer/wish-jar',
       ),
       // Points at the shared gallery, not the vault. The vault's route still
       // exists so the couple's existing encrypted items stay reachable, but

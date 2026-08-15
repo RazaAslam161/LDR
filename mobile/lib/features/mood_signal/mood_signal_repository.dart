@@ -23,10 +23,10 @@ MoodState moodFor(String key) =>
     moodStates.firstWhere((m) => m.key == key,
         orElse: () => const MoodState('feeling_close', 'Feeling close', '🤍'),);
 
-class IntimacyPrefs {
-  const IntimacyPrefs({this.receivingEnabled = false, this.signalingEnabled = false});
+class MoodSignalPrefs {
+  const MoodSignalPrefs({this.receivingEnabled = false, this.signalingEnabled = false});
 
-  factory IntimacyPrefs.fromJson(Map<String, dynamic> j) => IntimacyPrefs(
+  factory MoodSignalPrefs.fromJson(Map<String, dynamic> j) => MoodSignalPrefs(
         receivingEnabled: JsonUtils.parseBool(j['receiving_enabled']),
         signalingEnabled: JsonUtils.parseBool(j['signaling_enabled']),
       );
@@ -38,15 +38,15 @@ class IntimacyPrefs {
   bool get optedIn => receivingEnabled || signalingEnabled;
 }
 
-class IntimacySignal {
-  IntimacySignal({
+class MoodSignal {
+  MoodSignal({
     required this.id,
     required this.userId,
     required this.state,
     required this.windowExpiresAt,
   });
 
-  factory IntimacySignal.fromJson(Map<String, dynamic> j) => IntimacySignal(
+  factory MoodSignal.fromJson(Map<String, dynamic> j) => MoodSignal(
         id: JsonUtils.parseString(j['id']),
         userId: JsonUtils.parseString(j['user_id']),
         state: JsonUtils.parseString(j['state']),
@@ -61,22 +61,22 @@ class IntimacySignal {
   bool get isActive => windowExpiresAt.isAfter(DateTime.now());
 }
 
-class IntimacyRepository {
-  IntimacyRepository._();
+class MoodSignalRepository {
+  MoodSignalRepository._();
 
   static SupabaseClient get _c => SupabaseService.client;
 
-  static Future<IntimacyPrefs> getPrefs() async {
+  static Future<MoodSignalPrefs> getPrefs() async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return const IntimacyPrefs();
+    if (uid == null) return const MoodSignalPrefs();
     final res = await _c
         .from('intimacy_prefs')
         .select()
         .eq('user_id', uid)
         .maybeSingle();
     return res == null
-        ? const IntimacyPrefs()
-        : IntimacyPrefs.fromJson(res);
+        ? const MoodSignalPrefs()
+        : MoodSignalPrefs.fromJson(res);
   }
 
   static Future<void> setPrefs({
@@ -113,14 +113,14 @@ class IntimacyRepository {
 
   /// Active signals the caller is allowed to see. RLS guarantees you only see
   /// your partner's signal if YOU also have an active one (the mutual gate).
-  static Future<List<IntimacySignal>> activeSignals(String coupleId) async {
+  static Future<List<MoodSignal>> activeSignals(String coupleId) async {
     final res = await _c
         .from('intimacy_signals')
         .select()
         .eq('couple_id', coupleId)
         .gt('window_expires_at', DateTime.now().toUtc().toIso8601String());
     return (res as List)
-        .map((e) => IntimacySignal.fromJson(e as Map<String, dynamic>))
+        .map((e) => MoodSignal.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 

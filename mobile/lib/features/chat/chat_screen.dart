@@ -729,7 +729,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// before delivering", and it hit the SENDER too, who has no local file for
   /// a recording the way they do for a photo.
   Future<void> _warmMedia(Message m) async {
-    if (m.mediaPaths.isEmpty && m.intimatePaths.isEmpty) return;
+    if (m.mediaPaths.isEmpty && m.privatePaths.isEmpty) return;
     await ChatRepository.warmMedia([m]);
     if (mounted) setState(() {});
   }
@@ -880,7 +880,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _setMyMood() async {
     final id = _coupleId;
     if (id == null) return;
-    final m = await showMoodSelector(context);
+    // Same gate Closer uses: modest mode on means the intimate moods are not
+    // offered at all, rather than offered and then regretted.
+    final couple = ref.read(sessionProvider).couple;
+    final m = await showMoodSelector(
+      context,
+      intimateAllowed: couple != null && !couple.modestMode,
+    );
     if (m == null) return;
     await PresenceService.setMood(id, m.key, m.hex);
   }
@@ -2398,7 +2404,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
           .showSnackBar(const SnackBar(content: Text('Video unavailable')));
       return;
     }
-    await MediaViewer.openStored(context, intimateBucket, path,
+    await MediaViewer.openStored(context, privateBucket, path,
         isVideo: true, senderName: widget.senderName,);
   }
 

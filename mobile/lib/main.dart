@@ -22,11 +22,13 @@ import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
+import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
+import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_pip.dart';
@@ -112,7 +114,7 @@ class MilesApp extends ConsumerStatefulWidget {
 
   /// Whether the real Miles app is shown (true) or the disguise cover
   /// (false). Reset to false on every background so returning always requires
-  /// re-authentication; only FakeNewsScreen sets it true after the biometric +
+  /// re-authentication; only NewsCoverScreen sets it true after the biometric +
   /// splash. Static so the cover screen and the lifecycle handler
   /// share one source of truth.
   ///
@@ -556,7 +558,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     });
 
     // The cover/real swap is driven by the static showRealApp notifier so the
-    // lifecycle handler (and FakeNewsScreen) can flip it without setState.
+    // lifecycle handler (and NewsCoverScreen) can flip it without setState.
     return ValueListenableBuilder<bool>(
       valueListenable: MilesApp.showRealApp,
       builder: (context, isReal, _) {
@@ -586,6 +588,30 @@ class _MilesAppState extends ConsumerState<MilesApp>
                         style: const TextStyle(
                             color: MilesColors.cream50, fontSize: 16, height: 1.5,),
                       ),
+                      // A blocked client can now rescue itself instead of being
+                      // told to go find an APK by hand — the whole reason the
+                      // self-updater exists. Absent when no APK is published or
+                      // on the play build (UpdateService.available is false).
+                      if (UpdateService.available) ...[
+                        const SizedBox(height: 28),
+                        Builder(
+                          builder: (ctx) => ElevatedButton(
+                            onPressed: () =>
+                                showUpdateSheet(ctx, mandatory: true),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: MilesColors.ember,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 32, vertical: 14,),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),),
+                            ),
+                            child: const Text('Update now',
+                                style: TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w600,),),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

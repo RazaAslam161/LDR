@@ -133,11 +133,11 @@ void main() {
 
     expect(window.itemAt(0).bucket, chatBucket);
     expect(window.itemAt(0).isVideo, isFalse);
-    expect(window.itemAt(1).bucket, intimateBucket);
+    expect(window.itemAt(1).bucket, privateBucket);
     expect(window.itemAt(1).isVideo, isTrue);
     // What the disk files the bytes under. Keyed by the signed URL instead,
     // the whole library re-downloads once the token rotates.
-    expect(window.itemAt(1).cacheKey, '$intimateBucket/couple/vid_8.mp4');
+    expect(window.itemAt(1).cacheKey, '$privateBucket/couple/vid_8.mp4');
   });
 
   test('a save is labelled with whoever actually sent it', () async {

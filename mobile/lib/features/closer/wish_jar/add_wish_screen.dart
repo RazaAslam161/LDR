@@ -2,18 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/auth/auth_errors.dart';
-import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';
+import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 
 /// Compose a new Fantasy Jar entry. Text is freeform; tags come from the
 /// fixed taxonomy (max 3). Everything is encrypted + tag-hashed upstream.
-class AddFantasyScreen extends ConsumerStatefulWidget {
-  const AddFantasyScreen({super.key});
+class AddWishScreen extends ConsumerStatefulWidget {
+  const AddWishScreen({super.key});
 
   @override
-  ConsumerState<AddFantasyScreen> createState() => _AddFantasyScreenState();
+  ConsumerState<AddWishScreen> createState() => _AddWishScreenState();
 }
 
-class _AddFantasyScreenState extends ConsumerState<AddFantasyScreen> {
+class _AddWishScreenState extends ConsumerState<AddWishScreen> {
   final _controller = TextEditingController();
   final Set<String> _selected = {};
   bool _saving = false;
@@ -55,8 +55,8 @@ class _AddFantasyScreenState extends ConsumerState<AddFantasyScreen> {
     });
 
     try {
-      await FantasyJarRepository.ensureSharedKey(session);
-      await FantasyJarRepository.addEntry(
+      await WishJarRepository.ensureSharedKey(session);
+      await WishJarRepository.addEntry(
         coupleId: couple.id,
         authorId: me.id,
         text: text,

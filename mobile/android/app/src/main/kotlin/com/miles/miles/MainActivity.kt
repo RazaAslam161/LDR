@@ -187,12 +187,16 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/disguise")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    // The play channel ships no aliases (src/play/AndroidManifest.xml)
-                    // because a launcher entry that claims to be a Calculator is
-                    // a Play policy strike. Dart must ask this BEFORE offering
-                    // any cover or the picker: with the aliases gone, the covers
-                    // would still open over an honestly-named app.
+                    // Both channels ship the aliases now. What differs is the
+                    // one that starts enabled: sideload installs as News, play
+                    // installs as Miles and only leaves it if the owner picks a
+                    // cover in Settings.
                     "isEnabled" -> result.success(BuildConfig.DISGUISE_ENABLED)
+                    // True where the app's own identity is a real, selectable
+                    // launcher component (AliasMiles) rather than the absence
+                    // of one — so Dart knows there is something to switch back
+                    // TO, and knows not to prompt for a cover unasked.
+                    "isPlainDefault" -> result.success(BuildConfig.PLAIN_DEFAULT)
                     "setAlias" -> {
                         val target = call.argument<String>("aliasId")
                         val all = call.argument<List<String>>("all")
@@ -290,6 +294,66 @@ class MainActivity : FlutterFragmentActivity() {
                             startActivity(intent)
                         }
                         result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // In-app self-update, sideload channel only (Dart gates on the disguise
+        // flag; the REQUEST_INSTALL_PACKAGES permission and the FileProvider that
+        // backs install() are declared in src/sideload, so this cannot run on a
+        // play build). Downloading the APK and verifying it is Dart's job — this
+        // side only asks whether we may install, sends the user to grant it, and
+        // hands a finished file to the system installer.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/updater")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "canInstall" -> {
+                        result.success(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                packageManager.canRequestPackageInstalls()
+                            } else {
+                                true
+                            }
+                        )
+                    }
+                    "openInstallSettings" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:$packageName")
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                        result.success(null)
+                    }
+                    "install" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.error("bad_args", "path is required", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                this,
+                                "$packageName.fileprovider",
+                                java.io.File(path)
+                            )
+                            startActivity(
+                                Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(
+                                        uri,
+                                        "application/vnd.android.package-archive"
+                                    )
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("install_failed", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }

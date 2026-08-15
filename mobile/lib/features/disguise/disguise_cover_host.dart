@@ -9,7 +9,7 @@ import 'package:miles/features/disguise/covers/timer_cover.dart';
 import 'package:miles/features/disguise/covers/weather_cover.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
-import 'package:miles/features/fake_news/fake_news_screen.dart';
+import 'package:miles/features/covers/news_cover_screen.dart';
 
 /// Renders the cover that matches the user's chosen launcher identity.
 ///
@@ -77,7 +77,7 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost> {
       DisguiseCover.device =>
         DeviceInfoCover(onAuthenticated: widget.onAuthenticated),
       DisguiseCover.news =>
-        FakeNewsScreen(onAuthenticated: widget.onAuthenticated),
+        NewsCoverScreen(onAuthenticated: widget.onAuthenticated),
     };
   }
 }

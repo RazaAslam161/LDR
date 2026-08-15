@@ -20,8 +20,8 @@ import 'package:miles/features/capsule/capsule_list_screen.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/features/care/care_screen.dart';
 import 'package:miles/features/chat/camera/rapid_camera_screen.dart';
-import 'package:miles/features/closer/desire/desire_temp_screen.dart';
-import 'package:miles/features/closer/fantasy_jar/fantasy_jar_screen.dart';
+import 'package:miles/features/closer/warmth/warmth_meter_screen.dart';
+import 'package:miles/features/closer/wish_jar/wish_jar_screen.dart';
 import 'package:miles/features/closer/memory_threads/memory_threads_screen.dart';
 import 'package:miles/features/closer/memory_threads/propose_memory_screen.dart';
 import 'package:miles/features/closer/mood_lamp/mood_lamp_screen.dart';
@@ -39,8 +39,8 @@ import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
 import 'package:miles/features/heartbeat/heartbeat_screen.dart';
 import 'package:miles/features/home/location_map_screen.dart';
-import 'package:miles/features/intimacy/intimacy_prefs_screen.dart';
-import 'package:miles/features/intimacy/intimacy_screen.dart';
+import 'package:miles/features/mood_signal/mood_signal_prefs_screen.dart';
+import 'package:miles/features/mood_signal/mood_signal_screen.dart';
 import 'package:miles/features/profile/partner_profile_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
@@ -220,12 +220,12 @@ GoRouter buildRouter(Ref ref) {
             CapsuleFillScreen(capsule: state.extra! as Capsule),
       ),
       GoRoute(
-        path: '/app/intimacy',
-        builder: (context, state) => const IntimacyScreen(),
+        path: '/app/mood-signal',
+        builder: (context, state) => const MoodSignalScreen(),
       ),
       GoRoute(
-        path: '/app/intimacy/prefs',
-        builder: (context, state) => const IntimacyPrefsScreen(),
+        path: '/app/mood-signal/prefs',
+        builder: (context, state) => const MoodSignalPrefsScreen(),
       ),
       GoRoute(
         path: '/app/vault',
@@ -312,8 +312,8 @@ GoRouter buildRouter(Ref ref) {
         builder: (context, state) => const MoodLampScreen(),
       ),
       GoRoute(
-        path: '/app/closer/desire',
-        builder: (context, state) => const DesireTempScreen(),
+        path: '/app/closer/warmth',
+        builder: (context, state) => const WarmthMeterScreen(),
       ),
       GoRoute(
         path: '/app/closer/vault',
@@ -344,8 +344,8 @@ GoRouter buildRouter(Ref ref) {
         builder: (context, state) => const ProposeMemoryScreen(),
       ),
       GoRoute(
-        path: '/app/closer/fantasy-jar',
-        builder: (context, state) => const FantasyJarScreen(),
+        path: '/app/closer/wish-jar',
+        builder: (context, state) => const WishJarScreen(),
       ),
       GoRoute(
         path: '/app/closer/pick-for-us',

@@ -1,25 +1,26 @@
 /// Truth or Dare shapes. The writing itself lives in `game_content.dart`, in
-/// both English and Roman Urdu. Three heat levels so a couple can keep it sweet
-/// or turn it up:
+/// both English and Roman Urdu. Two heat levels:
 ///   • cute   – wholesome, romantic
 ///   • flirty – playful, teasing
-///   • spicy  – intimate / adult, but tasteful (it prompts *them* to express
-///              desire; the photo/voice dares always add "only as far as you
-///              are comfortable", so consent is baked into the game itself)
+///
+/// A third `spicy` tier used to sit above these. It shipped app-authored
+/// instructions to send intimate photos and to touch oneself — bundled text,
+/// not anything a user wrote, one drawer tap from the home screen with no gate
+/// beyond the signup age check. That is content the store reads straight out of
+/// the APK, so it is gone rather than reworded: the tier was named for what it
+/// was, and softer wording would not have changed what it asked for.
 enum TDType { truth, dare }
 
-enum TDTier { cute, flirty, spicy }
+enum TDTier { cute, flirty }
 
 extension TDTierMeta on TDTier {
   String get label => switch (this) {
         TDTier.cute => 'Cute',
         TDTier.flirty => 'Flirty',
-        TDTier.spicy => 'Spicy',
       };
   String get emoji => switch (this) {
         TDTier.cute => '🌸',
         TDTier.flirty => '😏',
-        TDTier.spicy => '🔥',
       };
 }
 

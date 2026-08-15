@@ -55,12 +55,12 @@ void main() {
       // one of the other 31 left the partner seeing where you were last.
       const realRoutes = [
         '/app/settings', '/app/disguise', '/app/capsule', '/app/capsule/new',
-        '/app/intimacy', '/app/vault', '/app/touch',
+        '/app/mood-signal', '/app/vault', '/app/touch',
         '/app/reasons', '/app/care', '/app/watch', '/app/cycle',
         '/app/heartbeat', '/app/games', '/app/rituals', '/app/prompt',
         '/app/timeline', '/app/location-map', '/app/closer/touch-trace',
-        '/app/closer/mood-lamp', '/app/closer/desire', '/app/closer/vault',
-        '/app/closer/fantasy-jar', '/app/closer/pick-for-us',
+        '/app/closer/mood-lamp', '/app/closer/warmth', '/app/closer/vault',
+        '/app/closer/wish-jar', '/app/closer/pick-for-us',
       ];
       for (final r in realRoutes) {
         final name = screenNameForPath(r);

@@ -33,6 +33,15 @@ class ReleaseGate {
   static String get message =>
       _message ?? 'Please update to keep using the app.';
 
+  /// The newest build the server knows about, and where to get it. Read from the
+  /// same `app_release` row as the gate above so the self-updater (UpdateService)
+  /// costs no second fetch. `latestBuild` defaults to this build, so "no newer
+  /// version" is the safe answer when the column is absent.
+  static int latestBuild = buildNumber;
+  static String? apkUrl;
+  static String? apkSha256;
+  static String? latestVersionName;
+
   /// Checked at startup, before sign-in — an out-of-date build may be broken in
   /// ways that stop it reaching a session at all.
   ///
@@ -43,13 +52,20 @@ class ReleaseGate {
     try {
       final row = await SupabaseService.client
           .from('app_release')
-          .select('min_build, message')
+          .select(
+            'min_build, latest_build, message, '
+            'apk_url, apk_sha256, latest_version_name',
+          )
           .limit(1)
           .maybeSingle();
       if (row == null) return;
       final min = (row['min_build'] as num?)?.toInt() ?? 1;
       _blocked = buildNumber < min;
       _message = row['message'] as String?;
+      latestBuild = (row['latest_build'] as num?)?.toInt() ?? buildNumber;
+      apkUrl = row['apk_url'] as String?;
+      apkSha256 = row['apk_sha256'] as String?;
+      latestVersionName = row['latest_version_name'] as String?;
       if (_blocked) {
         debugPrint('[release] build $buildNumber is below the minimum $min');
       }

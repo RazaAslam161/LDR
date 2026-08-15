@@ -171,10 +171,10 @@ class Message {
       ? null
       : Thumbnails.pathFor(MediaUrls.toPath(chatBucket, imagePath!));
 
-  /// The poster frame's path in [intimateBucket], if there is one.
+  /// The poster frame's path in [privateBucket], if there is one.
   String? get videoThumbPath => !hasThumb || videoPath == null
       ? null
-      : Thumbnails.pathFor(MediaUrls.toPath(intimateBucket, videoPath!));
+      : Thumbnails.pathFor(MediaUrls.toPath(privateBucket, videoPath!));
 
   /// A short preview of a message for quote-replies.
   String previewText() {
@@ -233,7 +233,7 @@ class Message {
   (String, String)? get _tileObject {
     if (kind == 'video') {
       final t = videoThumbPath;
-      return t == null ? null : (intimateBucket, t);
+      return t == null ? null : (privateBucket, t);
     }
     final t = imageThumbPath;
     if (t != null) return (chatBucket, t);
@@ -267,8 +267,8 @@ class Message {
       ];
 
   /// The same, for the private bucket video lives in.
-  Iterable<String> get intimatePaths => [
-        if (videoPath != null) MediaUrls.toPath(intimateBucket, videoPath!),
+  Iterable<String> get privatePaths => [
+        if (videoPath != null) MediaUrls.toPath(privateBucket, videoPath!),
         if (videoThumbPath != null) videoThumbPath!,
       ];
 }
@@ -346,7 +346,7 @@ class ChatRepository {
   /// between the finger coming off the glass and anything happening.
   static Future<void> warmMedia(Iterable<Message> messages) => Future.wait([
         MediaUrls.warm(chatBucket, messages.expand((m) => m.mediaPaths)),
-        MediaUrls.warm(intimateBucket, messages.expand((m) => m.intimatePaths)),
+        MediaUrls.warm(privateBucket, messages.expand((m) => m.privatePaths)),
       ]);
 
   static Future<void> sendText(String coupleId, String body,
@@ -465,8 +465,8 @@ class ChatRepository {
     final ext = _ext(file.path) ?? 'mp4';
     final path = '$coupleId/${_randomName('vid', ext)}';
     final pending = Thumbnails.forVideo(file);
-    await _c.storage.from(intimateBucket).upload(path, file);
-    final hasThumb = await _putThumb(intimateBucket, path, await pending);
+    await _c.storage.from(privateBucket).upload(path, file);
+    final hasThumb = await _putThumb(privateBucket, path, await pending);
     await _c.from('messages').insert({
       if (id != null) 'id': id,
       'couple_id': coupleId,
@@ -506,7 +506,7 @@ class ChatRepository {
   /// filled when the page loaded, so opening one is usually not a round trip.
   static Future<String?> signedVideoUrl(String? path) => path == null
       ? Future.value()
-      : MediaUrls.sign(intimateBucket, MediaUrls.toPath(intimateBucket, path));
+      : MediaUrls.sign(privateBucket, MediaUrls.toPath(privateBucket, path));
 
   /// Uploads a document to couple_files and inserts a message of kind='file'.
   ///

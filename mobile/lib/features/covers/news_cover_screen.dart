@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
-import 'package:miles/features/fake_news/rss_service.dart';
+import 'package:miles/features/covers/rss_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Clean Google-News-style light palette — intentionally NOTHING like Miles.
@@ -27,17 +27,17 @@ const _divider = Color(0xFFE0E0E0);
 /// long-press on the **Local** section tab opened it too, and long-pressing a
 /// tab to see whether it has a menu is a reflex. Either one put a biometric
 /// prompt in front of whoever was holding the phone.
-class FakeNewsScreen extends StatefulWidget {
-  const FakeNewsScreen({required this.onAuthenticated, super.key});
+class NewsCoverScreen extends StatefulWidget {
+  const NewsCoverScreen({required this.onAuthenticated, super.key});
 
   final VoidCallback onAuthenticated;
 
   @override
-  State<FakeNewsScreen> createState() => _FakeNewsScreenState();
+  State<NewsCoverScreen> createState() => _NewsCoverScreenState();
 }
 
-class _FakeNewsScreenState extends State<FakeNewsScreen>
-    with WidgetsBindingObserver, CoverGate<FakeNewsScreen> {
+class _NewsCoverScreenState extends State<NewsCoverScreen>
+    with WidgetsBindingObserver, CoverGate<NewsCoverScreen> {
   List<RssArticle> _articles = [];
   bool _loading = true;
   bool _hasError = false;

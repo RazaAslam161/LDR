@@ -25,8 +25,8 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
         emoji: '🎲',
         title: 'Truth or Dare',
         subtitle: en
-            ? 'Take turns — truth or nerve, from Cute to Spicy'
-            : 'Baari baari sach ya himmat — Cute se Spicy tak',
+            ? 'Take turns — truth or nerve'
+            : 'Baari baari sach ya himmat',
         route: '/app/games/truth-dare',
         accent: MilesColors.ember,
         synced: true,

@@ -5,7 +5,11 @@ import 'package:miles/core/widgets/animated_mood.dart';
 
 /// A bottom sheet of mood chips. Returns the chosen [MoodData] (or null).
 /// Scrollable so the full set (incl. the bold ones) is reachable on any screen.
-Future<MoodData?> showMoodSelector(BuildContext context, {String? currentKey}) {
+Future<MoodData?> showMoodSelector(
+  BuildContext context, {
+  String? currentKey,
+  bool intimateAllowed = false,
+}) {
   return showModalBottomSheet<MoodData>(
     context: context,
     isScrollControlled: true,
@@ -45,7 +49,8 @@ Future<MoodData?> showMoodSelector(BuildContext context, {String? currentKey}) {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      for (final m in kMoods)
+                      for (final m in moodsFor(
+                          intimateAllowed: intimateAllowed,))
                         GestureDetector(
                           onTap: () => Navigator.pop(ctx, m),
                           child: Container(

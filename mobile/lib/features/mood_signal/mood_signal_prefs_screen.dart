@@ -3,17 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
-import 'package:miles/features/intimacy/intimacy_controller.dart';
+import 'package:miles/features/mood_signal/mood_signal_controller.dart';
 
 /// Comfort & consent — every control is one tap, nothing guilt-trips, and the
 /// whole layer can be muted instantly.
-class IntimacyPrefsScreen extends ConsumerWidget {
-  const IntimacyPrefsScreen({super.key});
+class MoodSignalPrefsScreen extends ConsumerWidget {
+  const MoodSignalPrefsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(intimacyControllerProvider);
-    final ctrl = ref.read(intimacyControllerProvider.notifier);
+    final s = ref.watch(moodSignalControllerProvider);
+    final ctrl = ref.read(moodSignalControllerProvider.notifier);
     final prefs = s.prefs;
 
     return Scaffold(

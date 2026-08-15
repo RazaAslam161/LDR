@@ -7,7 +7,7 @@ import 'package:miles/features/disguise/disguise_profile.dart';
 /// assert on the source because the thing being protected — "this gesture is
 /// actually wired to something" — is not observable from the catalog alone.
 const _coverSources = {
-  DisguiseCover.news: 'lib/features/fake_news/fake_news_screen.dart',
+  DisguiseCover.news: 'lib/features/covers/news_cover_screen.dart',
   DisguiseCover.calculator:
       'lib/features/disguise/covers/calculator_cover.dart',
   DisguiseCover.notes: 'lib/features/disguise/covers/notes_cover.dart',

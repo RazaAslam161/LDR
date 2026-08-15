@@ -5,25 +5,25 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
-import 'package:miles/features/closer/fantasy_jar/add_fantasy_screen.dart';
-import 'package:miles/features/closer/fantasy_jar/fantasy_jar_repository.dart';
+import 'package:miles/features/closer/wish_jar/add_wish_screen.dart';
+import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 
 /// Fantasy Jar — a private list of "things I want to try when we're together".
 ///
 /// The magic: tags are HMAC-hashed before storage, so the server never sees
 /// plaintext. When both partners independently express interest in the same
 /// tag, we surface a soft "you both seem curious about ✨ tag ✨" nudge.
-class FantasyJarScreen extends ConsumerStatefulWidget {
-  const FantasyJarScreen({super.key});
+class WishJarScreen extends ConsumerStatefulWidget {
+  const WishJarScreen({super.key});
 
   @override
-  ConsumerState<FantasyJarScreen> createState() => _FantasyJarScreenState();
+  ConsumerState<WishJarScreen> createState() => _WishJarScreenState();
 }
 
-class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
+class _WishJarScreenState extends ConsumerState<WishJarScreen> {
   bool _loading = true;
   String? _error;
-  List<FantasyEntry> _mine = const [];
+  List<WishEntry> _mine = const [];
   List<String> _sharedTags = const [];
 
   @override
@@ -53,24 +53,24 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
     });
 
     try {
-      await FantasyJarRepository.ensureSharedKey(session);
+      await WishJarRepository.ensureSharedKey(session);
 
       final results = await Future.wait([
-        FantasyJarRepository.fetchMyEntries(
+        WishJarRepository.fetchMyEntries(
           coupleId: couple.id,
           myId: me.id,
         ),
-        FantasyJarRepository.fetchMyTagHashes(
+        WishJarRepository.fetchMyTagHashes(
           coupleId: couple.id,
           myId: me.id,
         ),
-        FantasyJarRepository.fetchPartnerTagHashes(
+        WishJarRepository.fetchPartnerTagHashes(
           coupleId: couple.id,
           partnerId: partner.id,
         ),
       ]);
 
-      final entryResult = results[0] as CloserLoadResult<FantasyEntry>;
+      final entryResult = results[0] as CloserLoadResult<WishEntry>;
       final entries = entryResult.items;
       if (entryResult.hasUnreadable && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -81,7 +81,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
       final partnerHashes = results[2] as Set<String>;
 
       // De-hash intersecting hashes back into tag names.
-      final tagHashMap = await FantasyJarRepository.buildTagHashMap();
+      final tagHashMap = await WishJarRepository.buildTagHashMap();
       final shared = <String>[];
       for (final entry in tagHashMap.entries) {
         if (myHashes.contains(entry.value) &&
@@ -116,7 +116,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
         : friendlyAuthError(e);
   }
 
-  Future<void> _delete(FantasyEntry entry) async {
+  Future<void> _delete(WishEntry entry) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -145,9 +145,9 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
     await _deleteEntry(entry);
   }
 
-  Future<void> _deleteEntry(FantasyEntry entry) async {
+  Future<void> _deleteEntry(WishEntry entry) async {
     try {
-      await FantasyJarRepository.deleteEntry(entryId: entry.id);
+      await WishJarRepository.deleteEntry(entryId: entry.id);
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -165,7 +165,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
 
   Future<void> _openAdd() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const AddFantasyScreen()),
+      MaterialPageRoute<void>(builder: (_) => const AddWishScreen()),
     );
     if (mounted) unawaited(_load());
   }
@@ -364,7 +364,7 @@ class _FantasyJarScreenState extends ConsumerState<FantasyJarScreen> {
     );
   }
 
-  Widget _buildEntryCard(FantasyEntry entry) {
+  Widget _buildEntryCard(WishEntry entry) {
     return Dismissible(
       key: ValueKey(entry.id),
       direction: DismissDirection.endToStart,

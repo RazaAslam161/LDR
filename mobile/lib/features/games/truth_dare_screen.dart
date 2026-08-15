@@ -94,7 +94,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     //
     // Indexed by the card's OWN tier, never the game's current one: either
     // partner can change the heat while a card is up, and looking index 42 up
-    // in the spicy pool because someone tapped Spicy would put a different
+    // in another tier because someone tapped a different chip would put a
     // question on each phone.
     final lang = ref.read(contentLanguageProvider);
     final ours = card == null
@@ -487,13 +487,9 @@ class _Words {
   String get start => _en ? 'Start' : 'Shuru karein';
   String get howItWorks => _en
       ? 'Take turns picking Truth or Dare — the same card shows on both '
-          'phones. Set the mood up top (Cute / Flirty / Spicy) and begin. '
-          'Photo and voice dares always say "only as far as you are '
-          'comfortable" — nothing is ever forced. 💛'
+          'phones. Set the mood up top and begin. Nothing is ever forced. 💛'
       : 'Baari baari Truth ya Dare chuno — dono ke phone par ek hi card '
-          'dikhega. Upar se mood (Cute / Flirty / Spicy) chuno aur shuru karo. '
-          'Dare mein photo/voice "jitna comfortable ho" — koi zabardasti '
-          'nahi. 💛';
+          'dikhega. Upar se mood chuno aur shuru karo. Koi zabardasti nahi. 💛';
   String get yourTurn => _en ? 'Your turn! 💫' : 'Tumhari baari! 💫';
   String get whatWillItBe => _en ? 'What will it be?' : 'Kya chunoge?';
   String get truthSub => _en ? 'Tell the truth' : 'Sach bolna hai';

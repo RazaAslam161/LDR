@@ -179,9 +179,30 @@ const List<DisguiseProfile> kDisguises = [
 
 /// The identity a fresh install starts with — matches the one alias the
 /// manifest ships with `android:enabled="true"`.
+/// The app as itself: its own name, its own icon, no cover behind it.
+///
+/// Deliberately NOT in [kDisguises] — it is the absence of a disguise, and
+/// every test and picker that walks that list is asking "which covers exist",
+/// which this is not an answer to. It has an alias of its own all the same,
+/// because a launcher identity you cannot switch back TO is a one-way door.
+/// Only the Play channel declares `.AliasMiles`; the sideload manifest has no
+/// such component, which is why [DisguiseService.plainDefault] gates it.
+const DisguiseProfile kPlainProfile = DisguiseProfile(
+  aliasId: 'Miles',
+  label: 'Miles',
+  blurb: 'The app as itself. No cover, its own name and icon.',
+  entry: 'Opens straight into Miles.',
+  icon: Icons.favorite_outline,
+  tint: Color(0xFFE0785A),
+  cover: DisguiseCover.news,
+);
+
 final DisguiseProfile kDefaultDisguise = kDisguises.first;
 
-DisguiseProfile disguiseForAlias(String? aliasId) => kDisguises.firstWhere(
+DisguiseProfile disguiseForAlias(String? aliasId) => aliasId ==
+        kPlainProfile.aliasId
+    ? kPlainProfile
+    : kDisguises.firstWhere(
       (d) => d.aliasId == aliasId,
       orElse: () => kDefaultDisguise,
     );

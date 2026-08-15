@@ -178,34 +178,56 @@ void main() {
     }
   });
 
-  test('the play channel carries no disguise at all', () {
-    // The whole reason the flavors exist. One alias reaching this manifest is
-    // an account strike, not a rejection, so it is worth asserting three ways:
-    // no alias, no cover label, and nothing borrowed from the disguise icons.
-    expect(playManifest.contains('<activity-alias'), isFalse,
-        reason: 'an alias in the play manifest is Deceptive Behavior',);
+  test('the play channel installs as itself, covers off', () {
+    // The play channel ships the covers now, and what makes that publishable
+    // is not their absence but their state: exactly one alias enabled, and it
+    // is the honest one. An enabled cover here is a launcher identity the user
+    // never chose, which is the Deceptive Behavior finding itself.
+    final enabled = RegExp(
+      r'<activity-alias(?:(?!</activity-alias>).)*?android:enabled="true"'
+      r'(?:(?!</activity-alias>).)*?</activity-alias>',
+      dotAll: true,
+    ).allMatches(playManifest).toList();
+    expect(enabled.length, 1,
+        reason: '${enabled.length} enabled aliases on play; exactly one may be',);
+    expect(enabled.single.group(0)!.contains('android:name=".AliasMiles"'), isTrue,
+        reason: 'the enabled play alias must be the app itself',);
+    expect(enabled.single.group(0)!.contains('ic_disguise'), isFalse,
+        reason: 'the honest identity cannot wear a cover icon',);
+
+    // Every cover is declared and every one of them is off.
     for (final d in kDisguises) {
-      expect(playManifest.contains('android:label="${d.label}"'), isFalse,
-          reason: '${d.label} is a cover identity and cannot ship to Play',);
+      final alias = RegExp(
+        '<activity-alias(?:(?!</activity-alias>).)*?'
+        'android:name=\"\\.Alias${d.aliasId}\"'
+        '(?:(?!</activity-alias>).)*?</activity-alias>',
+        dotAll: true,
+      ).firstMatch(playManifest);
+      expect(alias, isNotNull,
+          reason: '${d.label} is offered in the picker but play declares no '
+              'alias for it — applying it would throw',);
+      expect(alias!.group(0)!.contains('android:enabled="false"'), isTrue,
+          reason: '${d.label} ships ENABLED on play — a cover nobody chose',);
     }
-    expect(playManifest.contains('ic_disguise'), isFalse);
   });
 
   test('the play channel still has exactly one way in', () {
-    // Stripping the aliases takes MAIN/LAUNCHER with them. Without it restored
-    // on MainActivity the app installs with no launcher entry and cannot be
-    // opened at all — the failure the sideload manifest avoids by the opposite
-    // arrangement.
-    final launchers =
-        'android.intent.category.LAUNCHER'.allMatches(playManifest).length;
-    expect(launchers, 1, reason: '$launchers launcher entries on play');
-    final activity = RegExp(
-      r'<activity\s+android:name="\.MainActivity".*?</activity>',
+    // Exactly one launcher entry, and it belongs to the alias rather than the
+    // activity: a filter on MainActivity itself would be a tenth identity that
+    // the switch cannot disable, so the app could never fully leave a cover.
+    final enabledLaunchers = RegExp(
+      r'android:enabled="true"(?:(?!</activity-alias>).)*?'
+      r'android\.intent\.category\.LAUNCHER',
       dotAll: true,
+    ).allMatches(playManifest).length;
+    expect(enabledLaunchers, 1,
+        reason: '$enabledLaunchers enabled launcher entries on play',);
+    final activity = RegExp(
+      r'<activity\s+android:name="\.MainActivity"[^>]*/>',
     ).firstMatch(playManifest);
-    expect(activity, isNotNull, reason: 'play declares no MainActivity');
-    expect(activity!.group(0)!.contains('android.intent.category.LAUNCHER'),
-        isTrue,);
+    expect(activity, isNotNull,
+        reason: 'play declares no self-closing MainActivity — if it carries an '
+            'intent-filter, that is a launcher entry no alias can turn off',);
   });
 
   test('the play launcher icon exists and survives pre-API-26', () {

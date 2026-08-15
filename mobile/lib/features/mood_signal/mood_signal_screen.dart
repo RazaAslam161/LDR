@@ -7,19 +7,19 @@ import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
-import 'package:miles/features/intimacy/intimacy_controller.dart';
-import 'package:miles/features/intimacy/intimacy_repository.dart';
+import 'package:miles/features/mood_signal/mood_signal_controller.dart';
+import 'package:miles/features/mood_signal/mood_signal_repository.dart';
 
 /// "In the Mood" — a tender, mutual, opt-in way to signal closeness across
 /// distance. Nothing is ever explicit; a signal is only revealed when BOTH
 /// partners are open to it in the same window, so no one feels exposed.
-class IntimacyScreen extends ConsumerWidget {
-  const IntimacyScreen({super.key});
+class MoodSignalScreen extends ConsumerWidget {
+  const MoodSignalScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(intimacyControllerProvider);
-    final ctrl = ref.read(intimacyControllerProvider.notifier);
+    final s = ref.watch(moodSignalControllerProvider);
+    final ctrl = ref.read(moodSignalControllerProvider.notifier);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -34,7 +34,7 @@ class IntimacyScreen extends ConsumerWidget {
           IconButton(
             tooltip: 'Comfort & consent',
             icon: const Icon(Icons.tune, color: MilesColors.gilt),
-            onPressed: () => context.push('/app/intimacy/prefs'),
+            onPressed: () => context.push('/app/mood-signal/prefs'),
           ),
         ],
       ),
@@ -112,7 +112,7 @@ class _OptIn extends StatelessWidget {
 
 class _Picker extends StatelessWidget {
   const _Picker({required this.prefs, required this.onPick});
-  final IntimacyPrefs prefs;
+  final MoodSignalPrefs prefs;
   final void Function(String stateKey) onPick;
 
   @override
@@ -134,7 +134,7 @@ class _Picker extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               OutlinedButton(
-                onPressed: () => context.push('/app/intimacy/prefs'),
+                onPressed: () => context.push('/app/mood-signal/prefs'),
                 child: const Text('Open settings'),
               ),
             ],
@@ -202,7 +202,7 @@ class _MoodTile extends StatelessWidget {
 
 class _Waiting extends StatelessWidget {
   const _Waiting({required this.mine, required this.onNotTonight});
-  final IntimacySignal mine;
+  final MoodSignal mine;
   final VoidCallback onNotTonight;
 
   @override
@@ -256,8 +256,8 @@ class _Waiting extends StatelessWidget {
 
 class _MutualMoment extends StatelessWidget {
   const _MutualMoment({required this.mine, required this.partner});
-  final IntimacySignal mine;
-  final IntimacySignal partner;
+  final MoodSignal mine;
+  final MoodSignal partner;
 
   @override
   Widget build(BuildContext context) {

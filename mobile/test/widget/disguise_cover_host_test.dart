@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
-import 'package:miles/features/fake_news/fake_news_screen.dart';
+import 'package:miles/features/covers/news_cover_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The cover screen is the first thing a user sees on every cold start. If
@@ -47,7 +47,7 @@ void main() {
   /// headlessly — we are asserting reachability, not paint.
   void expectCoverMounted(WidgetTester tester, {required String when}) {
     tester.takeException();
-    expect(find.byType(FakeNewsScreen), findsOneWidget,
+    expect(find.byType(NewsCoverScreen), findsOneWidget,
         reason: 'no cover mounted $when — the user would be stuck on a blank '
             'screen with no way into the app',);
   }

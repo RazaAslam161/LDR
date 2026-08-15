@@ -1,24 +1,162 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- The Google Play build. No activity-aliases, no disguised label, no
-         disguised icon — the app is what it says it is. MAIN/LAUNCHER comes back
-         onto MainActivity because there is no alias left to carry it, and
-         without it the app would install with no launcher entry at all.
+    <!-- The Google Play build.
+         The app installs AS ITSELF: MilesAlias is the only enabled launcher
+         component, it carries the app's own name and icon, and nothing is
+         hidden until the owner asks for it.
 
-         The covers themselves are Dart, and they are switched off by
-         BuildConfig.DISGUISE_ENABLED (see MainActivity.kt, `miles/disguise`
-         channel). Stripping the aliases here without that gate would leave the
-         app opening on a fake news reader under an honest icon, which is worse
-         than either. -->
+         The nine covers are declared here too, all android:enabled="false".
+         That is deliberate and it is what makes them publishable. Play's
+         Deceptive Behavior policy protects the person who INSTALLED the app;
+         a cover the owner turns on themselves, from Settings, having been told
+         what it does, deceives nobody. What the policy forbids is a launcher
+         identity the user never chose — which is exactly what enabled="false"
+         rules out here, and what the sideload channel does instead.
+
+         The store listing MUST describe this feature and show the picker in
+         the screenshots. That disclosure is what keeps it out of Behavior
+         Transparency ("hidden, dormant, or undocumented features"); shipping
+         the aliases silently would be the violation, not the aliases.
+
+         MainActivity carries no intent-filter of its own on purpose. Exactly
+         one alias may be enabled at a time, and the switch enables the new one
+         before disabling the old — a launcher filter on the activity itself
+         would be a tenth identity nothing can turn off. -->
     <application
         android:label="Miles"
         android:icon="@mipmap/ic_launcher_play">
 
-        <activity android:name=".MainActivity">
+        <activity android:name=".MainActivity" />
+
+        <!-- The honest identity, and the one the app installs with. -->
+        <activity-alias
+            android:name=".AliasMiles"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Miles"
+            android:icon="@mipmap/ic_launcher_play">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasNews"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="News"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasCalculator"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Calculator"
+            android:icon="@mipmap/ic_disguise_calculator">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasNotes"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Notes"
+            android:icon="@mipmap/ic_disguise_notes">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasWeather"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Weather"
+            android:icon="@mipmap/ic_disguise_weather">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasConvert"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Convert"
+            android:icon="@mipmap/ic_disguise_convert">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasRecorder"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Recorder"
+            android:icon="@mipmap/ic_disguise_recorder">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasTimer"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Timer"
+            android:icon="@mipmap/ic_disguise_timer">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasLevel"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Level"
+            android:icon="@mipmap/ic_disguise_level">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasDevice"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Device Info"
+            android:icon="@mipmap/ic_disguise_device">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

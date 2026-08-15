@@ -16,8 +16,10 @@ import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
@@ -198,6 +200,7 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   void _onReady() {
+    unawaited(_maybeOfferUpdate());
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     // Foreground realtime path — works whether or not push is configured.
@@ -236,6 +239,25 @@ class _AppShellState extends ConsumerState<AppShell>
     // tab — but that happens before this state exists on a cold start.
     presenceRouteObserver?.publishActiveTab();
     _firstRunPrompts(couple.id);
+  }
+
+  static bool _updateOffered = false;
+
+  /// A newer sideload build exists — offered once per process, and only when no
+  /// more important prompt (escrow, first-run permissions) already holds the
+  /// screen. The Settings row carries the same action for any launch this skips,
+  /// so nothing is lost by yielding.
+  Future<void> _maybeOfferUpdate() async {
+    if (_updateOffered || !UpdateService.available) return;
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    if (!mounted) return;
+    // A more important prompt (escrow, first-run permissions) is holding the
+    // screen — yield without spending the once-a-session offer, since Settings
+    // is the only other path and a later launch should still try.
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _updateOffered = true;
+    await showUpdateSheet(context);
   }
 
   /// The one-time onboarding prompts, in sequence.

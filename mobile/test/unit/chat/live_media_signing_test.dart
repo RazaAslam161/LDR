@@ -24,19 +24,19 @@ void main() {
   group('what a message needs signed', () {
     test('a voice note names its couple_media path', () {
       expect(msg(voice: 'c1/voice_1.m4a').mediaPaths, ['c1/voice_1.m4a']);
-      expect(msg(voice: 'c1/voice_1.m4a').intimatePaths, isEmpty);
+      expect(msg(voice: 'c1/voice_1.m4a').privatePaths, isEmpty);
     });
 
     test('a video names the PRIVATE bucket instead', () {
       // Two buckets, two signing calls. Video warmed against couple_media
       // would sign nothing and leave the tap on a round trip.
-      expect(msg(video: 'c1/vid_1.mp4').intimatePaths, ['c1/vid_1.mp4']);
+      expect(msg(video: 'c1/vid_1.mp4').privatePaths, ['c1/vid_1.mp4']);
       expect(msg(video: 'c1/vid_1.mp4').mediaPaths, isEmpty);
     });
 
     test('a text message needs nothing', () {
       expect(msg().mediaPaths, isEmpty);
-      expect(msg().intimatePaths, isEmpty);
+      expect(msg().privatePaths, isEmpty);
     });
 
     test('a legacy public URL is reduced to the object name', () {
@@ -60,7 +60,7 @@ void main() {
   test('video is signed with the page, not on the tap', () {
     final repo =
         File('lib/features/chat/chat_repository.dart').readAsStringSync();
-    expect(repo, contains('MediaUrls.warm(intimateBucket'));
+    expect(repo, contains('MediaUrls.warm(privateBucket'));
     // createSignedUrl on tap is the round trip that made opening one slow.
     expect(repo.contains('createSignedUrl('), isFalse,
         reason: 'sign through MediaUrls so the cache can answer instead',);

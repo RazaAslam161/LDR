@@ -151,12 +151,12 @@ class _VideoPageState extends State<_VideoPage> {
   /// stopping there left the player unmounted with nothing to retry it — a
   /// video that never starts, which is indistinguishable from a slow one.
   Future<void> _resolve() async {
-    final warm = MediaUrls.cached(intimateBucket, widget.item.storagePath);
+    final warm = MediaUrls.cached(privateBucket, widget.item.storagePath);
     if (warm != null) {
       _resolved = warm;
       return;
     }
-    final url = await MediaUrls.sign(intimateBucket, widget.item.storagePath);
+    final url = await MediaUrls.sign(privateBucket, widget.item.storagePath);
     if (mounted) setState(() => _resolved = url);
   }
 
@@ -164,7 +164,7 @@ class _VideoPageState extends State<_VideoPage> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final active = widget.active;
-    final posterUrl = MediaUrls.cached(intimateBucket, item.gridPath);
+    final posterUrl = MediaUrls.cached(privateBucket, item.gridPath);
     final videoUrl = _resolved;
 
     return Stack(
@@ -174,7 +174,7 @@ class _VideoPageState extends State<_VideoPage> {
         if (posterUrl != null)
           NetImage(
             posterUrl,
-            cacheKey: '$intimateBucket/${item.gridPath}',
+            cacheKey: '$privateBucket/${item.gridPath}',
             thumb: true,
             fit: BoxFit.contain,
           ),
@@ -225,8 +225,8 @@ class _PageState extends State<_Page> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final thumbUrl = MediaUrls.cached(intimateBucket, item.gridPath);
-    final fullUrl = MediaUrls.cached(intimateBucket, item.storagePath);
+    final thumbUrl = MediaUrls.cached(privateBucket, item.gridPath);
+    final fullUrl = MediaUrls.cached(privateBucket, item.storagePath);
     final viewportPx = (MediaQuery.sizeOf(context).width *
             MediaQuery.devicePixelRatioOf(context))
         .round();
@@ -244,7 +244,7 @@ class _PageState extends State<_Page> {
               if (thumbUrl != null)
                 NetImage(
                   thumbUrl,
-                  cacheKey: '$intimateBucket/${item.gridPath}',
+                  cacheKey: '$privateBucket/${item.gridPath}',
                   // Unbounded and the same key the grid used, so this is the
                   // frame the grid already decoded — it paints with no work.
                   thumb: true,
@@ -253,7 +253,7 @@ class _PageState extends State<_Page> {
               if (fullUrl != null)
                 NetImage(
                   fullUrl,
-                  cacheKey: '$intimateBucket/${item.storagePath}',
+                  cacheKey: '$privateBucket/${item.storagePath}',
                   // Bounded at the viewport: a 12-megapixel original decoded at
                   // source resolution is ~48MB of raster for a screen that
                   // shows a fraction of it. Full quality is preserved on disk

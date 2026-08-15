@@ -1,21 +1,21 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
-import 'package:miles/features/intimacy/intimacy_repository.dart';
+import 'package:miles/features/mood_signal/mood_signal_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class IntimacyState {
-  const IntimacyState({
+class MoodSignalState {
+  const MoodSignalState({
     this.loading = true,
-    this.prefs = const IntimacyPrefs(),
+    this.prefs = const MoodSignalPrefs(),
     this.mine,
     this.partner,
   });
 
   final bool loading;
-  final IntimacyPrefs prefs;
-  final IntimacySignal? mine; // my active signal
-  final IntimacySignal? partner; // partner's — visible only when I have one
+  final MoodSignalPrefs prefs;
+  final MoodSignal? mine; // my active signal
+  final MoodSignal? partner; // partner's — visible only when I have one
 
   /// Both partners signalled within the window → the warm reveal.
   bool get mutual => mine != null && partner != null;
@@ -27,8 +27,8 @@ class IntimacyState {
 /// Owns the prefs + the mutual-consent signal state. The RLS on the table is
 /// what actually keeps a partner's signal hidden until you've signalled too;
 /// this controller just reflects what the server allows you to see.
-class IntimacyController extends StateNotifier<IntimacyState> {
-  IntimacyController(this.ref) : super(const IntimacyState()) {
+class MoodSignalController extends StateNotifier<MoodSignalState> {
+  MoodSignalController(this.ref) : super(const MoodSignalState()) {
     _init();
   }
 
@@ -38,11 +38,11 @@ class IntimacyController extends StateNotifier<IntimacyState> {
 
   Future<void> _init() async {
     _coupleId = ref.read(sessionProvider).couple?.id;
-    final prefs = await IntimacyRepository.getPrefs();
-    state = IntimacyState(loading: false, prefs: prefs);
+    final prefs = await MoodSignalRepository.getPrefs();
+    state = MoodSignalState(loading: false, prefs: prefs);
     final id = _coupleId;
     if (id != null) {
-      _channel = IntimacyRepository.subscribe(id, refresh);
+      _channel = MoodSignalRepository.subscribe(id, refresh);
       await refresh();
     }
   }
@@ -52,9 +52,9 @@ class IntimacyController extends StateNotifier<IntimacyState> {
     if (id == null) return;
     final uid = SupabaseService.currentUserId;
     try {
-      final list = await IntimacyRepository.activeSignals(id);
-      IntimacySignal? mine;
-      IntimacySignal? partner;
+      final list = await MoodSignalRepository.activeSignals(id);
+      MoodSignal? mine;
+      MoodSignal? partner;
       for (final s in list) {
         if (s.userId == uid) {
           mine = s;
@@ -62,7 +62,7 @@ class IntimacyController extends StateNotifier<IntimacyState> {
           partner = s;
         }
       }
-      state = IntimacyState(
+      state = MoodSignalState(
         loading: false,
         prefs: state.prefs,
         mine: mine,
@@ -75,12 +75,12 @@ class IntimacyController extends StateNotifier<IntimacyState> {
     required bool receiving,
     required bool signaling,
   }) async {
-    await IntimacyRepository.setPrefs(
+    await MoodSignalRepository.setPrefs(
         receiving: receiving, signaling: signaling,);
-    if (!signaling) await IntimacyRepository.clearMine();
-    state = IntimacyState(
+    if (!signaling) await MoodSignalRepository.clearMine();
+    state = MoodSignalState(
       loading: false,
-      prefs: IntimacyPrefs(
+      prefs: MoodSignalPrefs(
           receivingEnabled: receiving, signalingEnabled: signaling,),
       mine: signaling ? state.mine : null,
       partner: state.partner,
@@ -91,13 +91,13 @@ class IntimacyController extends StateNotifier<IntimacyState> {
   Future<void> signal(String stateKey) async {
     final id = _coupleId;
     if (id == null) return;
-    await IntimacyRepository.sendSignal(coupleId: id, state: stateKey);
+    await MoodSignalRepository.sendSignal(coupleId: id, state: stateKey);
     await refresh();
   }
 
   /// Frictionless "not tonight" — clears your signal, no trace, no guilt.
   Future<void> notTonight() async {
-    await IntimacyRepository.clearMine();
+    await MoodSignalRepository.clearMine();
     await refresh();
   }
 
@@ -111,7 +111,7 @@ class IntimacyController extends StateNotifier<IntimacyState> {
   }
 }
 
-final intimacyControllerProvider =
-    StateNotifierProvider.autoDispose<IntimacyController, IntimacyState>(
-  IntimacyController.new,
+final moodSignalControllerProvider =
+    StateNotifierProvider.autoDispose<MoodSignalController, MoodSignalState>(
+  MoodSignalController.new,
 );

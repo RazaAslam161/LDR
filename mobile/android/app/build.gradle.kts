@@ -100,6 +100,9 @@ android {
             dimension = "channel"
             isDefault = true
             buildConfigField("boolean", "DISGUISE_ENABLED", "true")
+            // Installs already disguised. This channel never goes near Play,
+            // where an identity the user did not pick is the whole violation.
+            buildConfigField("boolean", "PLAIN_DEFAULT", "false")
             // The debug keystore's password is the literally-documented string
             // "android" on every machine on earth, and anything signed with it
             // can be re-signed by anyone. Falling back is tolerable only
@@ -117,7 +120,14 @@ android {
         }
         create("play") {
             dimension = "channel"
-            buildConfigField("boolean", "DISGUISE_ENABLED", "false")
+            // The covers ship here too, declared android:enabled="false" and
+            // reachable only from Settings. Play's Deceptive Behavior policy
+            // protects the person who installed the app; a cover they turn on
+            // themselves deceives nobody. The store listing has to say so.
+            buildConfigField("boolean", "DISGUISE_ENABLED", "true")
+            // Installs as Miles, under its own name and icon, and stays that
+            // way until the owner asks otherwise.
+            buildConfigField("boolean", "PLAIN_DEFAULT", "true")
             // No fallback: the taskGraph check below stops the build instead of
             // handing back an artifact Play will reject.
             if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")

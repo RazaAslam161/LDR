@@ -9,7 +9,7 @@ const chatBucket = 'couple_media';
 const chatBgBucket = 'chat-bg';
 
 /// Chat video and Touch body photos. Private since it was written.
-const intimateBucket = 'couple_intimate';
+const privateBucket = 'couple_intimate';
 
 /// Documents sent in chat. Separate from [chatBucket] because that bucket's
 /// allowed_mime_types is a whitelist of images and audio, and a PDF has no

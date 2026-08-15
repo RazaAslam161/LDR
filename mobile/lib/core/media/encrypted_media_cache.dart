@@ -116,7 +116,7 @@ class EncryptedMediaCache {
     required String path,
     required String associatedData,
     required int decodeWidth,
-    String bucket = intimateBucket,
+    String bucket = privateBucket,
   }) async {
     final raw = await bytes(
         bucket: bucket, path: path, associatedData: associatedData,);
@@ -132,7 +132,7 @@ class EncryptedMediaCache {
   static Future<ImageProvider> tileProvider({
     required String path,
     required String associatedData,
-    String bucket = intimateBucket,
+    String bucket = privateBucket,
   }) async {
     final raw = await bytes(
         bucket: bucket, path: path, associatedData: associatedData,);
@@ -145,7 +145,7 @@ class EncryptedMediaCache {
     required String path,
     required String associatedData,
     int? decodeWidth,
-    String bucket = intimateBucket,
+    String bucket = privateBucket,
   }) async {
     final raw = await bytes(
         bucket: bucket, path: path, associatedData: associatedData,);

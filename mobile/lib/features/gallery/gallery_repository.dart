@@ -103,7 +103,7 @@ class GalleryRepository {
   GalleryRepository._();
 
   static SupabaseClient get _c => SupabaseService.client;
-  static const _bucket = intimateBucket;
+  static const _bucket = privateBucket;
 
   static const _columns = 'id,storage_path,thumb_path,uploaded_by,mime_type,'
       'width,height,created_at,delete_requested,delete_requested_by,'

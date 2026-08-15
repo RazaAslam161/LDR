@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/config.dart';
+import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
@@ -12,6 +13,7 @@ import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
@@ -20,6 +22,7 @@ import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -479,6 +482,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
+            // A newer sideload build is published — the on-demand way to update,
+            // beside the once-a-launch prompt. Hidden on the play build and when
+            // nothing newer exists (UpdateService.available).
+            if (UpdateService.available) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.system_update,
+                    color: MilesColors.ember,),
+                title: const Text('Update available'),
+                subtitle: Text(
+                  ReleaseGate.latestVersionName != null
+                      ? 'Install version ${ReleaseGate.latestVersionName}'
+                      : 'Install the latest version',
+                ),
+                onTap: () => showUpdateSheet(context),
+              ),
+              const SizedBox(height: 8),
+            ],
             // ── Profile ──────────────────────────────────────────
             const _SectionHeader(label: 'Profile'),
             Center(
@@ -569,8 +590,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           Text(
                             ref.watch(contentLanguageProvider) ==
                                     ContentLanguage.english
-                                ? 'Games and dares in English'
-                                : 'Games and dares in Roman Urdu',
+                                ? 'Games in English'
+                                : 'Games in Roman Urdu',
                             style: const TextStyle(
                                 color: MilesColors.taupe, fontSize: 12,),
                           ),
