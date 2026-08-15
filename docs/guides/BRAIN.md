@@ -2023,3 +2023,34 @@ copy should not claim more.
 **App otherwise frozen at owner's request.** The three open HIGH findings in
 §16 (offline ToS acceptance downgrade, re-prompt on every sign-in, placeholder
 contact email) are UNFIXED and still block a Play submission.
+
+### §16b The three ToS HIGHs, fixed 2026-08-16
+
+All three closed. `flutter analyze mobile` 0/0, `flutter test` **730 pass** (+3).
+
+1. **Offline acceptance was discarded and the local marker downgraded.** The
+   merge asked `if (server == null && local != null)` — only ever true for a
+   FIRST-ever acceptance. On every later version an offline accept was thrown
+   away and `_writeLocal(uid, server)` wrote the server's LOWER number over the
+   device's higher one, so the user was re-gated at every launch with the record
+   erased. Replaced with a higher-of-the-two merge that re-files anything the
+   device knows and the server does not, and never writes a lower number.
+   Two regression tests.
+2. **Every sign-in re-showed the Terms to someone who accepted months ago.**
+   `session_provider.init()` published `loading: false` the instant a session
+   appeared — before the profile or the acceptance had been read — so the router
+   ran a full redirect pass on a signed-in user whose terms state was still
+   null, which gates. `loading` now stays true while a session exists and the
+   profile has not landed; `loadProfile` clears it when it is actually done.
+3. **`{{CONTACT_EMAIL}}` was rendered to users.** The body no longer
+   interpolates it — `milesTermsBody` is a `const`, so a conditional in it is a
+   compile error, and a document whose shape depends on a constant is worse than
+   one pointing at the store listing. §12 now names the store listing.
+   `milesTermsHasContact` makes the gap checkable, and a test asserts no `{{`
+   token can reach a user.
+
+**STILL THE OWNER'S TO DO, and a submission is not possible without them:**
+- a real contact address (Instruction: cheapest is a domain ~$11/yr + Zoho free)
+- host the privacy policy and set `milesPrivacyPolicyUrl`
+- neither migration is applied; `20260816140000` must NOT be (message push is
+  unwanted by the owner)

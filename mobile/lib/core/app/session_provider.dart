@@ -83,7 +83,10 @@ class SessionNotifier extends StateNotifier<SessionState> {
   void init() {
     // Seed initial state from any stored session.
     final current = SupabaseService.client.auth.currentSession;
-    state = SessionState(loading: false, session: current);
+    // Same reason as the listener below: a restored session has a profile and
+    // an acceptance still to fetch, and false here is the router's cue to
+    // decide things it does not yet know.
+    state = SessionState(loading: current != null, session: current);
 
     _authSub = SupabaseService.authChanges.listen((event) async {
       // The server ended it: a revoked, expired or reused refresh token. Not a
@@ -93,8 +96,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
         await _endSession();
         return;
       }
+      // loading stays TRUE while a session exists and the profile has not been
+      // fetched yet. It used to publish false here, which let the router run a
+      // full redirect pass on a signed-in user whose terms acceptance had not
+      // been read yet — so someone who accepted months ago was shown the whole
+      // Terms screen for the length of three network calls before loadProfile
+      // finally released them. loadProfile sets it false when it is actually
+      // done; a session with nothing loaded behind it is not "not loading".
       state = SessionState(
-        loading: false,
+        loading: event.session != null,
         session: event.session,
         profile: state.profile,
         couple: state.couple,

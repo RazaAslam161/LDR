@@ -64,15 +64,24 @@ class TermsGate {
       final local = await _readLocal(uid);
       _version = local;
       final server = await fetchAcceptedVersion();
-      if (server == null && local != null) {
-        // This device accepted while the network was gone (see [accept]) and
-        // the row never landed. Land it now, rather than showing the terms
-        // again to somebody who has already read them.
-        await recordAcceptance(local);
-        _version = local;
-      } else {
-        _version = server;
-        if (server != null) await _writeLocal(uid, server);
+      // The HIGHER of the two wins, always. The old shape asked "is the server
+      // empty?" — which is only ever true for a first-ever acceptance, so on
+      // every LATER version an offline accept was thrown away: local said 2,
+      // the server still said 1, the else-branch took the server's answer AND
+      // wrote 1 back over the local 2, and the user was re-gated at every
+      // launch with the record of their acceptance erased from the device.
+      _version = switch ((local, server)) {
+        (null, final s) => s,
+        (final l, null) => l,
+        (final l, final s) => l! > s! ? l : s,
+      };
+      // Anything the device knows and the server does not is an acceptance
+      // that never landed — file it, whatever version it is.
+      if (_version != null && (server == null || _version! > server)) {
+        await recordAcceptance(_version!);
+      }
+      if (_version != null && _version != local) {
+        await _writeLocal(uid, _version!);
       }
     } catch (e) {
       // Not a silent catch, and not a fallback either — the local answer is

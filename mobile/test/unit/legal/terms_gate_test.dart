@@ -129,4 +129,55 @@ void main() {
       expect(filed, [milesTermsVersion]);
     });
   });
+
+  group('a local acceptance is never thrown away', () {
+    // The defect: the old merge asked "is the server empty?", which is only
+    // true for a first-ever acceptance. On every later version an offline
+    // accept was discarded AND the local marker overwritten with the server's
+    // lower number — so the user was re-gated forever and the device forgot
+    // they had ever agreed.
+    test('an offline accept of v2 survives a server that still says v1',
+        () async {
+      TermsGate.reset();
+      final recorded = <int>[];
+      TermsGate.currentAccount = () => 'uid-1';
+      TermsGate.fetchAcceptedVersion = () async => 1;
+      TermsGate.recordAcceptance = (v) async => recorded.add(v);
+      SharedPreferences.setMockInitialValues({'miles_tos_v1_uid-1': 2});
+
+      await TermsGate.load();
+
+      expect(TermsGate.acceptedVersion, 2,
+          reason: 'the higher of the two must win',);
+      expect(recorded, contains(2),
+          reason: 'the acceptance the server never got must be re-filed',);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt('miles_tos_v1_uid-1'), 2,
+          reason: 'the local marker must never be downgraded',);
+    });
+
+    test('a server ahead of the device wins and is written down', () async {
+      TermsGate.reset();
+      TermsGate.currentAccount = () => 'uid-1';
+      TermsGate.fetchAcceptedVersion = () async => 3;
+      TermsGate.recordAcceptance = (_) async {};
+      SharedPreferences.setMockInitialValues({'miles_tos_v1_uid-1': 1});
+
+      await TermsGate.load();
+
+      expect(TermsGate.acceptedVersion, 3);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt('miles_tos_v1_uid-1'), 3);
+    });
+  });
+
+  test('the terms are flagged incomplete until the owner fills them in', () {
+    // Not a style check. Shipping a compliance gate whose contact method is a
+    // template token, incorporating a privacy policy that is not published, is
+    // not a compliance artefact — and the two constants are easy to forget
+    // precisely because the gate works without them.
+    expect(milesContactEmail.contains('{{'), isFalse,
+        reason: 'a template token must never reach a user',);
+    expect(milesPrivacyPolicyUrl.contains('{{'), isFalse);
+  });
 }

@@ -14,12 +14,30 @@ const milesTermsUpdated = '16 August 2026';
 /// `web/privacy-policy.html` exist; nothing hosts them yet, and inventing a URL
 /// here would ship a link that 404s. Empty means "not published": the About
 /// card says so instead of opening a dead page.
-const milesPrivacyPolicyUrl = '';
+const milesPrivacyPolicyUrl =
+    'https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/privacy-policy.html';
+
+/// Whether the Terms are complete enough to put in front of a user.
+///
+/// Both of these are the owner's to fill. Until they are, the gate still works
+/// — the document is the agreement, not the address — but a release must not
+/// ship without them, and a test asserts that rather than trusting anyone to
+/// remember.
+bool get milesTermsHasContact =>
+    milesContactEmail.isNotEmpty && milesPrivacyPolicyUrl.isNotEmpty;
 
 /// Left as a placeholder deliberately. A support address that does not receive
 /// mail is worse than one the reader can see has not been filled in — and the
 /// same token appears in the privacy policy, so both get answered at once.
-const milesContactEmail = '{{CONTACT_EMAIL}}';
+/// Empty until the owner has one. A literal `{{CONTACT_EMAIL}}` was being
+/// rendered under "12. CONTACT" to every user the gate stopped — asking people
+/// to agree to a contract whose contact method was an unfilled template token.
+///
+/// The body no longer interpolates it at all: [milesTermsBody] is a `const`, so
+/// anything conditional in it is a compile error, and a document that changes
+/// shape depending on a constant is worse than one that points at the store
+/// listing. This exists so [milesTermsHasContact] can flag the gap.
+const milesContactEmail = 'Razaaslam3210@gmail.com';
 
 const milesTermsBody = '''
 Miles is a private app for two people. These terms are the agreement between
@@ -149,5 +167,5 @@ long any of it survives.
 
 12. CONTACT
 
-$milesContactEmail
+Razaaslam3210@gmail.com
 ''';

@@ -3,17 +3,17 @@
 **Last updated: 15 August 2026**
 
 > **BEFORE PUBLISHING — fill these three placeholders and delete this block.**
-> `{{PUBLISHER_NAME}}` · `{{POSTAL_ADDRESS}}` · `{{PRIVACY_CONTACT_EMAIL}}`
+> `R&D Dev` · `Pakistan` · `Razaaslam3210@gmail.com`
 > They also appear in `web/privacy-policy.html`, which is the copy users read.
-> `{{DELETE_URL}}` is wherever you host `web/delete-account.html`.
+> `https://sopictusdonlvuezmfep.supabase.co/functions/v1/delete-account` is wherever you host `web/delete-account.html`.
 
 Miles is a private app for two people in a relationship. This policy says what
 it stores, what it cannot read, who else touches your data, how long any of it
 survives, and how to get rid of it. It is written to be accurate rather than
 reassuring — where something is *not* protected, this document says so.
 
-Miles is published by **{{PUBLISHER_NAME}}**, {{POSTAL_ADDRESS}}. Privacy
-questions and data requests: **{{PRIVACY_CONTACT_EMAIL}}**.
+Miles is published by **R&D Dev**, Pakistan. Privacy
+questions and data requests: **Razaaslam3210@gmail.com**.
 
 ---
 
@@ -216,7 +216,7 @@ it.
 
 **See your data.** Everything Miles holds about you is visible in the app, on
 the screen that produced it. For a copy in another form, write to
-{{PRIVACY_CONTACT_EMAIL}}.
+Razaaslam3210@gmail.com.
 
 **Correct it.** Profile, name, photo, time zone and every preference are
 editable in Settings.
@@ -228,7 +228,7 @@ erase a shared history alone.
 
 **Delete your account.** Two routes, both real:
 - *In the app*: Settings → Delete my account.
-- *On the web, without reinstalling*: **{{DELETE_URL}}**. You enter your email,
+- *On the web, without reinstalling*: **https://sopictusdonlvuezmfep.supabase.co/functions/v1/delete-account**. You enter your email,
   receive a code at that address, and confirm. We never delete an account on an
   unverified request.
 
@@ -244,7 +244,7 @@ Android settings, or stop using a feature. None of it is retroactive: turning
 sharing off erases the stored position, but does not unsend what your partner
 already saw.
 
-**Object or complain.** Write to {{PRIVACY_CONTACT_EMAIL}}. If you are in the
+**Object or complain.** Write to Razaaslam3210@gmail.com. If you are in the
 UK, EEA or another jurisdiction with a data-protection authority, you may
 complain to it directly.
 
@@ -295,6 +295,6 @@ policy applies.
 
 ## 12. Contact
 
-{{PUBLISHER_NAME}}
-{{POSTAL_ADDRESS}}
-{{PRIVACY_CONTACT_EMAIL}}
+R&D Dev
+Pakistan
+Razaaslam3210@gmail.com
