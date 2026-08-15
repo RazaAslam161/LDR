@@ -83,7 +83,7 @@ The `redirect` callback reads `sessionProvider` and enforces this funnel:
   - `needsRole` = `profile != null && !profile.genderSet` → force `/role-setup` (one-time gender pick that gates the cycle feature).
   - Fully set up → bounce away from auth/onboarding routes (`/signin`, `/signup`, `/welcome`, `/couple`, `/role-setup`, `/`) into `/app`.
 
-Routes include the auth/onboarding pages plus the `AppShell` at `/app` and a large flat table of feature routes under `/app/...` (capsule, intimacy, vault, touch, together, reasons, care, watch, cycle, heartbeat, games, rituals, prompt, timeline, and the `closer/...` modules), plus `/call`. Game routes like `/app/games/would-you-rather` construct `SyncedCardGameScreen` with content pools from `lib/features/games/game_content.dart`.
+Routes include the auth/onboarding pages plus the `AppShell` at `/app` and a large flat table of feature routes under `/app/...` (capsule, intimacy, vault, touch, reasons, care, watch, cycle, heartbeat, games, rituals, prompt, timeline, and the `closer/...` modules), plus `/call`. Game routes like `/app/games/would-you-rather` construct `SyncedCardGameScreen` with content pools from `lib/features/games/game_content.dart`.
 
 ### Session model
 
@@ -295,7 +295,7 @@ Pairing and lifecycle operations run as definer functions (granted to `authentic
 Two flavors: Postgres-changes channels (filtered by `couple_id`, gated again by RLS on delivery — a subscriber only receives rows it may read) and ephemeral broadcast channels (no table). The shared helper `RealtimeService.coupleTable/coupleStream/broadcast` (`lib/core/realtime_service.dart`) centralizes the pattern; many features still hand-roll their own. Channel names observed (all suffixed with `<coupleId>` unless noted):
 
 - Postgres-changes: `profile-sync` (profiles, in `SupabaseRepository.subscribeToPresence`), `presence`, `messages`, `reach_events`, `body_touches`, `care_nudges`, `love_reasons`, `capsules`, `cycle_events`, `home_cycle`, `desire_temps`, `mood_lamp`, `intimacy` (intimacy_signals).
-- Broadcast / ephemeral: `call:<coupleId>` (WebRTC signalling: offer/answer/ice/hangup, event `'signal'`), `touch:<id>`, `touch_trace:<coupleId>`, `capsule_proximity:<coupleId>` (proximity, no coords persisted), `breath:<coupleId>`, `mood_burst:<id>`, `together:<coupleId>`, `heartbeat:<coupleId>`, `watch:<coupleId>`, `reach:<coupleId>`, and game channels `game_td:<cid>`, `gcard:<gameKey>:<cid>`, `gchat:<gameKey>:<coupleId>`.
+- Broadcast / ephemeral: `call:<coupleId>` (WebRTC signalling: offer/answer/ice/hangup, event `'signal'`), `touch:<id>`, `touch_trace:<coupleId>`, `capsule_proximity:<coupleId>` (proximity, no coords persisted), `breath:<coupleId>`, `mood_burst:<id>`, `heartbeat:<coupleId>`, `watch:<coupleId>`, `reach:<coupleId>`, and game channels `game_td:<cid>`, `gcard:<gameKey>:<cid>`, `gchat:<gameKey>:<coupleId>`.
 
 Note: Supabase Realtime delivers nothing unless the table is added to the `supabase_realtime` publication — `realtime.sql` and the per-feature SQL files do this, and apply `REPLICA IDENTITY FULL` so RLS-filtered UPDATE events carry the full row to subscribers. Channels are re-subscribed on socket reconnect (`realtimeResumed` listener in `PartnerPresenceNotifier`; `CallController.reconnect`).
 
@@ -708,12 +708,6 @@ This section documents the couple-facing "things to do together" surface of Teth
 
 **DB/security.** Games persist nothing server-side — all content is bundled client constants, all sync is transient broadcast, and the bag is local SharedPreferences. No tables, buckets, or RLS involved.
 
-### Together (shared affection space)
-
-**What it does / flow.** `TogetherScreen` (`lib/features/together/together_screen.dart`, route `/app/together`) is a shared avatar space. Each partner picks an emoji avatar; tapping a gesture (`cuddle 🫂`, `kiss 💋`, `hug 🤗`, `hold hands 🤝`, `head pat ✋`, `boop 👉`) animates the gesture on **both** screens — the two avatars lean together (`AnimatedAlign`) and the action emoji blooms with drifting hearts (`_MomentBurst`).
-
-**Data flow / realtime.** Channel `together:<coupleId>`, broadcast event `moment` (`{action}`). Sender plays locally and broadcasts; receiver plays the same action. Avatars are loaded/saved via `PresenceService` (`lib/core/services/presence_service.dart`): `fetchMine`/`fetchPartner` read the **`presence`** table and `setAvatarEmoji` upserts the `avatar_emoji` column — so the chosen avatar persists per user and the partner sees it. No gesture history is stored (the burst list is in-memory only).
-
 ### Watch Together
 
 **What it does / flow.** `WatchTogetherScreen` (`lib/features/watch/watch_together_screen.dart`, route `/app/watch`) lets a couple paste a YouTube link (movie/music video/playlist) and watch in loose sync via `youtube_player_flutter`. Whoever touches the controls drives; the other follows. Paste support is robust (clipboard button + `YoutubePlayer.convertUrlToId`).
@@ -783,8 +777,8 @@ This section documents the couple-facing "things to do together" surface of Teth
 ### Cross-cutting notes
 
 - **Session source:** every screen reads `coupleId`/`myUid`/`partner` from `sessionProvider` (`core/session_provider.dart`).
-- **Realtime patterns:** the *live/social* features (Games, Together, Watch, Heartbeat, capsule proximity) use **broadcast** channels (no DB writes); the *persisted-but-live* features (Reasons, Capsule unlock) use **Postgres-changes** subscriptions; Daily Prompt, Rituals, Timeline, Vault are pull/refresh only.
-- **Buckets:** only the Time Capsule uses Storage (`capsule-media`, signed URLs). Avatars (Together) are stored as an emoji string in the `presence` table, not a bucket.
+- **Realtime patterns:** the *live/social* features (Games, Watch, Heartbeat, capsule proximity) use **broadcast** channels (no DB writes); the *persisted-but-live* features (Reasons, Capsule unlock) use **Postgres-changes** subscriptions; Daily Prompt, Rituals, Timeline, Vault are pull/refresh only.
+- **Buckets:** only the Time Capsule uses Storage (`capsule-media`, signed URLs).
 - **No `.env` keys** are specific to these features beyond the app's shared Supabase config; the Watch feature depends on `youtube_player_flutter`, Heartbeat/Capsule on device permissions (camera, microphone, coarse location).
 
 ---
@@ -823,7 +817,7 @@ The router (`lib/core/router.dart`, `buildRouter`) drives a strict funnel using 
 
 - **Files:** `lib/features/shell/app_shell.dart` (`AppShell`), `lib/features/shell/app_drawer.dart` (`AppDrawer`), route `/app`.
 - **Bottom nav:** A `NavigationBar` over six screens (`HomeScreen`, `ChatScreen`, `CountdownScreen` labeled "Reunion", `SkyBridgeScreen` labeled "Sky", `BreathSyncScreen` labeled "Breath", `CloserScreen`). The **Closer** tab is only shown when `profile.isAdult` (`showCloser = isAdult`); its icon reflects `couple.modestMode` (locked vs. open). Selected tab index lives in `shellTabProvider`; the shell rebuilds only on `select`-scoped reads of `isAdult` / `modestMode` / tab index to avoid rebuilding on every presence/typing tick. A `BannerAdSlot` is shown only on the secondary tabs (Countdown/Sky/Breath, `selected >= 2 && !isCloserTab`).
-- **Drawer** (`AppDrawer`, opened via `rootScaffoldKey`): shows partner presence (`_PresenceDot` colored from `partner.presenceStatus`: asleep/busy/online) and timezone, plus push-route tiles to Capsule, Vault, Touch, Together, Reasons I Love You, Care Reminders, Watch Together, Cycle, Feel My Heartbeat, Games, Rituals, Daily Question, Timeline, and Settings, and a Sign-out button (`SupabaseRepository.signOut` + `sessionProvider.signOut`).
+- **Drawer** (`AppDrawer`, opened via `rootScaffoldKey`): shows partner presence (`_PresenceDot` colored from `partner.presenceStatus`: asleep/busy/online) and timezone, plus push-route tiles to Capsule, Vault, Touch, Reasons I Love You, Care Reminders, Watch Together, Cycle, Feel My Heartbeat, Games, Rituals, Daily Question, Timeline, and Settings, and a Sign-out button (`SupabaseRepository.signOut` + `sessionProvider.signOut`).
 - **Always-on realtime orchestration (the shell is the hub for Reach + Calls):**
   - Subscribes the **Reach** channel via `ReachRepository.subscribe(couple.id, _onReach)` and registers FCM (`FcmService.registerToken()`) once ready; also prompts the one-time full-screen-intent permission (`FsiPermission.promptIfNeeded`, Android 14+).
   - On `AppLifecycleState.resumed`, `_reconnectRealtime()` force-cycles the realtime socket (`realtime.disconnect()` → `connect()`) because Android doze kills sockets silently. When the socket reopens, `realtimeResumed` fires `_rearmAlwaysOn()`, which re-subscribes Reach, calls `callControllerProvider.reconnect()`, and `sessionProvider.reconnectPresence()`.

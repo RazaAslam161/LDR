@@ -347,11 +347,6 @@ class PresenceService {
       _upsert(coupleId, {'body_photo_path': path},
           op: 'set_body_photo', isAppActivity: true,);
 
-  /// The user's chosen avatar (emoji) for the "Together" space.
-  static Future<void> setAvatarEmoji(String coupleId, String emoji) =>
-      _upsert(coupleId, {'avatar_emoji': emoji},
-          op: 'set_avatar_emoji', isAppActivity: true,);
-
   // ╔═══════════════════════════════════════════════════════════════════════╗
   // ║ LOCATION ONLY — never stamps app_last_active_at. GPS runs while the     ║
   // ║ user is asleep; it must never touch the app-activity / last-seen clock.║

@@ -55,7 +55,7 @@ void main() {
       // one of the other 31 left the partner seeing where you were last.
       const realRoutes = [
         '/app/settings', '/app/disguise', '/app/capsule', '/app/capsule/new',
-        '/app/intimacy', '/app/vault', '/app/touch', '/app/together',
+        '/app/intimacy', '/app/vault', '/app/touch',
         '/app/reasons', '/app/care', '/app/watch', '/app/cycle',
         '/app/heartbeat', '/app/games', '/app/rituals', '/app/prompt',
         '/app/timeline', '/app/location-map', '/app/closer/touch-trace',

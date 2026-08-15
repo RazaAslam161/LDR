@@ -124,14 +124,6 @@ class AppDrawer extends ConsumerWidget {
                         },
                       ),
                       _DrawerTile(
-                        icon: Icons.favorite_border,
-                        label: 'Together',
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          context.push('/app/together');
-                        },
-                      ),
-                      _DrawerTile(
                         icon: Icons.auto_awesome,
                         label: 'Reasons I Love You',
                         onTap: () {

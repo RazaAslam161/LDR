@@ -261,7 +261,6 @@ class PresenceRouteObserver extends NavigatorObserver {
 /// default — the tab screens are joinable via [joinableTabIndex] instead, since
 /// they are not routes of their own.
 const Map<String, String> kJoinableRoutes = {
-  'Together': '/app/together',
   'Reasons': '/app/reasons',
   'Care': '/app/care',
   'Watch': '/app/watch',
