@@ -162,7 +162,8 @@ abstract class _Shape {
 }
 
 class _Circle extends _Shape {
-  const _Circle(this.cx, this.cy, this.r, {required super.color});
+  const _Circle(this.cx, this.cy, this.r,
+      {required super.color, super.cut,});
 
   final double cx;
   final double cy;
@@ -247,6 +248,29 @@ class _Arc extends _Shape {
   }
 }
 
+/// A filled polygon, even-odd. The set had only round-capped strokes and boxes,
+/// which cannot make a letterform: a grotesque needs flat terminals and a stem
+/// that changes width along a diagonal. Points are grid units, any winding.
+class _Poly extends _Shape {
+  const _Poly(this.pts, {required super.color});
+
+  final List<(double, double)> pts;
+
+  @override
+  bool hit(double x, double y) {
+    var inside = false;
+    for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      final (xi, yi) = pts[i];
+      final (xj, yj) = pts[j];
+      if ((yi > y) != (yj > y) &&
+          x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+}
+
 class _Tri extends _Shape {
   const _Tri(this.ax, this.ay, this.bx, this.by, this.cx, this.cy,
       {required super.color, super.cut, super.rotDeg,});
@@ -299,6 +323,7 @@ class _IconSpec {
 }
 
 const _white = _Rgba.white;
+const _ink = _Rgba(0x1B, 0x1B, 0x1D);
 
 final List<_IconSpec> _icons = [
   // ── News — the default identity ───────────────────────────────────────────
@@ -307,20 +332,57 @@ final List<_IconSpec> _icons = [
   // is also a worse disguise: a counterfeit of a famous icon is more likely to
   // be noticed than an unremarkable one nobody recognises.
   //
-  // An article card — a photo block and rules of text. Reads as "a thing to
-  // read" at 48dp without borrowing anyone's identity.
+  // A masthead: rule, wordmark, strapline. The article card this replaces was
+  // the universal list/document glyph — note apps and feed readers draw the
+  // same photo-block-and-rules — so it said "an app that shows text", not "a
+  // newspaper". A nameplate is what only a news app wears.
+  //
+  // The word is built from primitives because there is no type here: N and w
+  // are polygons so their terminals stay flat, e is a ring with a crossbar and
+  // a slot cut for the aperture, s is two bowls joined by a spine. Everything
+  // sits inside a radius of 33 from centre, which is what a circular launcher
+  // mask leaves — the rule and strapline were the first casualties when they
+  // did not.
   _IconSpec(
     base: 'ic_launcher',
-    bg: _Bg.linear(_Rgba(0xB3, 0x26, 0x1E), _Rgba(0x8C, 0x1D, 0x18), 20),
+    bg: _Bg.linear(_Rgba(0xFF, 0xFF, 0xFF), _Rgba(0xEF, 0xF1, 0xF3), 30),
+    shadow: false,
     mark: [
-      _RRect(31, 31, 21, 21, 3, color: _white),
-      _Cap(58, 36, 77, 36, 3, color: _white),
-      _Cap(58, 47, 72, 47, 3, color: _white),
-      _Cap(31, 62, 77, 62, 3, color: _white),
-      _Cap(31, 73, 68, 73, 3, color: _white),
+      // masthead rule
+      _RRect(28, 35, 52, 4.6, 0.6, color: _ink),
+      // N
+      _Poly([
+        (24.0, 46.0), (28.6, 46.0), (34.9, 60.0), (34.9, 46.0),
+        (39.5, 46.0), (39.5, 66.0), (34.9, 66.0), (28.6, 52.0),
+        (28.6, 66.0), (24.0, 66.0),
+      ], color: _ink),
+      // e
+      _Circle(48, 59, 7, color: _ink),
+      _Circle(48, 59, 4.0, color: _ink, cut: true),
+      _RRect(41, 57.8, 14, 2.6, 0, color: _ink),
+      _RRect(47.5, 60.4, 9, 2.8, 0, color: _ink, cut: true),
+      // w
+      _Poly([(56.5, 52.0), (60.3, 52.0), (63.6, 66.0), (59.8, 66.0)],
+          color: _ink),
+      _Poly([(63.1, 52.0), (66.9, 52.0), (63.6, 66.0), (59.8, 66.0)],
+          color: _ink),
+      _Poly([(63.1, 52.0), (66.9, 52.0), (70.2, 66.0), (66.4, 66.0)],
+          color: _ink),
+      _Poly([(69.7, 52.0), (73.5, 52.0), (70.2, 66.0), (66.4, 66.0)],
+          color: _ink),
+      // s
+      _Arc(79.5, 56.4, 3.4, 3.2, 175, 350, color: _ink),
+      _Cap(76.3, 56.8, 82.7, 61.8, 1.6, color: _ink),
+      _Arc(79.5, 61.6, 3.4, 3.2, 10, 185, color: _ink),
+      // strapline: red slug + letterspaced small caps
+      _RRect(28, 70, 12, 4.4, 0.6, color: _Rgba(0xE0, 0x2B, 0x20)),
+      _RRect(44, 70, 3.4, 4.4, 0.4, color: _ink),
+      _RRect(50, 70, 3.4, 4.4, 0.4, color: _ink),
+      _RRect(56, 70, 3.4, 4.4, 0.4, color: _ink),
+      _RRect(62, 70, 3.4, 4.4, 0.4, color: _ink),
+      _RRect(68, 70, 3.4, 4.4, 0.4, color: _ink),
     ],
   ),
-
   // ── Calculator ────────────────────────────────────────────────────────────
   // The previous mark drew a calculator-shaped slab with a screen and keys —
   // device chrome, which is the single most common amateur-icon mistake and

@@ -224,7 +224,7 @@ class KeyEscrow {
       // returns false, and the next sign-in seals the stand-in key minted on
       // the first Closer screen over the only copy of the real one. [_wrapKey]
       // goes on OPENING v2 for any row already written that way; the write
-      // flips to kdfArgon2idV2 once app_release.min_build is 27.
+      // flips to kdfArgon2idV2 once app_release.min_build is 28.
       final key = await _wrapKey(password, salt, kdf: kdfArgon2id);
       final box = await _aead.encrypt(
         seed,
