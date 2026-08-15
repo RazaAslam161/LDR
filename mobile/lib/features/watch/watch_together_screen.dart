@@ -9,9 +9,13 @@ import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
+import 'package:miles/features/watch/watch_embed.dart';
+import 'package:miles/features/watch/watch_embed_player.dart';
+import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/watch/watch_player.dart';
 import 'package:miles/features/watch/watch_protocol.dart';
 import 'package:miles/features/watch/watch_source.dart';
+import 'package:miles/features/watch/watch_viewer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -87,6 +91,13 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   /// A link we cannot play inline, held so the card can offer the browser.
   WatchSource? _handoff;
 
+  /// A cobrowse source being shown in-app. Not a player: nothing here reports a
+  /// position, so the sync protocol is not driving it and must not claim to be.
+  WatchSource? _viewing;
+
+  /// The source behind the current player, so a failure can name its own site.
+  WatchSource? _lastSource;
+
   Timer? _watchdog;
 
   /// What we last commanded the player to do, so its echo is recognised by
@@ -102,6 +113,18 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     super.initState();
     _bind(ref.read(sessionProvider));
     _heartbeat = Timer.periodic(kBeatInterval, (_) => _tick());
+    // Watching together during a call is the point, so opening this screen
+    // MINIMISES the call rather than leaving it behind a route. Nothing about
+    // the peer connection changes — the renderers live on the controller and
+    // CallPip draws them above the router — so this costs no renegotiation and
+    // drops no frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final call = ref.read(callControllerProvider);
+      if (call.state == CallState.connected ||
+          call.state == CallState.calling) {
+        call.setMinimized(true);
+      }
+    });
   }
 
   /// Subscribe once the couple is known, and re-subscribe if it changes.
@@ -142,6 +165,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   /// to one URL for its lifetime.
   void _openSource(WatchSource source, {bool broadcast = true}) {
     _videoId = source.key;
+    _lastSource = source;
     _fault = null;
     _pendingId = null;
 
@@ -160,9 +184,18 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     } else {
       current?.removeListener(_onPlayerChange);
       current?.dispose();
-      _player = source.kind == WatchKind.youtube
-          ? YoutubeWatchPlayer(source)
-          : MediaWatchPlayer(source);
+      // Exhaustive rather than a ternary: the old `youtube ? … : media` handed
+      // every new kind to MediaWatchPlayer, which fails with the generic "this
+      // video would not open" and no analyzer error to catch it.
+      _player = switch (source.kind) {
+        WatchKind.youtube => YoutubeWatchPlayer(source),
+        WatchKind.media => MediaWatchPlayer(source),
+        WatchKind.embed =>
+          EmbedWatchPlayer(source, adapterFor(source.site ?? '')!),
+        WatchKind.cobrowse || WatchKind.blocked => throw StateError(
+            'kind ${source.kind} has no player and must not reach _openSource',
+          ),
+      };
       _player!.addListener(_onPlayerChange);
       setState(() {});
     }
@@ -182,8 +215,11 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _watchdog = Timer(kReadyTimeout, () {
       if (!mounted) return;
       if (_player?.isReady ?? false) return;
+      // Names whichever site it actually is: this said "outside YouTube" for
+      // every backend, which is simply wrong for a Vimeo or TikTok embed.
+      final site = _lastSource?.site ?? 'that site';
       setState(() => _fault = "This video won't start. It may be blocked from "
-          'playing outside YouTube, or private.');
+          'playing outside $site, or private.');
     });
   }
 
@@ -229,12 +265,13 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     switch (source.kind) {
       case WatchKind.youtube:
       case WatchKind.media:
+      case WatchKind.embed:
         setState(() => _handoff = null);
         _openSource(source);
-      case WatchKind.handoff:
+      case WatchKind.cobrowse:
       case WatchKind.blocked:
-        // Not playable in the YouTube surface. Say which it is and why, rather
-        // than rejecting the paste as invalid — he pasted it for a reason.
+        // Nothing here can be driven, so nothing here claims to be in sync.
+        // cobrowse still opens inside Miles; only DRM is refused outright.
         setState(() {
           _handoff = source;
           _fault = null;
@@ -550,10 +587,18 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
               ],
             ),
           ),
-          if (_handoff != null)
+          if (_viewing != null)
+            Expanded(child: WatchViewer(source: _viewing!))
+          else if (_handoff != null)
             _LinkCard(
-              source: _handoff!,
+              source: _handoff,
               onOpen: () => _openInBrowser(_handoff!),
+              onHere: _handoff!.kind == WatchKind.cobrowse
+                  ? () => setState(() {
+                        _viewing = _handoff;
+                        _handoff = null;
+                      })
+                  : null,
               onDismiss: () => setState(() => _handoff = null),
             )
           else if (_fault != null)
@@ -630,15 +675,21 @@ class _LinkCard extends StatelessWidget {
     required this.source,
     required this.onOpen,
     required this.onDismiss,
+    this.onHere,
   }) : message = null;
 
   const _LinkCard.fault({required String this.message, required this.onDismiss})
       : source = null,
-        onOpen = null;
+        onOpen = null,
+        onHere = null;
 
   final WatchSource? source;
   final String? message;
   final VoidCallback? onOpen;
+
+  /// Opens the link inside Miles. Null when there is nothing to open in-app —
+  /// DRM, or a player that simply failed.
+  final VoidCallback? onHere;
   final VoidCallback onDismiss;
 
   @override
@@ -682,21 +733,32 @@ class _LinkCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // Wrap, not Row: three controls and a long site name overflowed
+              // the card on a 320dp phone.
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
                 children: [
                   TextButton(
                     onPressed: onDismiss,
                     child: const Text('Try another link'),
                   ),
-                  if (canOpen) ...[
-                    const SizedBox(width: 8),
-                    FilledButton.icon(
+                  // Leaving the app is the fallback now, not the offer. Handing
+                  // the link to Chrome ends the evening: it drops the partner,
+                  // the chat and the presence, and puts the site in the
+                  // recent-apps list beside a news reader.
+                  if (canOpen)
+                    TextButton(
                       onPressed: onOpen,
-                      icon: const Icon(Icons.open_in_new, size: 18),
-                      label: const Text('Open in browser'),
+                      child: const Text('Open in browser'),
                     ),
-                  ],
+                  if (onHere != null)
+                    FilledButton.icon(
+                      onPressed: onHere,
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('Watch here'),
+                    ),
                 ],
               ),
             ],

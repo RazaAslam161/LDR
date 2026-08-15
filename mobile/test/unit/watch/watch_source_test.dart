@@ -98,22 +98,53 @@ void main() {
       expect(s.reason, contains('DRM'));
     });
 
-    test('Vimeo hands off to the browser', () {
+    test('Vimeo is driven inline, not handed to the browser', () {
       final s = resolveWatchLink('https://vimeo.com/123456789')!;
-      expect(s.kind, WatchKind.handoff);
+      expect(s.kind, WatchKind.embed);
       expect(s.site, 'Vimeo');
+      // The SHARE url on the wire, the player id beside it — a bare id as the
+      // key reopens on the partner's phone as nothing at all.
+      expect(s.key, 'https://vimeo.com/123456789');
+      expect(s.embedId, '123456789');
     });
 
-    test('a YouTube playlist with no video hands off', () {
+    test('TikTok is driven inline', () {
+      final s = resolveWatchLink(
+        'https://www.tiktok.com/@someone/video/7212345678901234567',
+      )!;
+      expect(s.kind, WatchKind.embed);
+      expect(s.site, 'TikTok');
+      expect(s.embedId, '7212345678901234567');
+    });
+
+    test('a TikTok link with no video id in it opens in-app instead', () {
+      // vm.tiktok.com short links need a redirect resolved, and resolving one
+      // is a network call this function is not allowed to make.
+      final s = resolveWatchLink('https://vm.tiktok.com/ZMabcdefg/')!;
+      expect(s.kind, WatchKind.cobrowse);
+    });
+
+    test('a Vimeo profile link is not mistaken for a video', () {
+      final s = resolveWatchLink('https://vimeo.com/someuser')!;
+      expect(s.kind, WatchKind.cobrowse);
+    });
+
+    test('X opens in-app, with no claim that it is in sync', () {
+      final s = resolveWatchLink('https://x.com/someone/status/1234567890')!;
+      expect(s.kind, WatchKind.cobrowse);
+      expect(s.site, 'X');
+    });
+
+    test('a YouTube playlist with no video opens in-app', () {
       final s = resolveWatchLink('https://www.youtube.com/playlist?list=PL12')!;
-      expect(s.kind, WatchKind.handoff);
+      expect(s.kind, WatchKind.cobrowse);
       expect(s.reason, contains('playlist'));
     });
 
     test('an unknown site still opens rather than being called invalid', () {
       final s = resolveWatchLink('https://some-blog.example/post/1')!;
-      expect(s.kind, WatchKind.handoff);
-      expect(s.reason, isNotNull);
+      expect(s.kind, WatchKind.cobrowse);
+      expect(s.site, isNotNull);
     });
   });
 
@@ -146,6 +177,16 @@ void _roundTripTests() {
       final s = sourceFromKey('dQw4w9WgXcQ')!;
       expect(s.kind, WatchKind.youtube);
       expect(s.key, 'dQw4w9WgXcQ');
+    });
+
+    test('an embed key reopens as the same embed, with its player id', () {
+      // The partner receives only the key. If it does not come back as embed
+      // with an id, their phone shows nothing while ours plays.
+      final sent = resolveWatchLink('https://vimeo.com/123456789')!;
+      final got = sourceFromKey(sent.key)!;
+      expect(got.kind, WatchKind.embed);
+      expect(got.site, 'Vimeo');
+      expect(got.embedId, sent.embedId);
     });
 
     test('an mp4 URL reopens as media, keeping its format hint', () {

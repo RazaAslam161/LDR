@@ -21,9 +21,14 @@ enum WatchKind {
   /// A media file we can hand straight to video_player.
   media,
 
-  /// A real video, on a site that will not play inside another app. Opened in
-  /// the browser on both phones instead of pretending we can embed it.
-  handoff,
+  /// A site that publishes a JS player API, driven inside a WebView. Same
+  /// play/pause/seek sync as YouTube — see watch_embed.dart for who qualifies.
+  embed,
+
+  /// Anything else with a real URL: opened INSIDE Miles, so the two of you stay
+  /// in the room together, but with no position to sync and no claim that there
+  /// is one. Replaced the old handoff, which threw you both into Chrome.
+  cobrowse,
 
   /// Known to be impossible, so say so rather than spinning.
   blocked,
@@ -41,11 +46,20 @@ class WatchSource {
     this.original,
     this.site,
     this.reason,
+    this.embedId,
   });
 
-  /// youtube: the bare 11-character id. media/handoff: a canonical https URL.
+  /// youtube: the bare 11-character id. Everything else: a canonical https URL.
+  ///
+  /// This is what travels on the wire, so it must survive [sourceFromKey] and
+  /// come back the same kind. That is why an embed carries the SHARE url here
+  /// and puts its player id in [embedId] — a bare Vimeo id sent as the key
+  /// reopens on the partner's phone as nothing at all.
   final String key;
   final WatchKind kind;
+
+  /// embed only: the id its player URL is built from.
+  final String? embedId;
 
   /// A timestamp carried by the link (`?t=90`, `#t=1m30s`). Honoured on open.
   final Duration startAt;
@@ -61,12 +75,25 @@ class WatchSource {
 
 const _ytHosts = {'youtube.com', 'youtu.be', 'youtube-nocookie.com'};
 
-/// Sites that carry real video but refuse to be embedded. Opened in a browser.
-const _handoffSites = <String, String>{
+/// Sites whose own player API can be driven from inside a WebView, so play,
+/// pause and seek carry across exactly as they do for YouTube.
+///
+/// Short on purpose. A site qualifies only by publishing a documented way to
+/// control a video inside a cross-origin iframe, and almost none do — the
+/// browser's same-origin policy is the reason, not a lack of effort. Adding a
+/// host here without an adapter in watch_embed.dart is a silent break, so the
+/// two are checked against each other in watch_embed_test.dart.
+const _embedSites = <String, String>{
   'vimeo.com': 'Vimeo',
+  'tiktok.com': 'TikTok',
+};
+
+/// Named hosts that carry real video but publish no way to drive it. They open
+/// inside Miles like any other link; the name is only so the card can say which
+/// site it is instead of showing a bare hostname.
+const _cobrowseSites = <String, String>{
   'dailymotion.com': 'Dailymotion',
   'twitch.tv': 'Twitch',
-  'tiktok.com': 'TikTok',
   'instagram.com': 'Instagram',
   'facebook.com': 'Facebook',
   'fb.watch': 'Facebook',
@@ -148,16 +175,32 @@ WatchSource? resolveWatchLink(String pasted) {
     }
   }
 
-  for (final e in _handoffSites.entries) {
+  for (final e in _embedSites.entries) {
+    if (host == e.key || host.endsWith('.${e.key}')) {
+      final id = _embedKey(e.value, uri);
+      // A share link with no id in it — a profile, a short vm.tiktok.com
+      // redirect — cannot be turned into a player URL without a network call,
+      // and this function is deliberately pure. It still opens in-app.
+      if (id == null) break;
+      return WatchSource(
+        kind: WatchKind.embed,
+        key: _rewrite(uri).toString(),
+        embedId: id,
+        startAt: start,
+        original: uri,
+        site: e.value,
+      );
+    }
+  }
+
+  for (final e in _cobrowseSites.entries) {
     if (host == e.key || host.endsWith('.${e.key}')) {
       return WatchSource(
-        kind: WatchKind.handoff,
+        kind: WatchKind.cobrowse,
         key: _rewrite(uri).toString(),
         startAt: start,
         original: uri,
         site: e.value,
-        reason: "${e.value} won't play inside Miles. Opening it in your "
-            "browser — you'll both need to press play.",
       );
     }
   }
@@ -185,16 +228,14 @@ WatchSource? resolveWatchLink(String pasted) {
     );
   }
 
-  // A real link we cannot classify. He pasted it for a reason, so it opens in
-  // a browser rather than being called invalid.
+  // A real link we cannot classify. He pasted it for a reason, so it opens
+  // in-app rather than being called invalid.
   return WatchSource(
-    kind: WatchKind.handoff,
+    kind: WatchKind.cobrowse,
     key: rewritten.toString(),
     startAt: start,
     original: uri,
     site: host,
-    reason: "Miles can't play this one inline. Opening it in your browser — "
-        "you'll both need to press play.",
   );
 }
 
@@ -226,13 +267,36 @@ WatchSource? _youtube(Uri uri, String host, Duration start) {
   // so this would load nothing at all.
   if (uri.queryParameters['list'] != null) {
     return WatchSource(
-      kind: WatchKind.handoff,
+      kind: WatchKind.cobrowse,
       key: uri.toString(),
       original: uri,
       site: 'YouTube',
-      reason: 'Miles plays single videos, not playlists. Opening this in your '
-          'browser — or paste one video from it to watch in sync.',
+      reason: 'Miles syncs single videos, not playlists. Opening it here — or '
+          'paste one video from it to watch in sync.',
     );
+  }
+  return null;
+}
+
+/// The id an embed player is addressed by, or null if this link does not name
+/// one. Pure string work: a link that needs a redirect resolved cannot be
+/// answered here.
+String? _embedKey(String site, Uri uri) {
+  final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  if (site == 'Vimeo') {
+    // vimeo.com/123456789, player.vimeo.com/video/123456789, and the
+    // /channel/123456789 shapes all put the id last.
+    final last = segs.isEmpty ? '' : segs.last;
+    return RegExp(r'^\d{6,}$').hasMatch(last) ? last : null;
+  }
+  if (site == 'TikTok') {
+    // tiktok.com/@someone/video/1234567890123456789
+    final i = segs.indexOf('video');
+    if (i >= 0 && i + 1 < segs.length) {
+      final id = segs[i + 1];
+      return RegExp(r'^\d{15,}$').hasMatch(id) ? id : null;
+    }
+    return null;
   }
   return null;
 }
@@ -326,5 +390,6 @@ WatchSource? sourceFromKey(String key, {Duration startAt = Duration.zero}) {
     original: s.original,
     site: s.site,
     reason: s.reason,
+    embedId: s.embedId,
   );
 }

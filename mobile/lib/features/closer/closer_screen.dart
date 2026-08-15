@@ -344,6 +344,12 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
         route: '/app/routines',
       ),
       _FeatureTile(
+        emoji: '🎬',
+        title: 'Watch list',
+        blurb: 'Reels you send each other',
+        route: '/app/watch-list',
+      ),
+      _FeatureTile(
         emoji: '🎲',
         title: 'Pick for us',
         blurb: 'A roll for tonight',

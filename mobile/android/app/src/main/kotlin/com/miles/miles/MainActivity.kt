@@ -31,6 +31,15 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var secureFlagSet = false
 
+    // Text shared into the app from another app's share sheet, held until Dart
+    // asks for it.
+    //
+    // PULL, not push: the engine may not be attached when the intent arrives —
+    // a share that cold-starts the app delivers the intent before any Dart is
+    // running — and pushing into a channel that does not exist yet drops the
+    // link silently. Dart asks on start and on resume, and takes it once.
+    private var pendingSharedText: String? = null
+
     // Forwards hardware volume-key presses to Dart for the emergency-lock combo
     // + stealth-scrim dismiss. Android consumes volume keys before Flutter's
     // key pipeline sees them, so we must bridge them ourselves.
@@ -45,8 +54,40 @@ class MainActivity : FlutterFragmentActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        captureSharedText(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureSharedText(intent)
+    }
+
+    /// Instagram, TikTok and the rest all share a plain-text link.
+    private fun captureSharedText(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        if (intent.type != "text/plain") return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        if (text.isNotBlank()) pendingSharedText = text
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/share_intent")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // Taken once. Leaving it set would re-add the same link on
+                    // every resume for the rest of the session.
+                    "takeSharedText" -> {
+                        val text = pendingSharedText
+                        pendingSharedText = null
+                        result.success(text)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         volumeChannel =
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/volume_keys")
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/secure_screen")

@@ -30,7 +30,7 @@ import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
-import 'package:miles/features/call/call_pill.dart';
+import 'package:miles/features/call/call_pip.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -609,7 +609,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // These three animate independently of the routed screen, so each
               // gets its own layer — a pulsing badge must not repaint the page
               // beneath it.
-              const RepaintBoundary(child: CallPill()),
+              // The minimised call, as a real video window rather than a pill.
+              // Above the routed screen so it survives every push — including
+              // Watch Together, which is the whole point.
+              const RepaintBoundary(child: CallPip()),
               // Presence used to float here, top-centre over every screen. It
               // covered titles and buttons, interrupted whatever was being
               // read, and looked like a system alert instead of a person. It

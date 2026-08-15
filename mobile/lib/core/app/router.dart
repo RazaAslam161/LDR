@@ -26,6 +26,7 @@ import 'package:miles/features/closer/mood_lamp/mood_lamp_screen.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_screen.dart';
 import 'package:miles/features/closer/private_vault/private_vault_screen.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
+import 'package:miles/features/reels/reel_queue_screen.dart';
 import 'package:miles/features/routines/routine_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
@@ -308,6 +309,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/routines',
         builder: (context, state) => const RoutineScreen(),
+      ),
+      GoRoute(
+        path: '/app/watch-list',
+        builder: (context, state) => const ReelQueueScreen(),
       ),
       GoRoute(
         path: '/app/closer/memory-threads',

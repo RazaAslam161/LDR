@@ -146,7 +146,11 @@ cd /e/LDR/mobile && flutter build apk --release --split-per-abi
 ```
 
 - Always `cd /e/LDR/mobile` before flutter build (CWD drifts).
-- Build unprompted once green; **never install without an explicit request.**
+- **Never build the APK unless he asks, and don't ask whether to.** This line
+  used to say "build unprompted once green" and it was wrong: builds take ~5
+  minutes, compete with his own Gradle daemon for memory, and he does not want
+  them. Leave the work in the tree and say what changed. Installing likewise
+  needs an explicit request.
 - Repo hygiene tests enforce: 0 analyzer warnings, no translucent surfaces
   behind text (annotate genuine scrims `// scrim over <what>`), unique migration
   ordering keys, disguise intact.

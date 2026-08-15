@@ -575,6 +575,21 @@
       "item_id",
       "on_date",
       "user_id"
+    ],
+    "shared_reels": [
+      "added_by",
+      "couple_id",
+      "created_at",
+      "deleted",
+      "id",
+      "note",
+      "source",
+      "url"
+    ],
+    "shared_reel_views": [
+      "reel_id",
+      "seen_at",
+      "user_id"
     ]
   },
   "functions": [
