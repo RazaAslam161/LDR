@@ -57,9 +57,15 @@ class DisguiseService {
   /// offering something the user did not come for.
   static bool plainDefault = false;
 
-  /// Every alias this build declares, plain identity included.
+  /// Every alias this build declares, plain identity FIRST.
+  ///
+  /// Order is load-bearing on a fresh install. Nothing has been toggled yet, so
+  /// every alias reports COMPONENT_ENABLED_STATE_DEFAULT and the native side
+  /// takes the first match — which must be the identity the manifest actually
+  /// ships enabled, or the app opens wearing a cover nobody chose. Both
+  /// manifests enable the plain alias, so it leads.
   static List<String> get _allAliases => [
-        if (plainDefault) kPlainProfile.aliasId,
+        kPlainProfile.aliasId,
         ...kDisguises.map((d) => d.aliasId),
       ];
 

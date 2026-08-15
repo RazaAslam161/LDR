@@ -239,10 +239,29 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "currentAlias" -> {
                         val all = call.argument<List<String>>("all") ?: emptyList()
+                        // DEFAULT counts as enabled, and that is the whole fix.
+                        // getComponentEnabledSetting reports DEFAULT (0) for a
+                        // component nobody has ever toggled — which is every
+                        // alias on a FRESH INSTALL, including the one the
+                        // manifest ships android:enabled="true". Matching only
+                        // ENABLED (1) therefore found nothing on exactly the
+                        // install this has to be right for, returned null, and
+                        // sent reconcile() down its fallback path to the old
+                        // default: the app opened on the News cover under its
+                        // own name and icon.
+                        //
+                        // DEFAULT is only correct for an alias the manifest
+                        // enables, so it is checked second — an explicitly
+                        // enabled alias still wins, which is what keeps a
+                        // user's chosen cover ahead of the shipped one.
                         val active = all.firstOrNull { id ->
                             packageManager.getComponentEnabledSetting(
                                 ComponentName(packageName, "$packageName.Alias$id")
                             ) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        } ?: all.firstOrNull { id ->
+                            packageManager.getComponentEnabledSetting(
+                                ComponentName(packageName, "$packageName.Alias$id")
+                            ) == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
                         }
                         result.success(active)
                     }

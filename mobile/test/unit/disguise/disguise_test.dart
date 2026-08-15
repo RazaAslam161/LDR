@@ -71,8 +71,17 @@ void main() {
     test('every cover in the enum is offered', () {
       // The other direction: a cover built and then never listed is dead code
       // that looks like a feature.
+      //
+      // `none` is excluded because it is the ABSENCE of a cover, not one of
+      // them — kDisguises answers "which covers exist" and the plain identity
+      // is not an answer to that. It belongs to kPlainProfile, asserted below.
       final offered = kDisguises.map((d) => d.cover).toSet();
-      expect(offered, DisguiseCover.values.toSet());
+      final coversThatExist =
+          DisguiseCover.values.toSet()..remove(DisguiseCover.none);
+      expect(offered, coversThatExist);
+      expect(kPlainProfile.cover, DisguiseCover.none,
+          reason: 'the plain identity must draw no cover — a launcher that '
+              'says Miles opening a news reader is the bug this prevents',);
     });
 
     test('alias ids are unique — they map 1:1 to manifest aliases', () {

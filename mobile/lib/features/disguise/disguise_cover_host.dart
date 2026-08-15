@@ -44,9 +44,19 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost> {
         // happens, this future MUST complete or the user is stranded on a blank
         // screen with no way into the app.
         .timeout(const Duration(seconds: 3))
-        .catchError((_) => kDefaultDisguise)
+        .catchError((_) =>
+            DisguiseService.plainDefault ? kPlainProfile : kDefaultDisguise)
         .then((d) {
-      if (mounted) setState(() => _profile = d);
+      if (!mounted) return;
+      // No cover means the app is its own front door. Opening the gate here
+      // rather than drawing an empty box is what makes "Miles, no disguise"
+      // behave like an ordinary app instead of a cover that happens to be
+      // blank.
+      if (d.cover == DisguiseCover.none) {
+        widget.onAuthenticated();
+        return;
+      }
+      setState(() => _profile = d);
     });
   }
 
@@ -57,9 +67,18 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost> {
     // user still gets a working cover instead of an empty rectangle they cannot
     // escape. Rendering the DEFAULT cover leaks nothing — it is what a fresh
     // install shows anyway.
-    final profile = _profile ?? kDefaultDisguise;
+    // The pre-load fallback follows the CHANNEL, not the old default. On a
+    // build that installs as Miles, showing News for the frame or two before
+    // the identity loads is the same bug this whole change is about, just
+    // briefer.
+    final profile = _profile ??
+        (DisguiseService.plainDefault ? kPlainProfile : kDefaultDisguise);
 
     return switch (profile.cover) {
+      // Nothing to draw. The identity IS the app, so the gate opens itself and
+      // the user lands in Miles — which is what "no cover" has to mean, or the
+      // launcher says one thing and the first screen says another.
+      DisguiseCover.none => const SizedBox.shrink(),
       DisguiseCover.calculator =>
         CalculatorCover(onAuthenticated: widget.onAuthenticated),
       DisguiseCover.notes =>

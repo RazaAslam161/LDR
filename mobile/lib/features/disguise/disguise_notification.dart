@@ -49,6 +49,15 @@ class DisguiseNotificationStyle {
 /// curiosity is a notification that gets opened by the wrong person.
 DisguiseNotificationStyle notificationStyleFor(DisguiseProfile profile) {
   return switch (profile.cover) {
+    // No cover, so nothing to keep up: the notification says Miles because the
+    // launcher already does. Dressing it as a news alert on a phone whose home
+    // screen shows this app by name would be a disguise that only fools its
+    // owner. The icon is the notification silhouette, not @mipmap — see below.
+    DisguiseCover.none => const DisguiseNotificationStyle(
+        title: 'Miles',
+        body: 'You have something waiting',
+        smallIcon: '@drawable/ic_notif_news',
+      ),
     // Not @mipmap/ic_launcher: Android masks a small icon to its alpha
     // channel, and the launcher tile is opaque edge to edge — it arrived as a
     // solid white square in the status bar, which is a thing no shipped app

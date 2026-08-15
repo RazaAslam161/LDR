@@ -12,6 +12,14 @@ import 'package:miles/features/disguise/disguise_service.dart' show DisguiseServ
 /// Adding a profile means adding BOTH an entry here and a matching
 /// `<activity-alias android:name=".Alias<Id>">` — see [DisguiseService].
 enum DisguiseCover {
+  /// No cover at all — the app opens straight into itself.
+  ///
+  /// The plain identity used to carry `news` here, because every profile had to
+  /// name a cover and news was the old default. The launcher then said Miles
+  /// and the first screen said News, which is the one combination that reads as
+  /// a bug rather than a disguise.
+  none,
+
   /// A believable news reader (the app's original, hardcoded disguise).
   news,
 
@@ -194,7 +202,7 @@ const DisguiseProfile kPlainProfile = DisguiseProfile(
   entry: 'Opens straight into Miles.',
   icon: Icons.favorite_outline,
   tint: Color(0xFFE0785A),
-  cover: DisguiseCover.news,
+  cover: DisguiseCover.none,
 );
 
 final DisguiseProfile kDefaultDisguise = kDisguises.first;
