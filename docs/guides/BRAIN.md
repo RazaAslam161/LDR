@@ -1969,6 +1969,85 @@ error between those two points is silently unreportable — including the
 launch failure the reporter exists to catch. Not a race, a fixed window. Off
 this task's scope; separate fix.
 
+## §19 Security audit + remediation (backend only) — 2026-08-16
+
+A full manual security review of the backend and client crypto. No critical or
+high finding: RLS defaults deny, every SECURITY DEFINER RPC spot-checked scopes
+on `auth.uid()`, pairing already locks out at 10 fails/15min, and the edge
+functions were already enumeration- and oracle-aware. Six items came out of it;
+four are fixed and applied to BOTH projects, one is a platform limit that
+cannot be fixed from here, one is deferred because it cannot be done without
+breaking installed clients. Nothing in `mobile/` changed — this diff is two
+migrations and two edge-function files.
+
+**DONE + verified.**
+
+1. *turn-credentials could be minted without limit* (the only Medium). It
+   checked the caller's JWT but never how OFTEN one account asked, and every
+   call mints a 24h Cloudflare TURN credential billed by the gigabyte — the
+   function's own comment admitted the counter was missing. Added
+   `public.turn_mints` (RLS on, zero policies, deny-all like `app_secrets`) and
+   `public.claim_turn_mint()`, ten per rolling hour, identity from `auth.uid()`
+   so there is no user id on the wire to substitute. The edge function calls it
+   on the CALLER's client, not the admin one.
+   Proved on staging with a throwaway user: 14 calls → **10 allowed, 4 denied,
+   10 rows recorded**; signed-out call returns false; deleting the user cascaded
+   all 10 rows away.
+   It fails OPEN on RPC error and logs — deliberate. This guards an invoice;
+   closing it would break every call on a fleet with no update channel the day
+   a migration lags a deploy.
+2. *Trigger functions carried EXECUTE for anon/authenticated.* Never a live hole
+   — Postgres refuses trigger functions over `/rest/v1/rpc/` — but
+   `lock_down_ops_and_trigger_rpc` named them one at a time and eight new ones
+   had drifted in since. Revoked BY SHAPE (anything returning `trigger` or
+   `event_trigger`), so the next one is covered the day it is created.
+   Prod after: 0 anon-executable, 0 authenticated-executable, **32 triggers
+   still attached**.
+3. *Staging's `rls_auto_enable()` was anon-executable* SECURITY DEFINER. Caught
+   by the same shape-based revoke; it does not exist on prod. Staging advisor
+   now reports **zero** `anon_security_definer_function_executable`.
+4. *`map-token` comment overclaimed* "only a signed-in member of a couple" — it
+   checks signed-in only. Comment corrected rather than the code: adding a
+   couple check would break an unpaired user's map. Not redeployed (comment
+   only, no runtime effect).
+
+Prod negative tests, as anon over REST: `rpc/claim_turn_mint` → **42501
+permission denied**, `turn_mints?select=*` → **42501 permission denied**,
+`turn-credentials` → 401 from our own handler (function healthy on v4).
+
+**OPEN — cannot be fixed from this repo.** `net.http_post`/`net.http_get` are
+executable by anon and authenticated and schema `net` grants them USAGE. The
+first draft of the revoke migration "succeeded" and changed **nothing**: the
+grants read `=X/supabase_admin`, a privilege may only be revoked by the role
+that granted it, and `pg_has_role(postgres,'supabase_admin')` is false with
+`rolsuper` false. That line was deleted rather than left lying — a guard that
+silently no-ops is worse than none. What actually holds it shut is PostgREST
+exposing only `public`, which is a setting this repo does not own: **if
+`db_schemas` ever grows, this becomes a live SSRF primitive the same day.**
+Needs Supabase support or a superuser. The `extension_in_public` advisor for
+pg_net is cosmetic and stays — all 12 of its functions and 3 tables are already
+in schema `net`, and every caller says `net.http_post`.
+
+**DEFERRED — needs a version gate, not a patch.** Three crypto notes in
+`crypto_core.dart`, all sound today and none safely changeable on a fleet that
+never updates: the all-zero-nonce/all-zero-MAC legacy marker is honoured on
+read forever (writes already fail closed, so exploiting it needs write access
+inside a couple); AEAD associated-data is optional, so nothing binds a
+ciphertext to its row within a couple; `hmacTag` is keyless FNV-1a by design
+(both partners must agree) and is dictionary-attackable if tag vocabulary is
+sensitive. Each changes the wire format — do them behind `app_release.min_build`
+or not at all.
+
+**Rollback**, both written before applying:
+`drop function if exists public.claim_turn_mint(); drop table if exists
+public.turn_mints;` and the grant-restoring loop in the header of
+`20260816090100_revoke_execute_on_triggers_and_net.sql`. Both migrations are
+re-runnable no-ops.
+
+**Not run:** `flutter analyze` / `flutter test`. This diff contains no Dart, and
+`release_gate.dart` + `pubspec.yaml` were already dirty from §18's session — a
+gate run now would report their state, not this change's.
+
 **Regression test.** `mobile/test/unit/hygiene/startup_order_test.dart`, in the
 existing hygiene idiom. Three assertions: the gate does not share the wait, the
 gate is awaited before `runApp`, and no class called in that wait reads the

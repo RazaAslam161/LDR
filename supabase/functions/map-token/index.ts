@@ -14,9 +14,16 @@
 //   values ('MAPBOX_PUBLIC_TOKEN', 'pk.…')
 //   on conflict (key) do update set value = excluded.value;
 //
-// JWT-gated: verify_jwt stays TRUE for this function. Only a signed-in member
-// of a couple gets a token, which bounds abuse to people who already have an
-// account.
+// JWT-gated: verify_jwt stays TRUE for this function. A signed-in ACCOUNT gets
+// the token — there is no couple-membership check here, and this comment used
+// to claim one. Holding an account is the whole bound, which is the same bound
+// turn-credentials starts from.
+//
+// Unlike turn-credentials this is not rate-limited, and that is a decision
+// rather than an omission: every caller receives the SAME long-lived Mapbox
+// token, so an attacker who wants to spend the tile budget fetches it once and
+// never comes back. Counting the fetches would bound nothing. What bounds this
+// is rotating the row in app_secrets, which is why the token lives there.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const CORS = {

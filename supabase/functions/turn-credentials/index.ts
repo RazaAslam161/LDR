@@ -8,8 +8,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 // unzip — so on its own it proves nothing about the caller, and this endpoint
 // spends someone else's Cloudflare bill by the gigabyte. The caller's own JWT
 // is checked here the way map-token does it, which bounds minting to people who
-// hold an account. It does NOT bound how many one account may mint; that needs a
-// counter this function has nowhere to keep.
+// hold an account. How many one account may mint is bounded by
+// claim_turn_mint(), which keeps the counter this function has nowhere to hold:
+// ten an hour, counted against auth.uid() on the caller's own client so there is
+// no user id on the wire to substitute.
 //
 // Secrets (set once in the DB, NOT in code):
 //   insert into app_secrets(key,value) values
@@ -41,6 +43,21 @@ Deno.serve(async (req: Request) => {
     );
     const { data: { user } } = await caller.auth.getUser();
     if (!user) return json({ error: "unauthenticated" }, 401);
+
+    // Ten mints an hour per account. Deliberately on `caller`, not `admin`: the
+    // RPC reads auth.uid(), so the identity being counted is the one the JWT
+    // proved, and nothing here can be pointed at somebody else's quota.
+    //
+    // A missing or broken RPC lets the mint through and says so in the log. The
+    // failure this guards is a Cloudflare invoice; the failure it would cause by
+    // closing is every call on a fleet with no update channel, on the day a
+    // migration has not reached this project yet. Cost is the cheaper loss.
+    const { data: minted, error: mintErr } = await caller.rpc("claim_turn_mint");
+    if (mintErr) {
+      console.error("claim_turn_mint failed, allowing mint", mintErr.message);
+    } else if (minted === false) {
+      return json({ error: "rate_limited" }, 429);
+    }
 
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,
