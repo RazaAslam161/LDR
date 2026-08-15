@@ -42,6 +42,14 @@ enum WatchIntent {
 
   /// The follower is ready again.
   ready,
+
+  /// Whoever closed it closed it for both.
+  ///
+  /// The deleted row is the durable signal, but a DELETE has to survive RLS on
+  /// a table with no REPLICA IDENTITY FULL to be delivered at all, and the case
+  /// this matters in — both of them on this screen — is exactly the one a
+  /// broadcast is reliable for. Belt and braces.
+  close,
 }
 
 /// One message on the wire.

@@ -40,6 +40,14 @@ abstract class WatchPlayer implements Listenable {
   void pause();
   void seekTo(Duration position);
 
+  /// Media loudness, 0..1.
+  ///
+  /// Exists so a live call can duck the film. Without it there was no way to
+  /// lower one without lowering the other, and call audio and video audio both
+  /// played at full volume — which on a shared film means neither of them can
+  /// hear the other speak.
+  void setVolume(double volume);
+
   Widget view(BuildContext context);
   void dispose();
 }
@@ -133,6 +141,9 @@ class MediaWatchPlayer extends ChangeNotifier implements WatchPlayer {
   void seekTo(Duration position) => _vp?.seekTo(position);
 
   @override
+  void setVolume(double volume) => _vp?.setVolume(volume.clamp(0, 1));
+
+  @override
   Widget view(BuildContext context) {
     final chewie = _chewie;
     if (chewie == null) {
@@ -211,6 +222,11 @@ class YoutubeWatchPlayer extends ChangeNotifier implements WatchPlayer {
 
   @override
   void pause() => controller.pause();
+
+  @override
+  void setVolume(double volume) =>
+      // youtube_player_flutter takes 0..100.
+      controller.setVolume((volume.clamp(0, 1) * 100).round());
 
   @override
   void seekTo(Duration position) => controller.seekTo(position);

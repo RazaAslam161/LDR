@@ -590,6 +590,15 @@
       "reel_id",
       "seen_at",
       "user_id"
+    ],
+    "watch_sessions": [
+      "couple_id",
+      "kind",
+      "site",
+      "source_key",
+      "start_ms",
+      "started_at",
+      "started_by"
     ]
   },
   "functions": [

@@ -12,11 +12,13 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.app.PictureInPictureParams
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Rational
 import android.view.KeyEvent
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -39,6 +41,16 @@ class MainActivity : FlutterFragmentActivity() {
     // running — and pushing into a channel that does not exist yet drops the
     // link silently. Dart asks on start and on resume, and takes it once.
     private var pendingSharedText: String? = null
+
+    // Set while the activity is in Android's own picture-in-picture window.
+    //
+    // Read by the Dart side so the disguise cover does NOT come up. The cover
+    // is raised on every background, and PiP counts as one — without this
+    // exemption, minimising a call out of the app would show the News cover in
+    // the floating window instead of her face, which is both useless and a
+    // louder tell than the call ever was.
+    private var inPip = false
+    private var pipChannel: MethodChannel? = null
 
     // Forwards hardware volume-key presses to Dart for the emergency-lock combo
     // + stealth-scrim dismiss. Android consumes volume keys before Flutter's
@@ -73,8 +85,58 @@ class MainActivity : FlutterFragmentActivity() {
         if (text.isNotBlank()) pendingSharedText = text
     }
 
+    /// Android asks this the moment the user presses home or swipes up. A call
+    /// that is running should follow them out rather than being backgrounded.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (pipWanted) enterPip()
+    }
+
+    private var pipWanted = false
+
+    private fun enterPip(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
+            return false
+        }
+        return try {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    // Portrait-ish, matching the in-app window so the handoff
+                    // between them does not jump.
+                    .setAspectRatio(Rational(3, 4))
+                    .build()
+            )
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
+        pipChannel?.invokeMethod("pip", isInPictureInPictureMode)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        pipChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/pip")
+        pipChannel!!.setMethodCallHandler { call, result ->
+            when (call.method) {
+                // Dart arms this while a call is live, so pressing home takes
+                // the call with you instead of dropping it behind the cover.
+                "setWanted" -> {
+                    pipWanted = call.argument<Boolean>("wanted") ?: false
+                    result.success(null)
+                }
+                "enterNow" -> result.success(enterPip())
+                "isInPip" -> result.success(inPip)
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/share_intent")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

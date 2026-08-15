@@ -954,3 +954,150 @@ columns from the publication via a column list). A column list on the realtime
 publication is the exact trap recorded in §10a that made rows silently vanish
 and broke build 14 on both handsets. Drop the legacy columns outright once heal
 has migrated everything instead.
+
+### §12 Watch Together — the X embed rewrite, reverted 2026-08-15
+
+**Build 26 shipped a regression I introduced and could not test.** `_rewrite()`
+in `watch_source.dart` turned x.com/status links into
+`platform.twitter.com/embed/Tweet.html?id=<id>`. That URL is internal — it is
+what widgets.js fetches *with* `origin` and `widgetsVersion` params, and on its
+own it 404s. Result: X went from "plays, but the controls eject you" to "Not
+found". His words: *"previously X is working atleast on my screen but this time
+it's worst, nothing is showing."*
+
+Reverted: the rewrite block and `_tweetId()` are gone from `watch_source.dart`,
+and the 5 `_xEmbedTests()` with them. **Do not reintroduce an embed URL for X
+without loading it in a real WebView first.** A URL you cannot open is a guess.
+
+**Kept from that pass:** `_refused()` in `watch_viewer.dart` is now throttled to
+once a minute, and its "Open in browser" uses `source.original`. These pages fire
+an app handoff on *every* touch of the player — unmute, scrubber, fullscreen — so
+the unthrottled version showed a snackbar per tap. That is what made the controls
+feel dead and made "open in browser" look like the only thing that worked.
+
+**The unfixed part, stated honestly:** x.com in a WebView still has no sound and
+its controls still fire `intent://`. The viewer refuses those by design (that
+refusal is what keeps the evening in the app), so the controls will keep doing
+nothing. This is not fixable by rewriting URLs.
+
+### §12a Screen share — the actual answer to "watch the exact same video"
+
+Two WebViews on two phones are two independent browsers with two cookie jars.
+Logging in on one does nothing for the other, so *"one of us logs in and we both
+watch it"* is impossible through any in-app browser — that is a property of the
+web, not a missing feature. Each partner logs in with their **own** account.
+
+The mechanism that does deliver it is **screen share on the existing call**:
+one phone captures its screen, the other sees the same pixels. No second login,
+no sync protocol (there is one stream), and it works for any site or app.
+`flutter_webrtc` already ships `getDisplayMedia` — verified in
+`lib/src/native/mediadevices_impl.dart:53`.
+
+Known ceilings to state up front rather than discover: DRM apps (Netflix, Prime,
+Disney+) render black to a capture; internal audio needs Android 10+
+`AudioPlaybackCapture` or she sees the video and hears only your voice; and
+capture is whole-screen, so the vault, the disguise cover and notifications are
+all in frame.
+
+### §12b Screen share — built 2026-08-15
+
+One partner captures their whole display into the existing call; the other sees
+the same pixels. `getDisplayMedia` → `replaceTrack` onto the **already-negotiated
+camera sender**, because this class has no renegotiation path at all — a second
+track would never reach the far side. Partner is told via a fifth broadcast kind,
+`screen`, so their renderer letterboxes instead of cropping.
+
+`android/AndroidManifest.xml` (FOREGROUND_SERVICE_MEDIA_PROJECTION + service type
+`microphone|camera|mediaProjection`), `call_foreground.dart` (`callServiceTypes`,
+`addScreenShare` — the service is **stop+started**, not updated, because
+`updateService` cannot change `serviceTypes`), `call_controller.dart`,
+`call_screen.dart`, `call_pip.dart`.
+
+**No Kotlin was needed.** flutter_webrtc ships its own `ScreenRequestPermissionsFragment`
+and registers the Android-14 `MediaProjection.Callback` itself.
+
+**Layout bug caught before shipping, and worth remembering.** The share button made
+the control row **six** 60dp circles = exactly 360dp, the full width of the common
+phone. Measured, not guessed: fits at 360dp with *zero* gap, **overflows at 320
+and 340dp** — which is also what a 411dp phone becomes when its owner raises
+Android's display-size setting. Row → `Wrap`. Guarded by
+`test/unit/call/call_controls_layout_test.dart`, which also asserts the plain Row
+*would* overflow, so the Wrap cannot be "simplified" away later. This is the third
+time a Row has silently clipped a control (gallery consent band, Watch Together
+Play). **Widths are measurable — measure them.**
+
+**Skeptic findings, fixed:** `startScreenShare` had no generation check after its
+4th await (a teardown landing inside `replaceTrack` re-set `sharingScreen=true`
+and sent `screen:on` with a null call_id, which the far side does *not* drop —
+letterboxing their NEXT call), and no try/catch around `replaceTrack` while
+`_screenStream` was already assigned (a throw left MediaProjection recording with
+`sharingScreen=false`, and the next tap orphaned that capture for the life of the
+process). `dispose()` now drops the capture too.
+
+**AUDIO — settled from source, do not re-litigate.** `GetUserMediaImpl.getDisplayMedia`
+creates `audioTracks` empty at :583 and returns it untouched at :614;
+`AudioPlaybackCaptureConfiguration` has **zero** occurrences package-wide. The
+shared screen's own sound **cannot** be transmitted. The voice call is unaffected —
+only the *video* sender's track is swapped.
+
+The "play it on speaker and let the mic pick it up" fallback is a dead end, also
+proven: hardware AEC is ON for SDK>=29 (`MethodCallHandlerImpl.java:259-263`) and
+will cancel exactly that. The only lever, `WebRTC.initialize({'bypassVoiceProcessing': true})`,
+is **process-global and one-shot** (`utils.dart:29-39` auto-initializes on first
+call), so it cannot be scoped to a share — it would remove echo cancellation from
+every call for the life of the process, and howl. For watching a video *with*
+sound, Watch Together's synced local playback is the right tool: each phone plays
+its own audio.
+
+Related trap found while verifying: audio constraints are only read under
+`mandatory`/`optional` (`MediaConstraintsUtils.parseMediaConstraints`). A flat
+`{'audio': {'echoCancellation': false}}` parses to EMPTY and silently discards the
+platform defaults too. `'audio': true` must stay a bare bool.
+
+**Still device-only:** that `startForeground(microphone|mediaProjection)` succeeds
+at the escalation moment. Nothing in source settles it.
+
+### §12c Watch Together — fullscreen and close, fixed 2026-08-15 (build 27)
+
+**Fullscreen was three bugs stacked.** A YouTube link renders through
+`YoutubeWatchPlayer` → a bare `YoutubePlayer` with **no `YoutubePlayerBuilder`**
+anywhere in the app. That package's `toggleFullScreenMode()` does exactly one
+thing — `SystemChrome.setPreferredOrientations([landscapeLeft, landscapeRight])`.
+It does not resize, reparent or hide anything; `YoutubePlayerBuilder` is the part
+that swaps the tree, sets immersive mode and wires the back button, and it was
+absent. So:
+
+1. The AppBar, the paste field and the footer kept painting over the "fullscreen"
+   video.
+2. `_PlayerHost` was the ONLY branch of that if-chain not wrapped in `Expanded`.
+   A Column hands an unflexed child unbounded height, so the package's 16/9 box
+   demanded ~450dp against the ~150dp landscape leaves — the player was clipped
+   from the bottom, and the clipped region is exactly where the package draws its
+   control bar. **The exit-fullscreen button was rendered off-screen. That is why
+   it was stuck.**
+3. Nothing ever restored portrait. The app has no orientation policy at all
+   (zero `SystemChrome` calls in `lib/` before this), so one tap left the whole
+   app sideways for the rest of the session — popping the route did not undo it.
+
+Fixed without adopting `YoutubePlayerBuilder` (which would have meant hoisting it
+above the Scaffold and threading its player back down, and would only have helped
+YouTube): **landscape IS fullscreen** — same rule the package's own builder uses —
+so the AppBar/drawer/paste row/footer drop out, the player is `Expanded`, a
+`PopScope` makes back the way out, and `dispose()` releases the orientation lock
+with `setPreferredOrientations([])` rather than pinning portrait. Works for every
+player kind, not just YouTube.
+
+**Close-for-both was also two bugs.** `_restore()` began
+`if (!mounted || session == null) return;` — a deleted row and "nothing to
+restore" are indistinguishable to that line, so the host closing did nothing on
+the partner's phone. And `watch_sessions` has RLS on with **no
+`REPLICA IDENTITY FULL`**, so the DELETE event is not guaranteed to be delivered
+at all. Now: a `close` broadcast (reliable while both are on the screen) sent
+BEFORE the player is torn down, so build 26 — which resolves an unknown intent to
+`beat` — reads an accurate beat and ignores it instead of seeking to 0; plus the
+row delete, which `_restore` now acts on, for the partner who arrives later.
+
+**Mistake to not repeat:** I ran `dart format` on `watch_together_screen.dart`.
+This repo is NOT dart-formatted (verified against HEAD), so that added ~90 lines
+of pure whitespace churn to an otherwise small diff. Do not run `dart format`
+here.

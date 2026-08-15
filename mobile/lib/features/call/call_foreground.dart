@@ -33,10 +33,29 @@ class _CallTaskHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
 }
 
+/// The service types the one shared foreground service must declare at runtime.
+///
+/// `mediaProjection` is only ever asked for while a screen share is live.
+/// Android 14+ requires a service already carrying that type before a
+/// projection's virtual display is created, and it refuses a type the manifest
+/// does not also declare — so this list and the manifest's
+/// `android:foregroundServiceType` have to agree.
+List<ForegroundServiceTypes> callServiceTypes({required bool screenSharing}) =>
+    screenSharing
+        ? const [
+            ForegroundServiceTypes.microphone,
+            ForegroundServiceTypes.mediaProjection,
+          ]
+        : const [ForegroundServiceTypes.microphone];
+
 class CallForegroundService {
   CallForegroundService._();
 
   static bool _inited = false;
+
+  /// Latched for the rest of the call once a share has started. Sharing twice
+  /// in one call then costs no second restart, and `stop()` clears it.
+  static bool _screenSharing = false;
 
   static void _ensureInit() {
     if (_inited) return;
@@ -69,7 +88,7 @@ class CallForegroundService {
       final style = await currentNotificationStyle();
       await FlutterForegroundTask.startService(
         serviceId: 512,
-        serviceTypes: const [ForegroundServiceTypes.microphone],
+        serviceTypes: callServiceTypes(screenSharing: _screenSharing),
         notificationTitle: style.title,
         notificationText: style.body,
         // Without this the small icon falls back to the *application* icon
@@ -85,7 +104,27 @@ class CallForegroundService {
     }
   }
 
+  /// Bring `mediaProjection` into the live service's type set.
+  ///
+  /// Restarts the one shared service rather than updating it, because
+  /// `updateService` cannot change `serviceTypes` — only `startService` takes
+  /// them. The keepalive is unheld for that restart, which happens while the
+  /// app is foreground (the user has just cleared the system consent dialog),
+  /// where it is doing nothing anyway.
+  static Future<void> addScreenShare() async {
+    if (_screenSharing) return;
+    _screenSharing = true;
+    try {
+      _ensureInit();
+      if (await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.stopService();
+      }
+    } catch (_) {}
+    await start();
+  }
+
   static Future<void> stop() async {
+    _screenSharing = false;
     try {
       if (await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();

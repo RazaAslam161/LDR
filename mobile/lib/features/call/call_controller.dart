@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
@@ -33,6 +34,15 @@ class CallController extends ChangeNotifier {
   RealtimeChannel? _chan;
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
+
+  /// The sender carrying my camera. A screen share swaps its track rather than
+  /// adding a second one, so the far side needs no renegotiation.
+  RTCRtpSender? _videoSender;
+
+  /// The display capture, separate from [_localStream] and ours to dispose. The
+  /// camera track stays alive inside _localStream throughout, so stopping a
+  /// share is a swap back rather than a fresh getUserMedia.
+  MediaStream? _screenStream;
   String? _coupleId;
   String? _myUid;
 
@@ -51,6 +61,8 @@ class CallController extends ChangeNotifier {
   });
   bool frontCamera = true; // drives the local preview mirror
   bool minimized = false; // call screen dismissed but call still running
+  bool sharingScreen = false; // my display is going out in place of my camera
+  bool remoteScreen = false; // theirs is — render it letterboxed, not cropped
   String? peerName; // who's calling / being called
 
   final List<RTCIceCandidate> _pendingRemote = [];
@@ -1008,6 +1020,91 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Send my whole display in place of my camera.
+  ///
+  /// This exists because two in-app browsers cannot share one login: each
+  /// handset has its own cookie jar, so "we both watch the same video" is
+  /// unreachable through the WebView. Capturing the display sidesteps it —
+  /// whoever is signed in shares the pixels, and there is nothing to keep in
+  /// sync because there is only one stream.
+  Future<void> startScreenShare() async {
+    if (state != CallState.connected || _videoSender == null || sharingScreen) {
+      return;
+    }
+    final attempt = _attempt;
+    // Returns false when the consent dialog is cancelled; it does not throw.
+    // It also drops the cached projection token on every call, which is what
+    // Android 15+ demands — a spent token must never be replayed.
+    if (!await Helper.requestCapturePermission(fullScreenOnly: true)) return;
+    if (attempt != _attempt) return;
+    // Before the capture, not after: Android 14+ wants the mediaProjection
+    // service already running when the virtual display is created.
+    await CallForegroundService.addScreenShare();
+    if (attempt != _attempt) return;
+
+    final MediaStream screen;
+    try {
+      // Every constraint is discarded on Android — the capture is the real
+      // display size at a fixed 30fps — so asking for more would be decoration.
+      screen = await navigator.mediaDevices.getDisplayMedia({'video': true});
+    } catch (_) {
+      // A late failure arrives as a bare String from the plugin, not an
+      // Exception. A share that will not start must not take the call with it.
+      Diag.record(DiagArea.call, 'screen_share_failed', corr: _callId);
+      return;
+    }
+    final track = screen.getVideoTracks().firstOrNull;
+    if (track == null || attempt != _attempt) {
+      await _dropCapture(screen);
+      return;
+    }
+    _screenStream = screen;
+    track.onEnded = () => unawaited(stopScreenShare());
+    try {
+      await _videoSender!.replaceTrack(track);
+    } catch (_) {
+      // The capture is already running at this point. Left alone it would keep
+      // recording the display into a track nothing sends, with the system cast
+      // indicator up and no button state to stop it — and the next tap would
+      // orphan it for the life of the process.
+      Diag.record(DiagArea.call, 'screen_share_failed', corr: _callId);
+      if (identical(_screenStream, screen)) _screenStream = null;
+      await _dropCapture(screen);
+      return;
+    }
+    // A teardown landing inside replaceTrack has already disposed the capture
+    // and reset these; setting them now would announce a share on a call that
+    // has ended, and _send would carry a null call_id the far side does not
+    // drop — letterboxing their *next* call around an ordinary camera feed.
+    if (attempt != _attempt) return;
+    sharingScreen = true;
+    _send('screen', {'on': true});
+    notifyListeners();
+  }
+
+  Future<void> _dropCapture(MediaStream stream) async {
+    try {
+      await stream.dispose();
+    } catch (_) {}
+  }
+
+  /// Put the camera back on the wire and drop the capture.
+  ///
+  /// Also the recovery path when the share was killed from Android's own cast
+  /// notification: the plugin swallows that event, so the partner is left on a
+  /// frozen last frame until this runs.
+  Future<void> stopScreenShare() async {
+    if (!sharingScreen) return;
+    sharingScreen = false;
+    final camera = _localStream?.getVideoTracks().firstOrNull;
+    if (camera != null) await _videoSender?.replaceTrack(camera);
+    _send('screen', {'on': false});
+    final screen = _screenStream;
+    _screenStream = null;
+    if (screen != null) await _dropCapture(screen);
+    notifyListeners();
+  }
+
   Future<void> switchCamera() async {
     final track = _localStream?.getVideoTracks().firstOrNull;
     if (track == null) return;
@@ -1057,6 +1154,11 @@ class CallController extends ChangeNotifier {
   void setMinimized(bool v) {
     if (minimized == v) return;
     minimized = v;
+    // Arm Android's PiP while the call is minimised, so pressing home carries
+    // the call out of Miles instead of dropping it behind the disguise cover.
+    // Disarmed when the call is expanded again — a full-screen call that
+    // shrinks itself on every home press would be a surprise, not a feature.
+    unawaited(PipMode.setWanted(v && state == CallState.connected));
     notifyListeners();
   }
 
@@ -1064,9 +1166,11 @@ class CallController extends ChangeNotifier {
   Future<void> _openMedia({bool video = true}) async {
     final attempt = _attempt;
     final capture = navigator.mediaDevices.getUserMedia({
-      // Left as-is deliberately. The Android implementation already enables
-      // echo cancellation, noise suppression and auto gain; spelling them out
-      // as constraints risks a device rejecting the whole request.
+      // Left as a bare `true` deliberately, and it has to stay one: the plugin
+      // only reads audio constraints nested under `mandatory`/`optional`, so a
+      // flat map here would be parsed as empty and take the default echo
+      // cancellation and noise suppression away with it. (It sets those two, not
+      // auto gain — the settings map that claims otherwise is hardcoded.)
       'audio': true,
       // 1280x720x30 — the SAME values GetUserMediaImpl already falls back to
       // (DEFAULT_WIDTH/HEIGHT/FPS, :91-93), so this changes no behaviour; it
@@ -1168,7 +1272,11 @@ class CallController extends ChangeNotifier {
     _statsMonitor.noRelay = !relayAvailable;
     _statsMonitor.start(pc);
     for (final track in _localStream!.getTracks()) {
-      await pc.addTrack(track, _localStream!);
+      final sender = await pc.addTrack(track, _localStream!);
+      // Held so a screen share can replaceTrack onto the already-negotiated
+      // video m-line. There is no renegotiation path in this class, so a
+      // second track would never reach the far side.
+      if (track.kind == 'video') _videoSender = sender;
     }
     pc.onIceGatheringState = (g) => Diag.record(
         DiagArea.call, 'ice_gathering',
@@ -1348,6 +1456,9 @@ class CallController extends ChangeNotifier {
           return;
         }
         _addIce(map);
+      case 'screen':
+        remoteScreen = map['on'] == true;
+        notifyListeners();
       case 'hangup':
         _teardown(CallState.ended);
     }
@@ -1703,6 +1814,13 @@ class CallController extends ChangeNotifier {
       speakerOn = true;
       frontCamera = true;
       minimized = false;
+      sharingScreen = false;
+      remoteScreen = false;
+      _videoSender = null;
+      try {
+        await _screenStream?.dispose();
+      } catch (_) {}
+      _screenStream = null;
       localRenderer.srcObject = null;
       remoteRenderer.srcObject = null;
       _setState(end);
@@ -1748,6 +1866,10 @@ class CallController extends ChangeNotifier {
     remoteRenderer.dispose();
     _pc?.close();
     _localStream?.dispose();
+    // Disposed here as well as in _teardown: a container torn down while a
+    // share is live would otherwise leave MediaProjection recording the
+    // display with nothing left in the app able to stop it.
+    _screenStream?.dispose();
     super.dispose();
   }
 }

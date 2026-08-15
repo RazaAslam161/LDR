@@ -43,8 +43,10 @@ class _CallPipState extends ConsumerState<CallPip> {
     final size = MediaQuery.sizeOf(context);
     final insets = MediaQuery.paddingOf(context);
     final pos = _pos ??
-        Offset(size.width - _w - _margin,
-            size.height - _h - _margin - insets.bottom - 72,);
+        Offset(
+          size.width - _w - _margin,
+          size.height - _h - _margin - insets.bottom - 72,
+        );
 
     return Positioned(
       left: pos.dx,
@@ -56,80 +58,88 @@ class _CallPipState extends ConsumerState<CallPip> {
           // no other way back to the call once the window is gone.
           _pos = Offset(
             next.dx.clamp(_margin, size.width - _w - _margin),
-            next.dy.clamp(insets.top + _margin,
-                size.height - _h - _margin - insets.bottom,),
+            next.dy.clamp(
+              insets.top + _margin,
+              size.height - _h - _margin - insets.bottom,
+            ),
           );
         }),
         onTap: () {
           call.setMinimized(false);
           ref.read(routerProvider).push('/call');
         },
-        child: Material(
-          elevation: 8,
-          borderRadius: BorderRadius.circular(14),
-          clipBehavior: Clip.antiAlias,
-          color: MilesColors.surface1,
-          child: SizedBox(
-            width: _w,
-            height: _h,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (call.isVideo && call.remoteRenderer.srcObject != null)
-                  RTCVideoView(
-                    call.remoteRenderer,
-                    objectFit:
-                        RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  )
-                else
-                  Center(
-                    child: Icon(
-                      call.isVideo ? Icons.videocam : Icons.call,
-                      color: const Color(0xCCFBF8F4),
-                      size: 28,
+        // The boundary belongs HERE, inside the Positioned — a dragged window
+        // repainting must not repaint the page under it, but it also must not
+        // sit between Positioned and Stack.
+        child: RepaintBoundary(
+          child: Material(
+            elevation: 8,
+            borderRadius: BorderRadius.circular(14),
+            clipBehavior: Clip.antiAlias,
+            color: MilesColors.surface1,
+            child: SizedBox(
+              width: _w,
+              height: _h,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (call.isVideo && call.remoteRenderer.srcObject != null)
+                    RTCVideoView(
+                      call.remoteRenderer,
+                      objectFit: call.remoteScreen
+                          ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+                          : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    )
+                  else
+                    Center(
+                      child: Icon(
+                        call.isVideo ? Icons.videocam : Icons.call,
+                        color: const Color(0xCCFBF8F4),
+                        size: 28,
+                      ),
                     ),
-                  ),
-                // Controls that matter while watching something else: mute,
-                // and — the important one — turning the camera off.
-                //
-                // Killing the outgoing video track is the single largest thing
-                // either of them can do for playback quality. A call and a
-                // 1080p stream contend for one uplink, and WebRTC's congestion
-                // control responds by degrading ITSELF, so on a tight link the
-                // call quietly gets worse while the video buffers anyway.
-                // Camera off frees roughly a megabit and costs nothing they are
-                // looking at — they are watching the film, not each other.
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      // scrim over the video, so the controls stay readable
-                      // against whatever the camera happens to be pointing at
-                      color: Color(0x99000000),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _MiniButton(
-                          icon: call.micOn ? Icons.mic : Icons.mic_off,
-                          on: call.micOn,
-                          onTap: call.toggleMic,
-                        ),
-                        if (call.isVideo)
+                  // Controls that matter while watching something else: mute,
+                  // and — the important one — turning the camera off.
+                  //
+                  // Killing the outgoing video track is the single largest thing
+                  // either of them can do for playback quality. A call and a
+                  // 1080p stream contend for one uplink, and WebRTC's congestion
+                  // control responds by degrading ITSELF, so on a tight link the
+                  // call quietly gets worse while the video buffers anyway.
+                  // Camera off frees roughly a megabit and costs nothing they are
+                  // looking at — they are watching the film, not each other.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(
+                        // scrim over the video, so the controls stay readable
+                        // against whatever the camera happens to be pointing at
+                        color: Color(0x99000000),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
                           _MiniButton(
-                            icon: call.camOn
-                                ? Icons.videocam
-                                : Icons.videocam_off,
-                            on: call.camOn,
-                            onTap: call.toggleCam,
+                            icon: call.micOn ? Icons.mic : Icons.mic_off,
+                            on: call.micOn,
+                            onTap: call.toggleMic,
                           ),
-                      ],
+                          if (call.isVideo)
+                            _MiniButton(
+                              icon: call.camOn
+                                  ? Icons.videocam
+                                  : Icons.videocam_off,
+                              on: call.camOn,
+                              onTap: call.toggleCam,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

@@ -31,6 +31,7 @@ import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_pip.dart';
+import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -93,6 +94,7 @@ Future<void> main() async {
   unawaited(FcmService.init());
   // Lets the call's background foreground-service talk to the UI isolate.
   FlutterForegroundTask.initCommunicationPort();
+  PipMode.wire();
   debugPrint('STARTUP OK → booting app');
 
   runApp(const ProviderScope(child: MilesApp()));
@@ -236,7 +238,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // what stranded the user on News (and lost the in-flight media) when
         // they returned from the picker. The guard is cleared in a finally the
         // instant the picker closes, so full stealth resumes immediately after.
-        if (!MilesApp.systemOverlayActive) {
+        // PiP is the other exemption. Android reports `paused` for a picture-
+        // in-picture window, so the cover would come up INSIDE the floating
+        // call — showing News where her face should be, which is both useless
+        // and a louder tell than the call was.
+        if (!MilesApp.systemOverlayActive && !PipMode.active.value) {
           MilesApp.showRealApp.value = false;
         }
       case AppLifecycleState.detached:
@@ -612,7 +618,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // The minimised call, as a real video window rather than a pill.
               // Above the routed screen so it survives every push — including
               // Watch Together, which is the whole point.
-              const RepaintBoundary(child: CallPip()),
+              // NOT wrapped. CallPip returns a Positioned, and Positioned
+              // must be a DIRECT child of Stack — a RepaintBoundary between
+              // them throws "Incorrect use of ParentDataWidget" and takes the
+              // whole overlay layer down, which greys out the entire app and
+              // swallows every touch. The boundary lives inside CallPip.
+              const CallPip(),
               // Presence used to float here, top-centre over every screen. It
               // covered titles and buttons, interrupted whatever was being
               // read, and looked like a system alert instead of a person. It

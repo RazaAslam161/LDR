@@ -316,6 +316,7 @@ Uri _rewrite(Uri uri) {
   return uri;
 }
 
+
 MediaFormat? _formatOf(Uri uri) {
   final path = uri.path.toLowerCase();
   final dot = path.lastIndexOf('.');

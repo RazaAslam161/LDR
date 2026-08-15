@@ -14,11 +14,11 @@ import 'package:miles/features/watch/watch_embed_player.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/watch/watch_player.dart';
 import 'package:miles/features/watch/watch_protocol.dart';
+import 'package:miles/features/watch/watch_session.dart';
 import 'package:miles/features/watch/watch_source.dart';
 import 'package:miles/features/watch/watch_viewer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 
 /// Watch & listen together — paste any video link. YouTube plays inline;
 /// anything else opens in the browser on both phones. Play, pause and seek stay
@@ -45,6 +45,7 @@ const Duration kEchoWindow = Duration(milliseconds: 1500);
 class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   WatchPlayer? _player;
   ManagedSubscription? _channel;
+  ManagedSubscription? _sessionSub;
   final _urlInput = TextEditingController();
   String? _coupleId;
   String? _myUid;
@@ -124,7 +125,28 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
           call.state == CallState.calling) {
         call.setMinimized(true);
       }
+      _applyDuck();
     });
+  }
+
+  /// Media volume while a call is live.
+  ///
+  /// 0.35 rather than a mute: the film has to stay watchable, and a duck deep
+  /// enough to be inaudible would mean pausing it instead. Both of them are
+  /// here to talk over it — a call and a soundtrack at equal volume means
+  /// neither person can be heard, which is the state this replaces.
+  static const _duckedVolume = 0.35;
+
+  /// Applies the right media volume for the CURRENT call state.
+  ///
+  /// Idempotent and cheap, so it can be called from anywhere without tracking
+  /// whether it already ran. That matters more than it looks: loading a new
+  /// video builds a FRESH controller at full volume, so a duck applied once
+  /// when the call connected would silently lapse the moment they picked the
+  /// next thing to watch — which is exactly when they are talking.
+  void _applyDuck() {
+    final live = ref.read(callControllerProvider).state == CallState.connected;
+    _player?.setVolume(live ? _duckedVolume : 1.0);
   }
 
   /// Subscribe once the couple is known, and re-subscribe if it changes.
@@ -140,12 +162,33 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     if (couple == null || couple == _coupleId) return;
     _coupleId = couple;
     _channel?.dispose();
-    _channel = ManagedSubscription.start(() => SupabaseService.client
-        .channel('watch:$couple', opts: RealtimeChannelConfig(private: true))
-        .onBroadcast(event: 'watch', callback: _onMsg)
-        .subscribe(),);
+    _channel = ManagedSubscription.start(
+      () => SupabaseService.client
+          .channel('watch:$couple', opts: RealtimeChannelConfig(private: true))
+          .onBroadcast(event: 'watch', callback: _onMsg)
+          .subscribe(),
+    );
+    // The session row, so an open or a close reaches the other one even if
+    // they were on another screen when it happened.
+    _sessionSub?.dispose();
+    _sessionSub = ManagedSubscription.start(
+      () => SupabaseService.client
+          .channel('watch-session:$couple')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'watch_sessions',
+            callback: (_) => unawaited(_restore(couple)),
+          )
+          .subscribe(),
+    );
+
     // Ask what is already playing rather than announcing position zero.
     _send(WatchIntent.hello);
+    // And read the SERVER's answer, which survives both of them navigating
+    // away. hello only reaches a partner who happens to be on this screen
+    // right now; the row is there whether anyone is looking or not.
+    unawaited(_restore(couple));
   }
 
   @override
@@ -153,9 +196,57 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _heartbeat?.cancel();
     _watchdog?.cancel();
     _channel?.dispose();
+    _sessionSub?.dispose();
     _player?.dispose();
     _urlInput.dispose();
+    // The YouTube control's fullscreen button locks the device to landscape and
+    // nothing here used to undo it, so one tap left the WHOLE app sideways for
+    // the rest of the session. Released rather than pinned to portrait: free
+    // rotation is what the app had before this screen touched it.
+    SystemChrome.setPreferredOrientations(const <DeviceOrientation>[]);
     super.dispose();
+  }
+
+  /// Re-opens whatever the couple already had open.
+  Future<void> _restore(String coupleId) async {
+    final session = await WatchSessionRepository.current(coupleId);
+    if (!mounted) return;
+    // No row means whoever was hosting closed it, and closing it is meant to
+    // close it for both. Returning early here instead — because a delete looks
+    // exactly like "nothing to restore" — is what left the partner still
+    // playing a link the host had already shut.
+    if (session == null) {
+      if (_viewing != null) setState(_clearViewing);
+      return;
+    }
+    // Not broadcast: this is us catching up to a decision already made, and
+    // re-announcing it would bounce it back at the partner as a fresh load.
+    _openSource(session.source, broadcast: false, persist: false);
+  }
+
+  /// Drop whatever is on screen. Call inside a setState.
+  void _clearViewing() {
+    _viewing = null;
+    _handoff = null;
+    _videoId = null;
+    _player?.dispose();
+    _player = null;
+  }
+
+  /// Ends it for both. The only way a session closes — leaving the screen used
+  /// to do it, which is the bug.
+  Future<void> _closeSession() async {
+    final couple = _coupleId;
+    // Announced BEFORE the player goes, so the position and playing flag on it
+    // are still true. A build that predates this intent reads an unknown one as
+    // `beat`, and an accurate beat is a no-op — an empty one would drag them
+    // back to the start.
+    _send(WatchIntent.close);
+    setState(_clearViewing);
+    // No 'close' on the wire: the ROW is the signal. Deleting it reaches the
+    // partner through the session subscription below whether or not they are
+    // looking at this screen, which a broadcast cannot promise.
+    if (couple != null) await WatchSessionRepository.close(couple);
   }
 
   /// Open [source] in whichever backend can play it.
@@ -163,15 +254,30 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
   /// A YouTube player is reused across videos — the iframe can load a new id in
   /// place — but a media player is rebuilt, because VideoPlayerController binds
   /// to one URL for its lifetime.
-  void _openSource(WatchSource source, {bool broadcast = true}) {
+  void _openSource(WatchSource source,
+      {bool broadcast = true, bool persist = true}) {
     _videoId = source.key;
     _lastSource = source;
     _fault = null;
     _pendingId = null;
 
+    // Recorded server-side so the link outlives this route. Fire and forget:
+    // playback must not wait on a write, and losing the row costs persistence
+    // rather than the video.
+    final couple = _coupleId;
+    final me = _myUid;
+    if (persist && couple != null && me != null) {
+      unawaited(
+        WatchSessionRepository.open(
+          coupleId: couple,
+          startedBy: me,
+          source: source,
+        ),
+      );
+    }
+
     final current = _player;
-    if (source.kind == WatchKind.youtube &&
-        current is YoutubeWatchPlayer) {
+    if (source.kind == WatchKind.youtube && current is YoutubeWatchPlayer) {
       if (current.isReady) {
         current.load(source.key, source.startAt);
       } else {
@@ -197,6 +303,8 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
           ),
       };
       _player!.addListener(_onPlayerChange);
+      // A fresh controller starts at full volume; re-duck it.
+      _applyDuck();
       setState(() {});
     }
 
@@ -440,6 +548,13 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       return;
     }
 
+    // Before the leader election: closing is not a bid to drive, and it has to
+    // land whether or not a player is still up to receive it.
+    if (msg.intent == WatchIntent.close) {
+      if (_viewing != null) setState(_clearViewing);
+      return;
+    }
+
     // Whoever acted most recently drives. Both sides run the same comparison
     // on the same numbers, so they cannot disagree about who that is.
     if (msg.intent != WatchIntent.beat) {
@@ -501,6 +616,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       case WatchIntent.ready:
         if (msg.playing) _applyLocal(c.play, playing: true);
       case WatchIntent.hello:
+      case WatchIntent.close:
         break;
     }
   }
@@ -523,17 +639,21 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
         // same time and costs no rebuffer.
         if (drift > 0) {
           _applyLocal(c.pause, playing: false);
-          _holdUntil =
-              DateTime.now().add(Duration(milliseconds: drift.clamp(0, kSeekMs)));
+          _holdUntil = DateTime.now()
+              .add(Duration(milliseconds: drift.clamp(0, kSeekMs)));
         } else {
           final target = msg.projectedPosMs();
-          _applyLocal(() => c.seekTo(Duration(milliseconds: target)),
-              expectPosMs: target,);
+          _applyLocal(
+            () => c.seekTo(Duration(milliseconds: target)),
+            expectPosMs: target,
+          );
         }
       case WatchCorrection.seek:
         final target = msg.projectedPosMs();
-        _applyLocal(() => c.seekTo(Duration(milliseconds: target)),
-            expectPosMs: target,);
+        _applyLocal(
+          () => c.seekTo(Duration(milliseconds: target)),
+          expectPosMs: target,
+        );
     }
   }
 
@@ -542,126 +662,205 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     // Re-bind rather than reading the session once in initState: on a cold
     // start the couple resolves after this screen is already up.
     ref.listen<SessionState>(sessionProvider, (_, next) => _bind(next));
+    // The call can start or end while they are already watching — answering a
+    // call mid-film has to duck it, and hanging up has to give the film its
+    // sound back without anyone touching a slider.
+    ref.listen<CallController>(
+      callControllerProvider,
+      (_, __) => _applyDuck(),
+    );
     final partnerName =
         ref.watch(sessionProvider).partner?.displayName ?? 'them';
     final player = _player;
-    return Scaffold(
-      backgroundColor: MilesColors.night,
-      drawer: const AppDrawer(),
-      appBar: AppBar(
-        actions: const [PartnerHereAction()],
-        title: const Text('Watch Together'),
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
+    // Landscape IS fullscreen. The package's fullscreen button does nothing but
+    // rotate the device — it never swaps the tree — so the app bar, the paste
+    // field and the footer went on painting over a "fullscreen" video and
+    // squeezed it into what was left. Same rule YoutubePlayerBuilder uses.
+    final fullscreen =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    return PopScope(
+      canPop: !fullscreen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // Back is the way out of fullscreen, because the only other one — the
+        // player's own control bar — is the thing that was being clipped.
+        SystemChrome.setPreferredOrientations(
+          const [DeviceOrientation.portraitUp],
+        );
+      },
+      child: Scaffold(
+        backgroundColor: MilesColors.night,
+        drawer: fullscreen ? null : const AppDrawer(),
+        appBar: fullscreen
+            ? null
+            : AppBar(
+                actions: [
+                  // The ONLY way a session ends. Leaving the screen used to do it,
+                  // which meant one of them glancing at a message closed the video for
+                  // both — so ending it is now a deliberate act with a button.
+                  if (_videoId != null || _viewing != null || _handoff != null)
+                    IconButton(
+                      tooltip: 'Close for both of us',
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      onPressed: _closeSession,
+                    ),
+                  const PartnerHereAction(),
+                ],
+                title: const Text('Watch Together'),
+                leading: Builder(
+                  builder: (ctx) => IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => Scaffold.of(ctx).openDrawer(),
+                  ),
+                ),
+              ),
+        body: _FullscreenSafe(
+          on: fullscreen,
+          child: Column(
+            children: [
+              if (!fullscreen)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _urlInput,
+                          style: const TextStyle(color: MilesColors.cream50),
+                          decoration: const InputDecoration(
+                            hintText: 'Paste any video link…',
+                            prefixIcon: Icon(Icons.link,
+                                color: MilesColors.taupe, size: 20),
+                          ),
+                          onSubmitted: (_) => _onUrlSubmit(),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Paste link',
+                        icon: const Icon(
+                          Icons.content_paste,
+                          color: MilesColors.emberSoft,
+                        ),
+                        onPressed: _paste,
+                      ),
+                      // Bounded on purpose: the FilledButton theme's
+                      // `minimumSize: Size.fromHeight(56)` puts double.infinity in
+                      // the WIDTH, which in a Row is an unbounded demand that
+                      // overflows the row and clips the button.
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 96),
+                        child: FilledButton(
+                          onPressed: _onUrlSubmit,
+                          child: const Text('Play'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_viewing != null)
+                Expanded(child: WatchViewer(source: _viewing!))
+              else if (_handoff != null)
+                _LinkCard(
+                  source: _handoff,
+                  onOpen: () => _openInBrowser(_handoff!),
+                  onHere: _handoff!.kind == WatchKind.cobrowse
+                      ? () => setState(() {
+                            _viewing = _handoff;
+                            _handoff = null;
+                          })
+                      : null,
+                  onDismiss: () => setState(() => _handoff = null),
+                )
+              else if (_fault != null)
+                _LinkCard.fault(
+                  message: _fault!,
+                  onDismiss: () => setState(() {
+                    _fault = null;
+                    _player?.dispose();
+                    _player = null;
+                    _videoId = null;
+                  }),
+                )
+              else if (player != null)
+                // Expanded like every other branch of this chain. Unflexed, a
+                // Column hands it unbounded height, so the package's 16/9 box
+                // demanded more than landscape leaves and the bottom was cut —
+                // taking the control bar, and the only way out of fullscreen, with
+                // it.
+                Expanded(
+                  child: Center(
+                    child: _PlayerHost(player: player, onReady: _onReady),
+                  ),
+                )
+              else
+                Expanded(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        'Paste a YouTube link and press Play —\n'
+                        'you and $partnerName watch it in sync.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: MilesColors.taupe, fontSize: 13,),
+                      ),
+                    ),
+                  ),
+                ),
+              if (player != null && !fullscreen)
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      // Says who is driving, because with one leader that is a real
+                      // thing the user can now be told. The old footer asserted
+                      // that seeking stayed in sync while the code transmitted no
+                      // seek at all.
+                      Text(
+                        _peerStalled
+                            ? '$partnerName is buffering…'
+                            : _leader == null
+                                ? 'Press play — whoever plays first leads.'
+                                : _isLeader
+                                    ? "You're driving. $partnerName follows."
+                                    : '$partnerName is driving.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: MilesColors.taupe,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Play, pause and seek carry across. 🍿',
+                        textAlign: TextAlign.center,
+                        style:
+                            TextStyle(color: MilesColors.faint, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _urlInput,
-                    style: const TextStyle(color: MilesColors.cream50),
-                    decoration: const InputDecoration(
-                      hintText: 'Paste any video link…',
-                      prefixIcon:
-                          Icon(Icons.link, color: MilesColors.taupe, size: 20),
-                    ),
-                    onSubmitted: (_) => _onUrlSubmit(),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Paste link',
-                  icon: const Icon(Icons.content_paste,
-                      color: MilesColors.emberSoft,),
-                  onPressed: _paste,
-                ),
-                FilledButton(
-                    onPressed: _onUrlSubmit, child: const Text('Play'),),
-              ],
-            ),
-          ),
-          if (_viewing != null)
-            Expanded(child: WatchViewer(source: _viewing!))
-          else if (_handoff != null)
-            _LinkCard(
-              source: _handoff,
-              onOpen: () => _openInBrowser(_handoff!),
-              onHere: _handoff!.kind == WatchKind.cobrowse
-                  ? () => setState(() {
-                        _viewing = _handoff;
-                        _handoff = null;
-                      })
-                  : null,
-              onDismiss: () => setState(() => _handoff = null),
-            )
-          else if (_fault != null)
-            _LinkCard.fault(
-              message: _fault!,
-              onDismiss: () => setState(() {
-                _fault = null;
-                _player?.dispose();
-                _player = null;
-                _videoId = null;
-              }),
-            )
-          else if (player != null)
-            _PlayerHost(player: player, onReady: _onReady)
-          else
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Text(
-                    'Paste a YouTube link and press Play —\n'
-                    'you and $partnerName watch it in sync.',
-                    textAlign: TextAlign.center,
-                    style:
-                        const TextStyle(color: MilesColors.taupe, fontSize: 13),
-                  ),
-                ),
-              ),
-            ),
-          if (player != null)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // Says who is driving, because with one leader that is a real
-                  // thing the user can now be told. The old footer asserted
-                  // that seeking stayed in sync while the code transmitted no
-                  // seek at all.
-                  Text(
-                    _peerStalled
-                        ? '$partnerName is buffering…'
-                        : _leader == null
-                            ? 'Press play — whoever plays first leads.'
-                            : _isLeader
-                                ? "You're driving. $partnerName follows."
-                                : '$partnerName is driving.',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: MilesColors.taupe, fontSize: 12,),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Play, pause and seek carry across. 🍿',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: MilesColors.faint, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
     );
   }
+}
+
+/// SafeArea, but only while fullscreen.
+///
+/// In portrait the app bar already keeps the content clear of the status bar,
+/// and padding the bottom there would shift a layout that is fine. Landscape
+/// has no app bar and puts the cutout down the side of the video.
+class _FullscreenSafe extends StatelessWidget {
+  const _FullscreenSafe({required this.on, required this.child});
+
+  final bool on;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => on ? SafeArea(child: child) : child;
 }
 
 /// What the user sees instead of a spinner that never resolves.

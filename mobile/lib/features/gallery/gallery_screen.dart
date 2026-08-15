@@ -301,16 +301,32 @@ class _ConsentBand extends StatelessWidget {
             style: TextStyle(fontSize: 12, color: Color(0x99F5EFE6)),
           ),
           const SizedBox(height: 10),
+          // Both halves are Expanded, and that is load-bearing rather than
+          // cosmetic.
+          //
+          // The app's FilledButton theme sets
+          // `minimumSize: Size.fromHeight(56)`, and Size.fromHeight puts
+          // double.infinity in the WIDTH. In a Row that is an unbounded demand:
+          // the row overflows and "Delete them" is clipped straight off the
+          // right edge, while "Keep them" — a TextButton, with no such minimum
+          // — renders fine. The partner saw one button and reasonably concluded
+          // there was no way to agree.
+          //
+          // Any FilledButton this theme places in a Row has the same problem.
           Row(
             children: [
-              TextButton(
-                onPressed: busy ? null : onKeep,
-                child: const Text('Keep them'),
+              Expanded(
+                child: TextButton(
+                  onPressed: busy ? null : onKeep,
+                  child: const Text('Keep them'),
+                ),
               ),
               const SizedBox(width: 8),
-              FilledButton(
-                onPressed: busy ? null : onDelete,
-                child: const Text('Delete them'),
+              Expanded(
+                child: FilledButton(
+                  onPressed: busy ? null : onDelete,
+                  child: const Text('Delete them'),
+                ),
               ),
             ],
           ),

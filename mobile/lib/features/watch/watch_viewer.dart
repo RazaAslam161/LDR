@@ -78,8 +78,21 @@ class _WatchViewerState extends State<WatchViewer> {
 
   /// Told, not swallowed. Tapping fullscreen and having nothing happen reads as
   /// broken; one line explains it and points at the way out that still works.
+  /// When the last refusal was announced.
+  ///
+  /// These pages fire an app handoff on EVERY touch of the player — unmute,
+  /// the scrubber, fullscreen — so an unthrottled message meant a snackbar per
+  /// tap, which is what makes the controls feel dead and makes "open in
+  /// browser" look like the only thing that works. Say it once a minute.
+  DateTime? _saidAt;
+
   void _refused() {
     if (!mounted) return;
+    final now = DateTime.now();
+    if (_saidAt != null && now.difference(_saidAt!) < const Duration(minutes: 1)) {
+      return;
+    }
+    _saidAt = now;
     final site = widget.source.site ?? 'This site';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -87,7 +100,7 @@ class _WatchViewerState extends State<WatchViewer> {
         action: SnackBarAction(
           label: 'Open in browser',
           onPressed: () => launchUrl(
-            Uri.parse(widget.source.key),
+            widget.source.original ?? Uri.parse(widget.source.key),
             mode: LaunchMode.externalApplication,
           ),
         ),
@@ -129,8 +142,14 @@ class _WatchViewerState extends State<WatchViewer> {
                         // A dead end with no way out was the whole complaint
                         // about the old handoff card.
                         TextButton(
+                          // The link the user PASTED, not the rewritten one.
+                          // A cobrowse key can be an embed URL, and handing
+                          // someone platform.twitter.com/embed/Tweet.html in a
+                          // browser shows a bare widget with no way back to the
+                          // conversation it came from.
                           onPressed: () => launchUrl(
-                            Uri.parse(widget.source.key),
+                            widget.source.original ??
+                                Uri.parse(widget.source.key),
                             mode: LaunchMode.externalApplication,
                           ),
                           child: const Text('Open in browser'),

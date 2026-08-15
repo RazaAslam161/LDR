@@ -62,9 +62,13 @@ class CallScreen extends ConsumerWidget {
             // Remote video (full screen) — video calls only, once connected.
             if (connected && video)
               Positioned.fill(
+                // A shared display is portrait-tall and full of small text;
+                // cropping it to fill would shave the edges off the thing they
+                // are both looking at.
                 child: RTCVideoView(call.remoteRenderer,
-                    objectFit:
-                        RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
+                    objectFit: call.remoteScreen
+                        ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+                        : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
               )
             else
               const Positioned.fill(
@@ -246,8 +250,15 @@ class CallScreen extends ConsumerWidget {
                               onTap: call.accept,),
                         ],
                       )
-                    : Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    // Wrap, not Row: a video call now carries six controls at
+                    // 60dp each, which is exactly 360dp — the full width of the
+                    // commonest phone, and past it on anything narrower or on a
+                    // handset whose owner raised Android's display size. A Row
+                    // paints overflow stripes there; this drops the last button
+                    // to a second line and is identical wherever it fits.
+                    : Wrap(
+                        alignment: WrapAlignment.spaceEvenly,
+                        runSpacing: 16,
                         children: [
                           _RoundBtn(
                               icon: call.micOn ? Icons.mic : Icons.mic_off,
@@ -278,6 +289,22 @@ class CallScreen extends ConsumerWidget {
                                 bg: MilesColors.surface2,
                                 label: 'Flip',
                                 onTap: call.switchCamera,),
+                            // Connected-only: the swap needs a negotiated
+                            // video sender to swap onto.
+                            if (connected)
+                              _RoundBtn(
+                                  icon: call.sharingScreen
+                                      ? Icons.stop_screen_share
+                                      : Icons.screen_share,
+                                  bg: call.sharingScreen
+                                      ? MilesColors.ember
+                                      : MilesColors.surface2,
+                                  label: call.sharingScreen
+                                      ? 'Stop'
+                                      : 'Screen',
+                                  onTap: () => call.sharingScreen
+                                      ? call.stopScreenShare()
+                                      : call.startScreenShare(),),
                           ],
                           _RoundBtn(
                               icon: Icons.call_end,

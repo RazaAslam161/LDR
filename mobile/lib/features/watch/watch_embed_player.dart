@@ -71,6 +71,12 @@ class EmbedWatchPlayer extends ChangeNotifier implements WatchPlayer {
   void pause() => _run(adapter.pause);
 
   @override
+  void setVolume(double volume) {
+    // An embed is a third party's page in a WebView; there is no volume handle
+    // to reach. Ducking silently does nothing here rather than pretending.
+  }
+
+  @override
   void seekTo(Duration position) {
     // Held immediately rather than waiting for the page to report back: the
     // protocol may ask for position again before the seek has echoed, and
