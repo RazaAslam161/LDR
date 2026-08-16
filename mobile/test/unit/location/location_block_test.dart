@@ -31,6 +31,8 @@ class _FakeGeolocator extends GeolocatorPlatform {
 /// asked all looked identical from the inside. Each is repaired somewhere
 /// different, so the point of these tests is that they stay distinguishable.
 void main() {
+  _grantedModeTests();
+
   test('permission held and location on is the only unblocked state', () async {
     GeolocatorPlatform.instance = _FakeGeolocator(LocationPermission.whileInUse);
     expect(await LocationService.check(), LocationBlock.none);
@@ -98,5 +100,40 @@ void main() {
         LocationPermission.deniedForever,
         serviceEnabled: false,);
     expect(await LocationService.check(), LocationBlock.deniedForever);
+  });
+}
+
+/// First-run default. Granting location and then seeing only a city name reads
+/// as the feature being broken — city mode stores no coordinates, so there is
+/// nothing for the partner's map to draw. But Android 12+ lets the user
+/// downgrade the grant to approximate in the same dialog, and claiming
+/// 'precise' there would render a kilometres-wide fix as an exact pin.
+void _grantedModeTests() {
+  // Mirrors LocationService.grantedMode: the only input is what the platform
+  // says it granted.
+  String modeFor(String? platformAccuracy) => switch (platformAccuracy) {
+        'reduced' => 'city',
+        'precise' => 'precise',
+        _ => 'precise', // platforms with no such concept
+      };
+
+  group('first-run sharing mode follows the actual grant', () {
+    test('a precise grant shares precise, with no trip to Settings', () {
+      expect(modeFor('precise'), 'precise');
+    });
+
+    test('an approximate grant is stored as city, not as a fake precise', () {
+      expect(modeFor('reduced'), 'city');
+    });
+
+    test('a platform without the toggle is treated as precise', () {
+      expect(modeFor(null), 'precise');
+    });
+
+    test("the default is never 'off' — that was the old two-switch bug", () {
+      for (final a in ['precise', 'reduced', null]) {
+        expect(modeFor(a), isNot('off'));
+      }
+    });
   });
 }

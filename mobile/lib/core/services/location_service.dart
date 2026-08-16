@@ -153,9 +153,17 @@ class LocationService {
   /// themselves. Two separate switches for one intention, and only one of them
   /// was in front of the user.
   ///
-  /// 'city' rather than 'precise' on purpose — the coarse option is the polite
-  /// default for something enabled on the user's behalf, and Settings still
-  /// offers precise, or off.
+  /// 'precise' is the default, because granting location and then seeing only
+  /// a city name reads as the feature being broken: city mode stores no
+  /// coordinates at all, so the partner's map has nothing to draw and the whole
+  /// surface is a place name. Someone who agreed to share their location meant
+  /// their location. Settings still offers city, or off, and either revokes it
+  /// immediately.
+  ///
+  /// Android 12+ lets the USER downgrade the grant to approximate in the same
+  /// dialog, and no app can override that. When that happens we store 'city'
+  /// instead of claiming a precision we do not have — a 2km circle drawn as an
+  /// exact pin is a lie about where somebody is.
   ///
   /// Runs at most once per ACCOUNT on this handset: after that the stored mode
   /// is that user's own choice and must not be overridden, including their
@@ -180,8 +188,27 @@ class LocationService {
 
     final mine = await PresenceService.fetchMine(coupleId);
     if ((mine?.locationSharingMode ?? 'off') != 'off') return; // already chosen
-    await PresenceService.setSharingMode(coupleId, 'city');
-    await shareOnce(coupleId, 'city');
+
+    final mode = await grantedMode();
+    await PresenceService.setSharingMode(coupleId, mode);
+    await shareOnce(coupleId, mode);
+  }
+
+  /// The best mode this device's grant actually supports.
+  ///
+  /// On Android 12+ the permission sheet carries a Precise/Approximate toggle,
+  /// so a user can hold ACCESS_FINE_LOCATION in the manifest and still have
+  /// given only an approximate fix. Asking the platform is the only way to
+  /// know; assuming precise produces a coordinate accurate to kilometres,
+  /// rendered as a pin on a street.
+  static Future<String> grantedMode() async {
+    try {
+      final accuracy = await Geolocator.getLocationAccuracy();
+      return accuracy == LocationAccuracyStatus.reduced ? 'city' : 'precise';
+    } catch (_) {
+      // Older platforms have no such concept: a granted permission is precise.
+      return 'precise';
+    }
   }
 
   /// The first-run ask, once per account on this handset.

@@ -93,8 +93,10 @@ void main() {
       final fn =
           location.substring(location.indexOf('adoptPermissionAsDefault'));
       final body = fn.substring(0, fn.indexOf('\n  }'));
-      expect(body, contains("'city'"),
-          reason: 'coarse is the polite default for something enabled for you',);
+      expect(body, contains('grantedMode()'),
+          reason: 'the mode must follow what the OS actually granted — '
+              'Android 12+ lets the user downgrade to approximate, and '
+              'claiming precise there draws a 2km fix as an exact pin',);
       expect(body, contains('location_mode_defaulted'),
           reason: "once only — after that the stored mode is the user's choice",);
       expect(body, contains("!= 'off'"),
