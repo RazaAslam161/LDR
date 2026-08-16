@@ -205,15 +205,24 @@
 
     <!-- Supabase Auth deep-link for email confirmation + OAuth redirects -->
     <queries>
+        <!-- BROWSABLE is not optional, and leaving it out is why every one of
+             these silently did nothing on Android 11+. Package visibility
+             matches this declaration against a target's intent-filters, and a
+             browser's https filter carries BROWSABLE — so a query without it
+             matches no browser at all, launchUrl finds no handler, returns
+             false, and the user taps a link that does nothing. It cost the
+             privacy-policy link in Settings and the Watch Together hand-off,
+             both of which read as dead buttons rather than as a manifest
+             problem. See url_launcher's README, which specifies exactly this
+             three-element shape. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
         </intent>
-        <!-- Watch Together hands links it cannot embed to a browser. Without
-             http declared here, Android 11+ package visibility hides every
-             http:// handler and the hand-off silently does nothing. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="http" />
         </intent>
     </queries>
