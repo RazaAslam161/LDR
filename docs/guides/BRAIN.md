@@ -2192,3 +2192,302 @@ whole time. Read the artifact and the device before theorising about either.
 Published: build 38, sha256
 fb44473560b267ea3e61282cc9d6c27fc296826b0ae2cc533dc1faf821ec9f78,
 `min_build` still 2.
+
+
+## §20 Auth + first-run redesign (splash, sign-in, sign-up, reset, pairing) — 2026-08-16
+
+Visual and UX pass over the five screens every new account sees, using the
+UI/UX Pro Max skill (installed this session as a Claude Code **plugin**, not a
+loose skill — its SKILL.md calls its search tool through `${CLAUDE_PLUGIN_ROOT}`,
+which is only set for plugin-loaded skills, so a copy into `~/.claude/skills/`
+would have looked installed and failed on every query). Reproduce the queries
+with:
+
+    python "$(echo ~)/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.13.0/.claude/skills/ui-ux-pro-max/scripts/search.py" "<q>" --domain ux
+
+**No logic was touched.** signIn/signUp/sendPasswordReset/redeemPairingInvite
+and every security comment around them are byte-identical — the enumeration-safe
+signup notice, the swallowed reset errors, and the `/rewrap` note explaining why
+sign-in does not navigate on `mounted` are all still there.
+
+**The design decision, recorded because it will come up again.** The skill's
+`--design-system` recommendation for a romantic couples app is Aurora UI:
+`#BE185D` rose, `#FDF2F8` near-white background, Great Vibes script. Applying it
+would have replaced **Emberlight** — the warm plum-black, ember/gilt/blush,
+Fraunces + Inter system in `core/ui/theme.dart` — with a light-mode pink theme,
+on a dark-first app used at night. The skill was used for its **rules**
+(accessibility, forms, touch, motion) and its palette advice was rejected. Do
+the same next time: this app has a design system, and the generic
+recommendation does not know that.
+
+**The defect was a class, not five bugs.** The system was fine; the screens had
+drifted off it. Each one hand-rolled its own padding, its own back button, its
+own hex colours (`0xFFFBF8F4`, `0x99F5EFE6`, `0x80F5EFE6`) and its own font
+sizes, so a token change moved nothing and the four screens disagreed with each
+other. Fixed by giving them one shell instead of patching each:
+
+* **New** `features/auth/widgets/auth_scaffold.dart` — `AuthScaffold` (page
+  shell) and `AuthSwitchLink` (the "New here? Create an account" line). It owns
+  the two things that were wrong on a phone and right on a laptop, on EVERY
+  screen: the keyboard (`SingleChildScrollView` in `SafeArea` adds no IME
+  inset, so on a short display the focused field sat under the keyboard with
+  nothing to scroll to — `viewInsets.bottom` is added here once for all of
+  them) and the back affordance (a bare `TextButton` leading slot is ~20dp of
+  target; Android asks 48dp).
+* Sign-in and sign-up had **no `EmberBackground`** while splash and pairing did,
+  so the candle glow dropped out in the middle of the first flow anyone sees.
+  The scaffold draws it for all of them.
+* `widgets/labeled_field.dart` — its `hint` parameter was **accepted and never
+  rendered**; callers passed guidance that vanished. Now rendered, plus a
+  per-field `error`, plus `Semantics(label/hint/textField)`.
+* `widgets/alert_banner.dart` — now a **live region** (it appears in response to
+  an action, which is the one case a screen reader cannot discover), takes its
+  colours from `colorScheme.error` / `MilesColors.sage` instead of the
+  off-palette `0xFFEF6F58` and mint `0xFF34D399`, and scales with the user's
+  text size instead of a hard-coded 13px.
+* `sign_up_page.dart` carried **private duplicates** `_LabeledField` and
+  `_AlertBanner` shadowing the shared widgets — two copies free to drift.
+  Deleted; it uses the shared ones.
+
+**Rules applied, from the skill's own guideline set:** Error Placement (High) —
+each invalid field gets its own message instead of one banner under the submit
+button, so "Use at least 8 characters" now sits on the password field and
+"those two do not match" marks *which* box; Touch Target (High) — every text
+link is a `TextButton` with `minimumSize: Size(0, 48)`, including pairing's
+"Sign out", which is the only exit from a screen the router will not let an
+unpaired account leave; Autofill (Medium) — `autofillHints` on every field, so a
+password manager can fill these at all.
+
+Also: password reveal toggles (typing blind is how people lock themselves out of
+an account they know the password to); the splash honours
+`MediaQuery.disableAnimationsOf` and carries a "Skip intro" label; the invite
+code is wrapped in `Semantics` that spells it out character by character,
+because it is the one string a user has to relay to another human correctly and
+`letterSpacing: 8` display type reads as one unpronounceable word.
+
+**Gate — run after the last edit.**
+
+    flutter analyze lib/features/auth lib/features/intro
+    3 issues found  — all three info-level and all in rewrap_screen.dart,
+                      which this change does not touch (they pre-date it)
+    flutter test
+    All tests passed!  (730, including the repo hygiene suite:
+                        no-glassmorphism, opaque surfaces, launcher disguise)
+
+**What this means for a stranger on a device nobody here owns.** The fix lives
+in a shared scaffold and two shared widgets, so the next auth screen anyone adds
+inherits the keyboard inset, the 48dp targets and the semantics without knowing
+they exist. Nothing added is device-conditional. It improves specifically where
+the two test handsets cannot show anything: short screens (keyboard inset),
+scaled system fonts (no hard-coded px left in these screens), TalkBack (live
+regions, header roles, spelled-out code), reduced-motion users, and anyone using
+a password manager.
+
+**Still open.**
+* `role_setup_screen.dart` and `rewrap_screen.dart` still hand-roll their own
+  layout and have not been moved onto `AuthScaffold`. Same class of drift.
+* Not run on a device. `flutter analyze` and `flutter test` are static and
+  behavioural, not pixels — nobody has seen these five screens render.
+* `couple_page.dart` keeps its own `SurfacePanel`/`GlowButton` composition
+  rather than `AuthScaffold`; deliberate for now (its two-state reveal does not
+  fit the shell), but it is the remaining screen that can drift.
+* found, not fixed — `rewrap_screen.dart:282,285` catch `ArgumentError` and
+  `StateError` (subclasses of `Error`), flagged by the analyzer before this
+  change and left alone. Separate task.
+
+## §21 Auth audit — sign-in / sign-up / reset, adversarially verified — 2026-08-16
+
+Read-only audit. **Nothing was changed.** Ran while §20's UI rewrite landed in
+`d2ef5a7`, so every UX line number below was re-checked against the post-rewrite
+tree. 8 dimensions fanned out, each finding refuted by an independent verifier;
+77 survived, 9 refuted.
+
+**§20 fixed the surface. The defects below are underneath it and survive the
+rewrite untouched** — `supabase_repository.dart`, `key_escrow.dart`,
+`crypto_core.dart`, `partner_rewrap.dart` were not in that diff.
+
+**Measured on production (not inferred):**
+`users_total 6 | confirmed 6 | profiles 6 | key_escrow rows 2 | couples 9`
+→ **4 of 6 live accounts have no escrow row.** They lose the couple's entire
+encrypted history on reinstall, today, with no warning. This is the headline
+number; everything below explains how they got there.
+
+**CRITICAL — silent permanent data loss**
+1. `partner_rewrap.dart:252 answer()` guards only on `chain.isEmpty`, never on
+   `isKeyless()`. Two reinstalls in the same week → both phones keyless → the
+   ceremony ships a stand-in key, prints "Your history is back."
+   (`rewrap_screen.dart:275`), fires `clearKeyless()` so it is never offered
+   again, and the next sign-in overwrites the last real escrow row.
+2. `supabase_repository.dart:80` — `stranded = !hasSeed() || isKeyless()` is
+   TRUE for every brand-new account. The X25519 seed is minted lazily inside
+   `_keyPair()` (`crypto_core.dart:274`); `hasSeed()` is a bare storage read
+   (`:289`) that does not mint. So a first sign-in marks a three-minute-old
+   account keyless → `router.dart:136` pins it to `/rewrap` after pairing.
+   `deferRecovery()` stores `'deferred'`, which `isKeyless()` still reads as
+   true (`:160`), so it re-arms on the next sign-in.
+3. `supabase_repository.dart:38` — `currentUser` is read after `auth.signUp()`,
+   but gotrue 2.22.0 `gotrue_client.dart:302` only calls `_saveSession` when the
+   response carries one. `config.toml:56` has `enable_confirmations = true`, so
+   it never does → `uid` is whoever was signed in *before*, and
+   `KeyEscrow.backup()` re-seals THAT account's seed under a stranger's password.
+
+**HIGH**
+4. `supabase_repository.dart:47` — escrow at sign-up cannot write: `backup()`
+   exports the seed first (`key_escrow.dart:207`) and returns false when it is
+   null. Explains escrow_rows=2. The comment above it claims a protection that
+   has never once executed.
+5. `key_escrow.dart:216` — `backup()` refuses when keyless and a row merely
+   *exists*; `isMissing()` (`:176`) asks whether a row exists, never whether it
+   opens. An unopenable row locks the account out of ever writing a good one.
+6. `supabase_repository.dart:147` — the boolean `backup()` exists to return is
+   discarded; `new_password_page` prints "Password updated" unconditionally.
+7. Production advisor `auth_leaked_password_protection` = **WARN (disabled)**,
+   server minimum 6. That password is the Argon2id input for the wrap key, so
+   credential-stuffing yields plaintext, not just the account.
+8. `main.dart:508` — the deep-link "proof" list is OR'd `.any()` over five
+   attacker-suppliable params; `type=recovery` is a public constant. MainActivity
+   is `exported="true"` + BROWSABLE (`AndroidManifest.xml:93`). Drops the
+   disguise on a third party's say-so when no app lock is enrolled.
+9. **The analyzer gate is blind to compile errors.**
+   `test/unit/hygiene/repo_hygiene_test.dart:233` counts `RegExp('^error - ')`.
+   Proved empirically in a throwaway package with `cat -A`: dart right-aligns
+   severity to width 7 — `warning - ` is flush left (that regex works),
+   `  error - ` has 2 spaces, `   info - ` has 3. **`^error - ` can never
+   match**, so `expect(errors, 0)` cannot fail. The `^ *info - ` probe at `:239`
+   still passes, so the test looks healthy.
+
+**Gates as of this audit (I ran them):**
+* `flutter analyze` → `477 issues found`, **exit 1**, all 477 `info`, zero
+  errors, zero warnings. The tree compiles.
+* `flutter test` → `+730: All tests passed!`, exit 0.
+* Zero tests touch `KeyEscrow`, `hasSeed`, `markKeyless`, `updatePassword`,
+  `buildRouter`, or any auth screen. The reinstall-recovery path — the one that
+  decides whether a couple keeps its history — is pinned by nothing.
+
+**Survives §20's rewrite (re-checked post-`d2ef5a7`):** no `AutofillGroup`
+(hints alone do not reliably fire Android's save prompt); no `PopScope`; no
+`onChanged` to clear a stale error banner; no `finally` on either form; sign-up
+still has no confirm-password field while `new_password_page` has one; sign-in
+still shares one `_loading` between "Sign in" and "Forgot password?";
+`auth_errors.dart:31` still says 6 characters while both UIs say 8.
+
+**Fixed by §20, do not re-report:** hard-coded hexes in the auth screens,
+`textInputAction`/`focusNode`/`onSubmitted`, password reveal toggle, missing
+`mounted` guards, the three-design-language split (`AuthScaffold` now shared).
+
+**Unverified — needs a human at the dashboard**
+* Whether `tethered://auth-callback` is in Authentication → URL Configuration.
+  If absent, every confirmation and reset mail opens `localhost refused`.
+* Real SMTP quota. No `[auth.email.smtp]` block in `config.toml`, so the shared
+  built-in sender is in use; the actual cap is dashboard-side.
+* Server minimum password length (inferred 6 from GoTrue's default).
+
+**found, not fixed** — `couples` = 9 rows against 6 users; orphaned couple rows,
+outside this audit's scope.
+
+### §18 Every browser was invisible to the app — 2026-08-16
+
+**The Privacy Policy link and Watch Together's "open in browser" hand-off have
+both been dead on Android 11+.** Not the URL: the policy returns 200 from R2 and
+the string is in the shipped snapshot (`pub-c97f0d4f…` and `privacy-policy.html`
+each found once in build 38's `libapp.so`).
+
+`AndroidManifest.xml`'s `<queries>` declared `VIEW` + scheme but omitted
+`<category android:name="android.intent.category.BROWSABLE" />`. Package
+visibility matches that block against each app's intent-filters, and a browser's
+https filter carries BROWSABLE — so the query matched NO browser, `launchUrl`
+found no handler and returned false. A dead button, not an error.
+
+Both schemes now carry the category. Note the earlier near-miss: the `http`
+entry was added specifically to fix this class of failure for Watch Together,
+and its comment says so — the scheme was added, the category was missed, so the
+bug survived its own fix.
+
+**Affects every Android 11+ user, i.e. effectively all of them.** Nothing
+device-specific.
+
+Verified: manifest parses; `flutter test test/unit/disguise test/unit/hygiene`
+→ 88 pass. **NOT verified on hardware** — a manifest change only takes effect in
+a new build, so this needs build 39.
+
+**Next step:** build 39, publish, and confirm the Settings link opens a browser.
+
+**Left uncommitted deliberately:** BRAIN.md also carries the sign-in/sign-up
+session's in-flight edits (88 lines, no new section). Only the manifest was
+committed here.
+
+
+## §21 Motion layer for the auth flow — 2026-08-16
+
+Follows §20. "Framer Motion" was asked for by name; it is a React library and
+cannot run in Flutter, so this is the Flutter equivalent — and the better tool
+here anyway, because `Opacity` and `Transform` are composited by the engine
+without a layout or paint pass.
+
+**Three constraints picked the design, and they are the reason it is restrained
+rather than showy:**
+
+* The repo's own hygiene suite fails the build on `BackdropFilter` or
+  `ImageFilter.blur` (`test/unit/hygiene/repo_hygiene_test.dart:508`). No
+  frosted glass, no blur-glow, ever.
+* Sideloaded onto low-end Android. Only opacity and transform are animated —
+  an animated shadow, gradient or blur is what drops frames on that hardware.
+* The UI/UX Pro Max guideline set rates **Excessive Motion as High severity**:
+  animate one or two elements per view, not everything. The temptation with
+  "make it addictive" is to animate all of it; the guidance says that is the
+  defect, not the goal.
+
+**New** `lib/core/ui/motion.dart`:
+
+* `MilesMotion` — shared duration/curve tokens (`instant` 120ms, `quick` 220ms,
+  `settle` 420ms, `reveal` 620ms, `enter` easeOutCubic, `heroEnter`
+  easeOutQuart, `rise` 14). Tokens rather than inline numbers because the
+  same guideline set explicitly calls out one duration copied everywhere as the
+  anti-pattern — and because twelve inline `Duration(milliseconds: 240)` calls
+  cannot be retuned by anyone later.
+* `MilesMotion.off(context)` — reads `MediaQuery.disableAnimationsOf`, checked
+  at every call site rather than cached at startup, because it is a system
+  setting that changes while the app is running.
+* `EntranceStagger` — one controller fades and lifts a page's children in
+  sequence. Per-child offset is `min(0.09, 0.45/(n-1))`, which SHRINKS as the
+  form grows; a fixed step means a long form's submit button starts animating
+  after the controller has finished, i.e. never appears. Runs once on mount, so
+  a banner added later arrives with the controller already at 1.0 and is
+  painted immediately rather than dragged through the entrance a second time.
+  The animated subtree is passed as `AnimatedBuilder`'s `child` so form fields
+  are not rebuilt sixty times a second.
+* `MotionIn` — self-contained fade/lift (optionally scale) for things that
+  arrive in response to a user action.
+
+**Wired in three places, and only three:**
+
+* `AuthScaffold` wraps its body in `EntranceStagger`, so all five screens
+  inherit the entrance from one edit. Motion that has to be remembered per
+  screen is motion four screens out of five eventually lack.
+* `AlertBanner` uses `MotionIn`. It appears mid-form and pushes the submit
+  button down as it comes; doing that in a single frame is how someone taps a
+  button that is no longer under their thumb.
+* The invite-code panel in `couple_page.dart` is the one hero — `reveal`
+  duration, `scaleFrom: 0.94`, `heroEnter`, deliberately WITHOUT overshoot. A
+  bounce there reads as a toy on the screen where someone decides whether to
+  trust the app with their relationship.
+
+**Gate.** `flutter analyze lib/features/auth lib/features/intro lib/core/ui` →
+6 issues, **zero errors**; the one I introduced is fixed and the remaining five
+are pre-existing in `mood.dart`, `theme.dart` and `rewrap_screen.dart`, none of
+which this change touches.
+
+`flutter test` first came back **730 passed, 1 failed** — and the failure was
+NOT this change: `test/zz_audit_tmp_test.dart` failed to LOAD, and by the time
+the run ended the file did not exist. It was another session's scratch file,
+enumerated by the runner and deleted underneath it mid-run. Re-run to confirm;
+recorded here because the next person to see a `zz_*_tmp_test.dart` failure
+should suspect a concurrent session before they suspect their own diff.
+
+**Still open.**
+* Frame rate on real low-end hardware is **unverified**. The claim rests on
+  animating only composited properties; nobody has run this on an IN2015.
+* `role_setup_screen.dart` and `rewrap_screen.dart` are still off `AuthScaffold`
+  (§20), so they get no entrance.
+* `GlowButton` and `BreathingGlow` predate these tokens and still carry their
+  own durations. Not touched — folding them in is a separate pass.

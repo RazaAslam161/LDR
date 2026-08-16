@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 
 enum AlertTone { error, info }
@@ -33,7 +34,12 @@ class AlertBanner extends StatelessWidget {
     return Semantics(
       liveRegion: true,
       container: true,
-      child: Container(
+      // It arrives mid-form, pushing the submit button down as it comes. Doing
+      // that in one frame is what makes a user press a button that is no longer
+      // under their thumb; fading and lifting it in gives the eye the moment it
+      // needs to follow the shift.
+      child: MotionIn(
+        child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: MilesColors.tint(color, 0.12, over: MilesColors.night),
@@ -61,6 +67,7 @@ class AlertBanner extends StatelessWidget {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

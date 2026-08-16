@@ -1,0 +1,219 @@
+import 'package:flutter/material.dart';
+
+/// Motion tokens for the Emberlight system.
+///
+/// Durations live here rather than in each widget for the reason one duration
+/// copied everywhere always fails: a 240ms slide and a 240ms colour change do
+/// not feel the same, and once the number is inline in twelve files nobody can
+/// retune the app without finding all twelve. Distance and importance pick the
+/// token; the token picks the number.
+///
+/// Everything animated through these is **opacity and transform only**. Both
+/// are handled by the compositor without a layout or paint pass, which is what
+/// makes them safe on the low-end hardware this app is sideloaded onto — an
+/// animated shadow, blur or gradient on those devices drops frames, and blur is
+/// banned outright by the repo's own hygiene test.
+class MilesMotion {
+  MilesMotion._();
+
+  /// A control acknowledging a touch. Anything slower reads as lag.
+  static const Duration instant = Duration(milliseconds: 120);
+
+  /// Something appearing or leaving in place — a banner, a hint.
+  static const Duration quick = Duration(milliseconds: 220);
+
+  /// A screen's content settling in.
+  static const Duration settle = Duration(milliseconds: 420);
+
+  /// The one moment on a screen that is allowed to be slow, because it is the
+  /// point of the screen: the invite code arriving.
+  static const Duration reveal = Duration(milliseconds: 620);
+
+  /// Entering the screen — decelerate, as if it was already moving.
+  static const Curve enter = Curves.easeOutCubic;
+
+  /// A softer settle for the hero moment, with no overshoot: a bounce on a
+  /// pairing code reads as a toy, and this screen is asking someone to trust
+  /// the app with their relationship.
+  static const Curve heroEnter = Curves.easeOutQuart;
+
+  /// How far a thing rises as it fades in. Small on purpose — the eye reads
+  /// direction, not distance, and a long travel is what makes an interface
+  /// feel slow once you have seen it forty times.
+  static const double rise = 14;
+
+  /// True when the platform has been asked to stop animating.
+  ///
+  /// Checked at every call site rather than once at startup: it is a system
+  /// setting the user can change while the app is running, and on Android it
+  /// is also what "Remove animations" in accessibility settings drives.
+  static bool off(BuildContext context) =>
+      MediaQuery.disableAnimationsOf(context);
+}
+
+/// Fades and lifts its children in sequence when the screen first appears.
+///
+/// One controller drives every child, so the whole page is a single
+/// coordinated entrance rather than a dozen widgets each animating on their
+/// own schedule — the difference between a screen that composes itself and a
+/// screen that flickers. Guidance is explicit that a view should animate one
+/// or two things, not everything that moves; this is the one.
+///
+/// Runs exactly once, on mount. Anything added later — the error banner after
+/// a failed sign-in — arrives with the controller already at its end, so it is
+/// painted at full opacity immediately and brings its own entrance instead of
+/// being dragged through this one a second time.
+class EntranceStagger extends StatefulWidget {
+  const EntranceStagger({
+    required this.children,
+    super.key,
+    this.crossAxisAlignment = CrossAxisAlignment.stretch,
+  });
+
+  final List<Widget> children;
+  final CrossAxisAlignment crossAxisAlignment;
+
+  @override
+  State<EntranceStagger> createState() => _EntranceStaggerState();
+}
+
+class _EntranceStaggerState extends State<EntranceStagger>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: MilesMotion.settle,
+  );
+
+  bool _started = false;
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A user who has turned animations off gets the finished screen, not a
+    // faster version of the animation. Also the correct behaviour when the
+    // setting flips mid-session: jump to the end rather than start playing.
+    if (MilesMotion.off(context)) {
+      if (_c.value != 1) _c.value = 1;
+      return Column(
+        crossAxisAlignment: widget.crossAxisAlignment,
+        mainAxisSize: MainAxisSize.min,
+        children: widget.children,
+      );
+    }
+
+    if (!_started) {
+      _started = true;
+      _c.forward();
+    }
+
+    final n = widget.children.length;
+    // The last child must still finish inside the controller's run, so the
+    // per-child offset shrinks as the list grows. Without this a long form
+    // would have its submit button start animating after the animation ended,
+    // i.e. never.
+    final step = n <= 1 ? 0.0 : (0.45 / (n - 1)).clamp(0.0, 0.09);
+
+    return Column(
+      crossAxisAlignment: widget.crossAxisAlignment,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < n; i++)
+          _StaggerItem(
+            controller: _c,
+            begin: i * step,
+            child: widget.children[i],
+          ),
+      ],
+    );
+  }
+}
+
+class _StaggerItem extends StatelessWidget {
+  const _StaggerItem({
+    required this.controller,
+    required this.begin,
+    required this.child,
+  });
+
+  final AnimationController controller;
+  final double begin;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final anim = CurvedAnimation(
+      parent: controller,
+      curve: Interval(begin, (begin + 0.55).clamp(0.0, 1.0),
+          curve: MilesMotion.enter,),
+    );
+    return AnimatedBuilder(
+      animation: anim,
+      // Built once and reused every frame: the subtree does not depend on the
+      // animation value, only the two wrappers around it do. Rebuilding a form
+      // field sixty times a second is how an entrance animation turns into a
+      // dropped-frame report on a five-year-old handset.
+      child: child,
+      builder: (context, child) => Opacity(
+        opacity: anim.value,
+        child: Transform.translate(
+          offset: Offset(0, MilesMotion.rise * (1 - anim.value)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Fades and lifts a widget in when it first appears, on its own.
+///
+/// For things that arrive in response to something the user did — a banner, a
+/// revealed code — where there is no page entrance to join. Stateless and
+/// self-starting: it animates when it is first built and never again, so a
+/// parent rebuild does not replay it.
+class MotionIn extends StatelessWidget {
+  const MotionIn({
+    required this.child,
+    super.key,
+    this.duration = MilesMotion.quick,
+    this.curve = MilesMotion.enter,
+    this.rise = MilesMotion.rise,
+    this.scaleFrom = 1.0,
+  });
+
+  final Widget child;
+  final Duration duration;
+  final Curve curve;
+  final double rise;
+
+  /// Start scale. 1.0 disables it — scale is for the hero moment only.
+  final double scaleFrom;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MilesMotion.off(context)) return child;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: duration,
+      curve: curve,
+      child: child,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(0, rise * (1 - t)),
+          child: scaleFrom == 1.0
+              ? child
+              : Transform.scale(
+                  scale: scaleFrom + (1 - scaleFrom) * t,
+                  child: child,
+                ),
+        ),
+      ),
+    );
+  }
+}

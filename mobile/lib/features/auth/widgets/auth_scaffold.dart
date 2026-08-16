@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 
@@ -58,9 +59,11 @@ class AuthScaffold extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final media = MediaQuery.of(context);
 
-    final body = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
+    // The whole page composes itself once, from one controller — every auth
+    // screen gets it by being an AuthScaffold, which is the point: motion that
+    // has to be remembered per screen is motion four screens out of five will
+    // eventually be missing.
+    final body = EntranceStagger(
       children: [
         // A heading is the screen's name to a screen reader, not decoration.
         Semantics(

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_repository.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -335,7 +336,17 @@ class _InviteReveal extends StatelessWidget {
             style: TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           const SizedBox(height: 32),
-          SurfacePanel(
+          // The one hero on the whole flow, and the only place a scale is
+          // spent: this panel is what the screen exists to hand over, and it
+          // arrives after a partner-shaped wait. Slower than everything else
+          // (reveal, not quick) and eased without overshoot — a bounce here
+          // would read as a toy on the screen where someone is deciding
+          // whether to trust the app with their relationship.
+          MotionIn(
+            duration: MilesMotion.reveal,
+            curve: MilesMotion.heroEnter,
+            scaleFrom: 0.94,
+            child: SurfacePanel(
             glow: MilesColors.blush,
             padding: const EdgeInsets.all(28),
             child: Column(
@@ -371,6 +382,7 @@ class _InviteReveal extends StatelessWidget {
                   ),
                 ],
               ],
+            ),
             ),
           ),
           const SizedBox(height: 16),
