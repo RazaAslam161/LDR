@@ -4,7 +4,11 @@ import 'package:flutter/foundation.dart';
 
 /// Which mechanism an event belongs to. Kept small on purpose — a trace with
 /// forty categories is one nobody filters.
-enum DiagArea { call, receipt, presence, app }
+/// media — a send or a playback that failed on ONE of the two devices. The
+/// sender never sees a broken video: their bubble renders from the file
+/// still on their disk, so the only person who can observe the failure is
+/// the one who cannot describe it. That is the gap this area exists for.
+enum DiagArea { call, receipt, presence, app, media }
 
 /// One observation, from one device, at one instant.
 ///
