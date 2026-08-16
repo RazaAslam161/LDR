@@ -2907,3 +2907,103 @@ ever hard-codes `readableConfirmed: true`.
 **Still open, unchanged:** the `prev_*` escrow migration (needs a decision), the
 leaked-password/min-length dashboard toggles, `signup-notify` (needs an email
 provider), and L2 (`isMissing()` runs twice on the sign-in path).
+
+## §30 — Full Play Store readiness audit (2026-08-16)
+
+Requested: audit the whole app for Play Store readiness. Ran an 11-agent
+workflow (live policy research + 4 audit lanes + 6 adversarial verifiers):
+59 findings, 6 blocker/high verified — 5 confirmed, 1 refuted. Audit only:
+no code changed this session.
+
+**CONFIRMED BLOCKERS (each re-verified independently, live URLs curled):**
+1. **Web account-deletion page not hosted.** `web/delete-account.html` exists
+   locally (correct endpoint `account-delete` at line 182) but
+   `https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/delete-account.html`
+   → 404 while `privacy-policy.html` on the same bucket → 200. The URL the
+   policy prints (`.../functions/v1/delete-account`) → 404 (deployed name is
+   `account-delete`; POST → 400 = alive, and it is a JSON API not a page).
+   Play REQUIRES a working web deletion URL. Fix: upload the page to the R2
+   bucket; fix the URL at `web/privacy-policy.html:379` and
+   `docs/legal/privacy-policy.md:231`; use the page URL in the Data Safety form.
+2. **Live privacy policy still carries its editor TODO box** ("Before
+   publishing: replace `R&D Dev`, `Pakistan`, `Razaaslam3210@gmail.com`…",
+   `web/privacy-policy.html:94-98`, confirmed in the served copy). Needs
+   owner-confirmed entity/jurisdiction/contact, box deleted, re-upload.
+3. **No upload keystore.** No key.properties / *.jks anywhere; the play
+   flavour correctly refuses to build (gate at `build.gradle.kts:192-204`).
+   Decision before first upload: separate upload key vs reusing the sideload
+   key; Play App Signing enrolment is effectively one-way.
+4. **Google Maps key is in git history (commit 5403769) and NOT rotated** —
+   equality check proved current `maps.properties` key == leaked key. Repo
+   has no remote today so the leak is local-only, but the key ships in every
+   APK regardless. Before Play: rotate OR verify Cloud-console restrictions
+   (package com.miles.miles + SHA-1s incl. the future Play App Signing cert +
+   Maps SDK for Android only).
+5. **E2EE overclaim in-app:** `closer_screen.dart:376-379` promises blanket
+   E2EE above a grid whose Gallery tile is deliberately unencrypted
+   (`gallery_repository.dart:90-101`). Chat text/media also plaintext. Data
+   Safety form must claim transit encryption only; scope the header copy.
+   (Verifier correction: the opportunistic-plaintext window in crypto_core is
+   NOT silent for fresh pairs — it fails closed unless the partner published
+   the legacy plaintext sentinel; affects mixed old-build couples only.)
+
+**REFUTED by verifier:** "no AAB build path" — `docs/guides/PLAY-RELEASE-RUNBOOK.md:314-350`
+already documents `flutter build appbundle --release --flavor play` + jarsigner/
+bundletool verification + version-lockstep. Only a release.sh convenience mode
+is missing.
+
+**DECISIONS only the owner can make:**
+- **Sexual-content exposure:** Play has NO adults-only carve-out ("content
+  intended to be sexually gratifying" is prohibited; precedent: #open
+  suspension). Mitigations already built: Modest Mode default ON, both-partner
+  opt-in, all UGC private 1:1 + E2EE, fixed strings suggestive-not-explicit,
+  18+ terms, UGC reporting. Residual review risk is real and irreducible;
+  listing must use zero adult keywords and Modest-Mode-on screenshots.
+- **Camera FGS type mismatch:** manifest declares camera
+  (`src/main:26,199-203`) but `callServiceTypes()` never requests it
+  (`call_foreground.dart:43-50`) — backgrounded video call loses the camera on
+  Android 14+ AND the console declaration demands a demo video of a path that
+  does not exist. Either add camera to video-call service types (needs device
+  test) or drop it from the manifest.
+- **First-open cover offer contradiction:** `app_shell.dart:249-253` pushes the
+  disguise picker at first open whenever DISGUISE_ENABLED — which play sets
+  true (`build.gradle.kts:136`), contradicting the gradle comment "reachable
+  only from Settings" and `disguise_service.dart:53-57`'s own prohibition.
+  Gate it for play or disclose it in the listing.
+- **Play Console process:** personal account ⇒ closed test, 12 testers opted
+  in continuously 14 days, then production application. Declarations to file:
+  FGS microphone + mediaProjection (+camera if kept) each with demo video;
+  USE_FULL_SCREEN_INTENT; fine-location justification; Data Safety; IARC 18+.
+  Cycle tracking = health data — must be declared. From 2026-08-31 target API
+  36 required (already met). Android developer verification also now applies
+  to SIDELOADED installs in BR/ID/SG/TH from 2026-09-30, global 2027 — the
+  sideload channel is not exempt from identity verification forever.
+
+**PASSES (verified with file:line / merged-manifest / curl evidence):**
+targetSdk 36 (Flutter 3.44.2); play merge is honest-by-default (AliasMiles
+enabled, 9 covers enabled=false, single launcher entry); self-updater +
+REQUEST_INSTALL_PACKAGES absent from play merge (Dart gate
+update_service.dart:40-58 + manifest split); no analytics/crash SDKs (
+first-party client_errors only, redacted); no cleartext; no hardcoded secrets
+(Firebase keys public-by-design; Giphy/Mapbox keys via edge functions); static
+RLS scan: all 63 tables enabled, one deliberate using(true) (app_release,
+SELECT-only); in-app deletion complete incl. storage reaper; policy URL live;
+allowBackup=false + full data-extraction exclusions; WebView JS bridge exposes
+nothing; age/UGC: 18+ terms gate, report service, contact pause.
+
+**found, not fixed:** `mobile/lib/features/closer/secure_screen.dart:10` —
+stale comment says FLAG_SECURE native side is a no-op; `MainActivity.kt:158-168`
+implements it. `src/main/AndroidManifest.xml:52` READ_MEDIA_VISUAL_USER_SELECTED
+declared alone (grants nothing the app uses — photo picker everywhere) and
+`:58` RECEIVE_BOOT_COMPLETED redundant (plugin manifest declares it) — both
+removable to shrink the declaration surface. `mobile/.env` unreadable this
+session (permission deny rule) — human must confirm it holds only the Supabase
+URL + anon key and that METERED_TURN_* stay empty. R8 play build never run on
+a device (no keystore exists) — proguard rules look right on paper; empirical
+gate outstanding.
+
+**Next step:** owner decisions above, then a fix turn in this order: host
+delete-account.html + finalize policy → keystore + Play App Signing → Maps key
+rotation/restriction → camera FGS + cover-offer gate → first play AAB on
+hardware.
+
