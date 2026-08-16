@@ -289,6 +289,22 @@ class CryptoCore {
   static Future<bool> hasSeed() async =>
       await _storage.read(key: _seedKey) != null;
 
+  /// Mint this device's keypair now, if it has none.
+  ///
+  /// The seed is otherwise created the first time something asks for the
+  /// keypair, which is the first Closer screen — long after sign-in, the one
+  /// moment the password exists to seal it with. So a new account left sign-in
+  /// with nothing to escrow and no second chance until its next sign-in, which
+  /// is why production carried two escrow rows against six accounts.
+  ///
+  /// Only ever call this having established the device is NOT stranded. On a
+  /// phone that has lost its key this mints a stand-in, and sealing a stand-in
+  /// over the row holding the real one is exactly the loss escrow exists to
+  /// prevent.
+  static Future<void> ensureSeed() async {
+    await _keyPair();
+  }
+
   /// The raw private seed, for [KeyEscrow] to seal under the user's password.
   ///
   /// Deliberately narrow: this is the ONLY way the seed leaves this class, and

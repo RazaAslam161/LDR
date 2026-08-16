@@ -20,9 +20,19 @@ class _SignInPageState extends ConsumerState<SignInPage> {
   final _password = TextEditingController();
   final _passwordFocus = FocusNode();
   bool _loading = false;
+  bool _sendingReset = false;
   bool _reveal = false;
   String? _error;
   String? _emailError;
+
+  /// When the last reset mail was requested, so a second tap cannot spend the
+  /// first link.
+  ///
+  /// Static, and it has to be. Reading the mail means leaving the app, which
+  /// raises the disguise cover — and the cover REPLACES the router subtree, so
+  /// this State is destroyed every single time. A per-widget field reset itself
+  /// on exactly the trip the throttle exists to survive.
+  static DateTime? _lastResetAt;
 
   @override
   void dispose() {
@@ -71,18 +81,45 @@ class _SignInPageState extends ConsumerState<SignInPage> {
       setState(() => _emailError = 'Enter your email above first.');
       return;
     }
+    // A second request does not send a second mail — it spends the first.
+    //
+    // gotrue writes a fresh PKCE verifier to one shared key before it issues
+    // /recover, so the link already in the inbox stops matching the moment
+    // another request goes out, and the server's own per-address limit is one a
+    // minute. Both taps used to print the same cheerful confirmation, so the
+    // ordinary impatient user ended up with an inbox of links where only the
+    // last could work and no way to know it.
+    final since = _lastResetAt;
+    if (since != null && DateTime.now().difference(since).inSeconds < 60) {
+      setState(
+        () => _error = 'A link is already on its way. Give it a minute before '
+            'asking for another — a new one stops the first from working.',
+      );
+      return;
+    }
     setState(() {
-      _loading = true;
+      _sendingReset = true;
       _error = null;
       _emailError = null;
     });
+    String? failure;
     try {
       await SupabaseRepository.sendPasswordReset(email);
-    } catch (_) {
-      // Swallowed on purpose — see above.
+      _lastResetAt = DateTime.now();
+    } catch (e) {
+      // Still says nothing about whether the address is registered — GoTrue
+      // answers a reset for an unknown address exactly as it answers a known
+      // one, so a rate limit or a dead socket is not an oracle. Reporting the
+      // failure was never the leak; only "no such user" would be, and that is
+      // not a thing this endpoint says.
+      failure = friendlyAuthError(e);
     }
     if (!mounted) return;
-    setState(() => _loading = false);
+    setState(() {
+      _sendingReset = false;
+      _error = failure;
+    });
+    if (failure != null) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('If $email has an account, a reset link is on its way.'),
@@ -142,10 +179,14 @@ class _SignInPageState extends ConsumerState<SignInPage> {
         ),
         Align(
           alignment: Alignment.centerRight,
+          // Its own progress, and its own flag. Both actions used to share
+          // `_loading`, so asking for a reset link spun the Sign in button and
+          // the only feedback for the tap you actually made was a SnackBar you
+          // were no longer looking at, having gone to your inbox.
           child: TextButton(
-            onPressed: _loading ? null : _forgotPassword,
+            onPressed: _loading || _sendingReset ? null : _forgotPassword,
             style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
-            child: const Text('Forgot password?'),
+            child: Text(_sendingReset ? 'Sending…' : 'Forgot password?'),
           ),
         ),
         if (_error != null) ...[
@@ -154,7 +195,7 @@ class _SignInPageState extends ConsumerState<SignInPage> {
         ],
         const SizedBox(height: 20),
         FilledButton(
-          onPressed: _loading ? null : _submit,
+          onPressed: _loading || _sendingReset ? null : _submit,
           child: _loading
               ? const SizedBox(
                   height: 20,
@@ -167,7 +208,8 @@ class _SignInPageState extends ConsumerState<SignInPage> {
         AuthSwitchLink(
           prompt: 'New here?',
           action: 'Create an account',
-          onPressed: _loading ? null : () => context.go('/signup'),
+          onPressed:
+              _loading || _sendingReset ? null : () => context.go('/signup'),
         ),
       ],
     );

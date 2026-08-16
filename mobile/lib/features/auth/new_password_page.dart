@@ -26,6 +26,9 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
   final _confirm = TextEditingController();
   final _confirmFocus = FocusNode();
   bool _busy = false;
+
+  /// Set when the password changed but the key backup did not follow it.
+  bool _stale = false;
   bool _reveal = false;
 
   /// Which field is wrong, rather than one line under both of them. "Those two
@@ -66,10 +69,39 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
       _formError = null;
     });
     try {
-      await SupabaseRepository.updatePassword(pw);
+      final outcome = await SupabaseRepository.updatePassword(pw);
       if (!mounted) return;
+      // The password changed in every branch below. What differs is whether the
+      // key that opens their history followed it, and this screen used to print
+      // the same heart over all three.
+      if (outcome == PasswordChangeOutcome.escrowStale) {
+        // Stay, but never trap. The password HAS changed by this point, so
+        // "Save password" cannot be the only control on the screen: pressing it
+        // again re-sends the same string, which GoTrue answers with
+        // `same_password`, which the catch below renders as "the link may have
+        // expired" — false, and the one instruction here is not reachable from
+        // a screen with no way out.
+        setState(() {
+          _busy = false;
+          _stale = true;
+          _formError = 'Your password is changed. The backup of your key could '
+              'not be updated, so it is still locked with the old password — '
+              'sign in again while online to finish that part.';
+        });
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password updated 💛')),
+        SnackBar(
+          content: Text(
+            outcome == PasswordChangeOutcome.keyless
+                // Said here rather than left to the ceremony to explain: they
+                // arrived at this screen to fix a password, and the screen that
+                // replaces it is about something else entirely.
+                ? 'Password updated. This phone cannot open your history yet — '
+                    'your partner still has the key.'
+                : 'Password updated 💛',
+          ),
+        ),
       );
       context.go('/app');
     } catch (e) {
@@ -129,16 +161,27 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
           AlertBanner(message: _formError!),
         ],
         const SizedBox(height: 24),
-        FilledButton(
-          onPressed: _busy ? null : _save,
-          child: _busy
-              ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Save password'),
-        ),
+        // Once the password has actually changed, saving again is the wrong
+        // control — GoTrue answers a repeat with `same_password` and the catch
+        // renders it as an expired link. Continuing is the right one, and
+        // without it this screen has no exit at all: it has no back affordance
+        // and router.dart returns null for /new-password, so nothing moves them.
+        if (_stale)
+          FilledButton(
+            onPressed: () => context.go('/app'),
+            child: const Text('Continue'),
+          )
+        else
+          FilledButton(
+            onPressed: _busy ? null : _save,
+            child: _busy
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Save password'),
+          ),
       ],
     );
   }

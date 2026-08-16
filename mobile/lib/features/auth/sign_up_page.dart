@@ -22,7 +22,11 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
   bool _reveal = false;
   String? _error;
   String? _emailError;
+  String? _passwordError;
   String? _notice;
+
+  /// The address the form was submitted with, once it has been.
+  String? _sentTo;
 
   @override
   void dispose() {
@@ -33,10 +37,29 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
   }
 
   Future<void> _submit() async {
+    final email = _email.text.trim();
+    if (!email.contains('@') || email.startsWith('@') || email.endsWith('@')) {
+      setState(() => _emailError = "That doesn't look like an email address.");
+      return;
+    }
+    // Checked here, because nothing else does.
+    //
+    // The field asks for eight, NewPasswordPage enforces eight, and the server
+    // minimum is six — so a seven-character password was accepted at sign-up
+    // and then refused at every reset, and the account's own password could not
+    // be re-entered on the screen that changes it. It is also the Argon2id
+    // input for the escrow wrap key, and leaked-password protection is off on
+    // the project, which makes the client the only place anything is asked at
+    // all.
+    if (_password.text.length < 8) {
+      setState(() => _passwordError = 'Use at least 8 characters.');
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
       _emailError = null;
+      _passwordError = null;
       _notice = null;
     });
     try {
@@ -46,23 +69,19 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
       );
       setState(() {
         _loading = false;
-        // Deliberately ambiguous, and deliberately TRUE in both cases.
-        //
         // Supabase answers a signup for an address that already has an account
         // with a success-shaped response, on purpose: saying "that email is
         // taken" turns this form into an oracle anyone can feed addresses to in
-        // order to learn who has an account on a private couples app. That
-        // property is worth keeping.
+        // order to learn who has an account on a private couples app — which is
+        // precisely the question this app's disguise, panic gesture and contact
+        // pause exist to keep unanswerable. It also does not create a second
+        // account; there is no duplicate to worry about, only a silence.
         //
-        // What was not worth keeping is the old copy, "we sent you a
-        // confirmation link", which ASSERTS something that is false for an
-        // existing account — so a user who had simply forgotten they had signed
-        // up waited for mail that was never coming, with no way to read the
-        // screen correctly. This says only what is true either way, and the two
-        // routes out are on the screen instead of being guessed at.
-        _notice = 'If this address is new, a confirmation link is on its way. '
-            'If it already has an account, sign in below — or reset the '
-            'password if you have forgotten it.';
+        // So the screen stops trying to resolve it and hands over to
+        // [_sentState], which says the one thing that is true either way and
+        // offers both ways onward. See the note there.
+        _sentTo = email;
+        _notice = null;
       });
     } catch (e) {
       setState(() {
@@ -78,7 +97,10 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
   /// report whether the address exists and this must not either.
   Future<void> _resetPassword() async {
     final email = _email.text.trim();
-    if (email.isEmpty) {
+    // Same shape as the sign-up field above. It used to accept anything
+    // non-empty and still promise a link, so a typo'd address produced the
+    // identical reassurance as a real one.
+    if (!email.contains('@') || email.startsWith('@') || email.endsWith('@')) {
       setState(() => _emailError = 'Enter your email address first.');
       return;
     }
@@ -87,22 +109,81 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
       _error = null;
       _emailError = null;
     });
+    String? failure;
     try {
       await SupabaseRepository.sendPasswordReset(email);
-    } catch (_) {
-      // Swallowed on purpose: an error here that a success does not produce
-      // would say whether the address is registered, which is the whole thing
-      // this screen refuses to say.
+    } catch (e) {
+      // Reported, not swallowed. Hiding whether the address is REGISTERED is
+      // the property this screen protects; hiding that the request failed is
+      // just a lie — GoTrue answers a reset the same way for a known and an
+      // unknown address, so a rate limit or a dead socket tells a caller
+      // nothing about who has an account.
+      failure = friendlyAuthError(e);
     }
     if (!mounted) return;
     setState(() {
       _loading = false;
-      _notice = 'If that address has an account, a reset link is on its way.';
+      _error = failure;
+      _notice = failure != null
+          ? null
+          : 'If that address has an account, a reset link is on its way.';
     });
+  }
+
+  /// Where the form goes once it has been submitted.
+  ///
+  /// The screen used to keep the whole form on display and stack a green tick
+  /// over it saying something hedged, next to two more buttons — a success
+  /// mark, an "if", and three competing things to do, all at once. Whether the
+  /// address is new is the one fact this form must not answer out loud, so the
+  /// answer belongs where only the person holding the mailbox can read it. Here
+  /// there is one instruction and the two ways onward, and nothing claims to
+  /// know which of them applies.
+  Widget _sentState(BuildContext context, String email) {
+    return AuthScaffold(
+      title: 'Check your inbox',
+      subtitle: email,
+      onBack: () => setState(() {
+        _sentTo = null;
+        _notice = null;
+        _error = null;
+      }),
+      children: [
+        const Text(
+          'If this address is new here, a confirmation link is on its way. '
+          'Open it and you are in.',
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'If it already has an account, nothing was sent — no second account '
+          'was made either. Sign in instead, or reset the password.',
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          AlertBanner(message: _error!),
+        ],
+        if (_notice != null) ...[
+          const SizedBox(height: 16),
+          AlertBanner(message: _notice!, tone: AlertTone.info),
+        ],
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: _loading ? null : () => context.go('/signin'),
+          child: const Text('Sign in'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _loading ? null : _resetPassword,
+          child: Text(_loading ? 'Sending…' : 'Send a reset link'),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final sent = _sentTo;
+    if (sent != null) return _sentState(context, sent);
     return AuthScaffold(
       title: 'Begin',
       subtitle: 'Create your account. Invite your partner next.',
@@ -134,6 +215,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
           // first character is typed — so the one moment it was legible was
           // the one moment nobody needed it.
           hint: 'At least 8 characters.',
+          error: _passwordError,
           child: TextField(
             controller: _password,
             focusNode: _passwordFocus,
@@ -142,7 +224,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _loading ? null : _submit(),
             decoration: InputDecoration(
-              hintText: 'At least 8 characters',
               suffixIcon: IconButton(
                 onPressed: () => setState(() => _reveal = !_reveal),
                 icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
@@ -154,31 +235,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
         if (_error != null) ...[
           const SizedBox(height: 16),
           AlertBanner(message: _error!),
-        ],
-        if (_notice != null) ...[
-          const SizedBox(height: 16),
-          AlertBanner(message: _notice!, tone: AlertTone.info),
-          const SizedBox(height: 12),
-          // Both exits, shown only once the ambiguous notice is up. The
-          // screen otherwise ends at a dead end for exactly the user who
-          // needs them: the one who already has an account.
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _loading ? null : () => context.go('/signin'),
-                  child: const Text('Sign in'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _loading ? null : _resetPassword,
-                  child: const Text('Reset password'),
-                ),
-              ),
-            ],
-          ),
         ],
         const SizedBox(height: 20),
         FilledButton(

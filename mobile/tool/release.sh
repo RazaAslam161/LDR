@@ -68,6 +68,48 @@ if $publish; then
   done
 fi
 
+# ── 0. Gates ────────────────────────────────────────────────────────────────
+# Before the bump, deliberately. Gating after it meant a red tree still spent a
+# build number: pubspec.yaml and release_gate.dart were already written when the
+# gate exited, so the retry produced N+2 and N+1 never existed as an artifact —
+# the version-drift class the bump below exists to prevent, on a repo where
+# several sessions edit pubspec.yaml at once.
+#
+# Nothing else mechanically stopped a red tree from becoming an APK: no CI, no
+# git hook. On a sideloaded fleet with no update channel, whatever ships is what
+# people keep.
+#
+# Errors and warnings only, never the exit code. `flutter analyze` exits 1 on
+# `info` as well, and this tree carries hundreds of them; gating on the exit
+# code would mean nobody could ever cut a release, which is how a gate gets
+# deleted rather than obeyed.
+echo "gate: flutter analyze"
+analysis="$(flutter analyze --no-pub 2>&1 || true)"
+# Leading whitespace is optional on purpose. dart right-aligns the severity to
+# width 7 — `warning - ` flush left, `  error - `, `   info - ` — so a flush-left
+# anchor silently matches only one of the three. That exact mistake left
+# repo_hygiene_test.dart unable to see an analyzer error for a whole session.
+bad="$(printf '%s\n' "$analysis" | grep -cE '^ *(error|warning) - ' || true)"
+if [ "$bad" -ne 0 ]; then
+  printf '%s\n' "$analysis" | grep -E '^ *(error|warning) - ' >&2
+  echo "$bad analyzer error(s)/warning(s) — not building." >&2
+  exit 1
+fi
+# Proves the output was actually parsed rather than empty: `info` lines always
+# exist in this tree, so zero of them means analyze did not run and the count
+# above is noise. A gate that cannot fail is worse than none, because it is
+# trusted.
+if ! printf '%s\n' "$analysis" | grep -qE '^ *info - '; then
+  echo "could not read analyzer output — this gate is blind, not green." >&2
+  exit 1
+fi
+
+echo "gate: flutter test"
+if ! flutter test; then
+  echo "tests are red — not building." >&2
+  exit 1
+fi
+
 # ── 1. Build number ─────────────────────────────────────────────────────────
 read_build() { sed -n 's/^version:.*+\([0-9][0-9]*\).*/\1/p' pubspec.yaml; }
 read_gate()  { sed -n 's/.*buildNumber = \([0-9][0-9]*\).*/\1/p' "$GATE"; }

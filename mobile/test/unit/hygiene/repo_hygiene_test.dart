@@ -219,20 +219,30 @@ void main() {
   });
 
   test('the analyzer reports no errors and no warnings', () {
-    // Worth the ~40s it costs, because this was measured wrong for a whole
-    // session: the grep used to check it required leading whitespace, and the
-    // analyzer prints `warning - ...` flush left while only indenting `info`.
-    // Seven real warnings sat behind a green-looking check — an always-true
-    // type guard, an unused import, a raw Map, two uninferrable constructors
-    // and one use of a package-internal member. A verification that cannot
-    // fail is worse than no verification, because it is trusted.
+    // Worth the ~40s it costs, because this was measured wrong twice.
+    //
+    // First the grep required leading whitespace, and seven real warnings sat
+    // behind a green-looking check. The fix anchored both counts flush left —
+    // which repaired `warning` and quietly broke `error`.
+    //
+    // The analyzer right-aligns the severity to width 7, so the indent differs
+    // per level and no single flush-left anchor can match them all:
+    //   `warning - `   0 spaces
+    //   `  error - `   2 spaces
+    //   `   info - `   3 spaces
+    // `^error - ` therefore never matched, and the error count — the one this
+    // test exists to keep at zero — was structurally pinned to 0 while the
+    // `^ *info - ` probe below went on reporting the check healthy.
+    //
+    // Leading whitespace is optional in all three now. A verification that
+    // cannot fail is worse than no verification, because it is trusted.
     final r = Process.runSync('flutter', ['analyze', '--no-pub'],
         runInShell: true,);
     final out = '${r.stdout}';
     final errors =
-        RegExp('^error - ', multiLine: true).allMatches(out).length;
+        RegExp('^ *error - ', multiLine: true).allMatches(out).length;
     final warnings =
-        RegExp('^warning - ', multiLine: true).allMatches(out).length;
+        RegExp('^ *warning - ', multiLine: true).allMatches(out).length;
 
     // Proves the output was actually parsed. `info` lines always exist here;
     // zero of them means analyze did not run and the counts above are noise.

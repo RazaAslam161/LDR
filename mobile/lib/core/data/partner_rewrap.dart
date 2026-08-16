@@ -252,6 +252,36 @@ class PartnerRewrap {
   static Future<int> answer(RewrapRequest req) async {
     // Sentences, not diagnostics: the screen shows a StateError's message
     // verbatim rather than guessing which of these it was.
+    //
+    // Asked before the unlock, so a phone that must not answer never demands a
+    // fingerprint to be told so.
+    //
+    // A keyless phone HAS a key — the stand-in minted the first time anything
+    // asked for the keypair — so the emptiness check below passes and it seals
+    // 32 bytes that open nothing the couple ever wrote. The asking side then
+    // reports the history recovered and clears its own keyless mark, so the
+    // ceremony is never offered again, and its next sign-in escrows the
+    // stand-in over the last sealed copy of the real seed. Two reinstalls in
+    // the same week is all it takes, and every screen says it worked.
+    if (await CryptoCore.isKeyless()) {
+      // The instruction matters as much as the refusal.
+      //
+      // Builds 27-37 marked every brand-new account keyless at its first
+      // sign-in (the seed is minted lazily, so "no seed" read as "wiped"), and
+      // tapping past the ceremony leaves `deferred`, which this still reads as
+      // true. So some phones carrying this mark DO hold the couple's real key
+      // and are the only ones that can answer — and a bare refusal tells them
+      // to go and use the phone they are already holding.
+      //
+      // Signing out and back in is the fix and it is not folklore: sign-in
+      // re-runs escrow, and a successful restore calls clearKeyless.
+      throw StateError(
+        'This phone is not sure it still holds your key, so it will not send '
+        'one — a wrong key here would overwrite the real one for good. '
+        'If you can still read your messages here, sign out and sign back in '
+        'on this phone, then try again.',
+      );
+    }
     if (!await AppLock.available()) {
       throw StateError(
         'Set a screen lock on this phone first. The key only ever leaves '

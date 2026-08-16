@@ -2491,3 +2491,298 @@ should suspect a concurrent session before they suspect their own diff.
   (§20), so they get no entrance.
 * `GlowButton` and `BreathingGlow` predate these tokens and still carry their
   own durations. Not touched — folding them in is a separate pass.
+
+## §22 The three critical auth defects from §21 — fixed 2026-08-16
+
+Fixes only. The §21 HIGH/MEDIUM list is untouched and still open.
+
+**1. A keyless phone could hand over a key that opens nothing.**
+`partner_rewrap.dart answer()` guarded on `chain.isEmpty`, but a keyless phone
+HAS a key — the stand-in minted the first time anything asked for the keypair —
+so the check passed and it sealed 32 useless bytes. The asking side saw
+`added == 1`, printed "Your history is back.", cleared its own keyless mark so
+the ceremony was never offered again, and escrowed the stand-in over the last
+sealed copy of the real seed on its next sign-in.
+→ `answer()` now refuses when `CryptoCore.isKeyless()`, BEFORE the biometric
+prompt (a phone that must not answer should not be asked for a fingerprint) and
+before `exportKeyChainBytes()`. The message is a sentence, per that file's
+convention, and the screen shows it verbatim.
+
+**2. Every brand-new account was marked keyless at its first sign-in.**
+`stranded = !hasSeed() || isKeyless()` read "no seed" as "the keystore was
+wiped". The seed is minted lazily, so a first-ever sign-in has none — the two
+states are indistinguishable from the keystore alone.
+→ Extracted `strandedAfterRestore(alreadyKeyless:hasSeed:hadPriorIdentity:)` as
+a top-level pure function (the pattern `partner_rewrap_test.dart` already
+documents for storage-bound logic) and added `_hadPriorIdentity()`: a published
+`partner_keys.public_key` this device can no longer produce is the only evidence
+that separates a wipe from a first run. Short-circuited, so an ordinary sign-in
+pays no extra round trip.
+**Known limit, deliberate:** `partner_keys_select_member` scopes reads to the
+caller's couple, so an UNPAIRED account always answers false. Harmless — the
+funnel routes unpaired accounts to `/couple` above the keyless gate, and a
+recovery ceremony needs a partner to be worth offering.
+
+**3. Sign-up bound key storage to the PREVIOUS account.**
+`currentUser` was read after `auth.signUp()`, but gotrue 2.22.0
+(`gotrue_client.dart:302`) only calls `_saveSession` when the reply carries a
+session — and `enable_confirmations = true` means it never does. A second
+account created on a handset still holding a session re-sealed the FIRST
+account's seed under a password that account will never sign in with.
+→ Reads `res.session` / `res.user` off the response and returns early when there
+is no session. The escrow attempt that used to sit here is gone with it: it
+could never write a row anyway (no seed exists yet), and its comment claimed a
+protection that had never once executed.
+
+**Rejected during this work — do not re-propose without re-reading this.**
+A self-heal to clear bogus keyless marks left on already-affected devices
+("my public key matches the published one → I was never stranded") is UNSAFE.
+`publishMyPublicKey()` publishes a stand-in key too, so that condition is true
+for exactly the genuinely-stranded phones the mark exists to protect. Clearing
+it there would let them escrow the stand-in over the real row — the very
+catastrophe #1 fixes. The only sound clear stays the existing one: a successful
+`KeyEscrow.restore()`.
+
+**Residual, still open:** devices already carrying a bogus mark from defect #2
+stay walled until an escrow restore succeeds. Affects accounts created before
+this change, not new installs.
+
+**Tests** — `test/unit/core/auth_key_lifecycle_test.dart`, 6 tests, the first on
+this path. Four cover the `strandedAfterRestore` truth table; two are source
+pins for the guards that live behind FlutterSecureStorage and local_auth. Each
+was proved to FAIL against the un-fixed code before being kept — the pins by
+re-introducing each defect from a backup and watching them red, the formula by
+running old vs new side by side (`old=true` walls the new user, `new=false`).
+A source pin proves the guard is still written, not that it still fires; it is
+labelled as such in the file.
+
+**Gates, run after the last edit:**
+* `flutter analyze` → `477 issues found`, exit 1 — identical to the pre-change
+  baseline, so this change added none. 0 errors, 0 warnings.
+* `flutter test` → `+736: All tests passed!`, exit 0 (730 before, +6 new).
+
+Client-only. No schema change, no wire-format change, no dependency on anyone
+upgrading — a shipped build-31 phone behaves exactly as it did.
+
+**Not fixed, next up** — §21 #4: `KeyEscrow.backup()` at sign-in still cannot
+write a row for an account whose seed has not been minted, which is why
+production reads 2 escrow rows against 6 accounts.
+
+### §19 A video that plays for the sender and nothing for the receiver — 2026-08-16
+
+**Delivery is NOT the problem. Verified against production, not assumed:**
+upload path is `$coupleId/vid_…`; the `intimate_select` storage policy is
+`foldername(name)[1] = current_user_couple_id()`, so BOTH partners may read it;
+`couple_intimate` allows `video/mp4` and `video/quicktime` up to 100 MB. The
+object reaches her and the row is correct.
+
+**The defect is that the app destroyed the evidence.**
+`chat/widgets/video_surface.dart` caught `initialize()` with `catch (_)` — codec
+unsupported, 403, dead network and corrupt file all collapsed into one blank
+tile. Compounding it: **the sender can never observe this failure**, because
+their own bubble renders from the file still on their disk. So the only person
+who sees it is the one who cannot describe it, and the app threw away the
+reason.
+
+Fixed: the error is captured, logged via `Diag` with type + detail under a new
+`DiagArea.media`, and the failure UI now distinguishes "this phone can't play
+this video's format" (permanent — save and open elsewhere) from "couldn't be
+loaded" (transient — retry).
+
+**Working hypothesis, NOT a conclusion:** Android screen recordings are commonly
+HEVC/H.265. A handset that recorded one can always decode it; an older one often
+cannot, which fits every symptom. Deliberately not asserted — the logging that
+would prove it did not exist until now.
+
+**Class, not instance:** any recipient whose device lacks the codec hits this
+silently. Sender-side rendering from a local file means it is structurally
+invisible to the person who sent it.
+
+Verified: `flutter analyze mobile` 0 errors 0 warnings.
+**Unverified on hardware** — needs build 39, which also carries the BROWSABLE
+manifest fix from §18.
+
+**Next step:** build 39, publish, then read `client_errors` for
+`video_init_failed` to find out what the actual decoder error is.
+
+## §23 The §21 HIGH band — fixed 2026-08-16
+
+Follows §22 (criticals). Ran alongside another session's auth-screen rewrite in
+`d95faa8`; every UI edit below was made against the post-rewrite files.
+
+**#4 Escrow had never written a row at sign-up or first sign-in.**
+`KeyEscrow.backup()` exports the seed as its first act, and the seed is minted
+lazily on the first Closer screen — so the one moment the password exists had
+nothing to seal. New `CryptoCore.ensureSeed()`, called from `signIn` under TWO
+positive signals: `published == false` (the server has no key for this account)
+AND `KeyEscrow.isMissing()` (no escrow row). Either unknown mints nothing —
+minting on a guess produces a stand-in and the backup on the next line would
+seal it over the couple's real key.
+
+**#7 A reset on a seedless account marked it keyless forever.** Same defect
+class as §22 #2, same evidence now: `_publishedIdentity()`.
+
+**#6 The reset printed "Password updated 💛" over a failed re-wrap.**
+`updatePassword` returns `PasswordChangeOutcome` (settled / escrowStale /
+keyless); `new_password_page` says something different for each. The decision is
+the pure `passwordChangeOutcome(...)`, testable like `strandedAfterRestore`.
+
+**#8 `type=recovery` from any app dropped the disguise.** `_handleLink` no
+longer raises `pendingAuthLink` at all — MainActivity is exported with a
+BROWSABLE filter, so no test of an intent's CONTENTS can make it evidence. New
+`_watchAuthLinkRedemption()` raises it from the auth stream, which only moves
+when gotrue redeems a real token against the real server.
+**Caught in review before it shipped:** `onAuthStateChange` is a rxdart
+`BehaviorSubject` — it REPLAYS its last value to each new subscriber and emits
+`tokenRefreshed` on a timer. Reacting to "a session exists" would have lifted
+the cover on every ordinary launch and every silent refresh, i.e. disabled the
+disguise for everyone with an account. Narrowed to `signedIn` +
+`passwordRecovery`. Do not widen this predicate.
+
+**#9 Password policy.** Client now enforces 8 at sign-up (nothing did);
+`auth_errors.dart` said 6 while every field said 8. **Server half NOT done and
+not doable from here:** production advisor still reports
+`auth_leaked_password_protection` = WARN and the minimum is 6. Dashboard only —
+Authentication → Policies. No MCP tool exposes auth config.
+
+**#10 The analyzer gate could not see an analyzer error.** `^error - ` never
+matched: dart right-aligns severity to width 7, so `warning - ` is flush left,
+`  error - ` has 2 spaces, `   info - ` has 3. Both anchors now allow leading
+space. **Proved** by dropping a file with a type error into lib/ and running the
+test: `Expected: <0> Actual: <1>`. Probe file removed.
+
+**#11 `release.sh` built with no gates at all.** New step 1b: analyze
+(errors+warnings only — the exit code is useless here, this tree carries ~477
+`info`), plus a blindness probe requiring `info` lines to exist, plus
+`flutter test`. Any failure exits before the build.
+
+**#13 Double-tapping "Forgot password?" spent the first link.** gotrue writes a
+fresh PKCE verifier before issuing /recover, so request two invalidates link
+one. 60-second client cooldown that says so, its own `_sendingReset` flag (both
+actions shared `_loading`, so asking for a reset spun the Sign in button), and
+failures are now REPORTED rather than swallowed — hiding whether an address is
+registered is the property worth keeping; hiding that the request failed was
+just a lie.
+
+**#14 Every failure read "Something went wrong. Please try again."**
+`friendlyAuthError` rewritten typed-first: `AuthException.code` /`statusCode`
+for 429 / `over_email_send_rate_limit` / `over_request_rate_limit` /
+`weak_password` / `validation_failed`, `AuthRetryableFetchException` for the
+network branch. The old code matched the bare substring `connection`, so a
+Postgres pooler error told users to check their phone's clock.
+
+**Sign-up screen rebuilt** (his complaint, mid-session): the form used to stay on
+screen under a green success tick over a hedged sentence, beside two more
+buttons. Now a dedicated `_sentState` — one instruction, both ways onward,
+nothing claiming to know which applies. Duplicate "At least 8 characters"
+(printed as both label hint and box hint) removed.
+**Measured, against the fear:** `select count(distinct lower(email))` = 6 over 6
+users, zero duplicates. Supabase does NOT create a second account on a taken
+address; the UI simply never said so.
+
+**#5 NOT fixed, and deliberately.** `key_escrow.dart:216` refuses to overwrite an
+unopenable row. That refusal is CORRECT — the row may still hold the real key
+under the forgotten password, and overwriting destroys the last copy. The real
+fix is a second escrow slot, which is a migration touching installed clients, so
+it waits for a decision. A second ROW is off the table: build-31 calls
+`.maybeSingle()` and would throw. Additive columns are the only safe shape:
+`prev_wrapped_seed/prev_salt/prev_nonce/prev_kdf/prev_kdf_params`, all nullable;
+rollback is the matching `drop column if exists`.
+
+**#12 partly closed.** `auth_key_lifecycle_test.dart` is now 16 tests (was 6):
+`strandedAfterRestore` and `passwordChangeOutcome` truth tables,
+`friendlyAuthError` mapping, and four source pins. Still no behavioural test for
+anything behind FlutterSecureStorage or local_auth.
+
+**Gates, run after the last edit:**
+* `flutter analyze` → `477 issues found`, 0 errors, 0 warnings — exactly the
+  pre-change baseline.
+* `flutter test` → `+746: All tests passed!` (730 before, +16).
+* A real regression was caught by an EXISTING test mid-work:
+  `onboarding_escape_test` anchors on `signIn.indexOf('_forgotPassword')`, and a
+  doc comment referencing `[_forgotPassword]` above the method moved the anchor.
+  The comment was wrong, not the test.
+
+Client-only. No schema change, no wire-format change, nothing depends on anyone
+upgrading.
+
+**Open for a human:** the leaked-password/min-length dashboard toggles; the #5
+migration decision; and the `signup-notify` edge function that would let the
+INBOX say "you already have an account" without the screen ever leaking it —
+needs an email provider, which `app_secrets` does not yet have.
+
+## §24 Skeptic pass on §22/§23 — two of my own fixes were data-loss paths — 2026-08-16
+
+A read-only adversarial review of the §22+§23 diff returned **fail**. It was
+right. Recorded here because the gates were GREEN through every one of these:
+`flutter analyze` and `flutter test` cover none of it.
+
+**H1 — `published ?? false` (FIXED).** `_publishedIdentity()` returns
+`bool?`. Both call sites defaulted an unknown to false, i.e. "brand new" — and
+the doc four lines above said, in as many words, that doing so would let a
+stranded phone mint a stand-in and escrow it over the real row. It then did.
+Path: paired reinstall → `restore()` fails → the `partner_keys` lookup hits a
+transient failure → `null` → not marked keyless → never routed to `/rewrap` →
+mints a stand-in at Closer → next sign-in escrows it over the couple's real
+seed. The line it replaced (`!hasSeed || isKeyless`) was over-eager and never
+wrong in this direction.
+→ Both sites now `?? true`. **The asymmetry is the rule to keep:** wrongly
+walled costs a screen you tap past; wrongly cleared costs the history. Pinned by
+a test that fails on `?? false`.
+
+**H2 — `_publishedIdentity()` returned false, not null, for a hidden row
+(FIXED, doc only).** `partner_keys_select_member` filters on
+`current_user_couple_id()`, which is NULL for an unpaired account. **RLS
+filtering returns an empty set, not an error** — `.maybeSingle()` answers null
+without throwing, so the `catch` never fires and the function returns false.
+The doc claimed null. Corrected to describe what it does, and why the unpaired
+case survives it (no partner ⇒ nobody to answer a ceremony; the funnel routes
+them to `/couple` above the keyless gate). The dangerous direction, a paired
+reinstall, reads authoritatively.
+
+**H3 — the `answer()` guard locks out builds 27-37 (KEPT, message changed).**
+`b591d90` introduced the keyless bug at `buildNumber = 27`; current is 38. Every
+account created on 27-37 was marked keyless at first sign-in, tapped past the
+ceremony (`deferred`, which `isKeyless()` still reads true), then minted its
+first real seed at Closer — **that seed is the couple's key**. My guard now
+refuses their answer, which is the one phone that can help.
+Kept anyway, and this is the reasoning to preserve: a blocked ceremony is
+recoverable (sign out, sign in — that re-runs escrow and a successful restore
+calls `clearKeyless`); two keyless phones handing over a stand-in is not. The
+message no longer tells them to use the phone they are holding; it names the fix.
+**Open:** the durable answer is a human override on the ceremony screen — that
+exchange is already built on a second human confirming, and only the human can
+answer "can you still read your messages here?". Not attempted late in a long
+session on this file.
+
+**H4 (FIXED)** `escrowStale` was an exitless screen: no back affordance,
+`router.dart:78` returns null for `/new-password`, and the only control re-sent
+the same password — which GoTrue answers `same_password` and the catch rendered
+as "the link may have expired", which is false. Now shows Continue.
+
+**M1 (FIXED)** the 60 s reset throttle was a `State` field. Reading the mail
+means backgrounding, which raises the cover, which REPLACES the router subtree
+— so it reset on exactly the trip it existed to survive. Now `static`.
+**M2 (FIXED)** gotrue pushes a dead-link failure as a stream ERROR, not a value;
+neither listener had `onError`, so a stale link opened the cover and nothing
+ever happened. Now reported and the cover is raised.
+**M3 (FIXED)** `release.sh` bumped pubspec + release_gate BEFORE gating, so a
+red tree burned a build number and the retry skipped one. Gate moved to step 0,
+above the bump.
+**L1 (FIXED)** dartdoc had been glued onto the wrong function.
+**L2 (open, minor)** `isMissing()` runs twice on the sign-in path.
+
+**Cleared by the same pass, do not re-litigate:** the `release.sh` gate
+arithmetic under `set -euo pipefail`; the regex-anchor fix (independently
+re-derived: `warning - ` 0 sp, `  error - ` 2 sp, `   info - ` 3 sp); analyzer
+findings go to **stdout**, so `'${r.stdout}'` is right; `friendlyAuthError`
+ordering loses no message; `_authSub` created once and cancelled once, with
+cold-start covered by the BehaviorSubject replay; the event-type filter is
+load-bearing — **never widen it**, `initialSession` and `tokenRefreshed` both
+carry a live session and would drop the disguise on every launch and every
+~50-minute refresh; and deleting the sign-up escrow call was not a regression.
+
+**The lesson for this file:** a green gate said nothing about any of the four
+highs. Both of mine were introduced BY a fix, in the same function I was fixing,
+and both read as obviously correct. Adversarial review of a diff is not optional
+on the escrow/keyless path.

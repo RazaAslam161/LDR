@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -5,6 +6,66 @@ import 'package:miles/core/utils/json_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:miles/core/data/key_escrow.dart';
+
+/// Whether a device whose escrow did not restore has actually LOST a key.
+///
+/// Top-level, like [argon2idDerive], so the decision can be tested without the
+/// keystore and the network the three inputs come from. It used to read
+/// `!hasSeed || isKeyless` inline, which walled every brand-new account: the
+/// seed is minted lazily, so a first sign-in has none and looked identical to a
+/// wipe.
+///
+/// [hadPriorIdentity] is the only input that can tell those apart — a public
+/// key this account published that this device can no longer produce.
+bool strandedAfterRestore({
+  required bool alreadyKeyless,
+  required bool hasSeed,
+  required bool hadPriorIdentity,
+}) =>
+    alreadyKeyless || (!hasSeed && hadPriorIdentity);
+
+/// What a password change did to this device's key backup.
+///
+/// Three outcomes because the screen has three honest things to say, and used
+/// to say the first one for all of them.
+enum PasswordChangeOutcome {
+  /// The escrow is re-sealed under the new password — or there was no key on
+  /// this device to seal, which is the ordinary state of an account that has
+  /// not opened a screen that mints one. Neither needs explaining.
+  settled,
+
+  /// A key is on this device but the re-seal did not take. The escrow is still
+  /// sealed under the password just replaced, so nobody can open it: this
+  /// phone is now the only copy of the couple's key.
+  escrowStale,
+
+  /// This device cannot read the couple's history. The partner holds the key
+  /// and the router sends them to the ceremony.
+  keyless,
+}
+
+/// What a password change did to the key backup, from the three facts that
+/// decide it.
+///
+/// Top-level and pure for the same reason as [strandedAfterRestore]: the inputs
+/// come from the keystore and the network, and the decision is the part worth
+/// pinning. [publishedIdentity] is only consulted when there is no seed here,
+/// where it separates a real reinstall from an account that simply has not
+/// opened a screen that mints one yet.
+PasswordChangeOutcome passwordChangeOutcome({
+  required bool hasSeed,
+  required bool publishedIdentity,
+  required bool escrowWritten,
+}) {
+  if (!hasSeed) {
+    return publishedIdentity
+        ? PasswordChangeOutcome.keyless
+        : PasswordChangeOutcome.settled;
+  }
+  return escrowWritten
+      ? PasswordChangeOutcome.settled
+      : PasswordChangeOutcome.escrowStale;
+}
 
 /// All Supabase queries go through here so the screens stay thin.
 ///
@@ -30,20 +91,28 @@ class SupabaseRepository {
     required String email,
     required String password,
   }) async {
-    await _c.auth.signUp(
+    final res = await _c.auth.signUp(
       email: email,
       password: password,
       emailRedirectTo: authCallbackUrl,
     );
-    final uid = _c.auth.currentUser?.id;
-    if (uid != null) await CryptoCore.bindAccount(uid);
-    // Escrow at sign-up too.
+    // Read off the RESPONSE, never off currentUser.
     //
-    // The wrap key is derived from the password, and the password only exists
-    // in memory at these two moments. Backing up only at sign-in would leave
-    // every user who has never signed out with no escrow at all — and they are
-    // the ones who lose everything on their next reinstall. This is not
-    // something a fleet can be told to do manually.
+    // gotrue only swaps the stored session when the reply carries one, and with
+    // email confirmation on it never does. `currentUser` was therefore whoever
+    // was signed in BEFORE this call — so a second account created on a handset
+    // that still held a session bound key storage to the first account and
+    // sealed its seed under a password that account will never sign in with.
+    // The owner discovers it on their next reinstall, as a MAC failure nothing
+    // reports and a history nobody can open.
+    //
+    // No session means no account to act for yet. The escrow this used to
+    // attempt here could never have written a row anyway: the wrap needs a
+    // seed, and the seed is not minted until something asks for the keypair.
+    if (res.session == null) return;
+    final uid = res.user?.id;
+    if (uid == null) return;
+    await CryptoCore.bindAccount(uid);
     await KeyEscrow.backup(password);
   }
 
@@ -70,17 +139,97 @@ class SupabaseRepository {
     // Order matters: restore, then back up. Backing up first would seal the
     // brand-new throwaway key over the good one and make the loss permanent.
     if (!await KeyEscrow.restore(password)) {
-      // Nothing came back, so ask the seed — not the write below — whether this
-      // device is stranded. A failed upsert is a retry; a phone that holds its
-      // key and hit one bad response would otherwise be marked keyless, routed
-      // into the ceremony from every screen, and refused escrow from then on.
-      // Recorded rather than navigated, because a `context.go` from the sign-in
-      // page loses the race with the redirect the auth event has already
-      // started — and a cold start never comes back through here at all.
-      final stranded =
-          !await CryptoCore.hasSeed() || await CryptoCore.isKeyless();
+      // Nothing came back, so decide whether this device has actually LOST a
+      // key — recorded rather than navigated, because a `context.go` from the
+      // sign-in page loses the race with the redirect the auth event has
+      // already started, and a cold start never comes back through here.
+      //
+      // "No seed on this device" alone is not evidence of loss. The seed is
+      // minted lazily, the first time anything asks for the keypair, so every
+      // brand-new account has none at its first sign-in — and reading that as a
+      // wipe walled every new user behind a ceremony asking their partner to
+      // send back a key neither of them had ever had. It re-armed on each
+      // sign-in, because `deferRecovery` leaves `isKeyless` true.
+      //
+      // A published public key this device can no longer produce is evidence.
+      // Nothing else here distinguishes the two cases.
+      final alreadyKeyless = await CryptoCore.isKeyless();
+      final hasSeed = await CryptoCore.hasSeed();
+      // Asked only when it can still change the answer, so an ordinary sign-in
+      // on a phone that holds its key does not pay for a round trip. Null is
+      // "could not tell" — neither evidence of loss nor evidence of a first
+      // run, and both decisions below refuse to act on it.
+      final published =
+          alreadyKeyless || hasSeed ? null : await _publishedIdentity();
+      final stranded = strandedAfterRestore(
+        alreadyKeyless: alreadyKeyless,
+        hasSeed: hasSeed,
+        // Unknown counts as LOST, and the asymmetry is the reason. Walling
+        // someone who was fine costs a screen they can tap past. Clearing
+        // someone who was stranded costs the couple's history: they are never
+        // routed to the ceremony, mint a stand-in on the first Closer screen,
+        // and the sign-in after that escrows it over the row that still held
+        // the real seed. The old line marked unconditionally and was never
+        // wrong in this direction; `?? false` made it wrong on any sign-in
+        // where this one lookup happened to fail.
+        hadPriorIdentity: published ?? true,
+      );
+      // Two positive answers, not one. The server has no published key for this
+      // account AND no escrow row: nothing existed here before, so minting the
+      // seed now costs nothing and finally gives the backup below something to
+      // seal — which it never had at a first sign-in, and why production
+      // carried two escrow rows against six accounts.
+      //
+      // Either signal being unknown mints nothing. `published` is null when the
+      // lookup could not be made; `isMissing` answers false when it cannot
+      // reach the server. A phone that minted on a guess would seal a stand-in
+      // over the row still holding the couple's real key, which is the one
+      // outcome nothing here may risk.
+      if (!stranded && published == false && await KeyEscrow.isMissing()) {
+        await CryptoCore.ensureSeed();
+      }
       await KeyEscrow.backup(password);
       if (stranded) await CryptoCore.markKeyless();
+    }
+  }
+
+  /// Whether this account has ever published a real X25519 public key.
+  ///
+  /// Answers "did this account once have an identity this device can no longer
+  /// produce?" — the question [signIn] needs and the local keystore cannot
+  /// answer, since a reinstall and a first run look identical from there.
+  ///
+  /// Three answers. True is evidence of loss. False means the read succeeded
+  /// and showed no key. **Null means the read itself failed** — no evidence
+  /// either way, and callers must not read it as "brand new": that is how a
+  /// stranded phone mints a stand-in and escrows it over the real row. Both
+  /// callers default an unknown to LOST.
+  ///
+  /// Note what false does NOT distinguish. `partner_keys_select_member` scopes
+  /// reads to the caller's couple, so an unpaired account sees no row whether
+  /// or not one exists, and RLS filtering returns an empty set rather than an
+  /// error — `.maybeSingle()` answers null without throwing. So false covers
+  /// both "never published" and "unpaired, so hidden".
+  ///
+  /// That is survivable rather than ideal, and only because of what an unpaired
+  /// account is: it has no partner, so the ceremony false would skip has nobody
+  /// to answer it, and the funnel routes it to `/couple` above the keyless gate
+  /// in `buildRouter` anyway. The dangerous direction is the paired reinstall,
+  /// and there the read is authoritative.
+  static Future<bool?> _publishedIdentity() async {
+    try {
+      final uid = _c.auth.currentUser?.id;
+      if (uid == null) return null;
+      final row = await _c
+          .from('partner_keys')
+          .select('public_key')
+          .eq('user_id', uid)
+          .maybeSingle();
+      final pub = row?['public_key'] as String?;
+      return pub != null && pub != CryptoCore.legacyPublicKey;
+    } catch (e) {
+      debugPrint('[auth] published-identity lookup failed: ${e.runtimeType}');
+      return null;
     }
   }
 
@@ -117,7 +266,11 @@ class SupabaseRepository {
   }
 
   /// Sets a new password for the session opened by a recovery link.
-  static Future<void> updatePassword(String newPassword) async {
+  ///
+  /// Returns what became of the key backup, because "the password changed" and
+  /// "your history is still recoverable" are different facts and the screen was
+  /// printing the first over a silent failure of the second.
+  static Future<PasswordChangeOutcome> updatePassword(String newPassword) async {
     // Bound first, like sign-in: key material is stored per account, and a
     // recovery link can land here before loadProfile has bound anything — in
     // which case both the question below and the mark further down would go to
@@ -129,22 +282,30 @@ class SupabaseRepository {
     // when it is absent, so a moment later this can no longer be answered.
     final hasSeed = await CryptoCore.hasSeed();
     await _c.auth.updateUser(UserAttributes(password: newPassword));
-    if (!hasSeed) {
-      // A reset from a reinstall or a new phone. The row is sealed under the
-      // password they have just forgotten and there is nothing here to re-seal
-      // it with; writing anyway would replace the only copy of their key with
-      // a stand-in minted on the first Closer screen, silently and for good.
-      // Leave the row alone and send them to the partner, who still has it.
+    // "No seed here" is not by itself a reinstall — the seed is minted lazily,
+    // so an account that resets before ever opening a screen that mints one
+    // looks identical. Marking that keyless walled people out of a couple that
+    // had written nothing, permanently, on a password reset. Same evidence as
+    // [signIn]: a published key this device can no longer produce.
+    //
+    // The escrow, when there IS a seed, is sealed under the OLD password — the
+    // one just forgotten. Left alone, the next reinstall fails to open it,
+    // mints a throwaway key, and the following sign-in escrows that over the
+    // good row. This is the one moment both halves exist, and the boolean
+    // backup returns is the whole reason it returns one: a refusal leaves the
+    // escrow sealed under a password nobody knows, and the screen used to print
+    // "Password updated" over it either way.
+    final outcome = passwordChangeOutcome(
+      hasSeed: hasSeed,
+      // `?? true` for the same reason as [signIn]: a lookup that failed is not
+      // permission to treat a reinstall as a first run.
+      publishedIdentity: !hasSeed && (await _publishedIdentity() ?? true),
+      escrowWritten: hasSeed && await KeyEscrow.backup(newPassword),
+    );
+    if (outcome == PasswordChangeOutcome.keyless) {
       await CryptoCore.markKeyless();
-      return;
     }
-    // The escrow is sealed under the OLD password, which in the reset flow is
-    // the one the user has just forgotten. Left alone, the next reinstall fails
-    // to open it, mints a throwaway key, and the following sign-in escrows that
-    // over the good row — losing the history permanently and silently. The
-    // original seed is still on this device, so re-wrapping here is the one
-    // moment both halves exist.
-    await KeyEscrow.backup(newPassword);
+    return outcome;
   }
 
   static Future<void> signInWithGoogle() async {

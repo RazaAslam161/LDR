@@ -39,6 +39,8 @@ import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'
+    show AuthChangeEvent, AuthState;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -193,6 +195,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     with WidgetsBindingObserver {
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _sub;
+  StreamSubscription<AuthState>? _authSub;
   Timer? _heartbeat;
   final _volumeChannel = const MethodChannel('miles/volume_keys');
 
@@ -213,6 +216,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     WidgetsBinding.instance
         .addPostFrameCallback((_) => AppLock.lockIfEnabled());
     _initDeepLinks();
+    _watchAuthLinkRedemption();
     _watchPasswordRecovery();
     _startHeartbeat(); // app launches foregrounded
 
@@ -433,6 +437,48 @@ class _MilesAppState extends ConsumerState<MilesApp>
     }
   }
 
+  /// Raise the cover when a mail link is actually redeemed.
+  ///
+  /// Reading the link opens a mail app, which backgrounds this one and drops it
+  /// to the cover; the link then wakes it behind that cover, where the router
+  /// does not exist. The user is looking at a calculator with nothing to say it
+  /// worked.
+  ///
+  /// Driven from the auth stream rather than from the incoming intent, because
+  /// only the stream is evidence: a session appears here exactly when gotrue
+  /// has redeemed a real token against the real server, which no third-party
+  /// app can cause. See [_handleLink].
+  void _watchAuthLinkRedemption() {
+    _authSub = SupabaseService.authChanges.listen((event) {
+      // These two events only, and the narrowness is the whole point.
+      //
+      // onAuthStateChange is a BehaviorSubject: it replays its last value to
+      // every new subscriber and it emits `tokenRefreshed` on a timer. Reacting
+      // to "there is a session" would therefore lift the cover on the replayed
+      // `initialSession` of every ordinary launch, and again at each silent
+      // token refresh — turning the disguise off for everyone who simply has an
+      // account. `signedIn` and `passwordRecovery` are what a redeemed mail
+      // link produces, and a normal sign-in raises neither from behind the
+      // cover because the user is already looking at the real app by then.
+      if (event.event != AuthChangeEvent.signedIn &&
+          event.event != AuthChangeEvent.passwordRecovery) {
+        return;
+      }
+      if (event.session == null) return;
+      if (MilesApp.showRealApp.value) return;
+      pendingAuthLink.value = true;
+    }, onError: (Object e, StackTrace s) {
+      // A dead or already-spent link throws inside getSessionFromUrl, and
+      // gotrue pushes that as a stream ERROR rather than a value. With no
+      // handler it became an unhandled zone error and the user — who is looking
+      // at the cover, because opening the mail app raised it — saw a calculator
+      // and nothing else, forever. Raising the cover here is what turns a
+      // silent dead end into a screen that can say so.
+      ErrorReporter.report(e, s, kind: 'auth-link');
+      if (!MilesApp.showRealApp.value) pendingAuthLink.value = true;
+    },);
+  }
+
   /// Route to the new-password screen the moment a recovery session opens.
   ///
   /// Listened for here rather than in the router redirect because the event is
@@ -485,35 +531,24 @@ class _MilesAppState extends ConsumerState<MilesApp>
   /// Handles tethered://join?code=ABCDEF — stash the code and send the user to
   /// the pairing screen (the router gates auth/onboarding from there).
   ///
-  /// tethered://auth-callback (email confirmation, password recovery) needs no
-  /// token handling here: supabase_flutter parses those off the incoming link
-  /// itself and emits the auth event. What it cannot do is get the app out from
-  /// behind the cover, which is exactly where opening the inbox left it — so
-  /// that half is ours. See [pendingAuthLink].
+  /// tethered://auth-callback (email confirmation, password recovery) is
+  /// deliberately ignored here. supabase_flutter parses the token off the
+  /// incoming link itself; getting the app out from behind the cover is the
+  /// half that is ours, and it is raised from the auth stream instead — see
+  /// [_watchAuthLinkRedemption] and [pendingAuthLink].
   void _handleLink(Uri uri) {
     if (uri.scheme != 'tethered') return;
     if (uri.host == 'auth-callback') {
-      // The scheme alone is not evidence. MainActivity is exported and this
-      // intent-filter carries BROWSABLE, so a bare
-      // Intent(ACTION_VIEW, "tethered://auth-callback") from any installed app
-      // — or a link on any web page — used to set this, and CoverGate then ran
-      // runEntryGate() unconditionally. With no app lock enrolled, which is the
-      // default, that dropped the disguise on a third party's say-so.
+      // The intent is not evidence, and no test of its contents can make it
+      // evidence. MainActivity is exported and this filter carries BROWSABLE,
+      // so any installed app — or any web page — can send
+      // Intent(ACTION_VIEW, "tethered://auth-callback"). Raising the cover on
+      // that dropped the disguise on a third party's say-so, and the guard that
+      // replaced it only asked whether the caller had also supplied one of five
+      // query parameters. `type` is a public constant: `?type=recovery` passed.
       //
-      // A real Supabase callback carries the material it is redeeming. This
-      // narrows the caller from "anyone" to "anyone who also supplies a
-      // plausible token", and is the interim: the durable fix is to raise this
-      // off the auth-state stream (passwordRecovery / signedIn arriving while
-      // showRealApp is false) rather than off an intent at all.
-      const proof = ['code', 'access_token', 'refresh_token', 'token', 'type'];
-      final q = uri.queryParameters;
-      final frag = uri.fragment.isEmpty
-          ? const <String, String>{}
-          : Uri.splitQueryString(uri.fragment);
-      final carries = proof.any((k) =>
-          (q[k]?.isNotEmpty ?? false) || (frag[k]?.isNotEmpty ?? false));
-      if (!carries) return;
-      pendingAuthLink.value = true;
+      // What cannot be forged is the session actually changing, which only
+      // happens if gotrue redeemed a real token against the real server.
       return;
     }
     if (uri.host != 'join') return;
@@ -539,6 +574,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     EmergencyLockService.dispose();
     _stopHeartbeat();
     _sub?.cancel();
+    _authSub?.cancel();
     // Fires up to 6s after a pause and touches presenceRouteObserver. Left
     // pending it outlives the state that owns it, and a widget test that
     // disposes the tree fails on the timer rather than on what it was testing.
