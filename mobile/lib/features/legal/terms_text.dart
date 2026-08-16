@@ -10,12 +10,18 @@ const milesTermsVersion = 1;
 /// reading both.
 const milesTermsUpdated = '16 August 2026';
 
-/// Where the privacy policy is published. `docs/legal/privacy-policy.md` and
-/// `web/privacy-policy.html` exist; nothing hosts them yet, and inventing a URL
-/// here would ship a link that 404s. Empty means "not published": the About
-/// card says so instead of opening a dead page.
+/// Where the privacy policy is published.
+///
+/// Vercel project `miles-legal`, deployed from `web/`. It replaced an r2.dev
+/// URL — that host is Cloudflare's rate-limited development domain, which their
+/// own docs say not to build on, and it was serving one page while the other
+/// four 404'd.
+///
+/// All six pages sit in one directory and link to each other with relative
+/// hrefs, so this base must not be split across hosts. Empty would mean "not
+/// published", and the About card says so rather than opening a dead page.
 const milesPrivacyPolicyUrl =
-    'https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/privacy-policy.html';
+    'https://miles-legal.vercel.app/privacy-policy.html';
 
 /// Whether the Terms are complete enough to put in front of a user.
 ///

@@ -80,12 +80,29 @@ class SupabaseRepository {
 
   /// Where Supabase sends the user back to after they tap a link in an email.
   ///
-  /// Without this Supabase uses the project's Site URL, which defaults to
-  /// http://localhost:3000 — so every confirmation and reset mail opened
-  /// "localhost refused to connect" on the user's phone. The scheme is
-  /// registered in AndroidManifest.xml and must also be listed under
-  /// Authentication -> URL Configuration -> Redirect URLs in the dashboard.
-  static const authCallbackUrl = 'tethered://auth-callback';
+  /// An https:// page rather than the `tethered://auth-callback` scheme this
+  /// used to be. A custom scheme is invisible to everything that is not the
+  /// phone holding the app: Gmail's in-app browser blocks it, a desktop has no
+  /// handler for it at all, and an uninstalled app leaves a blank tab. Every
+  /// one of those is a new user's FIRST interaction with Miles, and it showed
+  /// them nothing — no page, no branding, no explanation.
+  ///
+  /// The page forwards whatever arrives to `tethered://auth-callback`
+  /// unchanged, so the app-side flow below is untouched: gotrue still redeems
+  /// the token, and `_handleLink` in main.dart still refuses to trust the
+  /// intent itself.
+  /// Where it cannot hand off — a desktop, which under PKCE can never hold the
+  /// code verifier — it says so instead of failing silently.
+  ///
+  /// MUST be listed under Authentication -> URL Configuration -> Redirect URLs
+  /// in the Supabase dashboard. If it is not, Supabase ignores it and falls
+  /// back to the project's Site URL, which is how every confirmation mail once
+  /// opened "localhost refused to connect" on a phone.
+  ///
+  /// The old scheme stays registered in AndroidManifest.xml and must not be
+  /// removed: mails already sent carry it, and shipped builds still redeem it.
+  static const authCallbackUrl =
+      'https://miles-legal.vercel.app/auth-callback.html';
 
   static Future<void> signUp({
     required String email,

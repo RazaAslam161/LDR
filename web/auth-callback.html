@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Miles</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbf8f6;
+    --surface: #ffffff;
+    --ink: #1d1a19;
+    --ink-soft: #55504d;
+    --rule: #e6dfda;
+    --accent: #a8556b;
+    --ok-bg: #eaf4ec;
+    --ok-rule: #7ba985;
+    --err-bg: #fceceb;
+    --err-rule: #d98a84;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141211;
+      --surface: #1c1917;
+      --ink: #ece7e3;
+      --ink-soft: #a49c97;
+      --rule: #322c29;
+      --accent: #e59db1;
+      --ok-bg: #17251a;
+      --ok-rule: #3f6a49;
+      --err-bg: #2a1715;
+      --err-rule: #7a3934;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem 1.15rem;
+    background: var(--bg); color: var(--ink);
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 27rem; width: 100%; text-align: center; }
+  .mark {
+    width: 64px; height: 64px; margin: 0 auto 1.5rem;
+    display: grid; place-items: center;
+    border-radius: 18px; background: var(--surface);
+    border: 1px solid var(--rule);
+    font-size: 30px; line-height: 1;
+  }
+  h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 .6rem; letter-spacing: -.015em; }
+  p { color: var(--ink-soft); margin: .7rem 0; }
+  p.lead { color: var(--ink); font-size: 1.02rem; }
+  a.btn, button.btn {
+    display: block; width: 100%; margin: 1.5rem 0 0; padding: .85rem 1rem;
+    font: inherit; font-weight: 650; text-decoration: none; text-align: center;
+    border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  .note {
+    border-radius: 10px; padding: .85rem .95rem; margin-top: 1.5rem;
+    font-size: .95rem; text-align: left; color: var(--ink);
+  }
+  .note.ok  { background: var(--ok-bg);  border: 1px solid var(--ok-rule); }
+  .note.err { background: var(--err-bg); border: 1px solid var(--err-rule); }
+  .quiet { font-size: .92rem; }
+  footer { margin-top: 2.5rem; font-size: .9rem; color: var(--ink-soft); }
+  footer a { color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="mark" aria-hidden="true">◍</div>
+
+<div id="working">
+  <h1>Opening Miles…</h1>
+  <p class="lead">One moment.</p>
+</div>
+
+<div id="ready" hidden>
+  <h1 id="ready-title">You're confirmed</h1>
+  <p class="lead" id="ready-body">Open Miles to finish signing in.</p>
+  <a class="btn" id="open" href="#">Open Miles</a>
+  <p class="quiet" id="ready-hint">If nothing happens, open the Miles app on
+  this phone yourself — you're already confirmed.</p>
+</div>
+
+<div id="desktop" hidden>
+  <h1>Open this on your phone</h1>
+  <p class="lead">This link finishes inside the Miles app, and Miles is an
+  Android app — so it has to be opened on the phone you started from.</p>
+  <div class="note ok">
+    <strong>Forward this email to yourself</strong> and open it on your phone,
+    or open your email app there and tap the link again. The link works until it
+    expires.
+  </div>
+</div>
+
+<div id="failed" hidden>
+  <h1 id="failed-title">This link didn't work</h1>
+  <p class="lead" id="failed-body"></p>
+  <div class="note err" id="failed-note"></div>
+</div>
+
+<footer>
+  <a href="index.html">Miles</a> ·
+  <a href="privacy-policy.html">Privacy</a> ·
+  <a href="mailto:Razaaslam3210@gmail.com">Support</a>
+</footer>
+
+</main>
+
+<script>
+// Supabase sends the browser here after it verifies an email-confirmation or
+// password-reset link. This page's ONLY job is to hand what arrived to the app,
+// unchanged, and to say something sensible when it cannot.
+//
+// WHY THE APP AND NOT THIS PAGE. The client uses PKCE (supabase_flutter 2.x
+// default: authFlowType is not set in supabase_service.dart, and PKCE is the
+// default). The code verifier is generated on the PHONE and never leaves it, so
+// only that phone can exchange the code for a session. A browser — this one, or
+// one on a laptop — has nothing to exchange with. That is not a limitation to
+// route around; it is the property that makes the link safe to email.
+//
+// Nothing here is logged, stored, or sent anywhere. The parameters are copied
+// from this URL straight onto the tethered:// URL and the page keeps no copy.
+// Referrer-Policy is no-referrer at the header and in a meta tag, so the code
+// cannot leak through a referer header on the footer links.
+(function () {
+  var q = new URLSearchParams(location.search);
+  // Supabase uses the query string for PKCE and the hash for the older implicit
+  // flow. Accept either, so a project-level flow change does not silently break
+  // every confirmation email.
+  var hash = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+  function param(name) { return q.get(name) || hash.get(name) || ""; }
+
+  var code = param("code");
+  var accessToken = param("access_token");
+  var type = param("type");                    // "recovery" | "signup" | ...
+  var error = param("error") || param("error_code");
+  var errorDesc = param("error_description");
+
+  var isRecovery = type === "recovery";
+  var show = function (id) { document.getElementById(id).hidden = false; };
+  var hide = function (id) { document.getElementById(id).hidden = true; };
+  var text = function (id, s) { document.getElementById(id).textContent = s; };
+
+  // 1. Supabase itself rejected the link — expired, already used, or tampered.
+  if (error) {
+    hide("working");
+    text("failed-body", isRecovery
+      ? "Password reset links expire, and each one can only be used once."
+      : "Confirmation links expire, and each one can only be used once.");
+    text("failed-note", errorDesc
+      ? decodeURIComponent(errorDesc.replace(/\+/g, " "))
+      : "Request a new link from the app and open the newest email.");
+    show("failed");
+    return;
+  }
+
+  // 2. Nothing usable arrived. Someone opened the page directly.
+  if (!code && !accessToken) {
+    hide("working");
+    text("failed-title", "Nothing to confirm");
+    text("failed-body", "This page finishes a link from a Miles email.");
+    text("failed-note", "Open the link in the email itself rather than this "
+      + "address on its own.");
+    show("failed");
+    return;
+  }
+
+  // 3. Hand it to the app, parameters intact. The app-side handler deliberately
+  //    treats the intent as untrusted and acts only on a session that gotrue
+  //    actually redeemed, so forwarding here grants nothing by itself.
+  var deepLink = "tethered://auth-callback" + (location.search || "")
+    + (location.hash || "");
+  document.getElementById("open").setAttribute("href", deepLink);
+
+  if (isRecovery) {
+    text("ready-title", "Reset your password");
+    text("ready-body", "Miles will open on the screen where you choose a new "
+      + "password.");
+    text("ready-hint", "If nothing happens, this link has to be opened on the "
+      + "phone where you asked for the reset.");
+  }
+
+  // A desktop cannot hold the PKCE verifier, so say so instead of firing a
+  // scheme nothing will answer and leaving a blank page — the exact failure
+  // this page exists to remove.
+  var isAndroid = /android/i.test(navigator.userAgent);
+  if (!isAndroid) {
+    hide("working");
+    show("desktop");
+    return;
+  }
+
+  // Try the app immediately, then reveal the manual button. Gmail's in-app
+  // browser blocks some automatic scheme navigations but honours a real tap,
+  // which is why the button is always shown rather than used as a fallback.
+  try { location.href = deepLink; } catch (e) { /* blocked; the button remains */ }
+  setTimeout(function () {
+    hide("working");
+    show("ready");
+  }, 900);
+})();
+</script>
+
+</body>
+</html>

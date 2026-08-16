@@ -3793,3 +3793,53 @@ provider is ever added.
    "News"; both manifests set `android:label="Miles"`.
 6. Dead `GIPHY_API_KEY` line still in `mobile/.env` (a DIFFERENT key from the one
    now in `app_secrets`); nothing reads it, but it ships in the artifact.
+
+## §39 — Legal pages are hosted; the domain blocker was never real (2026-08-17)
+
+**LIVE: https://miles-legal.vercel.app** — a Vercel project separate from the
+owner's main site, deployed from `web/` in this repo. Verified, every URL:
+
+    200  /                      200  privacy-policy.html   200  terms.html
+    200  csae.html              200  delete-account.html   200  faq.html
+
+Security headers confirmed on the live response; `grep -ci "before publishing"`
+on the served privacy policy returns **0**, so the author TODO box is gone.
+
+**"Buy a domain" was never a Play requirement.** Play needs a reachable HTTPS
+URL, not a custom domain. A free `*.vercel.app` satisfies the privacy-policy,
+account-deletion and child-safety fields. Recorded because §31's launch plan
+listed the domain purchase as a blocker and it cost nothing to remove.
+
+**Console URLs:**
+  Privacy policy    https://miles-legal.vercel.app/privacy-policy.html
+  Account deletion  https://miles-legal.vercel.app/delete-account.html
+  Child safety      https://miles-legal.vercel.app/csae.html
+
+**`terms_text.dart:17` now points there.** It was on
+`pub-c97f0d4f…r2.dev/privacy-policy.html` — Cloudflare's rate-limited DEV domain,
+which their docs say not to depend on, and which served that one page while the
+other four 404'd.
+
+**Deployed from `web/` with no copy, deliberately.** Two sets of legal pages
+drifting apart is the exact failure §38 had to fix; a privacy policy that
+disagrees with itself is worse than one merely out of date. `docs/legal/*.md`
+remain the markdown sources and must be kept in step by hand.
+
+**Redeploy after any edit:** `cd E:\LDR\web && npx vercel --prod`
+Reasoning that cannot live in `vercel.json` is in `web/README.md` — JSON has no
+comments and Vercel's schema REJECTS unknown keys (a `comment` field failed the
+first deploy with "should NOT have additional property").
+
+**The CSP has one deliberate relaxation, do not "tighten" it blindly.**
+`script-src 'unsafe-inline'` is required because `delete-account.html` carries an
+inline script that POSTs to `account-delete`. Removing it leaves the page
+rendering perfectly while the delete button silently stops working — on a page
+Play requires to function. Caught before the first deploy, not after.
+
+**Still open:** one `[PLACEHOLDER]` in `csae.html` §5 — the Pakistani national
+law-enforcement unit that receives CSAM reports and its channel. NCMEC's
+CyberTipline is already named as the international route so the page stands
+without it, but Play expects the local authority. Not guessed: naming the wrong
+agency in a child-safety policy is worse than an honest gap.
+
+**Gate:** `490 issues found` (0 errors/warnings), `01:56 +770: All tests passed!`
