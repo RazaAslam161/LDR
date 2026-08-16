@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/data/supabase_repository.dart';
-import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/glow_button.dart';
-import 'package:miles/core/widgets/love_text_field.dart';
+import 'package:miles/features/auth/widgets/alert_banner.dart';
+import 'package:miles/features/auth/widgets/auth_scaffold.dart';
+import 'package:miles/features/auth/widgets/labeled_field.dart';
 
 /// Where a password-reset link lands.
 ///
@@ -25,29 +24,46 @@ class NewPasswordPage extends ConsumerStatefulWidget {
 class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+  final _confirmFocus = FocusNode();
   bool _busy = false;
-  String? _error;
+  bool _reveal = false;
+
+  /// Which field is wrong, rather than one line under both of them. "Those two
+  /// do not match" printed centrally under a pair of identical-looking boxes
+  /// does not say which one to retype.
+  String? _passwordError;
+  String? _confirmError;
+  String? _formError;
 
   @override
   void dispose() {
     _password.dispose();
     _confirm.dispose();
+    _confirmFocus.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final pw = _password.text;
     if (pw.length < 8) {
-      setState(() => _error = 'Use at least 8 characters.');
+      setState(() {
+        _passwordError = 'Use at least 8 characters.';
+        _confirmError = null;
+      });
       return;
     }
     if (pw != _confirm.text) {
-      setState(() => _error = 'Those two do not match.');
+      setState(() {
+        _passwordError = null;
+        _confirmError = 'Those two do not match.';
+      });
       return;
     }
     setState(() {
       _busy = true;
-      _error = null;
+      _passwordError = null;
+      _confirmError = null;
+      _formError = null;
     });
     try {
       await SupabaseRepository.updatePassword(pw);
@@ -62,7 +78,7 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
           _busy = false;
           // The recovery session is short-lived; saying so beats a bare
           // "something went wrong" when the link has simply gone stale.
-          _error = 'Could not update your password. The link may have '
+          _formError = 'Could not update your password. The link may have '
               'expired — request a new one.';
         });
       }
@@ -71,48 +87,59 @@ class _NewPasswordPageState extends ConsumerState<NewPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: EmberBackground(
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Choose a new password',
-                    style: TextStyle(
-                        color: MilesColors.cream50,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,),),
-                const SizedBox(height: 24),
-                LoveTextField(
-                  controller: _password,
-                  label: 'New password',
-                  obscureText: true,
-                ),
-                const SizedBox(height: 14),
-                LoveTextField(
-                  controller: _confirm,
-                  label: 'Confirm password',
-                  obscureText: true,
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  Text(_error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: MilesColors.ember),),
-                ],
-                const SizedBox(height: 24),
-                GlowButton(
-                  label: _busy ? 'Saving…' : 'Save password',
-                  onPressed: _busy ? null : _save,
-                ),
-              ],
+    return AuthScaffold(
+      title: 'Choose a new password',
+      subtitle: 'This replaces the old one everywhere you are signed in.',
+      centred: true,
+      children: [
+        LabeledField(
+          label: 'New password',
+          hint: 'At least 8 characters.',
+          error: _passwordError,
+          child: TextField(
+            controller: _password,
+            obscureText: !_reveal,
+            autofillHints: const [AutofillHints.newPassword],
+            textInputAction: TextInputAction.next,
+            onSubmitted: (_) => _confirmFocus.requestFocus(),
+            decoration: InputDecoration(
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _reveal = !_reveal),
+                icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
+                tooltip: _reveal ? 'Hide password' : 'Show password',
+              ),
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 16),
+        LabeledField(
+          label: 'Confirm password',
+          error: _confirmError,
+          child: TextField(
+            controller: _confirm,
+            focusNode: _confirmFocus,
+            obscureText: !_reveal,
+            autofillHints: const [AutofillHints.newPassword],
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _busy ? null : _save(),
+          ),
+        ),
+        if (_formError != null) ...[
+          const SizedBox(height: 16),
+          AlertBanner(message: _formError!),
+        ],
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: _busy
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save password'),
+        ),
+      ],
     );
   }
 }

@@ -2133,3 +2133,18 @@ All three closed. `flutter analyze mobile` 0/0, `flutter test` **730 pass** (+3)
 - host the privacy policy and set `milesPrivacyPolicyUrl`
 - neither migration is applied; `20260816140000` must NOT be (message push is
   unwanted by the owner)
+
+---
+
+## §15 User-facing FAQ — 2026-08-16
+
+`docs/legal/faq.md` (source) + `web/faq.html` (self-contained, hosts beside
+privacy-policy.html / delete-account.html). Play-first (users arrive from the Play Store; direct-link/APK installs get one
+labelled question under Updates). 26 Q&As: pairing, covers-are-opt-in,
+honest E2EE boundary (Memory Threads + Fantasy Jar only — chat is NOT E2EE and
+the FAQ says so), self-update flow, key-recovery ceremony, 30-day dissolution
+purge, contact pause, deletion. One placeholder: `[support contact]`.
+Privacy-policy drift FIXED 2026-08-16: Private Vault removed from §1/§2 in
+both privacy-policy.md and web/privacy-policy.html; Personal Vault parenthetical
+reworded. Verified: wish_jar is only a file rename — user-facing name is still
+Fantasy Jar and entries stay E2EE (CryptoCore.encryptString), so that row stands.

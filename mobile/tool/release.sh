@@ -133,10 +133,10 @@ if not so:
     print('no libapp.so in the APK'); sys.exit(1)
 blob = z.read(so[0])
 stamp = b'miles-build-' + b'$pubspec_build'
-    if stamp not in blob:
-        print('STALE SNAPSHOT: libapp.so has no ' + stamp.decode())
-        sys.exit(1)
-    sys.exit(0 if b'Update available' in blob else 1)
+if stamp not in blob:
+    print('STALE SNAPSHOT: libapp.so has no ' + stamp.decode())
+    sys.exit(1)
+sys.exit(0 if b'Update available' in blob else 1)
 " || {
   echo "REFUSING TO SHIP THIS ARTIFACT." >&2
   echo "Either update_sheet.dart is missing from libapp.so, or the Dart in it" >&2

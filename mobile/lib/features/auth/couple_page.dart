@@ -179,8 +179,14 @@ class _CouplePageState extends ConsumerState<CouplePage> {
                 right: 4,
                 child: TextButton(
                   onPressed: _loading ? null : _signOut,
-                  child: const Text('Sign out',
-                      style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
+                  // The only exit from a screen the router will not let an
+                  // unpaired account leave, so it has to be a real target
+                  // rather than 13px of text in a corner.
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    foregroundColor: MilesColors.taupe,
+                  ),
+                  child: const Text('Sign out'),
                 ),
               ),
             ],
@@ -340,12 +346,21 @@ class _InviteReveal extends StatelessWidget {
                         letterSpacing: 3,
                         color: MilesColors.taupe,),),
                 const SizedBox(height: 12),
-                Text(
-                  code,
-                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                        letterSpacing: 8,
-                        fontWeight: FontWeight.w300,
-                      ),
+                // Letter-spaced display type is unreadable to a screen reader
+                // as one word, and this is a code someone has to relay
+                // correctly for the pairing to work at all. Spelling it out
+                // character by character is the difference between "ABC123"
+                // and six letters nobody can distinguish over a phone call.
+                Semantics(
+                  label: 'Your invite code: ${code.split('').join(' ')}',
+                  excludeSemantics: true,
+                  child: Text(
+                    code,
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                          letterSpacing: 8,
+                          fontWeight: FontWeight.w300,
+                        ),
+                  ),
                 ),
                 if (expiresAt != null) ...[
                   const SizedBox(height: 8),
@@ -396,9 +411,15 @@ class _InviteReveal extends StatelessWidget {
           const SizedBox(height: 4),
           TextButton(
             onPressed: onUseTheirCode,
+            // The escape hatch for the case where both partners pressed
+            // "create" — it has to be findable and hittable, not a 13px line.
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              foregroundColor: MilesColors.taupe,
+            ),
             child: const Text(
               'They already have a code? Enter it instead',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 13),
+              textAlign: TextAlign.center,
             ),
           ),
         ],

@@ -54,6 +54,15 @@ class _IntroSplashScreenState extends State<IntroSplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Someone who has asked their phone to stop animating things has usually
+    // asked for a reason — vestibular discomfort, or a device where every
+    // animation is a stutter. Honour it by handing straight over rather than
+    // playing a 900ms fade they did not ask for. Read here rather than in
+    // initState because the setting can change while the app is alive.
+    if (MediaQuery.disableAnimationsOf(context) && !_done) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _advance());
+    }
+
     // Rise and settle: the mark lifts a little as it fades in, then holds.
     final fade = CurvedAnimation(parent: _c, curve: const Interval(0, 0.6));
     final rise = CurvedAnimation(
@@ -63,7 +72,13 @@ class _IntroSplashScreenState extends State<IntroSplashScreen>
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: GestureDetector(
+      // The whole screen is the skip target, which is right — but without a
+      // label it is an unnamed tappable rectangle to a screen reader, on the
+      // first screen of the app.
+      body: Semantics(
+        button: true,
+        label: 'Skip intro',
+        child: GestureDetector(
         onTap: _advance,
         behavior: HitTestBehavior.opaque,
         child: EmberBackground(
@@ -80,6 +95,7 @@ class _IntroSplashScreenState extends State<IntroSplashScreen>
               ),
             ),
           ),
+        ),
         ),
       ),
     );

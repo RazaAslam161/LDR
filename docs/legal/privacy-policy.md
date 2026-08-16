@@ -30,7 +30,7 @@ recorded so codes cannot be guessed.
 
 **What you send each other.** Chat messages, photographs, videos, voice notes
 and documents. Anything you write or capture inside the intimacy module
-("Closer") — memory threads, private-vault items, fantasy-jar entries.
+("Closer") — memory threads, fantasy-jar entries.
 Scheduled rituals, visits, prompts and check-ins.
 
 **Health and intimacy data.** If you use the cycle tracker, its logs and
@@ -85,7 +85,6 @@ that applies, the server stores ciphertext it cannot open.
 | | |
 |---|---|
 | Memory Threads | titles, notes and photographs |
-| Private Vault (inside Closer) | notes, photos, video and audio |
 | Fantasy Jar | the text of each entry |
 
 **NOT end-to-end encrypted — stored so that the server *could* read them:**
@@ -93,7 +92,7 @@ that applies, the server stores ciphertext it cannot open.
 | | |
 |---|---|
 | Chat | message text, photos, videos, voice notes, documents |
-| Personal Vault (the owner-only vault, not the Closer one) | note text is stored as plain text |
+| Personal Vault (your owner-only vault) | note text is stored as plain text |
 | Location | coordinates and place labels |
 | Cycle tracker | logs, events and settings |
 | Presence | online state, last seen, current screen |
@@ -103,7 +102,8 @@ that applies, the server stores ciphertext it cannot open.
 These are protected by database row-level security and private storage buckets —
 only you and your partner can fetch them through the app — and by encryption in
 transit and at rest at the hosting provider. They are **not** protected from the
-operator of the database. Do not treat chat as if it were the vault.
+operator of the database. Do not treat chat as if it were end-to-end
+encrypted.
 
 **Three further limits, stated because they are true:**
 

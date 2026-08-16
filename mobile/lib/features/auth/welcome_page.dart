@@ -5,6 +5,7 @@ import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/auth/widgets/labeled_field.dart';
@@ -126,14 +127,12 @@ class _WelcomePageState extends ConsumerState<WelcomePage> {
               const SizedBox(height: 64),
               Text(
                 'A little about you',
-                style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                      color: const Color(0xFFFBF8F4),
-                    ),
+                style: Theme.of(context).textTheme.displaySmall,
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "We'll use this to set up your space.",
-                style: TextStyle(color: Color(0x99F5EFE6)),
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 32),
               LabeledField(
@@ -182,8 +181,8 @@ class _WelcomePageState extends ConsumerState<WelcomePage> {
                               '${_birthDate!.year}',
                       style: TextStyle(
                         color: _birthDate == null
-                            ? const Color(0x4dF5EFE6)
-                            : const Color(0xFFFBF8F4),
+                            ? MilesColors.faint
+                            : MilesColors.cream50,
                       ),
                     ),
                   ),
@@ -211,11 +210,11 @@ class _WelcomePageState extends ConsumerState<WelcomePage> {
                     : const Text('Continue'),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Miles is for adults only. Your date of birth is stored on '
                 'your profile and never shared.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: Color(0x66F5EFE6)),
+                style: Theme.of(context).textTheme.labelSmall,
               ),
             ],
           ),

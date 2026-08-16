@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Miles — FAQ</title>
+<!-- BEFORE PUBLISHING: fill the [support contact] placeholder near the end. -->
+<style>
+  :root {
+    --bg: #faf9f7; --ink: #1e1b1a; --muted: #6b625e; --line: #e5e0dc;
+    --accent: #b3261e; --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16110f; --ink: #ece7e3; --muted: #a49a94; --line: #322a26;
+      --accent: #e58f89; --card: #201916;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.65 -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 1.7rem; margin: 0 0 .4rem; }
+  .lede { color: var(--muted); margin: 0 0 2.5rem; }
+  .lede a { color: var(--accent); }
+  h2 {
+    font-size: .85rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); margin: 2.8rem 0 .8rem; font-weight: 600;
+  }
+  details {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; margin: 0 0 .6rem; overflow: hidden;
+  }
+  summary {
+    cursor: pointer; padding: .85rem 1rem; font-weight: 600;
+    list-style: none; display: flex; justify-content: space-between; gap: 1rem;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--muted); flex: none; }
+  details[open] summary::after { content: "–"; }
+  details > div { padding: 0 1rem .95rem; }
+  details p { margin: 0 0 .7rem; } details p:last-child { margin-bottom: 0; }
+  details a { color: var(--accent); }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Frequently asked questions</h1>
+  <p class="lede">Straight answers to the questions people actually ask.
+  For full detail on data handling, the <a href="privacy-policy.html">privacy
+  policy</a> is the authoritative document — where the two differ, it wins.</p>
+
+  <h2>Getting started</h2>
+  <details><summary>What is Miles?</summary><div>
+    <p>A private space for two people in a relationship — messages, calls,
+    photos, shared memories and small daily rituals of closeness, built for
+    couples who live apart. There is no feed, no followers, and no one else in
+    it: every account is paired with exactly one partner.</p>
+  </div></details>
+  <details><summary>How much does it cost?</summary><div>
+    <p>Nothing. No subscriptions, no ads, no in-app purchases.</p>
+  </div></details>
+  <details><summary>What devices does it work on?</summary><div>
+    <p>Android phones (Android 7 and newer). There is no iPhone version at the
+    moment.</p>
+  </div></details>
+  <details><summary>Where do I download Miles?</summary><div>
+    <p>From the Google Play Store. If you received a direct install link from
+    us instead, that is the same app on a different update channel — see
+    “I installed Miles from a direct link” under Updates.</p>
+  </div></details>
+  <details><summary>How do I connect with my partner?</summary><div>
+    <p>One of you creates the couple, then shares the short invite code the app
+    generates. The other enters that code (or opens the invite link) and you're
+    paired. Codes are single-use and expire after 24&nbsp;hours — if one
+    expires, just make a new one.</p>
+  </div></details>
+  <details><summary>Can a third person join?</summary><div>
+    <p>No. A couple is exactly two accounts. A code for a couple that is
+    already complete is refused.</p>
+  </div></details>
+  <details><summary>Is there an age requirement?</summary><div>
+    <p>Yes — Miles is for adults, 18 and over.</p>
+  </div></details>
+
+  <h2>Privacy</h2>
+  <details><summary>Is everything end-to-end encrypted?</summary><div>
+    <p>No, and we would rather tell you plainly than imply otherwise. A small
+    set of especially sensitive areas — Memory Threads and Fantasy Jar
+    entries — is end-to-end encrypted: the encryption happens on your phone,
+    and our servers store only ciphertext they cannot read.</p>
+    <p>Everything else (chat, media, location, profile) is protected by strict
+    access controls and encryption in transit and at rest, but is not
+    end-to-end encrypted. The <a href="privacy-policy.html">privacy policy</a>
+    lists exactly which is which.</p>
+  </div></details>
+  <details><summary>Can anyone else see what we share?</summary><div>
+    <p>Access rules on the server restrict every piece of couple content to the
+    two of you. Nobody else's account can fetch it.</p>
+  </div></details>
+  <details><summary>What are “covers”?</summary><div>
+    <p>An optional layer of discretion. From Settings you can choose a cover
+    identity — the app then looks like an ordinary utility (a calculator, a
+    notes app, a weather app…) on your launcher and opens on a convincing
+    stand-in screen until you enter through a private gesture shown when you
+    pick the cover.</p>
+    <p>Miles installs under its own name and icon; a cover is something
+    <em>you</em> choose to put on, and you can take it off any time.</p>
+  </div></details>
+  <details><summary>If I turn on a cover, what still shows the real name?</summary><div>
+    <p>Android's own Settings&nbsp;→&nbsp;Apps list shows the app's real entry.
+    A cover changes the launcher and the opening screen, not the operating
+    system's records — treat it as discretion, not invisibility.</p>
+  </div></details>
+  <details><summary>Can I lock the app?</summary><div>
+    <p>Yes. App&nbsp;Lock (Settings&nbsp;→&nbsp;Security) requires your
+    fingerprint, face, or a PIN every time the app opens. There is also a quick
+    gesture that locks the app instantly if someone picks up your phone.</p>
+  </div></details>
+  <details><summary>Does my partner see my location?</summary><div>
+    <p>Only if you turn sharing on, and only at the precision you choose: off,
+    city-level, or precise. Turning it off deletes the last shared position —
+    it doesn't just stop updating.</p>
+  </div></details>
+  <details><summary>Who can see the cycle tracker?</summary><div>
+    <p>Both partners in the couple, by design — it exists to help you care for
+    each other. If you'd rather not share it, don't enable it.</p>
+  </div></details>
+
+  <h2>Messages and calls</h2>
+  <details><summary>Are voice and video calls free?</summary><div>
+    <p>Yes. Calls travel over the internet, so they use your data plan (or
+    Wi-Fi). Video calls use roughly the data of any other video-calling
+    app.</p>
+  </div></details>
+  <details><summary>Do calls go through your servers?</summary><div>
+    <p>Calls connect phone-to-phone whenever the network allows, encrypted in
+    transit. When a direct connection isn't possible, the encrypted stream is
+    relayed — the relay passes the data along but cannot read it.</p>
+  </div></details>
+  <details><summary>Why did a message not arrive instantly?</summary><div>
+    <p>Usually the other phone is asleep or offline; delivery resumes the
+    moment it reconnects. If it persists, check that battery optimisation
+    isn't restricting Miles on either phone
+    (Android Settings&nbsp;→&nbsp;Battery).</p>
+  </div></details>
+
+  <h2>Updates</h2>
+  <details><summary>How do updates work?</summary><div>
+    <p>Through the Play Store, like any app — automatically if you have
+    auto-update enabled, or from the app's Play Store page. Your messages,
+    photos and login survive updates. Occasionally a version is required to
+    keep working with the server; the app will tell you plainly when that
+    happens.</p>
+  </div></details>
+  <details><summary>How do I know if I'm up to date?</summary><div>
+    <p>Settings&nbsp;→&nbsp;About shows your version and a “Latest available”
+    line telling you whether a newer one exists.</p>
+  </div></details>
+  <details><summary>I installed Miles from a direct link (APK), not the Play Store. How do I update?</summary><div>
+    <p>From inside the app: it checks for a new version when it starts and
+    shows an update prompt — there's also an “Update available” row in
+    Settings. One tap downloads the update (currently the full app, roughly
+    220&nbsp;MB, so Wi-Fi is kinder), verifies it against a cryptographic
+    fingerprint, and hands it to Android's installer.</p>
+    <p>The first time, Android asks you to allow installs from Miles — that's
+    its standard step for any app that updates outside the Play Store, and
+    Android itself refuses any update not signed by the same key as the app
+    you already have.</p>
+  </div></details>
+
+  <h2>Your account and your data</h2>
+  <details><summary>Where is my data stored?</summary><div>
+    <p>On servers in the Asia-Pacific region (Mumbai). The
+    <a href="privacy-policy.html">privacy policy</a> details what is stored
+    and for how long.</p>
+  </div></details>
+  <details><summary>I forgot my password. Is my history gone?</summary><div>
+    <p>Your account is recoverable by email reset. For the end-to-end
+    encrypted areas, your phone holds the key — so as long as either phone
+    still has the app signed in, everything survives: the app walks you and
+    your partner through a short, one-time recovery in which their phone hands
+    the keys back to yours (you'll read a 6-digit code to them; it expires
+    after 10 minutes).</p>
+    <p>If <em>both</em> phones lose the app and no backup applies, end-to-end
+    encrypted content is unrecoverable — that is the honest cost of encryption
+    nobody else holds keys to.</p>
+  </div></details>
+  <details><summary>I got a new phone. What do I do?</summary><div>
+    <p>Install Miles, sign in, and follow the recovery step above so your new
+    phone receives the encryption keys from your partner's. Everything not
+    end-to-end encrypted is simply there after signing in.</p>
+  </div></details>
+  <details><summary>What happens if we break up?</summary><div>
+    <p>Either of you can leave the couple from Settings. When the second
+    partner leaves (or an account is deleted), the couple's entire history —
+    messages, photos, videos, everything — is permanently deleted
+    30&nbsp;days later, storage included. Re-pairing within those 30&nbsp;days
+    cancels the deletion.</p>
+  </div></details>
+  <details><summary>How do I delete my account?</summary><div>
+    <p>Settings&nbsp;→&nbsp;Account&nbsp;→&nbsp;Delete account removes your
+    account and your content — a real deletion, not a deactivation. There is
+    also a <a href="delete-account.html">web page</a> for requesting deletion
+    without reinstalling the app.</p>
+  </div></details>
+  <details><summary>Can I be forced to show what's in the app?</summary><div>
+    <p>The app can't prevent coercion, but it avoids making things worse:
+    privacy choices leave no tell-tale marks, and a paused or quiet feature
+    looks the same as nothing happening. If you're in a situation where an app
+    could put you at risk, trust your judgement first.</p>
+  </div></details>
+
+  <h2>Safety</h2>
+  <details><summary>What if I need space from my partner inside the app?</summary><div>
+    <p>Contact Pause (Settings) quiets calls and alerts from your partner
+    without announcing itself. It's enforced on the server, so it works even
+    if your phone is off.</p>
+  </div></details>
+  <details><summary>How do I report a problem or someone's behaviour?</summary><div>
+    <p>Settings&nbsp;→&nbsp;Report. Reports go to us, not to your partner.</p>
+  </div></details>
+  <details><summary>How do I get help?</summary><div>
+    <p>[support contact] — include your app version
+    (Settings&nbsp;→&nbsp;About) so we can help faster. Never include your
+    password; we will never ask for it.</p>
+  </div></details>
+
+  <footer>Miles · This page travels with the app; the
+  <a href="privacy-policy.html">privacy policy</a> is the authoritative
+  statement of data handling.</footer>
+</main>
+</body>
+</html>

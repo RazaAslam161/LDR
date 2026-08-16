@@ -25,6 +25,7 @@ import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/features/legal/faq_screen.dart';
 import 'package:miles/features/legal/terms_screen.dart';
 import 'package:miles/features/legal/terms_text.dart';
 import 'package:miles/features/safety/contact_pause.dart';
@@ -953,12 +954,23 @@ class _AboutCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Row(
+                // Wrap, not Row: three links overflow a narrow phone.
+                Wrap(
+                  spacing: 20,
+                  runSpacing: 10,
                   children: [
                     // In-app, not a URL: opening Chrome throws the user out of
                     // an app whose launcher identity may be a cover, and the
                     // terms have to be readable with no connection because they
-                    // gate the app on first run.
+                    // gate the app on first run. The FAQ follows the same rule.
+                    _AboutLink(
+                      label: 'FAQ',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const FaqScreen(),
+                        ),
+                      ),
+                    ),
                     _AboutLink(
                       label: 'Terms',
                       onTap: () => Navigator.of(context).push(
@@ -967,7 +979,6 @@ class _AboutCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 20),
                     _AboutLink(
                       label: 'Privacy Policy',
                       onTap: () => _openPrivacyPolicy(context),

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/data/supabase_repository.dart';
-import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/features/auth/widgets/alert_banner.dart';
+import 'package:miles/features/auth/widgets/auth_scaffold.dart';
+import 'package:miles/features/auth/widgets/labeled_field.dart';
 
 class SignUpPage extends ConsumerStatefulWidget {
   const SignUpPage({super.key});
@@ -15,14 +17,18 @@ class SignUpPage extends ConsumerStatefulWidget {
 class _SignUpPageState extends ConsumerState<SignUpPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _passwordFocus = FocusNode();
   bool _loading = false;
+  bool _reveal = false;
   String? _error;
+  String? _emailError;
   String? _notice;
 
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
@@ -30,6 +36,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _emailError = null;
       _notice = null;
     });
     try {
@@ -72,12 +79,13 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
   Future<void> _resetPassword() async {
     final email = _email.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'Enter your email address first.');
+      setState(() => _emailError = 'Enter your email address first.');
       return;
     }
     setState(() {
       _loading = true;
       _error = null;
+      _emailError = null;
     });
     try {
       await SupabaseRepository.sendPasswordReset(email);
@@ -95,167 +103,101 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: TextButton(
-          onPressed: () => context.go('/'),
-          child: const Text('Back'),
-        ),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 24),
-              Text(
-                'Begin',
-                style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                      color: const Color(0xFFFBF8F4),
-                    ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Create your account. Invite your partner next.',
-                style: TextStyle(color: Color(0x99F5EFE6)),
-              ),
-              const SizedBox(height: 32),
-              _LabeledField(
-                label: 'Email',
-                child: TextField(
-                  controller: _email,
-                  keyboardType: TextInputType.emailAddress,
-                  autocorrect: false,
-                  // No suggestion strip, and nothing learned into the
-                  // keyboard's dictionary — a disguised app must not surface
-                  // its own email back on any other app's keyboard.
-                  enableSuggestions: false,
-                  enableIMEPersonalizedLearning: false,
-                  decoration: const InputDecoration(hintText: 'you@home.com'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              _LabeledField(
-                label: 'Password',
-                child: TextField(
-                  controller: _password,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: 'At least 8 characters',
-                  ),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 16),
-                _AlertBanner(message: _error!),
-              ],
-              if (_notice != null) ...[
-                const SizedBox(height: 16),
-                _AlertBanner(message: _notice!, tone: _AlertTone.info),
-                const SizedBox(height: 8),
-                // Both exits, shown only once the ambiguous notice is up. The
-                // screen otherwise ends at a dead end for exactly the user who
-                // needs them: the one who already has an account.
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _loading ? null : () => context.go('/signin'),
-                        child: const Text('Sign in'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _loading ? null : _resetPassword,
-                        child: const Text('Reset password'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _loading ? null : _submit,
-                child: _loading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Create account'),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Already with us? ',
-                    style: TextStyle(color: Color(0x99F5EFE6)),
-                  ),
-                  GestureDetector(
-                    onTap: () => context.go('/signin'),
-                    child: const Text(
-                      'Sign in',
-                      style: TextStyle(color: Color(0xFFF4937E)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+    return AuthScaffold(
+      title: 'Begin',
+      subtitle: 'Create your account. Invite your partner next.',
+      onBack: () => context.go('/'),
+      children: [
+        LabeledField(
+          label: 'Email',
+          error: _emailError,
+          child: TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            textInputAction: TextInputAction.next,
+            onSubmitted: (_) => _passwordFocus.requestFocus(),
+            autofillHints: const [AutofillHints.username],
+            // No suggestion strip, and nothing learned into the
+            // keyboard's dictionary — a disguised app must not surface
+            // its own email back on any other app's keyboard.
+            enableSuggestions: false,
+            enableIMEPersonalizedLearning: false,
+            decoration: const InputDecoration(hintText: 'you@home.com'),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _LabeledField extends StatelessWidget {
-  const _LabeledField({required this.label, required this.child});
-  final String label;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 6),
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0x80F5EFE6),
+        const SizedBox(height: 16),
+        LabeledField(
+          label: 'Password',
+          // The rule, before it can be broken. It used to live only in the
+          // greyed-out hint inside the box, which disappears the moment the
+          // first character is typed — so the one moment it was legible was
+          // the one moment nobody needed it.
+          hint: 'At least 8 characters.',
+          child: TextField(
+            controller: _password,
+            focusNode: _passwordFocus,
+            obscureText: !_reveal,
+            autofillHints: const [AutofillHints.newPassword],
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _loading ? null : _submit(),
+            decoration: InputDecoration(
+              hintText: 'At least 8 characters',
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _reveal = !_reveal),
+                icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
+                tooltip: _reveal ? 'Hide password' : 'Show password',
+              ),
             ),
           ),
         ),
-        child,
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          AlertBanner(message: _error!),
+        ],
+        if (_notice != null) ...[
+          const SizedBox(height: 16),
+          AlertBanner(message: _notice!, tone: AlertTone.info),
+          const SizedBox(height: 12),
+          // Both exits, shown only once the ambiguous notice is up. The
+          // screen otherwise ends at a dead end for exactly the user who
+          // needs them: the one who already has an account.
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _loading ? null : () => context.go('/signin'),
+                  child: const Text('Sign in'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _loading ? null : _resetPassword,
+                  child: const Text('Reset password'),
+                ),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 20),
+        FilledButton(
+          onPressed: _loading ? null : _submit,
+          child: _loading
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Create account'),
+        ),
+        const SizedBox(height: 8),
+        AuthSwitchLink(
+          prompt: 'Already with us?',
+          action: 'Sign in',
+          onPressed: _loading ? null : () => context.go('/signin'),
+        ),
       ],
-    );
-  }
-}
-
-enum _AlertTone { error, info }
-
-class _AlertBanner extends StatelessWidget {
-  const _AlertBanner({required this.message, this.tone = _AlertTone.error});
-  final String message;
-  final _AlertTone tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = tone == _AlertTone.error
-        ? const Color(0xFFEF6F58)
-        : const Color(0xFF34D399);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: MilesColors.tint(color, 0.1, over: MilesColors.night),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(message, style: TextStyle(color: color, fontSize: 13)),
     );
   }
 }
