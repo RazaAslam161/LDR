@@ -116,6 +116,24 @@ void main() {
           reason: 'the guard must run before the chain is exported',);
     });
 
+    test('answer() refuses by default and only a human may override', () {
+      // The override exists because the mark is not reliable enough to convict
+      // on: builds 27-37 set it on every new account, so a phone carrying it
+      // may be the only one that CAN answer. It must still default to refusing,
+      // or the guard is decorative.
+      final src = read('lib/core/data/partner_rewrap.dart');
+      expect(src.contains('bool readableConfirmed = false'), isTrue,
+          reason: 'the override must default to refusing',);
+      expect(src.contains('isKeyless() && !readableConfirmed'), isTrue,
+          reason: 'the guard no longer consults the override',);
+      // And the only caller must pass a value it got from the human, never a
+      // literal true.
+      final screen = read('lib/features/auth/rewrap_screen.dart');
+      expect(screen.contains('readableConfirmed: true'), isFalse,
+          reason: 'the ceremony hard-codes the override',);
+      expect(screen.contains('readableConfirmed: _readableConfirmed'), isTrue);
+    });
+
     test('sign-in mints a seed only on two positive answers', () {
       // Minting on a guess produces a stand-in, and the backup on the next line
       // seals it over the row still holding the couple's real key.

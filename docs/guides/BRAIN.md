@@ -2825,3 +2825,85 @@ for EVERY Android 11+ user until a build ships), and video diagnostics
 **Next step:** auth session owns `release.sh`; handed over with the full negative
 result set. Do not bypass the gate to ship — it is the only thing stopping a red
 tree becoming an APK on a fleet with no update channel.
+
+## §25 The analyze gate that blocked build 39, and the ceremony's human override — 2026-08-16
+
+Answers the handoff in "§20 release.sh's analyze gate blocks a green tree".
+Both fixes are in the working tree, **uncommitted**.
+
+### The empty capture — NOT reproduced, and the gate no longer depends on it
+
+The handoff's remaining suspect was the flag combination. **It is not the
+cause.** I ran the real script's prelude, cut immediately after the capture, on
+this tree:
+
+    RUN A  --bump                      → PROBE bytes=85873 info=477
+    RUN B  --bump --upload --verify    → PROBE bytes=85873 info=477
+
+Identical. Also ruled out, by direct test rather than reasoning: two concurrent
+`flutter analyze` runs both returned 85874 bytes / 477 info, so contention with
+another session's gate run is not it either.
+
+Add to the ruled-out list so nobody repeats them: the flag combination, and
+concurrent analyze runs. The empty capture remains **unexplained and
+unreproducible on this machine**, and I stopped chasing it — because the gate
+should not have been able to fail that way with no evidence in the first place.
+
+### The two real defects in that gate, both mine, both fixed
+
+**1. The liveness check was a fact about this repo, not about the analyzer.**
+It required a `^ *info - ` line to exist. That is true today only because the
+tree carries 477 of them — **clean those up and the gate refuses every build
+forever**, on a perfectly green tree. It now looks for the analyzer's own
+summary, which is always emitted: `477 issues found.` or `No issues found!`,
+both matched by `issues? found`.
+
+**2. It kept no evidence.** The capture lived in a shell variable, so when it
+came back empty the only symptom anybody could record was the word "blind" —
+which is exactly why the bug above could not be diagnosed. Output now goes to a
+`mktemp` file; the failure path prints the byte count, the first 20 lines, and
+the path to the retained capture, and the error/warning path prints the file
+path too.
+
+Proved on all three paths with a `flutter` shim on PATH, rather than argued:
+
+    A  analyzer emits nothing  → 2 attempts, "blind, not green", 0 bytes,
+                                 capture path printed, rc=1
+    B  "No issues found!"      → GATE-PASSED   (this is the trap, now fixed;
+                                 the old check refused this tree)
+    C  "  error - ..."         → prints the error, "1 analyzer error(s)", rc=1
+
+Kept from the other session's fix: `flutter pub get` before analyze, and the
+retry. Their reasoning was right and is preserved.
+
+**Still true and worth keeping:** the gate sits before the version bump, so
+every aborted run costs no build number. pubspec is still 38.
+
+### H3 from §24 — the ceremony's human override (fixed)
+
+`answer()` refused outright when `isKeyless()`, which locks out the builds 27-37
+cohort: accounts marked keyless at first sign-in by the original bug that then
+minted the couple's real key at Closer. Refusing them ends their partner's
+recovery; ignoring the mark lets a genuinely keyless phone overwrite the real
+key. **No local signal separates the two** — a phone that lost its key still
+publishes its stand-in, so "my published key matches mine" is true for exactly
+the phones that must not send.
+
+The person holding the phone can answer it in one glance. `answer()` now takes
+`readableConfirmed`, defaulting to **false** so nothing can confirm by accident,
+and the screen asks only after a refusal and only after the six digits have
+already matched: "Can you still read your messages on this phone?" — with the
+cost of getting it wrong stated above the affirmative, and the affirmative
+worded as a fact about their screen rather than as permission to proceed.
+
+This is the ceremony's existing security model, not a hole in it: the method's
+own comment already says the second human is the entire security of the
+exchange. Pinned by a test that fails if the default flips or if the screen
+ever hard-codes `readableConfirmed: true`.
+
+**Gates:** `flutter analyze` 477 issues, 0 errors, 0 warnings. `flutter test`
+`+748: All tests passed!` (747 before). 18 tests in auth_key_lifecycle_test.
+
+**Still open, unchanged:** the `prev_*` escrow migration (needs a decision), the
+leaked-password/min-length dashboard toggles, `signup-notify` (needs an email
+provider), and L2 (`isMissing()` runs twice on the sign-in path).

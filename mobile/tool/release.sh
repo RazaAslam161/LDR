@@ -101,30 +101,46 @@ echo "gate: flutter analyze"
 # exactly the clean-then-release path this script tells you to use. One retry
 # costs seconds and turns a gate that blocks good trees into one that only
 # blocks bad ones. It still fails closed if the second attempt is empty too.
-analysis="$(flutter analyze --no-pub 2>&1 || true)"
-if ! printf '%s
-' "$analysis" | grep -qE '^ *info - '; then
-  echo "  analyzer returned nothing (cold start) — retrying once" >&2
-  analysis="$(flutter analyze --no-pub 2>&1 || true)"
+# To a FILE, not a variable. An empty capture is what blocked build 39 for a
+# day, and a shell variable keeps no evidence of why: by the time the gate said
+# "blind" the output was gone. The file survives, and the failure path below
+# prints it and says where it is.
+alog="$(mktemp -t miles-analyze.XXXXXX)"
+analyzed=false
+for attempt in 1 2; do
+  flutter analyze --no-pub >"$alog" 2>&1 || true
+  # Proof that the ANALYZER ran, taken from the analyzer rather than from this
+  # tree. It always ends in "N issues found." or "No issues found!".
+  #
+  # The previous liveness check required an `info - ` line to exist, which is a
+  # fact about this repo today (477 of them) and not about the tool. Anybody who
+  # cleaned those up would have made every future build fail with "this gate is
+  # blind" on a perfectly green tree — a tripwire wearing a gate's clothes.
+  if grep -qE 'issues? found' "$alog"; then analyzed=true; break; fi
+  echo "  attempt $attempt produced no analyzer summary — retrying" >&2
+done
+if ! $analyzed; then
+  # Everything the next person needs, in the failure itself. The last time this
+  # fired, the only symptom recorded anywhere was the word "blind".
+  echo "could not read analyzer output — this gate is blind, not green." >&2
+  echo "  captured $(wc -c <"$alog") bytes over 2 attempts" >&2
+  echo "  first lines of what came back:" >&2
+  head -20 "$alog" >&2
+  echo "  full capture kept at: $alog" >&2
+  exit 1
 fi
 # Leading whitespace is optional on purpose. dart right-aligns the severity to
 # width 7 — `warning - ` flush left, `  error - `, `   info - ` — so a flush-left
 # anchor silently matches only one of the three. That exact mistake left
 # repo_hygiene_test.dart unable to see an analyzer error for a whole session.
-bad="$(printf '%s\n' "$analysis" | grep -cE '^ *(error|warning) - ' || true)"
+bad="$(grep -cE '^ *(error|warning) - ' "$alog" || true)"
 if [ "$bad" -ne 0 ]; then
-  printf '%s\n' "$analysis" | grep -E '^ *(error|warning) - ' >&2
+  grep -E '^ *(error|warning) - ' "$alog" >&2
   echo "$bad analyzer error(s)/warning(s) — not building." >&2
+  echo "  full analyzer output: $alog" >&2
   exit 1
 fi
-# Proves the output was actually parsed rather than empty: `info` lines always
-# exist in this tree, so zero of them means analyze did not run and the count
-# above is noise. A gate that cannot fail is worse than none, because it is
-# trusted.
-if ! printf '%s\n' "$analysis" | grep -qE '^ *info - '; then
-  echo "could not read analyzer output — this gate is blind, not green." >&2
-  exit 1
-fi
+rm -f "$alog"
 
 echo "gate: flutter test"
 if ! flutter test; then

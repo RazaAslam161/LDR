@@ -50,6 +50,10 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
   bool _loading = true;
   bool _asked = false;
   bool _busy = false;
+
+  /// Set only by [_offerReadableOverride], and only for this screen: the human
+  /// has looked at their own messages and confirmed this phone can read them.
+  bool _readableConfirmed = false;
   bool _claiming = false;
   String? _error;
 
@@ -354,7 +358,8 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
       // handed over. Their new key is not published yet, so this still derives
       // the OLD key — which is exactly the one their history needs.
       await ensureSharedKey(ref.read(sessionProvider));
-      final dropped = await PartnerRewrap.answer(req);
+      final dropped =
+          await PartnerRewrap.answer(req, readableConfirmed: _readableConfirmed);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -377,7 +382,49 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
         // someone to fix a thing that was not the problem.
         _error = e is StateError ? e.message : partnerKeyMessage(e);
       });
+      // Only this one refusal has a way past it, and only through the person
+      // holding the phone. Offered after the digits have already matched, so it
+      // is never the first thing anybody sees.
+      if (e is StateError && e.message.contains('had lost your key')) {
+        unawaited(_offerReadableOverride(req));
+      }
     }
+  }
+
+  /// Ask the human the question the device cannot answer.
+  ///
+  /// Deliberately not a checkbox on the form. It appears only after a refusal,
+  /// it states the cost of getting it wrong before the affirmative option, and
+  /// the affirmative is worded as a fact about their screen ("Yes, I can read
+  /// them") rather than as an instruction to proceed.
+  Future<void> _offerReadableOverride(RewrapRequest req) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Can you still read your messages on this phone?'),
+        content: const Text(
+          'Open your chat and look, then come back.\n\n'
+          'If you can read them, this phone holds the key and it is safe to '
+          'send.\n\n'
+          'If they look empty or scrambled, do not send — this phone would '
+          'overwrite the real key and neither of you could open anything '
+          'again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("No, or I'm not sure"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Yes, I can read them'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    setState(() => _readableConfirmed = true);
+    await _sendAnswer();
   }
 
   @override

@@ -249,7 +249,14 @@ class PartnerRewrap {
   /// The device unlock is demanded HERE and not in the screen, so no later call
   /// site can answer in the background. The second human is the entire security
   /// of this exchange.
-  static Future<int> answer(RewrapRequest req) async {
+  /// [readableConfirmed] is the human answering the question this code cannot.
+  ///
+  /// Defaulted to false so no existing call site can confirm by accident, and
+  /// so the refusal stays the behaviour anything new inherits.
+  static Future<int> answer(
+    RewrapRequest req, {
+    bool readableConfirmed = false,
+  }) async {
     // Sentences, not diagnostics: the screen shows a StateError's message
     // verbatim rather than guessing which of these it was.
     //
@@ -263,23 +270,31 @@ class PartnerRewrap {
     // ceremony is never offered again, and its next sign-in escrows the
     // stand-in over the last sealed copy of the real seed. Two reinstalls in
     // the same week is all it takes, and every screen says it worked.
-    if (await CryptoCore.isKeyless()) {
-      // The instruction matters as much as the refusal.
+    if (await CryptoCore.isKeyless() && !readableConfirmed) {
+      // Refused by default, and the override is a HUMAN, deliberately.
       //
-      // Builds 27-37 marked every brand-new account keyless at its first
-      // sign-in (the seed is minted lazily, so "no seed" read as "wiped"), and
-      // tapping past the ceremony leaves `deferred`, which this still reads as
-      // true. So some phones carrying this mark DO hold the couple's real key
-      // and are the only ones that can answer — and a bare refusal tells them
-      // to go and use the phone they are already holding.
+      // The mark is not reliable enough to convict on alone. Builds 27-37 set
+      // it on every brand-new account at its first sign-in (the seed is minted
+      // lazily, so "no seed" read as "wiped"), and tapping past the ceremony
+      // leaves `deferred`, which this still reads as true. So a phone carrying
+      // this mark may be the one holding the couple's real key and the only one
+      // that can answer — refusing it outright ends their recovery.
       //
-      // Signing out and back in is the fix and it is not folklore: sign-in
-      // re-runs escrow, and a successful restore calls clearKeyless.
+      // It is also not safe to ignore: a genuinely keyless phone HAS a key, the
+      // stand-in minted on first use, and handing that over overwrites the real
+      // one for good while every screen reports success.
+      //
+      // No local signal separates those two. A phone that lost its key still
+      // publishes its stand-in, so "my published key matches mine" is true for
+      // exactly the phones that must not send. The person holding it, though,
+      // can answer in one glance: can you still read your messages here? This
+      // exchange already rests on a second human reading six digits aloud —
+      // see the note on this method — so asking them one more question is the
+      // existing security model, not a hole in it.
       throw StateError(
-        'This phone is not sure it still holds your key, so it will not send '
-        'one — a wrong key here would overwrite the real one for good. '
-        'If you can still read your messages here, sign out and sign back in '
-        'on this phone, then try again.',
+        'This phone was told once that it had lost your key, so it will not '
+        'send one without you saying otherwise — a wrong key here overwrites '
+        'the real one for good.',
       );
     }
     if (!await AppLock.available()) {
