@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
+import 'package:miles/main.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// In-app self-update for the sideloaded build.
@@ -71,8 +72,20 @@ class UpdateService {
 
   /// Sends the user to the system screen that grants install permission. They
   /// return and try again — there is no callback for the grant.
-  Future<void> openInstallSettings() =>
-      _channel.invokeMethod<void>('openInstallSettings');
+  ///
+  /// Flagged as a deliberate overlay first. Leaving for Settings reports
+  /// `paused` exactly like a real backgrounding, so the cover went up, the
+  /// widget tree was swapped, and the update sheet the user was standing in was
+  /// destroyed — they granted the permission, came back to no sheet, and had to
+  /// force-stop the app for the offer to reappear. That is the one flow a user
+  /// cannot skip on the way to installing an update.
+  ///
+  /// Unlike the pickers, there is no result to await, so this cannot clear the
+  /// flag in a `finally`; [MilesApp] clears it on resume instead.
+  Future<void> openInstallSettings() {
+    MilesApp.systemOverlayActive = true;
+    return _channel.invokeMethod<void>('openInstallSettings');
+  }
 
   /// Streams the published APK to the cache and verifies its SHA-256 as it goes,
   /// so a ~220 MB file never sits in memory and a corrupt or tampered download

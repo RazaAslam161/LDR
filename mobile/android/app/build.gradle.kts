@@ -101,16 +101,17 @@ android {
             isDefault = true
             buildConfigField("boolean", "DISGUISE_ENABLED", "true")
             // Installs as Miles, under its own name and icon, and offers the
-            // covers on first open — the same arrangement as the play channel.
-            // An identity nobody chose is a worse default even where no policy
-            // forbids it: the owner picks the cover, having been shown what it
-            // does.
+            // covers on first open. An identity nobody chose is a worse default
+            // even where no policy forbids it: the owner picks the cover,
+            // having been shown what it does. The play channel no longer offers
+            // them at all.
             buildConfigField("boolean", "PLAIN_DEFAULT", "true")
             // Only this channel may install its own APK. Kept as its own flag
             // rather than inferred from the two above, both of which have
-            // legitimately changed meaning already — DISGUISE_ENABLED is now
-            // true on BOTH channels, and a self-updater gated on it would have
-            // started offering downloads inside a Play build.
+            // legitimately changed meaning more than once — a self-updater
+            // gated on DISGUISE_ENABLED would have started offering downloads
+            // inside a Play build during the window where that flag was true on
+            // both channels.
             buildConfigField("boolean", "SELF_UPDATE", "true")
             // The debug keystore's password is the literally-documented string
             // "android" on every machine on earth, and anything signed with it
@@ -129,10 +130,25 @@ android {
         }
         create("play") {
             dimension = "channel"
-            // The covers ship here too, declared android:enabled="false" and
-            // reachable only from Settings. Play's Deceptive Behavior policy
-            // protects the person who installed the app; a cover they turn on
-            // themselves deceives nobody. The store listing has to say so.
+            // Covers ship here, and the listing DISCLOSES them (owner's call:
+            // the feature is the point of the app for the people who need it).
+            // Play's Deceptive Behavior policy protects the person holding the
+            // phone — a cover they chose, having been told what it does and how
+            // to get back, deceives nobody. What it does forbid is a fresh
+            // install quietly offering nine invented identities before the user
+            // has any idea what the app is, which is what the first-run picker
+            // used to do.
+            //
+            // Shipping this channel therefore REQUIRES all of, and a change to
+            // any one of them is a policy change, not a UI tweak:
+            //   1. no unprompted cover offer on first run (app_shell)
+            //   2. a confirmation that names the consequence and the way back,
+            //      before any cover is applied (disguise_picker_screen)
+            //   3. a visible way out on every cover screen
+            //   4. the feature described in the store listing, with the picker
+            //      in at least one screenshot
+            //   5. the unlock gesture + a test account in Console > App access
+            // Items 4 and 5 are Console-side; see PLAY-READINESS-AUDIT.md.
             buildConfigField("boolean", "DISGUISE_ENABLED", "true")
             // Installs as Miles, under its own name and icon, and stays that
             // way until the owner asks otherwise.

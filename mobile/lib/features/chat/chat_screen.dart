@@ -494,6 +494,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _refreshPartnerReceipt({required String source}) async {
+    // Every caller reaches here across an await, and `ref.read` throws
+    // StateError once the element is disposed — leaving the chat while this was
+    // in flight was five of the six errors reported from build 40.
+    if (!mounted) return;
     final couple = _coupleId;
     final partnerId = ref.read(sessionProvider).partner?.id;
     if (couple == null || partnerId == null) return;
@@ -1203,8 +1207,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       await ChatRepository.clearConversation();
       // Instant fan-out to the partner over the live broadcast channel (same
       // reliable path as typing/msg). Postgres DELETE realtime is the backstop.
+      // NOT `const {}`. realtime_client writes into the payload map it is
+      // handed, so a const literal threw UnsupportedError out of
+      // _UnmodifiableMapMixin.[]= and the partner was never told — every clear
+      // was one-sided until the Postgres DELETE backstop caught up. Seen on a
+      // real handset on build 40; every other broadcast here already passes a
+      // mutable literal, and this is the only one whose payload is empty.
       unawaited(
-        _moodChannel?.sendBroadcastMessage(event: 'cleared', payload: const {}),
+        _moodChannel?.sendBroadcastMessage(event: 'cleared', payload: {}),
       );
       if (mounted) {
         setState(() {

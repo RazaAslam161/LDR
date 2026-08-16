@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -23,7 +24,6 @@ import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
-import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/home/home_screen.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
@@ -62,6 +62,7 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingChat.addListener(_onPendingChat);
     pendingMemory.addListener(_onPendingMemory);
     realtimeResumed.addListener(_rearmAlwaysOn);
+    ReleaseGate.revision.addListener(_onReleaseChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
 
@@ -180,21 +181,8 @@ class _AppShellState extends ConsumerState<AppShell>
     _rewrapOpen = false;
   }
 
-  /// Shows the disguise picker the first time only. Deliberately after pairing
-  /// rather than at sign-up: before there is a partner there is nothing on the
-  /// phone worth disguising, and an icon-change prompt during onboarding reads
-  /// as suspicious rather than protective.
-  Future<void> _offerDisguiseOnce() async {
-    if (await DisguiseService.hasChosen()) return;
-    if (!mounted) return;
-    await context.push('/app/disguise?onboarding=1');
-  }
-
   void _onReady() {
     unawaited(_maybeOfferUpdate());
-    // Before the couple check on purpose: this is the one prompt that does not
-    // need a partner to make sense.
-    unawaited(_offerCoverAtFirstOpen());
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     // Foreground realtime path — works whether or not push is configured.
@@ -235,30 +223,29 @@ class _AppShellState extends ConsumerState<AppShell>
     _firstRunPrompts(couple.id);
   }
 
-  /// How the app looks in the launcher, asked at FIRST OPEN.
-  ///
-  /// It used to sit inside _firstRunPrompts, which _onReady only reaches after
-  /// `couple == null` returns — so the question never reached anyone who had
-  /// not paired yet. The old reasoning was that there is nothing worth hiding
-  /// before there is a partner; that is true of the CONTENT and false of the
-  /// decision. Someone installing this app has a reason to before they have
-  /// anything in it, and being asked after pairing is being asked once the icon
-  /// has already sat on the home screen for a day.
-  Future<void> _offerCoverAtFirstOpen() async {
-    if (!DisguiseService.enabled) return;
-    if (await DisguiseService.hasChosen()) return;
+  /// A resume re-read the gate and the answer moved. Offer the update from the
+  /// screen the user is already on — without this the re-check updates statics
+  /// nothing consults again until the next cold start, which is the whole bug.
+  void _onReleaseChanged() {
     if (!mounted) return;
-    await _offerDisguiseOnce();
+    unawaited(_maybeOfferUpdate());
   }
 
-  static bool _updateOffered = false;
+  static int _offeredForBuild = 0;
 
-  /// A newer sideload build exists — offered once per process, and only when no
+  /// A newer sideload build exists — offered once PER BUILD, and only when no
   /// more important prompt (escrow, first-run permissions) already holds the
   /// screen. The Settings row carries the same action for any launch this skips,
   /// so nothing is lost by yielding.
+  ///
+  /// Keyed on the build rather than a bool because the gate is re-read on
+  /// resume: a long-lived process that declined build N must still be offered
+  /// N+1, and a plain "offered once per process" latch swallowed it forever.
   Future<void> _maybeOfferUpdate() async {
-    if (_updateOffered || !UpdateService.available) return;
+    if (_offeredForBuild == ReleaseGate.latestBuild ||
+        !UpdateService.available) {
+      return;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
     // A more important prompt (escrow, first-run permissions) is holding the
@@ -266,7 +253,7 @@ class _AppShellState extends ConsumerState<AppShell>
     // is the only other path and a later launch should still try.
     final route = ModalRoute.of(context);
     if (route != null && !route.isCurrent) return;
-    _updateOffered = true;
+    _offeredForBuild = ReleaseGate.latestBuild;
     await showUpdateSheet(context);
   }
 
@@ -368,6 +355,7 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingChat.removeListener(_onPendingChat);
     pendingMemory.removeListener(_onPendingMemory);
     realtimeResumed.removeListener(_rearmAlwaysOn);
+    ReleaseGate.revision.removeListener(_onReleaseChanged);
     _rewrapSub?.dispose();
     final ch = _reachChannel;
     _reachChannel = null;

@@ -12,7 +12,7 @@ import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 ///
 /// The magic: tags are HMAC-hashed before storage, so the server never sees
 /// plaintext. When both partners independently express interest in the same
-/// tag, we surface a soft "you both seem curious about ✨ tag ✨" nudge.
+/// tag, we surface a soft "you both wished for ✨ tag ✨" nudge.
 class WishJarScreen extends ConsumerStatefulWidget {
   const WishJarScreen({super.key});
 
@@ -205,7 +205,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Fantasy Jar',
+                  'Wish Jar',
                   style: TextStyle(
                     color: Color(0xFFFBF8F4),
                     fontSize: 16,
@@ -285,7 +285,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'You both seem curious about',
+                  'You both wished for',
                   style: TextStyle(
                     color: const Color(0xFF0B0F16).withValues(alpha: 0.7),
                     fontSize: 12,
@@ -314,7 +314,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
                       borderRadius: BorderRadius.circular(40),
                     ),
                     child: Text(
-                      t,
+                      wishTagLabel(t),
                       style: const TextStyle(
                         color: Color(0xFF0B0F16),
                         fontWeight: FontWeight.w600,
@@ -355,7 +355,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
           const SizedBox(height: 8),
           const Text(
             "Tap + to add a thought. You'll see a soft nudge when your "
-            'partner is curious about the same thing.',
+            'partner adds the same tag.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0x80F5EFE6), height: 1.5),
           ),
@@ -408,7 +408,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
                 children: entry.tags
                     .map(
                       (t) => Text(
-                        '#$t',
+                        '#${wishTagLabel(t)}',
                         style: const TextStyle(
                           color: Color(0xFFF4937E),
                           fontSize: 11,

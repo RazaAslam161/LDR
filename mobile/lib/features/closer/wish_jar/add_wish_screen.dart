@@ -98,7 +98,7 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                 children: [
                   Text(
-                    'What are you curious about?',
+                    'What would you like to do together?',
                     style: Theme.of(context).textTheme.displaySmall?.copyWith(
                           color: const Color(0xFFFBF8F4),
                           fontSize: 22,
@@ -167,7 +167,7 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
                             ),
                           ),
                           child: Text(
-                            tag,
+                            wishTagLabel(tag),
                             style: TextStyle(
                               color: selected
                                   ? const Color(0xFF0B0F16)
@@ -228,7 +228,7 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'New fantasy',
+                  'New wish',
                   style: TextStyle(
                     color: Color(0xFFFBF8F4),
                     fontSize: 16,

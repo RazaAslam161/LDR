@@ -26,6 +26,20 @@ const List<String> kFantasyTaxonomy = [
   'surprise',
 ];
 
+/// Display names for the taxonomy entries whose stored key reads badly on
+/// screen. The keys above are hashed into `tag_hashes` by [CryptoCore.hmacTag]
+/// and are permanent — every entry already saved, on every shipped client,
+/// matches on those exact strings. Anything the user reads goes through here
+/// instead. Lowercase to sit beside the untranslated tags in the `#tag` row.
+const Map<String, String> _kWishTagLabels = {
+  'urgent': 'spontaneous',
+  'role': 'make-believe',
+  'sensation': 'senses',
+};
+
+/// The human-readable name for a taxonomy tag.
+String wishTagLabel(String tag) => _kWishTagLabels[tag] ?? tag;
+
 /// One decrypted entry — shown only to its author.
 class WishEntry {
   WishEntry({

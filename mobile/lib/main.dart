@@ -356,6 +356,16 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // Refresh the FCM token every resume — self-heals a token the notify
       // functions nulled server-side (UNREGISTERED), restoring pushes.
       FcmService.registerToken();
+      // Re-read the release gate. It ran once in main() into plain statics, so a
+      // phone Android kept alive never saw a release published while it sat in
+      // the background — the update went only to whoever cold started after it.
+      // Throttled internally; the notifier drives the block screen and the
+      // update sheet without a restart.
+      unawaited(ReleaseGate.recheck());
+      // We are foregrounded, so by definition no overlay we opened is still in
+      // front. Pickers clear this in their own `finally`; the install-permission
+      // screen has no result to await and can only be cleared here.
+      MilesApp.systemOverlayActive = false;
     }
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
@@ -615,7 +625,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
     // The cover/real swap is driven by the static showRealApp notifier so the
     // lifecycle handler (and NewsCoverScreen) can flip it without setState.
-    return ValueListenableBuilder<bool>(
+    return ValueListenableBuilder<int>(
+      // Rebuilds when a resume re-check changes the answer, so a build that
+      // falls below min_build while running shows the block screen then —
+      // not on the next cold start, which for a backgrounded app may be days.
+      valueListenable: ReleaseGate.revision,
+      builder: (context, _, __) => ValueListenableBuilder<bool>(
       valueListenable: MilesApp.showRealApp,
       builder: (context, isReal, _) {
         // Cover layer: a convincing "News" app shown on cold start and the
@@ -758,6 +773,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
           ),
         );
       },
+      ),
     );
   }
 }

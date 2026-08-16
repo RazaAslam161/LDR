@@ -1005,8 +1005,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
               children: [
                 const SizedBox(height: 8),
                 const Text(
-                  'Tap where you want them to feel it. A glow lands there on\n'
-                  'their screen too, and you feel theirs. Both at once.',
+                  'Tap anywhere on their photo. A glow lands in the same\n'
+                  'spot on their screen, with a buzz. Their taps reach you.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12),
                 ),

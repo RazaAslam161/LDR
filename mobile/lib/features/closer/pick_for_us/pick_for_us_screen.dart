@@ -8,8 +8,8 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_repository.dart';
 
-/// "Pick for us" dice — consensual spontaneity. Three tiers (warm → hot);
-/// both partners must tap "let's go hotter" to unlock the next tier.
+/// "Pick for us" dice — consensual spontaneity. Three tiers (warm → bold);
+/// both partners must tap "let's go bolder" to unlock the next tier.
 class PickForUsScreen extends ConsumerStatefulWidget {
   const PickForUsScreen({super.key});
 
@@ -414,7 +414,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                                     borderRadius: BorderRadius.circular(40),
                                   ),
                                   child: Text(
-                                    t,
+                                    diceTagLabel(t),
                                     style: const TextStyle(
                                       color: Color(0xFF0B0F16),
                                       fontWeight: FontWeight.w600,
@@ -496,7 +496,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  tier.tags.join(' · '),
+                  tier.tags.map(diceTagLabel).join(' · '),
                   style: const TextStyle(
                       color: Color(0x80F5EFE6), fontSize: 11,),
                 ),
@@ -564,7 +564,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                 ),
               ),
               onPressed: () => _askHotter(tier),
-              child: const Text("Let's go hotter"),
+              child: const Text("Let's go bolder"),
             )
           else
             OutlinedButton(
@@ -579,7 +579,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                 ),
               ),
               onPressed: () => _askHotter(tier),
-              child: const Text("Let's go hotter"),
+              child: const Text("Let's go bolder"),
             ),
         ],
       ),
@@ -609,7 +609,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
               runSpacing: 4,
               children: roll.tags
                   .map((t) => Text(
-                        t,
+                        diceTagLabel(t),
                         style: const TextStyle(
                           color: Color(0xFFF5EFE6),
                           fontSize: 12,

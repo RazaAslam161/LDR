@@ -152,8 +152,8 @@ class _ModestModeOn extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Closer is an optional, private part of Miles for adult couples '
-            'who want to deepen intimacy across distance. Touch traces, '
+            'Closer is an optional, private part of Miles for the two of you — '
+            'a quiet place to stay close across the distance. Touch traces, '
             'shared moods, a private vault.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
@@ -314,14 +314,14 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
       ),
       _FeatureTile(
         emoji: '🌡️',
-        title: 'Desire',
-        blurb: 'How much today?',
+        title: 'Closeness',
+        blurb: 'How close do you feel today?',
         route: '/app/closer/warmth',
       ),
       _FeatureTile(
         emoji: '🍯',
-        title: 'Fantasy Jar',
-        blurb: 'Soft matches, big sparks',
+        title: 'Wish Jar',
+        blurb: 'A quiet nudge when you match',
         route: '/app/closer/wish-jar',
       ),
       // Points at the shared gallery, not the vault. The vault's route still
@@ -352,7 +352,7 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
       _FeatureTile(
         emoji: '🎲',
         title: 'Pick for us',
-        blurb: 'A roll for tonight',
+        blurb: 'Let the dice decide',
         route: '/app/closer/pick-for-us',
       ),
       _FeatureTile(
@@ -374,8 +374,9 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'A private, end-to-end encrypted space. Nothing here is readable '
-          'by anyone but the two of you — not even us.',
+          'A private space for the two of you. Memory Threads and Wish Jar '
+          'entries are end-to-end encrypted; the rest is kept behind strict '
+          'access rules.',
           style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
         ),
         const SizedBox(height: 24),

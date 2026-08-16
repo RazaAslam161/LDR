@@ -14,14 +14,14 @@ enum DiceTier {
   ),
   warmHot._(
     id: 'warm_hot',
-    label: 'Warm + Hot',
-    emoji: '🔥',
+    label: 'Warm + Bold',
+    emoji: '✨',
     tags: ['urgent', 'evening', 'adventurous', 'bold', 'lingering'],
   ),
   hot._(
     id: 'hot',
-    label: 'Hot',
-    emoji: '🌶️',
+    label: 'Bold',
+    emoji: '⚡',
     tags: ['night', 'surprise', 'role', 'sensation', 'daring'],
   );
 
@@ -42,6 +42,21 @@ enum DiceTier {
   static DiceTier byId(String id) =>
       all.firstWhere((t) => t.id == id, orElse: () => warm);
 }
+
+/// Display names for the faces whose stored key reads badly on screen. The
+/// keys above are what [PickForUsRepository.saveRoll] writes into
+/// `dice_rolls.tags`, so every roll already in a couple's history holds them —
+/// renaming the keys would only fix the dice and leave the history reading the
+/// old words. Anything a partner reads goes through here instead. Same names
+/// the Fantasy Jar uses for the same three faces.
+const Map<String, String> _kDiceTagLabels = {
+  'urgent': 'spontaneous',
+  'role': 'make-believe',
+  'sensation': 'senses',
+};
+
+/// The human-readable name for a dice face.
+String diceTagLabel(String tag) => _kDiceTagLabels[tag] ?? tag;
 
 /// One stored dice roll.
 class DiceRoll {

@@ -1,26 +1,32 @@
 /// Truth or Dare shapes. The writing itself lives in `game_content.dart`, in
-/// both English and Roman Urdu. Two heat levels:
+/// both English and Roman Urdu. Three levels, deepening rather than heating up:
 ///   • cute   – wholesome, romantic
 ///   • flirty – playful, teasing
+///   • spicy  – the honest one: fears, regrets, the things neither of you says
 ///
-/// A third `spicy` tier used to sit above these. It shipped app-authored
-/// instructions to send intimate photos and to touch oneself — bundled text,
-/// not anything a user wrote, one drawer tap from the home screen with no gate
-/// beyond the signup age check. That is content the store reads straight out of
-/// the APK, so it is gone rather than reworded: the tier was named for what it
-/// was, and softer wording would not have changed what it asked for.
+/// The third tier once shipped app-authored instructions to send intimate
+/// photos and to touch oneself, and was deleted outright. Deleting it was the
+/// wrong repair twice over. It removed a feature to fix wording, and
+/// [TDCard.fromJson] returns null for a tier it does not know — so a partner on
+/// an older build drawing that tier left this phone showing no card at all,
+/// silently. The tier is back with its wire name `spicy` unchanged, because
+/// that name travels on the wire and in shipped APKs; only what it ASKS FOR
+/// changed. Boldness here means saying the hard thing, not undressing.
 enum TDType { truth, dare }
 
-enum TDTier { cute, flirty }
+enum TDTier { cute, flirty, spicy }
 
 extension TDTierMeta on TDTier {
+  /// Display only. The enum NAME is the wire key — never rename it.
   String get label => switch (this) {
         TDTier.cute => 'Cute',
-        TDTier.flirty => 'Flirty',
+        TDTier.flirty => 'Playful',
+        TDTier.spicy => 'Deep',
       };
   String get emoji => switch (this) {
         TDTier.cute => '🌸',
-        TDTier.flirty => '😏',
+        TDTier.flirty => '😉',
+        TDTier.spicy => '🌙',
       };
 }
 

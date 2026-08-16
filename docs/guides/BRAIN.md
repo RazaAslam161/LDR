@@ -2908,6 +2908,188 @@ ever hard-codes `readableConfirmed: true`.
 leaked-password/min-length dashboard toggles, `signup-notify` (needs an email
 provider), and L2 (`isMissing()` runs twice on the sign-in path).
 
+## §26 — Build 39 shipped, and the copy step release.sh never had (2026-08-16)
+
+**Shipped.** Build 39 is live: R2, `app_release`, and `E:\LDR\Miles.apk` all
+serve sha256 `84ed079682794871ef1f96feb30f1952e85dd23e7134bfdcaecda0bd3df204e0`.
+`min_build` deliberately left at 2 — raise it only once 39 is installed.
+
+Gate, run on the combined tree after `flutter clean`:
+
+    errors+warnings: 0
+    477 issues found. (ran in 244.7s)     <- all info
+    05:10 +748: All tests passed!
+
+**What 39 carries that no phone could reach before it:** the BROWSABLE manifest
+fix (`87b562f` — the Privacy Policy link and the Watch Together browser hand-off
+were dead for every Android 11+ user), the auth key-lifecycle work (`6a28c64`,
+`d95faa8`, `5d75334`), and the video failure diagnostics (`b9830c7`).
+
+**The defect found this round: `release.sh` had no copy step.** It uploaded to
+R2 and left `E:\LDR\Miles.apk` holding whatever was last copied by hand. Build 39
+went to R2 while Miles.apk still held 38 (`fb444735…`), so a sideload from "the
+latest APK in LDR" would have installed 38 while the release was reported as 39.
+
+This is the stale-snapshot bug one layer out. The stamp guard only inspects the
+APK the script just built; it cannot see the file you actually install. Fixed by
+adding `cp "$APK" ../Miles.apk` AFTER the stamp check, so a refused artifact can
+never land in the sideload slot. Uncommitted, in the working tree.
+
+**Class, not instance:** every artifact a human installs from needs its identity
+proven at the moment of the claim, not inferred from the step that produced it.
+Two hashes agreeing is not evidence when a third copy is the one that ships.
+
+**Not real:** the 24,991 analyzer errors seen in an aborted run were a
+post-`flutter clean` tree with no package resolution — every import unresolved.
+`voice_note_bubble_test.dart` imports `flutter_test` correctly and `image: ^4.9.1`
+is at pubspec:83. Nothing is broken there.
+
+**Open / next.**
+1. Verify on hardware after installing 39: Privacy Policy link opens a browser,
+   Watch Together hands off to a browser (both BROWSABLE-dependent, unverified).
+2. Read `client_errors` for `video_init_failed` to settle her video — HEVC is
+   still a labelled hypothesis, not a diagnosis.
+3. Signup -> pairing -> first message on a NEW account. `6a28c64`/`5d75334`
+   rewrote key-lifecycle and rewrap code; tests pass but no fresh account has
+   run that path on a phone.
+4. APK is 219 MB and sideloaders re-download it whole every update — no delta
+   patching off-Play. Worth a size pass; not a blocker.
+
+## §27 — min_build raised to 39 (2026-08-16)
+
+`app_release` now reads `min_build = 39, latest_build = 39`, sha
+`84ed0796…f204e0`. Anything below 39 gets the terminal block screen.
+
+**Checked before raising it, because a floor is a hard block for everyone:**
+
+- *Who is out there.* `client_errors` by build: 23/24/25/26/28/31 all last seen
+  2026-08-15 or earlier; 37 once at 00:29; **38 is where both users are**, last
+  seen 2026-08-16 12:48. Two distinct user_ids have ever reported. Nobody is
+  stranded on a build that predates the working updater.
+- *The block screen has a way out.* `update_sheet.dart` is shared by the update
+  prompt and the terminal block, and carries the full download -> install flow.
+  A floor with no update path is how you brick a sideloaded app; this isn't one.
+- *No crypto moved.* `key_escrow.dart:227` reads "the write flips to
+  kdfArgon2idV2 once app_release.min_build is 28" — that is a NOTE TO A FUTURE
+  DEVELOPER, not automatic behaviour. Line 228 still hardcodes `kdf: kdfArgon2id`.
+  Raising the floor changed no key derivation.
+
+**Now unblocked but deliberately NOT taken:** the escrow comment justifies the
+old wrap format by "Build 26 is still permitted and still out there." At
+min_build 39 that is no longer true, so the v2 write flip is now legal. It is a
+crypto change and needs its own verification pass — not a drive-by in a release
+turn. Whoever takes it must confirm old rows still open before changing writes.
+
+**Reversible:** `update public.app_release set min_build = 2 where id = true;`
+
+**Consequence to expect:** anyone still on 38 hits the block screen on next
+launch and must download 39 through it. 38's updater is proven (37 -> 38 worked
+on hardware), so that path is sound.
+
+**Still unverified on hardware** — unchanged from §26, and now forced on
+everyone: the fresh-account signup -> pairing -> first message path that
+`6a28c64`/`5d75334` rewrote. A floor of 39 means no user can sit below it while
+that goes untested.
+
+## §28 — The update reached nobody who was already running (2026-08-16)
+
+**Reported:** partner on 38 got no update prompt after 39 was published and the
+floor raised to 39.
+
+**Not the cause, each ruled out with a query before touching code:** RLS on
+`app_release` is `app_release_read` for `{anon,authenticated}` qual `true`; the
+published row is correct; R2 serves the right bytes; the APK is sound.
+
+**Root cause.** `ReleaseGate.check()` ran ONCE in `main()` into plain statics,
+and nothing re-read them. `isBlocked` is consulted by `MilesApp.build` on the
+first frame only; `UpdateService.available` is a static computed at startup. No
+lifecycle observer re-ran the check. So a client already running when a release
+is published learns nothing until the PROCESS is killed and cold started.
+
+**Class, not instance.** This is not her handset. A sideloaded app has no store
+push, and Android keeps processes alive for days — so every release reached only
+the fraction of users who happened to cold start after it. That is most of a
+fleet. It also explains why builds seemed to reach the two test phones slowly.
+
+**Fix — three points, each independently able to swallow an update:**
+1. `ReleaseGate.recheck()` on `AppLifecycleState.resumed` (main.dart), throttled
+   15 min, and skipped once blocked since that screen is terminal.
+2. `ReleaseGate.revision` ValueNotifier, bumped only when the answer CHANGES;
+   `MilesApp.build` now wraps in a ValueListenableBuilder on it, so the block
+   screen appears live rather than on the next cold start.
+3. `app_shell._offeredForBuild` replaces the `_updateOffered` bool — a
+   long-lived process that declined build N would otherwise never be offered
+   N+1. Plus a `revision` listener that offers from the screen the user is on.
+
+**Seam added:** `ReleaseGate.applyRow` (`@visibleForTesting`) splits parsing and
+change-detection from the fetch. `check()` behaviour is unchanged.
+
+**Tests — `test/unit/core/release_gate_test.dart`, 6 cases, all passing.** They
+assert on `revision` directly because the bump is deletable without breaking a
+build: everything compiles, every other test passes, and the app silently
+reverts to cold-start-only updates. Covered: floor blocks + bumps; unchanged row
+does NOT bump; newer build noticed mid-session (her exact case); lifting the
+floor releases a RUNNING client (the min_build=2 rollback only helped cold
+starts before); empty row fails open; buildStamp matches buildNumber.
+
+**Honest limit: build 39 contains the OLD startup-only gate.** This fix cannot
+help anyone until they are on a build that has it. 39 still has to reach her by
+force-stop (swipe from recents, reopen -> block screen -> Update now). The
+self-healing behaviour starts at build 40.
+
+**found, not fixed:** `flutter test` exits 0 with `Test directory "test" not
+found` when run from the repo root instead of `mobile/`. A gate that passes by
+finding nothing, same shape as the analyzer-returns-empty bug. `release.sh` cds
+correctly so the release path is safe; any new script that does not would get a
+silent pass.
+
+**Uncommitted, in the working tree:** `lib/core/app/release_gate.dart`,
+`lib/main.dart`, `lib/features/shell/app_shell.dart`,
+`test/unit/core/release_gate_test.dart`, `tool/release.sh` (§26 copy step).
+
+## §29 — Production wiped to zero users for fresh-user testing (2026-08-16)
+
+Requested: delete all users and their data to test the app as a brand-new user.
+Done on PRODUCTION `sopictusdonlvuezmfep`. **Irreversible — no PITR on the free
+plan.**
+
+**Before:** 6 auth users (not the 2 the telemetry showed), 694 storage objects,
+63 public tables, 160 messages, 9 couples, 6 profiles.
+
+**After, verified by query:**
+
+    auth.users              0
+    storage.objects         0
+    PUBLIC ROWS REMAINING   0     (all 61 user tables)
+    app_release (kept)      1
+    app_secrets (kept)      5
+    storage.buckets (kept)  5
+
+**Deliberately NOT wiped — "all users and their data" is not "all rows".**
+`app_secrets` holds CF_TURN_API_TOKEN, CF_TURN_KEY_ID, FUNCTIONS_BASE_URL,
+MAPBOX_PUBLIC_TOKEN, NOTIFY_SHARED_SECRET; wiping it kills calls, maps and the
+notify functions, and the values are not recoverable from this repo.
+`app_release` is the update gate, not user data. `storage.buckets` kept — the
+five buckets stay, only their objects went.
+
+`daily_prompts` WAS wiped: it has a `couple_id`, so it is per-couple data rather
+than a seeded catalogue. Checked before deleting rather than guessed from name.
+
+**TRUNCATE deadlocked** against a live realtime/client connection holding
+AccessShareLock on `couples` — TRUNCATE needs AccessExclusiveLock. The whole
+batch rolled back (verified: all counts unchanged) and was redone with DELETE
+under `session_replication_role = replica`, which takes only RowExclusiveLock
+and skips FK ordering. Use DELETE, not TRUNCATE, against this live database.
+
+**Caveat — orphaned storage files.** Deleting `storage.objects` rows removes the
+records the app lists from; the underlying S3 blobs are not reclaimed by that
+delete and still count toward quota. Invisible to the app, but they are there.
+Emptying the buckets through the Storage API is the way to actually free them.
+
+**Consequence:** every client is now signed into an account that no longer
+exists, and `min_build` is 39, so build 38 handsets hit the block screen. Both
+phones need a fresh signup.
+
 ## §30 — Full Play Store readiness audit (2026-08-16)
 
 Requested: audit the whole app for Play Store readiness. Ran an 11-agent
@@ -3007,3 +3189,355 @@ delete-account.html + finalize policy → keystore + Play App Signing → Maps k
 rotation/restriction → camera FGS + cover-offer gate → first play AAB on
 hardware.
 
+## §31 — Build 40 + full Play readiness audit (2026-08-16)
+
+**Build 40 built, NOT pushed** (owner said don't push to Cloudflare). At
+`E:\LDR\Miles.apk`, versionCode 40 read from the APK, sha256
+`4fb3b48710a8c3140aee72a2ceac5fd3f7f0a0582775af2f7cc0e27da4aaa580`, 219 MB
+sideload universal. Gate inside the build: analyze 0 errors/0 warnings,
+`+754: All tests passed!`, `snapshot really is build 40`, and the new
+`sideload copy: Miles.apk is build 40` line proving the §26 copy step works.
+R2 and `app_release` still point at 39 — deliberately.
+
+Build 40 is the first build carrying the §28 resume re-check, so from 40 onward
+a published release reaches a running phone without a cold start.
+
+**Play audit.** Six dimensions, 53 agents, every finding adversarially verified.
+65 confirmed (7 blocker / 22 high / 36 medium), 8 refuted. Full report:
+`docs/guides/PLAY-READINESS-AUDIT.md`, raw findings
+`docs/guides/play-readiness-findings.json`.
+
+**TWO CLAIMS I MADE EARLIER THAT THE AUDIT DISPROVED — do not repeat them:**
+1. "The 219 MB APK is a hard Play blocker." FALSE. That is the SIDELOAD universal
+   artifact. The play AAB's arm64 split measures ~93 MB, far under the limit.
+   Size is an optimisation, not a gate.
+2. "The self-updater is an unresolved Play policy conflict." FALSE. The play
+   flavor already excludes it at three layers — manifest, BuildConfig
+   (`SELF_UPDATE = false`, build.gradle.kts:143) and Dart. Count of
+   `REQUEST_INSTALL_PACKAGES` in the merged play manifest is 0.
+
+**The real blocker, and it was invisible from the source:** there is no
+`android/key.properties` and no `.aab` has ever been built. `isMinifyEnabled`
+and `shrinkResources` are true for the play flavor ONLY, so R8, resource
+shrinking and the play manifest merge have never once run. The configuration
+that will actually ship is the one configuration never compiled or executed.
+Every behavioural claim about the Play build is therefore unverified.
+
+**Other blockers:** no CSAE/child-safety standards doc or Console declaration
+(mandatory for Social UGC apps); four of five hosted legal URLs 404
+(delete-account, terms, csae, faq) and the live privacy policy still renders its
+author TODO box and links to a 404 deletion endpoint; zero listing assets in the
+repo; Console account + 12-tester/14-day closed test not started.
+
+**The owner decision that cannot be deferred: the disguise.** A fresh Play
+install today opens the nine-cover picker unprompted on first run
+(`app_shell.dart:249-253`, `DISGUISE_ENABLED=true` on play). Three options are
+costed in the audit; "leave it" is not one of them. Minimum regardless of
+choice: `_offerCoverAtFirstOpen()` must not fire on the play channel.
+
+**Adult content needs NO cuts** — the explicit tier is already gone, modest_mode
+defaults true, Giphy is pinned pg-13. Ship as Social / Mature 17+ / 18+ only.
+The one hard rule: intimacy surfaces never appear in listing screenshots.
+
+**Note for other sessions:** `docs/guides/PLAY-RELEASE-RUNBOOK.md` (another
+session, 2026-08-15) is now partly WRONG — §0.1 claims the play build strips the
+disguise aliases and sets `DISGUISE_ENABLED=false`; both are false in the tree.
+Following it as written files an incorrect Console declaration. Corrections are
+listed in the audit's Phase 3.
+
+## §32 — One app for Play, and the app stops authoring sexual content (2026-08-16)
+
+**Owner instruction, now permanent in `~/.claude/CLAUDE.md` and memory.** Two
+parts, both reversing what this repo assumed:
+
+1. **ONE app, and it ships on Google Play.** Not a sideload edition beside a
+   store edition. Flavors are a build mechanism, never a reason to split a
+   decision. The old CLAUDE.md rule said "Play Store abandoned; adult features in
+   scope" — deleted, it was the exact opposite of current intent.
+2. **The app is a secure private couples app and AUTHORS NO SEXUAL CONTENT.**
+   What users do inside is theirs; the app supplies private space and security.
+   The 18+ tag covers what users bring — it does not license the app to write it
+   for them. Features stay; app-written words get rewritten neutral.
+
+**Covers cut from the play channel** (owner's choice, previous turn).
+`build.gradle.kts` play flavor `DISGUISE_ENABLED` true -> **false**. One line,
+because everything downstream was already written for it:
+`disguise_picker_screen.dart:80` has a play branch, `main.dart:115/155/228`
+short-circuit on the flag. Sideload keeps the disguise in full. Two now-false
+comments in the sideload flavor were corrected in the same edit.
+
+**"(intimacy module)" removed** from both visible sites — the settings row title
+and the enable dialog body.
+
+**Content sweep — 69 strings across 5 areas, ZERO features removed.** Counts
+verified 1:1 against HEAD: TD cards 263/263, Closer tiles 10/10, touch labels
+10/10, moods 20/20, dice faces 15/15, jar tags 12/12, TD tiers 2/2.
+
+**The technique worth reusing: display maps, not constant renames.** Dice and jar
+tags (`urgent`, `role`, `sensation`) are STORED in `dice_rolls.result_tags` and
+hashed into `fantasy_jar_entries.tag_hashes` (FNV-1a over the lowercased literal,
+`crypto_core.dart:678`). Renaming the constants would have cleaned new rolls and
+left every roll already in a couple's history reading the old word forever, and
+would have orphaned every saved jar entry. `diceTagLabel()` / `wishTagLabel()`
+added instead — keys byte-identical, applied at all 6 display sites, so EXISTING
+history reads the new words too.
+
+**The independent checker found a whole file nobody was assigned:**
+`lib/features/cycle/love_notes_pool.dart` — 250 app-authored notes, 68 uses of
+"sexy", and the app SENDS these into chat as real messages
+(`cycle_screen.dart:500` -> `ChatRepository.sendText`). Gated off today by
+`feature_flags.dart:15 pooledLoveNotes = false`, one const flip from live.
+Rewritten: the vocative rotates across terms the pool already uses (jaan, begum,
+mera bacha, bandri, meri chuii si, churail), skipping any already present in the
+same note so it does not read repetitively. Two notes needed real rewrites, not a
+swap — they were possessive about her appearance ("yeh khoobsurati sirf mere liye
+bani hai", "sirf mere phone ki gallery mein safe rahe"); now about her smile and
+her time.
+
+**Third false E2EE claim killed.** `closer_screen.dart:377` said "Nothing here is
+readable by anyone but the two of you — not even us." Verified false against the
+LIVE schema before editing: `body_touches(body_zone, touch_type, intensity,
+pos_x, pos_y)`, `desire_temps(score)`, `dice_rolls(tier, result_tags)`,
+`intimacy_signals(state)` are all plaintext, no ciphertext or nonce columns.
+Settings had the same claim in two places; all three are now honest.
+
+**Gate, run after the last edit:**
+
+    477 issues found. (ran in 30.7s)     <- 0 errors, 0 warnings
+    02:00 +758: All tests passed!
+
+**NEEDS AN OWNER DECISION — already shipped, not caused by this sweep.**
+`TDTier.spicy` was DELETED in commit `1d1f4d5` rather than reworded.
+`TDCard.fromJson` (truth_dare_deck.dart:47-53) returns null for `'tier':'spicy'`
+and `truth_dare_screen.dart:111` does `_card = ours ?? card` — so a phone on an
+older build playing a spicy card leaves the updated phone showing NO CARD at all,
+silently, no log. Sideloaded fleet, no forced update. Options: re-add the tier as
+a parse-only alias mapped to playful, or accept the desync.
+
+**found, not fixed:** stale internal comments still say "fantasy jar" /
+"intimacy module" / "Desire Temperature" (developer-facing only); dice unlock
+toast reads "Warm + Bold unlocked" then "Bold unlocked"; no test pins DiceTier
+labels or `diceTagLabel`, unlike the TD deck; `pick_for_us_repository.dart:128,152`
+`catch (_) { }` drops malformed-row errors unlogged.
+
+**Concurrent-session note:** an agent reported another session editing
+`add_wish_screen.dart` mid-run. Files touched here are listed in the diff; other
+sessions' changes to `location_service.dart`, `sync_state_test.dart` and
+`location_block_test.dart` were left alone.
+
+## §33 — The third Truth-or-Dare tier is back, reworded (2026-08-16)
+
+Owner: "TDTier.spicy was deleted in commit 1d1f4d5 rather than reworded. it
+should be reworded." Done — this is the doctrine from §32 applied to the one
+place the previous sweep had removed a feature instead of rewriting its words.
+
+**Restored:** `enum TDTier { cute, flirty, spicy }`, label **"Deep"**, emoji 🌙.
+Content is entirely new: 20 truths + 11 dares per language, matching the
+ORIGINAL slot counts (20/11) so an index arriving from an older build lands in
+range instead of out of bounds. EN and Roman Urdu verified index-parallel across
+all three tiers by counting the parsed pools, not by eye.
+
+**The wire name `spicy` is unchanged and must stay unchanged.** It travels in
+`TDCard.toJson` and lives inside every shipped APK; this fleet is sideloaded and
+cannot be made to update. Only what the tier ASKS FOR changed — boldness now
+means saying the hard thing, not undressing: "what is one thing about us you
+have never said out loud", "which argument of ours is still sitting with you",
+"record a voice note telling me a fear you have never told me".
+
+**This also closes the shipped-client desync flagged in §32.** `fromJson`
+returned null for an unknown tier and `truth_dare_screen.dart:111` does
+`_card = ours ?? card`, so a partner on an older build drawing spicy left this
+phone showing NO CARD, silently, no log. It decodes again.
+
+**A test failed on the restore, and it was right to.** `game_content_test.dart`
+carried `a card from a build that still has spicy decodes as null`, whose own
+comment called the blank card acceptable ("the card simply does not appear") —
+the test pinned the bug. The REQUIREMENT changed, so the test changed: it now
+asserts an unknown tier (`molten`) degrades quietly, and two new tests pin the
+new contract — `spicy` decodes, and every tier reachable on the wire has
+non-empty pools in both languages (an empty pool is the same blank screen by
+another route). Not a gate weakened to go green; stated here so the next session
+sees why the assertion flipped.
+
+No UI work was needed: `truth_dare_screen.dart:230` and the tests both iterate
+`TDTier.values`, so the third chip and its coverage appeared on their own.
+
+**Gate, after the last edit:**
+
+    477 issues found. (ran in 151.7s)     <- 0 errors, 0 warnings
+    03:43 +760: All tests passed!         <- was 758; +2 new wire-compat tests
+
+**Still open from §32, unchanged:** stale internal comments ("fantasy jar",
+"intimacy module", "Desire Temperature"); dice unlock toast reads "Warm + Bold
+unlocked" then "Bold unlocked"; no test pins DiceTier labels or `diceTagLabel`;
+`pick_for_us_repository.dart:128,152` drop malformed-row errors unlogged.
+
+## §34 — Covers on Play under disclosure (Option C), and the update sheet that vanished (2026-08-16)
+
+### The update prompt died the moment you went to grant permission
+
+Owner report: tapping Update sends you to Android's "install unknown apps"
+screen; coming back, the prompt is GONE and only a force-stop brings it back.
+
+**Root cause, one omission.** `UpdateService.openInstallSettings()` never set
+`MilesApp.systemOverlayActive`. Every picker and the camera do
+(`photo_picker_service.dart:60`, `document_picker_service.dart:29`,
+`rapid_camera_screen.dart:123`). Without the flag, leaving for Settings reports
+`paused` exactly like a real backgrounding, so `main.dart:299` raises the cover,
+`MilesApp.build` swaps the whole tree, and the modal sheet the user was standing
+in is destroyed. They grant the permission and return to nothing.
+
+**Fix.** Set the flag inside `openInstallSettings()` so every caller benefits,
+and clear it on `resumed` in `_MilesAppState.didChangeAppLifecycleState`. It
+cannot self-clear in a `finally` like the pickers: there is no result to await,
+the intent returns immediately. Clearing on resume is safe by definition — if we
+are foregrounded, no overlay we opened is still in front.
+
+**Why it mattered more than it looks:** this is the one step a first-time
+updater cannot skip, so it broke the update path for everyone who had not
+already granted the permission — which is every fresh install.
+
+### Covers: Option C — they ship on Play, disclosed
+
+Owner chose C over cutting them. `play` flavor `DISGUISE_ENABLED` back to
+**true**. The five shipping requirements are now written beside the flag in
+`build.gradle.kts`; changing any one of them is a policy change, not a UI tweak:
+
+1. **no unprompted cover offer on first run** — DONE. `_offerCoverAtFirstOpen()`
+   removed, along with `_offerDisguiseOnce()` which it orphaned, and the call in
+   `_onReady()`. A fresh install used to present nine invented identities before
+   the user had seen what the app was; that is what a reviewer opens into.
+2. **confirmation naming the consequence and the way back** — DONE.
+   `disguise_picker_screen._apply()` now confirms before applying anything other
+   than `DisguiseCover.none`: it names the new launcher label, states Miles will
+   not be findable by its own name, and gives the exact re-entry gesture
+   (5 quick logo taps, or ~3s hold on the "Local" tab — read from
+   `news_cover_screen.dart:17-21`, not invented).
+3. **visible way out on every cover screen** — already existed, unchanged.
+4. **listing describes the feature + picker in a screenshot** — CONSOLE, owner.
+5. **unlock gesture + test account in Console > App access** — CONSOLE, owner.
+
+Covers themselves are untouched and one tap away in Settings > How this app
+looks. Requirements 4 and 5 are not optional: shipping C without them is
+shipping an undisclosed app-hider, which is the account-strike path.
+
+**Gate, after the last edit:**
+
+    477 issues found. (ran in 29.4s)     <- 0 errors, 0 warnings
+    03:50 +760: All tests passed!
+
+(An intermediate run showed 478 — my removal orphaned the `disguise_service`
+import in `app_shell.dart`. Removed; back to 477.)
+
+### Who actually sees an update when one is published
+
+Depends only on the build each phone is on, because the gate runs before sign-in:
+
+- **40+** — on resume, no restart (the §28 re-check shipped in 40)
+- **39** — cold start only
+- **<=38** — hard-blocked by `min_build = 39`; block screen with Update now
+
+**NOT YET IN ANY ARTIFACT.** `Miles.apk` is build 40 and predates §32, §33 and
+§34 — the content rewrite, the restored Deep tier, the covers decision and this
+update-sheet fix all need a build 41 to reach a phone.
+
+## §35 — Two real bugs off the testers' handsets, and a red gate that is not mine (2026-08-16)
+
+Both testers are on build 40 and signed up fresh against the wiped database.
+
+**THE FRESH-ACCOUNT FUNNEL WORKS — the highest-flagged unknown is now cleared.**
+
+    users 2 | profiles 2 | couples 1 | partner_keys 2 | invites 1 | builds_seen: 40
+
+Two signups, two profiles, paired, and BOTH public keys published. The rewritten
+key-lifecycle code from `6a28c64`/`5d75334` has now run on real hardware against
+an empty database, which §26-§28 all listed as untested.
+
+**Two real bugs, found by reading `client_errors` rather than guessing.**
+
+1. **"Clear chat" never reached the partner.** `chat_screen.dart:1207` passed
+   `payload: const {}` to `sendBroadcastMessage`. realtime_client WRITES into the
+   payload map it is handed, so a const literal threw `UnsupportedError` out of
+   `_UnmodifiableMapMixin.[]=` on every clear — one-sided until the Postgres
+   DELETE backstop caught up. Now a mutable literal. It is the only broadcast in
+   the app with an EMPTY payload, which is exactly where reaching for `const`
+   feels natural; all 10 other sites already pass mutable maps. Grep-confirmed
+   this was the only occurrence.
+
+2. **Receipt refresh crashed on leaving the chat** — 5 of the 6 reported errors.
+   `_refreshPartnerReceipt` calls `ref.read(sessionProvider)` across an await
+   with no `mounted` check; `ConsumerStatefulElement.read` throws `StateError`
+   once disposed. Guarded at the top. The later work in that method already had
+   its own `mounted` check.
+
+**GATE IS RED, AND IT IS NOT FROM THIS WORK. Do not build from this tree.**
+
+    warning - Unused import: chat_repository.dart  - vault_screen.dart:6
+    warning - Unused import: url_launcher.dart     - vault_screen.dart:10
+    warning - The value of the field '_busy' isn't used - vault_screen.dart:25
+    487 issues found.
+    Failing: repo_hygiene_test "the analyzer reports no errors and no warnings"
+
+Another session is mid-flight on the Vault: `vault_screen.dart` +267/-79,
+`vault_repository.dart` modified, `vault_viewer.dart` new and untracked. Matches
+the open "Multi-select upload, gallery, timeline redesign" task. **Deliberately
+NOT fixed** — those three warnings are the normal debris of an unfinished edit,
+and a drive-by fix from this session would collide with theirs. Whoever owns the
+Vault work: these are yours, and the hygiene test is red until they go.
+
+Analyzer issues in the files THIS session touched: none (grep-filtered).
+`game_content_test` + `release_gate_test` pass: `+20: All tests passed!`
+
+**Escrow gap worth checking on the phones:** `key_escrow` has 1 row for 2 users.
+One partner has no recovery path — reinstall and that key is gone. Expected if
+escrow is opt-in; a silent write failure if it is meant to be automatic. Not
+investigated this turn.
+
+**min_build deliberately left at 39.** Both phones are on 40, so raising it is
+zero-risk and zero-benefit until something newer ships; raise it in the same step
+as publishing 41 so the floor never sits above what is actually served.
+
+**Build 41 is the next artifact and it is NOT cut.** It would carry: the content
+rewrite (§32), the restored Deep tier (§33), covers-on-Play + the update-sheet
+fix (§34) and these two chat fixes. Because both handsets are on 40, 41 will be
+the first release to appear on their screens WITHOUT a restart — the first real
+test of the §28 resume re-check. Build only when asked, and only from a green tree.
+
+## §36 — Gate green again; the Vault warnings were signal, not debris (2026-08-16)
+
+**Supersedes the "GATE IS RED — do not build from this tree" warning in §35.**
+
+The Vault session was asked to clear its three warnings and did. Re-run here:
+
+    490 issues found.            <- 0 errors, 0 warnings
+    01:35 +770: All tests passed!
+
+770 tests, up from 760 — they added ten alongside the Vault work.
+
+**Worth recording how they resolved it.** Two of the three were flagged to them
+as possibly signal rather than leftovers, and one was:
+
+    23:  bool _busy = false;
+    94:    setState(() => _busy = true);
+    116:   setState(() => _busy = false);
+    353:   child: _busy
+
+`_busy` was UNWIRED, not surplus — the multi-select upload path never disabled
+its controls while work was in flight. Deleting the field to satisfy the
+analyzer would have gone green and left a real double-tap gap. The two stale
+imports (`chat_repository`, `url_launcher`) were genuinely dead and removed.
+
+**Lesson for the next unused-field warning:** an `unused_field` on a `_busy` /
+`_loading` / `_sending` flag is more often a missing wire-up than dead code.
+Check the path that should set it before deleting it.
+
+**Cross-session note:** this was resolved by messaging the owning session rather
+than fixing their file. `vault_screen.dart` was +267/-79 and mid-edit; a
+drive-by fix from here would have collided. Asking cost one message and got a
+better fix than deleting the field would have been.
+
+**Tree is now clear for build 41.** Contents: §32 content rewrite, §33 restored
+Deep tier, §34 covers-on-Play + update-sheet fix, §35 two chat fixes off the
+handsets, plus the Vault work. NOT built — build only when asked. Both testers
+are on 40, so 41 is the first release that should reach them WITHOUT a restart:
+the first real test of the §28 resume re-check.

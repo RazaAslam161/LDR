@@ -107,16 +107,45 @@ void main() {
       );
       expect(back?.index, -1);
     });
+
+    test('a card from a phone still on the spicy tier decodes', () {
+      // The third tier was once deleted rather than reworded. fromJson returns
+      // null for a tier it does not know, and truth_dare_screen does
+      // `_card = ours ?? card` — so a partner on an older build drawing that
+      // tier left this phone showing NO CARD, silently. The wire name outlives
+      // the wording: this app is sideloaded and cannot make anyone update.
+      final back = TDCard.fromJson(
+        {'type': 'truth', 'tier': 'spicy', 'text': 'their words', 'index': 3},
+      );
+      expect(back, isNotNull);
+      expect(back?.tier, TDTier.spicy);
+      expect(back?.index, 3);
+    });
+
+    test('every tier that can arrive on the wire has cards in both languages',
+        () {
+      // A tier decoding fine but having an empty pool is the same blank screen
+      // by another route: localiseTD would have nothing to look the index up in.
+      for (final tier in TDTier.values) {
+        for (final lang in ContentLanguage.values) {
+          expect(truthPool(lang, tier), isNotEmpty, reason: '$tier $lang truth');
+          expect(darePool(lang, tier), isNotEmpty, reason: '$tier $lang dare');
+        }
+      }
+    });
   });
 
-  group('a retired tier on the wire', () {
-    // The spicy tier is gone from this build, but a partner still on the old
-    // one can broadcast a spicy card. Decoding it must produce nothing rather
-    // than throwing — the card simply does not appear.
-    test('a card from a build that still has spicy decodes as null', () {
+  group('an unknown tier on the wire', () {
+    // This used to assert the opposite: that a `spicy` card decoded to null,
+    // "the card simply does not appear". That WAS the bug — a partner on an
+    // older build drew a card and this phone showed nothing, with no error and
+    // no log. The tier is back under its original wire name, so the positive
+    // case now lives in 'TDCard wire format'. What must still hold is that a
+    // genuinely unknown tier degrades quietly instead of throwing.
+    test('a tier this build has never heard of decodes as null', () {
       expect(
         TDCard.fromJson(
-          {'type': 'dare', 'tier': 'spicy', 'text': 'from an old build', 'index': 3},
+          {'type': 'dare', 'tier': 'molten', 'text': 'from a future build', 'index': 3},
         ),
         isNull,
       );

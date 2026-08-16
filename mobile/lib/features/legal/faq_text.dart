@@ -61,7 +61,7 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
           'Is everything end-to-end encrypted?',
           'No, and we would rather tell you plainly than imply otherwise. A '
               'small set of especially sensitive areas — memory threads and '
-              'fantasy-jar entries — is end-to-end encrypted: the encryption '
+              'wish-jar entries — is end-to-end encrypted: the encryption '
               'happens on your phone, and our servers store only ciphertext '
               'they cannot read.\n\nEverything else (chat, media, location, '
               'profile) is protected by strict access controls and encryption '

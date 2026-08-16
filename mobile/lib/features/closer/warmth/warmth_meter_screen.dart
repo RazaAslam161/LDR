@@ -148,7 +148,7 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
 
   String get _revealMessage {
     if (_partnerScore != null) {
-      return 'Tonight could be ✨';
+      return "You're both feeling close today ✨";
     }
     if (_submittedToday) {
       return "You're a little out of sync today.\nThat's okay.";
@@ -180,7 +180,7 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Desire',
+                          'Closeness',
                           style: TextStyle(
                             color: Color(0xFFFBF8F4),
                             fontSize: 16,
@@ -188,7 +188,7 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
                           ),
                         ),
                         Text(
-                          'How much today?',
+                          'How close do you feel today?',
                           style: TextStyle(
                             fontSize: 11,
                             color: Color(0x66F5EFE6),
@@ -279,10 +279,10 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
                     const Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('1 · eh',
+                        Text('1 · low-key',
                             style:
                                 TextStyle(color: Color(0x66F5EFE6), fontSize: 11),),
-                        Text('10 · yes',
+                        Text('10 · all in',
                             style:
                                 TextStyle(color: Color(0x66F5EFE6), fontSize: 11),),
                       ],

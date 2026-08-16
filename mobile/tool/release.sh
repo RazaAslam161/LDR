@@ -228,6 +228,15 @@ sys.exit(0 if b'Update available' in blob else 1)
 }
 echo "self-updater present, and the snapshot really is build $pubspec_build"
 
+# The sideload copy. This script uploaded to R2 but never refreshed it, so
+# E:\LDR\Miles.apk kept whatever was last copied by hand — a file named like the
+# latest release and one build behind it. Build 39 went to R2 while Miles.apk
+# still held 38, which is the shipped-artifact-is-not-the-claimed-artifact bug
+# one layer out from the stale snapshot above. Copied only after the stamp check
+# passes, so a refused artifact can never land here.
+cp "$APK" ../Miles.apk
+echo "sideload copy: Miles.apk is build $pubspec_build"
+
 # ── 3. Upload ───────────────────────────────────────────────────────────────
 if $upload; then
   endpoint="https://${MILES_R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${MILES_R2_BUCKET}/${object}"

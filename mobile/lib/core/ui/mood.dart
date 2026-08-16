@@ -49,14 +49,14 @@ const List<MoodData> kMoods = [
   MoodData('angry', '😠', 'Angry', '#E0564B', 'Fuming'),
   MoodData('annoyed', '😤', 'Annoyed', '#C9824A', 'Irritated'),
   // ── Bold / intimate (adult expressions — never children) ──
-  MoodData('horny', '🥵', 'Turned on', '#E84A6F', 'Aching for you',
+  MoodData('horny', '🥵', 'Yearning', '#E84A6F', 'Wanting you close',
       intimate: true, asset: 'yearning',),
   MoodData('flirty', '😏', 'Flirty', '#D45A77', 'Feeling cheeky',
       intimate: true,),
   MoodData('devilish', '😈', 'Devilish', '#9B59B6', 'Up to no good',
       intimate: true, asset: 'mischief',),
   MoodData('kiss', '😘', 'Kissy', '#F2A9BC', 'Blowing a kiss', intimate: true),
-  MoodData('kissmark', '💋', 'Marked you', '#E0564B', 'Left a mark',
+  MoodData('kissmark', '💋', 'Lipstick kiss', '#E0564B', 'Sealed with a kiss',
       intimate: true, asset: 'lipstick',),
 ];
 
@@ -64,8 +64,8 @@ const List<MoodData> kMoods = [
 ///
 /// [intimate] moods are the ones that only make sense once both partners have
 /// turned Closer on. The flag existed from the start and nothing ever read it,
-/// so 'Turned on / Aching for you' sat in the ordinary chat mood sheet for
-/// every user — outside Closer, outside Modest Mode, outside the adult check.
+/// so the bold moods sat in the ordinary chat mood sheet for every user —
+/// outside Closer, outside Modest Mode, outside the adult check.
 /// This is the reader that was missing.
 List<MoodData> moodsFor({required bool intimateAllowed}) =>
     intimateAllowed ? kMoods : [for (final m in kMoods) if (!m.intimate) m];

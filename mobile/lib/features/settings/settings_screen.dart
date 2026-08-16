@@ -371,9 +371,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         builder: (ctx) => AlertDialog(
           title: const Text('Enable Closer?'),
           content: const Text(
-            'This reveals the intimacy module for both of you. Everything in '
-            'Closer is end-to-end encrypted. You can re-enable Modest Mode any '
-            'time.',
+            'This makes Closer visible for both of you. You can re-enable '
+            'Modest Mode any time.',
             style: TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [
@@ -689,12 +688,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               value: !isModest,
               onChanged: _busy ? null : _toggleModestMode,
               activeThumbColor: MilesColors.ember,
-              title: const Text('Closer (intimacy module)',
+              title: const Text('Closer',
                   style: TextStyle(color: MilesColors.cream50),),
               subtitle: Text(
                 isModest
                     ? 'Hidden. Reveal for both partners.'
-                    : 'Visible. End-to-end encrypted.',
+                    : 'Visible to both of you.',
                 style: const TextStyle(fontSize: 12, color: MilesColors.taupe),
               ),
             ),

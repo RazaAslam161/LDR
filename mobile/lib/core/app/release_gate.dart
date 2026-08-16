@@ -24,7 +24,7 @@ class ReleaseGate {
   /// This build. Bump with every release that a server change will depend on.
   /// Kept here rather than read from pubspec because the number that matters is
   /// the one the SERVER compares against, and it has to be legible in a diff.
-  static const buildNumber = 38;
+  static const buildNumber = 40;
 
   /// The human-facing version, shown in Settings > About. Kept beside
   /// [buildNumber] and mirrored from pubspec's `version:` — the About card used
@@ -47,6 +47,21 @@ class ReleaseGate {
   static bool _blocked = false;
   static String? _message;
 
+  /// Bumped whenever a check CHANGES the answer, so the UI can react without a
+  /// restart.
+  ///
+  /// [check] used to run once in main() into plain statics, which meant a client
+  /// already running when a release was published never learned about it: the
+  /// update sheet and the block screen both read values frozen at process start.
+  /// A phone that Android keeps alive for days therefore sat on a superseded
+  /// build indefinitely, and the release reached only whoever happened to cold
+  /// start afterwards. That is most of a fleet, not an edge case.
+  static final ValueNotifier<int> revision = ValueNotifier(0);
+
+  /// Guards against re-checking on every task switch. A resume is cheap to
+  /// observe and a round trip is not.
+  static DateTime? _lastCheck;
+
   static bool get isBlocked => _blocked;
   static String get message =>
       _message ?? 'Please update to keep using the app.';
@@ -67,6 +82,7 @@ class ReleaseGate {
   /// missing on a fresh environment) the app carries on: locking everyone out
   /// because a gate was unreachable is a worse outage than the one it guards.
   static Future<void> check() async {
+    _lastCheck = DateTime.now();
     try {
       final row = await SupabaseService.client
           .from('app_release')
@@ -77,23 +93,55 @@ class ReleaseGate {
           .limit(1)
           .maybeSingle();
       if (row == null) return;
-      final min = (row['min_build'] as num?)?.toInt() ?? 1;
-      _blocked = buildNumber < min;
-      _message = row['message'] as String?;
-      latestBuild = (row['latest_build'] as num?)?.toInt() ?? buildNumber;
-      apkUrl = row['apk_url'] as String?;
-      apkSha256 = row['apk_sha256'] as String?;
-      latestVersionName = row['latest_version_name'] as String?;
-      // Unconditional, and it is not only a trace: reading buildStamp is what
-      // keeps the literal in the snapshot. A const string nothing references is
-      // one the tree-shaker may drop, and release.sh greps for it to prove the
-      // Dart in the artifact is the Dart it just compiled.
-      debugPrint('[release] $buildStamp checked in, server says $latestBuild');
-      if (_blocked) {
-        debugPrint('[release] build $buildNumber is below the minimum $min');
-      }
+      applyRow(row);
     } catch (e) {
       debugPrint('[release] gate unreachable, allowing: ${e.runtimeType}');
     }
   }
+
+  /// Parsing and change detection, split from the fetch so it can be exercised
+  /// without a backend.
+  ///
+  /// The [revision] bump is the part that regresses silently: remove it and
+  /// everything still compiles, every test that does not assert on it still
+  /// passes, and the app quietly goes back to learning about a release only on
+  /// a cold start — which is the bug this whole path exists to fix.
+  @visibleForTesting
+  static void applyRow(Map<String, dynamic> row) {
+    final min = (row['min_build'] as num?)?.toInt() ?? 1;
+    final wasBlocked = _blocked;
+    final wasLatest = latestBuild;
+    _blocked = buildNumber < min;
+    _message = row['message'] as String?;
+    latestBuild = (row['latest_build'] as num?)?.toInt() ?? buildNumber;
+    apkUrl = row['apk_url'] as String?;
+    apkSha256 = row['apk_sha256'] as String?;
+    latestVersionName = row['latest_version_name'] as String?;
+    if (_blocked != wasBlocked || latestBuild != wasLatest) {
+      revision.value++;
+    }
+    // Unconditional, and it is not only a trace: reading buildStamp is what
+    // keeps the literal in the snapshot. A const string nothing references is
+    // one the tree-shaker may drop, and release.sh greps for it to prove the
+    // Dart in the artifact is the Dart it just compiled.
+    debugPrint('[release] $buildStamp checked in, server says $latestBuild');
+    if (_blocked) {
+      debugPrint('[release] build $buildNumber is below the minimum $min');
+    }
+  }
+
+  /// Re-read the gate when the app comes back to the foreground.
+  ///
+  /// Publishing a release changes a row on the server; without this the change
+  /// reaches only clients that cold start afterwards. Throttled because a resume
+  /// fires on every task switch, and skipped once blocked — the block screen is
+  /// terminal, so there is nothing a further check could tell it.
+  static Future<void> recheck() async {
+    if (_blocked) return;
+    final last = _lastCheck;
+    if (last != null && DateTime.now().difference(last) < _recheckAfter) return;
+    await check();
+  }
+
+  static const _recheckAfter = Duration(minutes: 15);
 }
