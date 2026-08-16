@@ -360,6 +360,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return id;
   }
 
+  /// The reply a voice note was quoting, remembered per send id.
+  ///
+  /// [_takeReplyId] CONSUMES the reply — it has to, so the next message does
+  /// not silently inherit it. But the voice retry re-enters the same send with
+  /// the same id, and by then the reply is gone, so a retried note lost the
+  /// message it was answering. Keyed by send id, taken once, reused by any
+  /// retry of that id.
+  final _voiceReplies = <String, String?>{};
+
+  Future<void> _sendVoiceOnce(String coupleId, File file, String id) {
+    final replyId = _voiceReplies.putIfAbsent(id, _takeReplyId);
+    return ChatRepository.sendVoice(coupleId, file, id: id, replyToId: replyId);
+  }
+
   /// Find a loaded message by id (for rendering a quoted reply preview).
   Message? _byId(String? id) {
     if (id == null) return null;
@@ -1633,8 +1647,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             _sendMediaBatch(couple.id, items),
                         onSendFiles: (docs) =>
                             _sendDocuments(couple.id, docs),
-                        onSendVoice: (f) => ChatRepository.sendVoice(couple.id, f,
-                            replyToId: _takeReplyId(),),
+                        onSendVoice: (f, id) => _sendVoiceOnce(couple.id, f, id),
                         onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
                             replyToId: _takeReplyId(),),
                         onFlingGif: _flingGifFile,

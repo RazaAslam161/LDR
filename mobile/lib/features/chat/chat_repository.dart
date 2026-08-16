@@ -35,6 +35,7 @@ class Message {
     this.body,
     this.imagePath,
     this.voicePath,
+    this.voiceDurationMs,
     this.videoPath,
     this.filePath,
     this.fileSize,
@@ -55,6 +56,9 @@ class Message {
         body: JsonUtils.parseStringOrNull(j['body']),
         imagePath: JsonUtils.parseStringOrNull(j['image_path']),
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
+        voiceDurationMs: j['voice_duration_ms'] == null
+            ? null
+            : JsonUtils.parseInt(j['voice_duration_ms']),
         videoPath: JsonUtils.parseStringOrNull(j['video_path']),
         filePath: JsonUtils.parseStringOrNull(j['file_path']),
         fileSize: j['file_size'] == null ? null : JsonUtils.parseInt(j['file_size']),
@@ -90,6 +94,7 @@ class Message {
         body: body,
         imagePath: imagePath,
         voicePath: voicePath,
+        voiceDurationMs: voiceDurationMs,
         videoPath: videoPath,
         filePath: filePath,
         fileSize: fileSize,
@@ -113,6 +118,7 @@ class Message {
         body: server.body,
         imagePath: server.imagePath,
         voicePath: server.voicePath,
+        voiceDurationMs: server.voiceDurationMs,
         videoPath: server.videoPath,
         filePath: server.filePath,
         fileSize: server.fileSize,
@@ -142,6 +148,14 @@ class Message {
   final String? body;
   final String? imagePath;
   final String? voicePath;
+
+  /// How long the voice note runs, in milliseconds, or null when nobody knows.
+  ///
+  /// Null is a permanent state, not a transitional one: every note sent before
+  /// the column existed keeps it, and so does everything from a client older
+  /// than this build — the fleet is sideloaded and has no update channel. The
+  /// bubble draws no label at all for those rather than inventing one.
+  final int? voiceDurationMs;
   final String? videoPath;
 
   /// couple_files object name. [body] carries the file's display name, so a
@@ -381,21 +395,25 @@ class ChatRepository {
         'latency_ms': sw.elapsedMilliseconds,
       },);
     } catch (e) {
+      final landed = _alreadyLanded(e);
       Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
         'kind': 'text',
         'body_len': trimmed.length,
-        'ok': false,
+        'ok': landed,
+        'dedupe': landed,
         'error_class': e.runtimeType.toString(),
         'pg_code': e is PostgrestException ? e.code : null,
         'latency_ms': sw.elapsedMilliseconds,
       },);
+      if (landed) return;
       rethrow;
     }
   }
 
   /// Uploads an image to couple_media/<coupleId>/<rand>.<ext> and inserts a
   /// message row of kind='image'. Returns the storage path (so callers can
-  /// broadcast the fast-path 'msg'), or null if there's no signed-in user.
+  /// broadcast the fast-path 'msg'), or null if there's no signed-in user or
+  /// the row this [id] names was already written by an earlier attempt.
   static Future<String?> sendImage(String coupleId, File file,
       {String? replyToId, String? id, String? albumId,}) async {
     final uid = SupabaseService.currentUserId;
@@ -427,13 +445,19 @@ class ChatRepository {
         'latency_ms': sw.elapsedMilliseconds,
       },);
     } catch (e) {
+      final landed = _alreadyLanded(e);
       Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
         'kind': 'image',
-        'ok': false,
+        'ok': landed,
+        'dedupe': landed,
         'error_class': e.runtimeType.toString(),
         'pg_code': e is PostgrestException ? e.code : null,
         'latency_ms': sw.elapsedMilliseconds,
       },);
+      // Null rather than [path]: the row is already there and already names the
+      // object the FIRST attempt uploaded, so broadcasting this attempt's path
+      // would push the partner a path their row does not carry.
+      if (landed) return null;
       rethrow;
     }
     return path;
@@ -467,16 +491,20 @@ class ChatRepository {
     final pending = Thumbnails.forVideo(file);
     await _c.storage.from(privateBucket).upload(path, file);
     final hasThumb = await _putThumb(privateBucket, path, await pending);
-    await _c.from('messages').insert({
-      if (id != null) 'id': id,
-      'couple_id': coupleId,
-      'sender_id': uid,
-      'video_path': path,
-      'kind': 'video',
-      if (replyToId != null) 'reply_to_id': replyToId,
-      if (albumId != null) 'album_id': albumId,
-      'has_thumb': hasThumb,
-    });
+    try {
+      await _c.from('messages').insert({
+        if (id != null) 'id': id,
+        'couple_id': coupleId,
+        'sender_id': uid,
+        'video_path': path,
+        'kind': 'video',
+        if (replyToId != null) 'reply_to_id': replyToId,
+        if (albumId != null) 'album_id': albumId,
+        'has_thumb': hasThumb,
+      });
+    } catch (e) {
+      if (!_alreadyLanded(e)) rethrow;
+    }
   }
 
   /// Upload [bytes] as the thumbnail beside [originalPath]. Answers whether the
@@ -525,18 +553,22 @@ class ChatRepository {
     final ext = _ext(name) ?? _ext(file.path) ?? 'bin';
     final path = '$coupleId/${_randomName('file', ext)}';
     await _c.storage.from(filesBucket).upload(path, file);
-    await _c.from('messages').insert({
-      if (id != null) 'id': id,
-      'couple_id': coupleId,
-      'sender_id': uid,
-      'file_path': path,
-      'file_size': await file.length(),
-      // The name goes in body so an older client renders it as text rather
-      // than an empty bubble it has no case for.
-      'body': name,
-      'kind': 'file',
-      if (replyToId != null) 'reply_to_id': replyToId,
-    });
+    try {
+      await _c.from('messages').insert({
+        if (id != null) 'id': id,
+        'couple_id': coupleId,
+        'sender_id': uid,
+        'file_path': path,
+        'file_size': await file.length(),
+        // The name goes in body so an older client renders it as text rather
+        // than an empty bubble it has no case for.
+        'body': name,
+        'kind': 'file',
+        if (replyToId != null) 'reply_to_id': replyToId,
+      });
+    } catch (e) {
+      if (!_alreadyLanded(e)) rethrow;
+    }
   }
 
   /// A signed URL for a document, minted on demand — file bubbles render a
@@ -546,21 +578,38 @@ class ChatRepository {
       : MediaUrls.sign(filesBucket, MediaUrls.toPath(filesBucket, path));
 
   /// Uploads a voice note and inserts a message row of kind='voice'.
+  ///
+  /// [id] is the recording's id, and the caller must keep it the same across
+  /// every attempt at the same recording. Without one the server mints a fresh
+  /// uuid per call, so a retry of a send whose INSERT had actually landed —
+  /// only its response was lost — wrote a second row the id dedupe could not
+  /// see, and the note arrived twice on both phones.
   static Future<void> sendVoice(String coupleId, File file,
-      {String? replyToId,}) async {
+      {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
 
     final ext = _ext(file.path) ?? 'm4a';
     final path = '$coupleId/${_randomName('voice', ext)}';
+    // Read off the local file, before the upload: the bubble has to be able to
+    // say how long a note runs without downloading and decoding the audio.
+    final durationMs = await m4aDurationMs(file);
     await _c.storage.from(chatBucket).upload(path, file);
-    await _c.from('messages').insert({
-      'couple_id': coupleId,
-      'sender_id': uid,
-      'voice_path': path,
-      'kind': 'voice',
-      if (replyToId != null) 'reply_to_id': replyToId,
-    });
+    try {
+      await _c.from('messages').insert({
+        if (id != null) 'id': id,
+        'couple_id': coupleId,
+        'sender_id': uid,
+        'voice_path': path,
+        'kind': 'voice',
+        // Omitted rather than sent as null when it could not be read, so a
+        // recording this cannot measure writes the exact row it always did.
+        if (durationMs != null) 'voice_duration_ms': durationMs,
+        if (replyToId != null) 'reply_to_id': replyToId,
+      });
+    } catch (e) {
+      if (!_alreadyLanded(e)) rethrow;
+    }
   }
 
   /// Live stream of new messages for this couple (both partners' sends).
@@ -629,6 +678,25 @@ class ChatRepository {
 
   // ─── helpers ──────────────────────────────────────────────────
 
+  /// The row this insert was trying to write is already there — so the call has
+  /// its desired end state and is a success, not a failure.
+  ///
+  /// An insert can land server-side and its response still be lost: the 30s
+  /// TimeoutHttpClient ceiling on a bad uplink, or the socket dropping under
+  /// it. The retry that follows carries the SAME client id and collides with
+  /// the row the first attempt wrote. Reporting that as a failure left the
+  /// sender looking at a red bubble whose retry could never go green, for a
+  /// message the partner already had — and what a user does about that is
+  /// retype it, which mints a new id and genuinely does send it twice.
+  ///
+  /// Postgres raises SQLSTATE 23505 for a unique violation and PostgREST
+  /// passes that through verbatim as [PostgrestException.code]. Unambiguous on
+  /// this table: `messages_pkey` on `id` is its only unique index (verified
+  /// against prod 2026-08-17 — every other index there is non-unique), so 23505
+  /// here has exactly one meaning.
+  static bool _alreadyLanded(Object e) =>
+      e is PostgrestException && e.code == '23505';
+
   static String? _ext(String path) {
     final dot = path.lastIndexOf('.');
     if (dot < 0 || dot == path.length - 1) return null;
@@ -642,4 +710,93 @@ class ChatRepository {
     final ms = DateTime.now().millisecondsSinceEpoch;
     return '${prefix}_$ms$hex.$ext';
   }
+
+  /// How long an m4a recording runs, in milliseconds, read from the file's own
+  /// header. Null when it cannot be read.
+  ///
+  /// The recorder does not report a duration — record 7.1.0's `stop()` hands
+  /// back the path and nothing else, and the only Duration in the package is
+  /// the amplitude polling interval — so the choice was this or a wall clock
+  /// around start/stop. A wall clock counts microphone warm-up and the
+  /// encoder's closing flush as though they were audio, and on the short notes
+  /// this was raised about ("2 seconds, 3 seconds") that overshoot is the whole
+  /// difference between 0:02 and 0:03. The mvhd box is the length the encoder
+  /// itself wrote down when it closed the file, so it is what the note plays
+  /// for.
+  ///
+  /// Pure Dart over a few dozen bytes on purpose: this sits in the send path of
+  /// the app's most-used feature, so it must not spin up a decoder, take an
+  /// audio-focus lock, or be able to hang. Every failure answers null and the
+  /// note sends exactly as it did before.
+  ///
+  /// Public so the box walk can be exercised against a real recording.
+  static Future<int?> m4aDurationMs(File file) async {
+    RandomAccessFile? raf;
+    try {
+      raf = await file.open();
+      final moov = await _box(raf, 0, await raf.length(), 'moov');
+      if (moov == null) return null;
+      final mvhd = await _box(raf, moov.$1, moov.$2, 'mvhd');
+      if (mvhd == null) return null;
+      await raf.setPosition(mvhd.$1);
+      final f = await raf.read(32);
+      if (f.length < 32) return null;
+      // mvhd payload: version(1) flags(3), then created/modified/timescale/
+      // duration. The dates and the duration are 32-bit at version 0 and
+      // 64-bit at version 1; timescale is 32-bit either way.
+      final v1 = f[0] == 1;
+      final timescale = _be32(f, v1 ? 20 : 12);
+      final duration = v1 ? _be64(f, 24) : _be32(f, 16);
+      // 0xFFFFFFFF is the container's own way of saying it does not know.
+      if (timescale == 0 || duration <= 0 || duration == 0xFFFFFFFF) return null;
+      return (duration * 1000 / timescale).round();
+    } catch (e) {
+      debugPrint('[voice] no duration from ${file.path}: ${e.runtimeType}');
+      return null;
+    } finally {
+      await raf?.close();
+    }
+  }
+
+  /// The payload range of the first [type] box lying between [start] and [end],
+  /// walking siblings. `moov` is written last in a recording — the encoder does
+  /// not know the duration until it stops — so this cannot just read the head
+  /// of the file.
+  static Future<(int, int)?> _box(
+    RandomAccessFile raf,
+    int start,
+    int end,
+    String type,
+  ) async {
+    var at = start;
+    while (at + 8 <= end) {
+      await raf.setPosition(at);
+      final head = await raf.read(8);
+      if (head.length < 8) return null;
+      var size = _be32(head, 0);
+      var header = 8;
+      if (size == 1) {
+        // A 64-bit size, carried after the type, for boxes past 4 GiB.
+        final big = await raf.read(8);
+        if (big.length < 8) return null;
+        size = _be64(big, 0);
+        header = 16;
+      } else if (size == 0) {
+        size = end - at; // runs to the end of its parent
+      }
+      // A size that does not fit inside the parent means this is not the
+      // structure it claims to be; walking on would be reading noise.
+      if (size < header || at + size > end) return null;
+      if (String.fromCharCodes(head.sublist(4, 8)) == type) {
+        return (at + header, at + size);
+      }
+      at += size;
+    }
+    return null;
+  }
+
+  static int _be32(List<int> b, int i) =>
+      (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
+
+  static int _be64(List<int> b, int i) => (_be32(b, i) << 32) | _be32(b, i + 4);
 }

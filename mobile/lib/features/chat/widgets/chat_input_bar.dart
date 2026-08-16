@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,9 +8,11 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:uuid/uuid.dart';
 
 /// Chat input bar with three actions: text, image attach, hold-to-record voice.
 class ChatInputBar extends StatefulWidget {
@@ -32,7 +35,9 @@ class ChatInputBar extends StatefulWidget {
   /// A whole document pick. Same contract as [onSendMedia]: handed to the send
   /// queue, on screen before the first byte moves.
   final void Function(List<PickedDocument> docs) onSendFiles;
-  final Future<void> Function(File voice) onSendVoice;
+  /// The id is minted by the bar, not the send path, so a retry of the SAME
+  /// recording reuses it and the second insert conflicts instead of duplicating.
+  final Future<void> Function(File voice, String id) onSendVoice;
   final Future<void> Function(File video) onSendVideo;
 
   /// A GIF/sticker picked from the phone keyboard — flung (rises on both phones).
@@ -58,6 +63,7 @@ class ChatInputBar extends StatefulWidget {
 
 class _ChatInputBarState extends State<ChatInputBar> {
   final _text = TextEditingController();
+  static const _uuid = Uuid();
   final _recorder = AudioRecorder();
   bool _sending = false;
   bool _recording = false;
@@ -66,12 +72,61 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool get _hasText => _text.text.trim().isNotEmpty;
   bool _lastHasText = false;
 
+  /// Debounce for writing the draft. A platform round trip per keystroke is a
+  /// cost the typing itself should not have to carry.
+  Timer? _draftTimer;
+
   @override
   void initState() {
     super.initState();
+    _restoreDraft();
+    _lastHasText = _hasText;
     // Rebuild the moment text goes empty↔non-empty so the send (✈) icon
     // appears immediately instead of waiting for an unrelated rebuild.
     _text.addListener(_onTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(ChatInputBar old) {
+    super.didUpdateWidget(old);
+    if (old.coupleId == widget.coupleId) return;
+    // A different couple on the same handset (an account switch) must neither
+    // inherit the previous one's draft nor lose it.
+    unawaited(ChatDraftStore.save(old.coupleId, _text.text));
+    _text.clear();
+    _restoreDraft();
+  }
+
+  /// Put back whatever was typed and not sent.
+  ///
+  /// Synchronous whenever this process already holds the draft, which is the
+  /// ordinary case — a tab change and the disguise cover both dispose this
+  /// State without ending the process — so the text is there in the first
+  /// frame rather than appearing a moment after it.
+  void _restoreDraft() {
+    // Any save queued by the caller's _text.clear() is about the couple we are
+    // leaving, and would otherwise land on the one we are arriving at.
+    _draftTimer?.cancel();
+    final cached = ChatDraftStore.peek(widget.coupleId);
+    if (cached != null) {
+      _setText(cached);
+      return;
+    }
+    unawaited(ChatDraftStore.load(widget.coupleId).then((draft) {
+      // The disk read raced the user; the user wins.
+      if (!mounted || draft == null || _text.text.isNotEmpty) return;
+      _setText(draft);
+    }),);
+  }
+
+  /// Caret after the restored text, and nothing left marked as composing — the
+  /// field is showing settled text, not something the keyboard is mid-way
+  /// through and may replace.
+  void _setText(String body) {
+    _text.value = TextEditingValue(
+      text: body,
+      selection: TextSelection.collapsed(offset: body.length),
+    );
   }
 
   void _onTextChanged() {
@@ -80,10 +135,24 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _lastHasText = h;
       if (mounted) setState(() {});
     }
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 250), _saveDraft);
+  }
+
+  /// Reads the field when it runs rather than capturing the text when it was
+  /// scheduled, so a save that lands after a send writes the cleared field.
+  void _saveDraft() {
+    _draftTimer?.cancel();
+    unawaited(ChatDraftStore.save(widget.coupleId, _text.text));
   }
 
   @override
   void dispose() {
+    // Written HERE and not only on the debounce: this State is disposed on
+    // every tab change and every time the cover goes up, and someone who types
+    // and leaves at once would outrun the timer. Before _text.dispose(),
+    // because it reads the field.
+    _saveDraft();
     _text.removeListener(_onTextChanged);
     _text.dispose();
     _recorder.dispose();
@@ -121,6 +190,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final t = _text.text.trim();
     if (t.isEmpty || _sending) return;
     _text.clear();
+    // The draft dies with the send, and it dies BEFORE the await: this State is
+    // disposed the moment the user leaves, and a draft still holding a body
+    // that already went is one that comes back and gets sent a second time.
+    _draftTimer?.cancel();
+    unawaited(ChatDraftStore.clear(widget.coupleId));
     setState(() => _sending = true);
     try {
       await widget.onSendText(t);
@@ -352,10 +426,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// dead connection and nothing here caught it, so it left through main.dart's
   /// platformDispatcher handler: the note was gone and the user was told
   /// nothing. Failing to START a recording has always said so (:325).
-  Future<void> _sendVoice(File file) async {
+  /// [id] is minted once per recording and REUSED by the retry below.
+  ///
+  /// Without it the server minted a fresh id per attempt, so a note whose row
+  /// had actually landed — response lost on a bad connection, which is exactly
+  /// when the retry gets tapped — was written a second time and appeared twice
+  /// on both phones. `sendVoice` now treats a primary-key conflict as success,
+  /// but only if both attempts carry the SAME id, which is what this threads.
+  Future<void> _sendVoice(File file, {String? id}) async {
+    final sendId = id ?? _uuid.v4();
     setState(() => _sending = true);
     try {
-      await widget.onSendVoice(file);
+      await widget.onSendVoice(file, sendId);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -365,7 +447,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           // rather than an apology for having lost it.
           action: SnackBarAction(
             label: 'Retry',
-            onPressed: () => _sendVoice(file),
+            onPressed: () => _sendVoice(file, id: sendId),
           ),
         ),
       );

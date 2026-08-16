@@ -345,7 +345,8 @@
       "sender_mood_color",
       "seq",
       "video_path",
-      "voice_path"
+      "voice_path",
+      "voice_duration_ms"
     ],
     "mood_lamp": [
       "color_rgb",

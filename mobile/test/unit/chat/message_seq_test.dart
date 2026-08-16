@@ -73,6 +73,59 @@ void main() {
     expect(m.seq, 0);
   });
 
+  test('fromJson reads the voice note length', () {
+    final m = Message.fromJson({
+      'id': 'a',
+      'sender_id': 'me',
+      'created_at': DateTime(2026).toIso8601String(),
+      'kind': 'voice',
+      'voice_path': 'c/voice_1.m4a',
+      'voice_duration_ms': 7400,
+    });
+    expect(m.voiceDurationMs, 7400);
+  });
+
+  test('a voice row with no duration column reads as null, not as zero', () {
+    // Both the twelve notes sent before the column and every note from a
+    // client older than it. Zero would be a length; null is "nobody knows",
+    // and only one of those two can be rendered honestly.
+    final m = Message.fromJson({
+      'id': 'a',
+      'sender_id': 'me',
+      'created_at': DateTime(2026).toIso8601String(),
+      'kind': 'voice',
+      'voice_path': 'c/voice_1.m4a',
+    });
+    expect(m.voiceDurationMs, isNull);
+  });
+
+  test('the length survives copyWith and reconcileWith', () {
+    // The same class of bug this file was written for: a field carried into
+    // Message.fromJson and then silently dropped by one of the two rebuilders,
+    // so the label appears on the first paint and vanishes when the server row
+    // lands. copyWith runs on every send-status transition.
+    final voice = Message(
+      id: 'a',
+      senderId: 'me',
+      createdAt: DateTime(2026),
+      kind: 'voice',
+      voicePath: 'c/voice_1.m4a',
+      voiceDurationMs: 4200,
+    );
+    expect(voice.copyWith(sendStatus: SendStatus.sent).voiceDurationMs, 4200);
+
+    final landed = Message(
+      id: 'a',
+      senderId: 'me',
+      createdAt: DateTime(2026, 1, 2),
+      kind: 'voice',
+      voicePath: 'c/voice_1.m4a',
+      voiceDurationMs: 4200,
+      seq: 8,
+    );
+    expect(voice.reconcileWith(landed).voiceDurationMs, 4200);
+  });
+
   test('the max seq of a conversation advances as messages reconcile', () {
     // This is what _maxSeq does, and what gates _ackRead. With the bug every
     // element stayed 0, so a brand-new couple never acked anything at all.

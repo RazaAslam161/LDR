@@ -16,6 +16,7 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
+import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
@@ -329,6 +330,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
     MediaUrls.clear();
     MapToken.clear();
     ChatSendQueue.instance.clear();
+    // The unsent draft goes with them. It is a message body — the most personal
+    // thing in the app — and it now survives a screen change on purpose, which
+    // means without this it would survive a SIGN-OUT too and wait in the field
+    // for whoever signs in on this handset next.
+    unawaited(ChatDraftStore.clearAll());
     // Ciphertext too, unlike a cover raise. Raising the cover keeps the disk
     // layer because it is unreadable without the key and re-fetching it every
     // time someone glances at their phone is a great deal of traffic for
