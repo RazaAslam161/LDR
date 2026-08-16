@@ -192,6 +192,9 @@ class _AppShellState extends ConsumerState<AppShell>
 
   void _onReady() {
     unawaited(_maybeOfferUpdate());
+    // Before the couple check on purpose: this is the one prompt that does not
+    // need a partner to make sense.
+    unawaited(_offerCoverAtFirstOpen());
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     // Foreground realtime path — works whether or not push is configured.
@@ -232,6 +235,22 @@ class _AppShellState extends ConsumerState<AppShell>
     _firstRunPrompts(couple.id);
   }
 
+  /// How the app looks in the launcher, asked at FIRST OPEN.
+  ///
+  /// It used to sit inside _firstRunPrompts, which _onReady only reaches after
+  /// `couple == null` returns — so the question never reached anyone who had
+  /// not paired yet. The old reasoning was that there is nothing worth hiding
+  /// before there is a partner; that is true of the CONTENT and false of the
+  /// decision. Someone installing this app has a reason to before they have
+  /// anything in it, and being asked after pairing is being asked once the icon
+  /// has already sat on the home screen for a day.
+  Future<void> _offerCoverAtFirstOpen() async {
+    if (!DisguiseService.enabled) return;
+    if (await DisguiseService.hasChosen()) return;
+    if (!mounted) return;
+    await _offerDisguiseOnce();
+  }
+
   static bool _updateOffered = false;
 
   /// A newer sideload build exists — offered once per process, and only when no
@@ -258,10 +277,8 @@ class _AppShellState extends ConsumerState<AppShell>
   /// ever being read. The location one is last because it is the only one that
   /// leads to a system dialog we cannot draw over.
   Future<void> _firstRunPrompts(String coupleId) async {
-    // The launcher disguise, at the point the app first has something worth
-    // hiding. Skipped forever once answered either way.
-    await _offerDisguiseOnce();
-    if (!mounted) return;
+    // The cover question is NOT here any more — it runs from _onReady before
+    // the couple check, so an unpaired user still gets asked.
     final partnerName =
         ref.read(sessionProvider).partner?.displayName ?? 'your partner';
     // One-time, dismissible full-screen-alert prompt (Android 14+).

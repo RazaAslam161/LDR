@@ -861,79 +861,123 @@ class _AboutCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: MilesColors.surface1,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: MilesColors.hairline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Wordmark(size: 22),
-          const SizedBox(height: 10),
-          const Text(
-            'Feel close, even from here.',
-            style: TextStyle(color: MilesColors.taupe, fontSize: 13),
-          ),
-          const SizedBox(height: 18),
-          const _AboutRow(label: 'Developed by', value: 'R&D Dev'),
-          const _AboutRow(
-            label: 'Version',
-            value: '${ReleaseGate.versionName} (${ReleaseGate.buildNumber})',
-          ),
-          // What the release check actually came back with. "No prompt
-          // appeared" was three separate causes over two days and none of them
-          // could be told apart from the outside — a stale build with no
-          // updater in it, a channel flag, and a version that was already
-          // current all look identical. This says which.
-          _AboutRow(
-            label: 'Latest available',
-            value: ReleaseGate.latestBuild > ReleaseGate.buildNumber
-                ? '${ReleaseGate.latestBuild} — update ready'
-                : ReleaseGate.apkUrl == null
-                    ? 'not reachable'
-                    : '${ReleaseGate.latestBuild} — up to date',
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            // The honest split, and it has to stay honest: the Terms link is
-            // fifteen lines below this and says the same thing. Chat text and
-            // media are stored where the operator could read them; the vault,
-            // memory threads and the wish jar are sealed on this phone with a
-            // key the server never holds. Claiming all of it was encrypted was
-            // a sentence this screen contradicted with its own second link.
-            'Your vault, memory threads and wish jar are sealed on this phone '
-            'with a key we never hold. Chat and its media are not — they are '
-            'stored, and never read. The Terms below say exactly which is '
-            'which.',
-            style: TextStyle(
-              color: MilesColors.taupe,
-              fontSize: 12,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              // In-app, not a URL: opening Chrome throws the user out of an app
-              // whose launcher identity is a cover, and the terms have to be
-              // readable with no connection — they gate the app on first run.
-              _AboutLink(
-                label: 'Terms',
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const TermsScreen(readOnly: true),
+          // Masthead. Generous top padding and the tagline directly under the
+          // wordmark, so the card opens with the app's name rather than with a
+          // table — the old one led with a key/value grid and read like a
+          // diagnostics dump.
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 22, 20, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wordmark(size: 24),
+                SizedBox(height: 8),
+                Text(
+                  'Feel close, even from here.',
+                  style: TextStyle(
+                    color: MilesColors.taupe,
+                    fontSize: 13,
+                    height: 1.4,
                   ),
                 ),
-              ),
-              const Text(' · ',
-                  style: TextStyle(color: MilesColors.faint, fontSize: 12),),
-              _AboutLink(
-                label: 'Privacy Policy',
-                onTap: () => _openPrivacyPolicy(context),
-              ),
-            ],
+              ],
+            ),
           ),
+          const Divider(height: 1, thickness: 1, color: MilesColors.hairline),
+
+          // The facts. One rhythm: label left in faint, value right in cream,
+          // baseline-aligned, each row the same height. A fixed 104px gutter
+          // was what made the old one look ragged — 'Latest available' wrapped
+          // and nothing else did.
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            child: Column(
+              children: [
+                _AboutRow(label: 'Developed by', value: 'R&D Dev'),
+                _AboutRow(
+                  label: 'Version',
+                  value: '${ReleaseGate.versionName} '
+                      '(${ReleaseGate.buildNumber})',
+                ),
+              ],
+            ),
+          ),
+          // Split out of the const block because it reads runtime state. What
+          // the release check actually came back with: "no prompt appeared" was
+          // three separate causes over two days — a stale snapshot, a channel
+          // flag, and a version already current — and from the outside all
+          // three look identical. This says which.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _AboutRow(
+              label: 'Latest',
+              value: ReleaseGate.apkUrl == null
+                  ? 'not reachable'
+                  : ReleaseGate.latestBuild > ReleaseGate.buildNumber
+                      ? '${ReleaseGate.latestBuild} · update ready'
+                      : 'up to date',
+              accent: ReleaseGate.latestBuild > ReleaseGate.buildNumber,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1, thickness: 1, color: MilesColors.hairline),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  // The honest split, and it has to stay honest: the Terms link
+                  // is directly below and says the same thing. Chat text and
+                  // media are stored where the operator could read them; the
+                  // vault, memory threads and wish jar are sealed on this phone
+                  // with a key the server never holds. Claiming all of it was
+                  // encrypted was a sentence this screen contradicted with its
+                  // own second link.
+                  'Your vault, memory threads and wish jar are sealed on this '
+                  'phone with a key we never hold. Chat and its media are not '
+                  '\u2014 they are stored, and never read.',
+                  style: TextStyle(
+                    color: MilesColors.taupe,
+                    fontSize: 12.5,
+                    height: 1.55,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    // In-app, not a URL: opening Chrome throws the user out of
+                    // an app whose launcher identity may be a cover, and the
+                    // terms have to be readable with no connection because they
+                    // gate the app on first run.
+                    _AboutLink(
+                      label: 'Terms',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const TermsScreen(readOnly: true),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    _AboutLink(
+                      label: 'Privacy Policy',
+                      onTap: () => _openPrivacyPolicy(context),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
         ],
       ),
     );
@@ -985,29 +1029,50 @@ class _AboutLink extends StatelessWidget {
 }
 
 class _AboutRow extends StatelessWidget {
-  const _AboutRow({required this.label, required this.value});
+  const _AboutRow({
+    required this.label,
+    required this.value,
+    this.accent = false,
+  });
 
   final String label;
   final String value;
 
+  /// Draws the value in ember. Used for the one row that is an invitation
+  /// rather than a fact — an update waiting to be installed.
+  final bool accent;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
+        // Label and value share a baseline. The old row used a 104px SizedBox
+        // and start-alignment, so a value that wrapped sat a line above its own
+        // label and the column read as broken.
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 104,
+          Expanded(
+            flex: 4,
             child: Text(
               label,
-              style: const TextStyle(color: MilesColors.faint, fontSize: 12),
+              style: const TextStyle(
+                color: MilesColors.faint,
+                fontSize: 12.5,
+                letterSpacing: 0.1,
+              ),
             ),
           ),
           Expanded(
+            flex: 6,
             child: Text(
               value,
-              style: const TextStyle(color: MilesColors.cream50, fontSize: 12),
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: accent ? MilesColors.ember : MilesColors.cream50,
+                fontSize: 12.5,
+                fontWeight: accent ? FontWeight.w600 : FontWeight.w500,
+              ),
             ),
           ),
         ],

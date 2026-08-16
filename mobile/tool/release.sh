@@ -132,13 +132,21 @@ so = [n for n in z.namelist() if n.endswith('libapp.so')]
 if not so:
     print('no libapp.so in the APK'); sys.exit(1)
 blob = z.read(so[0])
-sys.exit(0 if b'Update available' in blob else 1)
+stamp = b'miles-build-' + b'$pubspec_build'
+    if stamp not in blob:
+        print('STALE SNAPSHOT: libapp.so has no ' + stamp.decode())
+        sys.exit(1)
+    sys.exit(0 if b'Update available' in blob else 1)
 " || {
-  echo "THIS BUILD CANNOT SELF-UPDATE — update_sheet.dart is not in libapp.so." >&2
-  echo "Shipping it would strand every phone on a build with no update path." >&2
+  echo "REFUSING TO SHIP THIS ARTIFACT." >&2
+  echo "Either update_sheet.dart is missing from libapp.so, or the Dart in it" >&2
+  echo "is NOT the Dart just compiled. Gradle re-stamps versionCode while" >&2
+  echo "Flutter can reuse a cached AOT snapshot, and releases went out that" >&2
+  echo "way carrying build-31 code under fresh version numbers." >&2
+  echo "Run: flutter clean && bash tool/release.sh ..." >&2
   exit 1
 }
-echo "self-updater present in libapp.so"
+echo "self-updater present, and the snapshot really is build $pubspec_build"
 
 # ── 3. Upload ───────────────────────────────────────────────────────────────
 if $upload; then

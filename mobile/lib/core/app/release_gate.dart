@@ -24,12 +24,25 @@ class ReleaseGate {
   /// This build. Bump with every release that a server change will depend on.
   /// Kept here rather than read from pubspec because the number that matters is
   /// the one the SERVER compares against, and it has to be legible in a diff.
-  static const buildNumber = 36;
+  static const buildNumber = 38;
 
   /// The human-facing version, shown in Settings > About. Kept beside
   /// [buildNumber] and mirrored from pubspec's `version:` — the About card used
   /// to hardcode 'v0.1.0', which was still saying 0.1.0 at build 30.
   static const versionName = '0.1.0';
+
+  /// A literal that CHANGES EVERY BUILD, so a release can prove its Dart is the
+  /// Dart it claims to be.
+  ///
+  /// Const interpolation of a const int is a compile-time constant, so this
+  /// lands in libapp.so as the actual characters `miles-build-37`. release.sh
+  /// greps for the number pubspec says it just built; a snapshot Flutter reused
+  /// from an earlier build carries the earlier number and the release stops.
+  ///
+  /// The guard this replaces looked for 'Update available', which had been in
+  /// every build since 31 — so it passed on exactly the failure it was written
+  /// to catch, and six releases shipped build-31 Dart under fresh versionCodes.
+  static const buildStamp = 'miles-build-$buildNumber';
 
   static bool _blocked = false;
   static String? _message;
@@ -71,6 +84,11 @@ class ReleaseGate {
       apkUrl = row['apk_url'] as String?;
       apkSha256 = row['apk_sha256'] as String?;
       latestVersionName = row['latest_version_name'] as String?;
+      // Unconditional, and it is not only a trace: reading buildStamp is what
+      // keeps the literal in the snapshot. A const string nothing references is
+      // one the tree-shaker may drop, and release.sh greps for it to prove the
+      // Dart in the artifact is the Dart it just compiled.
+      debugPrint('[release] $buildStamp checked in, server says $latestBuild');
       if (_blocked) {
         debugPrint('[release] build $buildNumber is below the minimum $min');
       }
