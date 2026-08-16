@@ -394,12 +394,20 @@
       "wrapped_keys"
     ],
     "personal_vault_items": [
+      "byte_size",
       "content",
       "created_at",
+      "height",
       "id",
+      "media_nonce",
       "media_url",
+      "mime_type",
       "owner_id",
-      "type"
+      "storage_path",
+      "thumb_nonce",
+      "thumb_path",
+      "type",
+      "width"
     ],
     "presence": [
       "app_last_active_at",

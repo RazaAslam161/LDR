@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
-import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/vault/vault_repository.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:miles/features/vault/vault_viewer.dart';
 
 /// The unlocked vault — personal notes only the owner can see. Shown by
 /// VaultGateScreen after a successful PIN/biometric unlock.
@@ -19,6 +20,7 @@ class VaultScreen extends StatefulWidget {
 class _VaultScreenState extends State<VaultScreen> {
   List<VaultItem> _items = const [];
   bool _loading = true;
+  bool _busy = false;
   String? _loadError;
 
   @override
@@ -50,6 +52,89 @@ class _VaultScreenState extends State<VaultScreen> {
             : SnackBarAction(label: 'Retry', onPressed: onRetry),
       ),
     );
+  }
+
+
+  /// Media first, because that is what a vault mostly holds.
+  Future<void> _addSheet() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MilesColors.surface1,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: MilesColors.ember,),
+              title: const Text('Photos or video',
+                  style: TextStyle(color: MilesColors.cream50),),
+              onTap: () => Navigator.pop(ctx, 'media'),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.edit_note_rounded, color: MilesColors.ember),
+              title: const Text('Note',
+                  style: TextStyle(color: MilesColors.cream50),),
+              onTap: () => Navigator.pop(ctx, 'note'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == 'note') return _addNote();
+    if (choice == 'media') return _addMedia();
+  }
+
+  /// Copies the picked files INTO the vault, encrypted, under this user's own
+  /// folder — it does not bookmark them where they already live.
+  Future<void> _addMedia() async {
+    final picked = await ImagePicker().pickMultipleMedia();
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    var failed = 0;
+    for (final file in picked) {
+      try {
+        final bytes = await file.readAsBytes();
+        await VaultRepository.saveMedia(
+          bytes: bytes,
+          mimeType: _mimeOf(file.path, file.mimeType),
+          label: file.name,
+          type: _mimeOf(file.path, file.mimeType).startsWith('video/')
+              ? 'saved_video'
+              : 'saved_photo',
+        );
+      } catch (e) {
+        // Counted and reported, never swallowed: a save that silently did
+        // nothing is the worst outcome for something the user believes is now
+        // kept safe.
+        failed++;
+        debugPrint('[vault] save failed: ${e.runtimeType}');
+      }
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (failed > 0) {
+      _toast(failed == picked.length
+          ? "Nothing could be saved — check your connection."
+          : "$failed of ${picked.length} couldn't be saved.");
+    }
+    await _load();
+  }
+
+  /// XFile.mimeType is usually null on Android, so the extension decides.
+  static String _mimeOf(String path, String? reported) {
+    if (reported != null && reported.contains('/')) return reported;
+    final ext = path.toLowerCase().split('.').last;
+    return switch (ext) {
+      'mp4' => 'video/mp4',
+      'mov' => 'video/quicktime',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'm4a' || 'aac' => 'audio/mp4',
+      'mp3' => 'audio/mpeg',
+      _ => 'image/jpeg',
+    };
   }
 
   Future<void> _addNote() async {
@@ -106,24 +191,24 @@ class _VaultScreenState extends State<VaultScreen> {
 
   /// Opens a saved media item. Public couple_media URLs open directly; private
   /// couple_intimate items (stored as `intimate:<path>`) get a fresh signed URL.
+  /// Opens the item in-app. Nothing here ever reaches a browser.
   Future<void> _openMedia(VaultItem item) async {
-    final c = item.content ?? '';
-    String? url;
-    if (c.startsWith('intimate:')) {
-      url = await ChatRepository.signedVideoUrl(c.substring(9));
-    } else if (c.isNotEmpty) {
-      url = c;
+    // A legacy bookmark row has no bytes of its own — it points into the
+    // couple's shared bucket, or at a signed URL that has almost certainly
+    // expired. There is nothing to show and no honest way to pretend there is.
+    if (!item.isOwned) {
+      _toast('Saved before this vault kept its own copy — re-save it from the '
+          'original message.');
+      return;
     }
-    var ok = false;
-    if (url != null && url.isNotEmpty) {
-      try {
-        ok = await launchUrl(Uri.parse(url),
-            mode: LaunchMode.externalApplication,);
-      } catch (_) {}
-    }
-    if (!ok) {
-      _toast('Link expired — the original message has the latest version');
-    }
+    final owned = _items.where((i) => i.isOwned).toList();
+    final index = owned.indexWhere((i) => i.id == item.id);
+    if (index < 0) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VaultViewer(items: owned, initialIndex: index),
+      ),
+    );
   }
 
   Future<void> _delete(VaultItem item) async {
@@ -171,11 +256,25 @@ class _VaultScreenState extends State<VaultScreen> {
       children: [
         if (media.isNotEmpty) ...[
           _sectionHeader('Saved media'),
-          for (final item in media) ...[
-            _mediaTile(item),
-            const SizedBox(height: 12),
-          ],
-          const SizedBox(height: 8),
+          // A grid, not a stack of rows with an "open" button. Square cells
+          // fixed by the delegate, so a tile occupies its final shape before
+          // any bytes arrive and nothing below it reflows as pictures land.
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 3,
+              mainAxisSpacing: 3,
+            ),
+            itemCount: media.length,
+            itemBuilder: (_, i) => _VaultTile(
+              item: media[i],
+              onTap: () => _openMedia(media[i]),
+              onLongPress: () => _delete(media[i]),
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
         if (notes.isNotEmpty) ...[
           _sectionHeader('Notes'),
@@ -225,61 +324,6 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       );
 
-  Widget _mediaTile(VaultItem item) {
-    final IconData icon;
-    final String title;
-    switch (item.type) {
-      case 'saved_video':
-        icon = Icons.videocam_rounded;
-        title = 'Saved video';
-      case 'saved_voice':
-        icon = Icons.mic_rounded;
-        title = 'Saved voice note';
-      default:
-        icon = Icons.photo_rounded;
-        title = 'Saved photo';
-    }
-    return GestureDetector(
-      onLongPress: () => _delete(item),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: MilesColors.surface1,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: MilesColors.gilt.withValues(alpha: 0.12)),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: MilesColors.ember, size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 14,),),
-                  const SizedBox(height: 2),
-                  Text(item.mediaUrl ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: MilesColors.taupe, fontSize: 11,),),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.open_in_new_rounded,
-                  color: MilesColors.gilt,),
-              onPressed: () => _openMedia(item),
-              tooltip: 'Open',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -301,12 +345,25 @@ class _VaultScreenState extends State<VaultScreen> {
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: MilesColors.blush,
         foregroundColor: MilesColors.cream50,
-        onPressed: _addNote,
+        onPressed: _addSheet,
         icon: const Icon(Icons.add),
-        label: const Text('Note'),
+        label: const Text('Add'),
       ),
       body: SafeArea(
-        child: _loading
+        child: _busy
+            ? const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 14),
+                    Text('Encrypting and saving…',
+                        style:
+                            TextStyle(color: MilesColors.taupe, fontSize: 12),),
+                  ],
+                ),
+              )
+            : _loading
             ? const Center(child: CircularProgressIndicator())
             : _loadError != null
                 ? _LoadFailed(message: _loadError!, onRetry: _load)
@@ -350,4 +407,133 @@ class _LoadFailed extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// One square cell in the vault grid.
+///
+/// Paints the thumbnail object, never the original: a 3-wide grid decoding
+/// full-size pictures is how a gallery ends up feeling like it is still
+/// loading long after it has finished.
+class _VaultTile extends StatefulWidget {
+  const _VaultTile({
+    required this.item,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final VaultItem item;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  State<_VaultTile> createState() => _VaultTileState();
+}
+
+class _VaultTileState extends State<_VaultTile> {
+  ImageProvider? _provider;
+  bool _failed = false;
+  bool _mounted = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_VaultTile old) {
+    super.didUpdateWidget(old);
+    // Cells are recycled. Without this the tile keeps painting the previous
+    // item's picture until the new one resolves.
+    if (old.item.id != widget.item.id) {
+      _provider = null;
+      _failed = false;
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _mounted = false;
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final path = widget.item.gridPath;
+    if (path == null) return; // video/audio, or a legacy row: icon only
+    try {
+      final p = await EncryptedMediaCache.tileProvider(
+        bucket: VaultRepository.bucket,
+        path: path,
+        associatedData: widget.item.thumbPath != null
+            ? VaultRepository.thumbAdFor(widget.item.id)
+            : VaultRepository.fullAdFor(widget.item.id),
+      );
+      if (_mounted) setState(() => _provider = p);
+    } catch (e) {
+      if (_mounted) setState(() => _failed = true);
+    }
+  }
+
+  IconData get _glyph => switch (widget.item.type) {
+        'saved_video' => Icons.play_circle_outline_rounded,
+        'saved_voice' => Icons.graphic_eq_rounded,
+        _ => Icons.photo_outlined,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = _provider;
+    return GestureDetector(
+      onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(color: MilesColors.surface2),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (provider != null)
+              Image(
+                image: provider,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                // Zero fade-out: the default composites two frames per
+                // recycled cell for a full second during a scroll.
+                errorBuilder: (_, __, ___) => Center(
+                  child: Icon(_glyph, color: MilesColors.faint, size: 26),
+                ),
+              )
+            else
+              Center(
+                child: Icon(
+                  _failed ? Icons.broken_image_outlined : _glyph,
+                  color: MilesColors.faint,
+                  size: 26,
+                ),
+              ),
+            // Video and voice keep a badge even once a poster paints, so the
+            // grid says what a cell will do before it is tapped.
+            if (widget.item.isVideo || widget.item.isAudio)
+              const Align(
+                alignment: Alignment.bottomRight,
+                child: Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.play_circle_fill_rounded,
+                      color: Colors.white70, size: 18,),
+                ),
+              ),
+            if (!widget.item.isOwned)
+              const Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.link_off_rounded,
+                      color: MilesColors.faint, size: 14,),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
