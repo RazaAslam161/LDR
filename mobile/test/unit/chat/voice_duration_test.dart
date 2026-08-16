@@ -159,4 +159,44 @@ void main() {
       isNull,
     );
   });
+
+
+  // The one this suite missed, and the reason a whole build shipped without
+  // durations: every test above hands VoiceNoteBubble a durationMs directly, so
+  // they all passed while chat_screen never passed one. The column was written,
+  // the row carried it, the model parsed it, the widget could render it — and
+  // the call site dropped it on the floor between them.
+  //
+  // This pins the boundary the widget tests cannot see: a row as PostgREST
+  // actually returns it must arrive at the model with its duration intact, so
+  // there is something for the bubble to be given.
+  test('a row from the server carries its voice duration into the model', () {
+    final m = Message.fromJson(<String, dynamic>{
+      'id': '11111111-1111-1111-1111-111111111111',
+      'sender_id': '22222222-2222-2222-2222-222222222222',
+      'created_at': '2026-08-16T22:49:33.905435+00:00',
+      'kind': 'voice',
+      'voice_path': 'couple/voice/x.m4a',
+      // Postgres integer over JSON, exactly the shape observed in production:
+      // select voice_duration_ms -> 5364.
+      'voice_duration_ms': 5364,
+    });
+
+    expect(m.voiceDurationMs, 5364);
+  });
+
+  test('a note sent before the column existed parses as null, not zero', () {
+    final m = Message.fromJson(<String, dynamic>{
+      'id': '33333333-3333-3333-3333-333333333333',
+      'sender_id': '22222222-2222-2222-2222-222222222222',
+      'created_at': '2026-08-16T21:18:02.787751+00:00',
+      'kind': 'voice',
+      'voice_path': 'couple/voice/old.m4a',
+      'voice_duration_ms': null,
+    });
+
+    // Null and 0 render differently on purpose — null shows no label at all,
+    // and 0 would claim a real recording is instantaneous.
+    expect(m.voiceDurationMs, isNull);
+  });
 }

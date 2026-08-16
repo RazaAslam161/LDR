@@ -23,6 +23,13 @@ const milesTermsUpdated = '16 August 2026';
 const milesPrivacyPolicyUrl =
     'https://miles-legal.vercel.app/privacy-policy.html';
 
+/// The Child Safety Standards, same host as the privacy policy.
+///
+/// Play blocks publishing a social/UGC app without this document, and it was
+/// written and hosted before anything in the app pointed at it — so a reviewer
+/// handed the Console URL could read it and a user could not find it at all.
+const milesCsaeUrl = 'https://miles-legal.vercel.app/csae.html';
+
 /// Whether the Terms are complete enough to put in front of a user.
 ///
 /// Both of these are the owner's to fill. Until they are, the gate still works

@@ -2270,6 +2270,7 @@ class _Content extends StatelessWidget {
             onToggle: () => _play(context, voice, m.id, url),
             senderName: senderName,
             bubble: bubble,
+            durationMs: m.voiceDurationMs,
           ),
         );
       case 'video':

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -58,7 +59,36 @@ class UpdateService {
       (ReleaseGate.apkUrl?.isNotEmpty ?? false) &&
       ReleaseGate.latestBuild > ReleaseGate.buildNumber;
 
-  http.Client? _client;
+  /// Static, like the transfer it belongs to. As an instance field, Cancel was
+  /// tapped on a FRESH UpdateService created by the reopened sheet, whose
+  /// `_client` was null — so it silently cancelled nothing while the real
+  /// download carried on.
+  static http.Client? _client;
+
+  /// The download in flight, and its progress, held STATICALLY.
+  ///
+  /// These used to live in the update sheet's State, which owns nothing that
+  /// can survive: leaving the app raises the disguise cover, and that swaps the
+  /// whole widget tree, so the sheet was disposed and its `dispose()` cancelled
+  /// the transfer. Glancing at another app 200 MB into a 219 MB download threw
+  /// all of it away, and coming back showed no sheet and no explanation.
+  ///
+  /// The cover still rises — that is a security property and not negotiable.
+  /// What changed is who owns the download: the service does, so the widget is
+  /// free to come and go over the top of it. Reopening the sheet re-attaches to
+  /// whatever is already running instead of starting a second one.
+  static Future<File>? _inFlight;
+
+  /// 0..1 while downloading. Listened to by the sheet, so progress keeps
+  /// advancing across a background and is correct the instant it reopens.
+  static final ValueNotifier<double> progress = ValueNotifier(0);
+
+  /// A finished, hash-verified APK waiting to be installed. Kept so backing out
+  /// of the system installer and returning does not re-fetch 219 MB.
+  static File? ready;
+
+  /// Whether a transfer is running right now.
+  static bool get isDownloading => _inFlight != null;
 
   /// Whether the OS will let this app install packages. On API < 26 it always
   /// can; from 26 the user must grant "install unknown apps" for this source.
@@ -87,6 +117,32 @@ class UpdateService {
     return _channel.invokeMethod<void>('openInstallSettings');
   }
 
+  /// Joins the transfer already running, or starts one.
+  ///
+  /// Idempotent on purpose: the sheet calls this on every open, and a second
+  /// call while bytes are moving must never open a second socket onto the same
+  /// file. A caller that arrives mid-download simply awaits the same future and
+  /// watches [progress].
+  Future<File> start() {
+    final existing = _inFlight;
+    if (existing != null) return existing;
+    final run = download((received, total) {
+      progress.value = total > 0 ? received / total : 0;
+    });
+    _inFlight = run;
+    // Cleared however it ends — success, failure or cancel — so a later attempt
+    // is never blocked by a future that already completed.
+    unawaited(
+      run.then(
+        (f) => ready = f,
+        onError: (_) => ready = null,
+      ).whenComplete(() {
+        _inFlight = null;
+      }),
+    );
+    return run;
+  }
+
   /// Streams the published APK to the cache and verifies its SHA-256 as it goes,
   /// so a ~220 MB file never sits in memory and a corrupt or tampered download
   /// is rejected before it can be handed to the installer.
@@ -95,6 +151,9 @@ class UpdateService {
   /// Throws on a network error, an HTTP error, or a hash mismatch. Cancelling
   /// closes the socket, which surfaces here as a thrown error the caller treats
   /// as a cancel.
+  ///
+  /// Prefer [start]: it is what keeps a single transfer alive across the sheet
+  /// being disposed, and this takes a callback that only the sheet used to own.
   Future<File> download(void Function(int received, int total) onProgress) async {
     final url = ReleaseGate.apkUrl;
     if (url == null || url.isEmpty) {

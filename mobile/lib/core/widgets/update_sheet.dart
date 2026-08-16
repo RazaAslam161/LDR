@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -42,8 +43,56 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   File? _apk;
 
   @override
+  void initState() {
+    super.initState();
+    // Re-attach to a transfer already running. The sheet is disposed every time
+    // the app is backgrounded (the cover swaps the widget tree), so arriving to
+    // find bytes already moving is the NORMAL case, not an edge one.
+    UpdateService.progress.addListener(_onProgress);
+    if (UpdateService.isDownloading) {
+      _stage = _Stage.downloading;
+      _progress = UpdateService.progress.value;
+      unawaited(_attach());
+    } else if (UpdateService.ready != null) {
+      _apk = UpdateService.ready;
+    }
+  }
+
+  void _onProgress() {
+    if (mounted) setState(() => _progress = UpdateService.progress.value);
+  }
+
+  /// Await the transfer already running, rather than starting a second one.
+  ///
+  /// Stops at the finished file and does NOT install: the user backgrounded the
+  /// app, so throwing the system installer in front of them the moment they
+  /// return is not something they asked for. The sheet shows a ready state and
+  /// they tap.
+  Future<void> _attach() async {
+    try {
+      final apk = await _service.start();
+      if (!mounted) return;
+      setState(() {
+        _apk = apk;
+        _stage = _Stage.idle;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _Stage.failed;
+        _error = e is Exception ? e.toString() : 'The download did not finish.';
+      });
+    }
+  }
+
+  @override
   void dispose() {
-    _service.cancel();
+    UpdateService.progress.removeListener(_onProgress);
+    // Deliberately NOT cancelling. This runs every time the app is backgrounded
+    // — the cover raise disposes the whole tree — and cancelling here is what
+    // threw away a nearly-complete 219 MB download when the user glanced at
+    // another app. The transfer belongs to the service now and keeps going; an
+    // explicit Cancel is the only thing that stops it.
     super.dispose();
   }
 
@@ -68,10 +117,10 @@ class _UpdateSheetState extends State<_UpdateSheet> {
         _error = null;
       });
       try {
-        apk = await _service.download((received, total) {
-          if (!mounted || total <= 0) return;
-          setState(() => _progress = received / total);
-        });
+        // start(), not download(): the service owns the transfer so it survives
+        // this sheet being disposed, and progress arrives through the listener
+        // wired in initState rather than a closure over this State.
+        apk = await _service.start();
         _apk = apk;
       } catch (e) {
         if (!mounted) return;

@@ -982,6 +982,19 @@ class _AboutCard extends StatelessWidget {
                       label: 'Privacy Policy',
                       onTap: () => _openPrivacyPolicy(context),
                     ),
+                    // The fourth document, and the one Play blocks publishing a
+                    // social app without. It was written and hosted while this
+                    // card still listed three, so the standards existed and the
+                    // app never pointed at them — findable by a reviewer given
+                    // the Console URL, and by nobody actually using the app.
+                    //
+                    // A URL rather than a screen, unlike the three above: it is
+                    // the document Google, a platform or a police force is told
+                    // to read, and that audience is not holding this phone.
+                    _AboutLink(
+                      label: 'Child Safety',
+                      onTap: () => _openLegalPage(context, milesCsaeUrl),
+                    ),
                   ],
                 ),
               ],
@@ -996,12 +1009,19 @@ class _AboutCard extends StatelessWidget {
   /// The policy is written (docs/legal, web/privacy-policy.html) and not yet
   /// hosted, so [milesPrivacyPolicyUrl] is empty. Say that, rather than open a
   /// browser onto a 404 and leave the user wondering what else is missing.
-  Future<void> _openPrivacyPolicy(BuildContext context) async {
-    final url = Uri.tryParse(milesPrivacyPolicyUrl);
-    if (milesPrivacyPolicyUrl.isEmpty || url == null) {
+  Future<void> _openPrivacyPolicy(BuildContext context) =>
+      _openLegalPage(context, milesPrivacyPolicyUrl);
+
+  /// Opens one of the hosted legal documents in a browser.
+  ///
+  /// An empty constant means "not published", which is a real state — inventing
+  /// a URL here would ship a link that 404s in front of whoever followed it.
+  /// Say so rather than opening a dead page.
+  Future<void> _openLegalPage(BuildContext context, String href) async {
+    final url = Uri.tryParse(href);
+    if (href.isEmpty || url == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('The privacy policy is not published yet.'),),
+        const SnackBar(content: Text('That document is not published yet.')),
       );
       return;
     }
