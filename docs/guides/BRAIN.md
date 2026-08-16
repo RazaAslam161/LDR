@@ -2148,3 +2148,47 @@ Privacy-policy drift FIXED 2026-08-16: Private Vault removed from §1/§2 in
 both privacy-policy.md and web/privacy-policy.html; Personal Vault parenthetical
 reworded. Verified: wish_jar is only a file rename — user-facing name is still
 Fantasy Jar and entries stay E2EE (CryptoCore.encryptString), so that row stands.
+
+### §17 The self-update path works — proven on hardware 2026-08-16
+
+Build 37 offered build 38 and the prompt appeared. First time the whole chain
+has run: `ReleaseGate.check()` → `app_release` → `UpdateService.available` →
+`showUpdateSheet`. Every earlier "no prompt" report had a real cause, and none
+of them was the updater.
+
+**THE DEFECT THAT REACHED STRANGERS, and the reason it took two days to see.**
+Gradle re-stamps `versionCode` from pubspec on every build; Flutter can reuse a
+cached AOT snapshot. So builds 32-37 shipped **build-31 Dart under fresh version
+numbers**. Anyone who updated in that window received six-build-old code
+INCLUDING the `ReleaseGate.check()` that never ran — which strands them
+permanently, because a build that cannot check can never be offered another one.
+`release.sh` had a guard and it could not fire: it grepped `libapp.so` for
+`'Update available'`, a string present since build 31, so it reported
+"self-updater present" on every stale release.
+
+**The fix is a per-build literal.** `ReleaseGate.buildStamp` is
+`const 'miles-build-$buildNumber'` — const interpolation of a const int, so the
+characters land in the snapshot. `release.sh` greps for the number pubspec just
+built and REFUSES the upload otherwise. Verified both directions against a real
+artifact: stamp 38 accepted, stamp 31 rejected. It is read inside `check()`
+rather than left a bare constant, because a constant nothing references is one
+the tree-shaker may drop, and a guard that can be optimised away is not a guard.
+
+**Do not hand-upload an APK to R2.** `release.sh` is now the only path that
+checks the stamp before uploading; bypassing it reintroduces exactly this bug.
+
+**The cover picker never reached unpaired users.** It ran from
+`_firstRunPrompts`, which `_onReady` only reaches past `couple == null` — so
+through sign-up and the entire pairing flow nobody was ever asked how the app
+should look. Moved before the couple check. On the owner's handset there was a
+SECOND cause, specific to him: `disguise_chosen` survives `adb install -r`.
+
+**Diagnostic lesson worth keeping.** Four wrong theories (stale process, second
+package, cached check, App Clone user) came from reasoning about source instead
+of reading the device. `adb shell dumpsys package` and a raw byte search of the
+installed `libapp.so` settled it in two commands. The phone was connected the
+whole time. Read the artifact and the device before theorising about either.
+
+Published: build 38, sha256
+fb44473560b267ea3e61282cc9d6c27fc296826b0ae2cc533dc1faf821ec9f78,
+`min_build` still 2.
