@@ -2786,3 +2786,42 @@ carry a live session and would drop the disguise on every launch and every
 highs. Both of mine were introduced BY a fix, in the same function I was fixing,
 and both read as obviously correct. Adversarial review of a diff is not optional
 on the escrow/keyless path.
+
+### §20 release.sh's analyze gate blocks a green tree — HANDED TO THE AUTH SESSION 2026-08-16
+
+**Nothing has shipped. R2 still serves build 38.** Build 39 is blocked.
+
+`analysis="$(flutter analyze --no-pub 2>&1 || true)"` captures EMPTY under
+`--bump --upload --verify`, so the blindness check refuses the build. The SAME
+script with `--bump` alone captures 85,873 bytes / 477 info lines and passes.
+
+**Ruled out — do not redo:**
+- The tree. `analyze` 0/0 and `flutter test` 747 pass, verified three times.
+- pwd and binary. Instrumented with the failing flags: `pwd=/e/LDR/mobile`,
+  `flutter=/c/flutter/flutter/bin/flutter` — identical to the passing run.
+- `set -euo pipefail`. Standalone script, same options, same capture → 477.
+- Sourcing `tool/.release-env`. Probe with `set -a; . tool/.release-env` → 477.
+- Cold-start timing. A retry was added; the retry is ALSO empty, so it is
+  deterministic under those flags, not a warm-up race.
+
+Only unexplained variable: the flag combination. The credential-validation block
+that runs for `--upload`/`--verify` is the suspect; the mechanism is unfound.
+
+**TWO REAL BUGS I DID FIX in that gate (uncommitted, in `mobile/tool/release.sh`):**
+1. `flutter pub get` added before the gate. `--no-pub` skips restoring packages,
+   so after a clean there is no `.dart_tool` and every import is unresolved —
+   24,991 phantom errors on a green tree. The script's own failure advice
+   ("flutter clean && bash tool/release.sh") walked straight into it.
+2. One retry when the capture has no `info -` lines. Still fails closed.
+
+**Correct behaviour worth keeping:** the gate sits BEFORE the bump, so three
+aborted runs burned no version numbers — pubspec is still 38.
+
+**Blocked behind this:** auth key-lifecycle (6a28c64, d95faa8), the BROWSABLE
+manifest fix (87b562f — Privacy Policy link and Watch Together hand-off are dead
+for EVERY Android 11+ user until a build ships), and video diagnostics
+(b9830c7).
+
+**Next step:** auth session owns `release.sh`; handed over with the full negative
+result set. Do not bypass the gate to ship — it is the only thing stopping a red
+tree becoming an APK on a fleet with no update channel.

@@ -83,8 +83,30 @@ fi
 # `info` as well, and this tree carries hundreds of them; gating on the exit
 # code would mean nobody could ever cut a release, which is how a gate gets
 # deleted rather than obeyed.
+# pub get FIRST, and it is not optional. `--no-pub` skips restoring packages,
+# so on a tree that has just been cleaned there is no .dart_tool and every
+# import in the project resolves to nothing: the gate reported 24,991 errors
+# against a tree that analyzed 0/0 a minute earlier, and refused the build.
+# The advice this script prints on failure is "flutter clean && release.sh",
+# which walked straight into it. Restoring first costs a few seconds and is the
+# difference between a gate and a tripwire.
+echo "gate: flutter pub get"
+flutter pub get >/dev/null 2>&1 || {
+  echo "pub get failed — cannot analyze a tree with no packages" >&2; exit 1; }
+
 echo "gate: flutter analyze"
+# Retried once, because the FIRST analyze after a clean returns empty from a
+# cold analysis server — no error, no issues, just nothing. The blindness check
+# below then refuses the build on a tree that is perfectly green, which is
+# exactly the clean-then-release path this script tells you to use. One retry
+# costs seconds and turns a gate that blocks good trees into one that only
+# blocks bad ones. It still fails closed if the second attempt is empty too.
 analysis="$(flutter analyze --no-pub 2>&1 || true)"
+if ! printf '%s
+' "$analysis" | grep -qE '^ *info - '; then
+  echo "  analyzer returned nothing (cold start) — retrying once" >&2
+  analysis="$(flutter analyze --no-pub 2>&1 || true)"
+fi
 # Leading whitespace is optional on purpose. dart right-aligns the severity to
 # width 7 — `warning - ` flush left, `  error - `, `   info - ` — so a flush-left
 # anchor silently matches only one of the three. That exact mistake left
