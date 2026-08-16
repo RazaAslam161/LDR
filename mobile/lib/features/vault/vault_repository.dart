@@ -46,8 +46,23 @@ class VaultItem {
   /// is a legacy bookmark row: a bare URL, or `intimate:<path>` pointing into
   /// the couple's shared bucket.
   final String? storagePath;
+
   final String? thumbPath;
   final String? mimeType;
+
+/// The shared-bucket path a legacy row points at, if it points at one.
+  ///
+  /// These are still readable — the bytes are in couple_intimate and can be
+  /// re-signed on demand. Only the rows holding a bare signed URL are dead,
+  /// because that signature expired within a day of being saved.
+  String? get legacyIntimatePath {
+    final c = content;
+    if (c == null || !c.startsWith('intimate:')) return null;
+    return c.substring(9);
+  }
+
+  /// True when there is genuinely nothing left to show.
+  bool get isDeadBookmark => !isOwned && legacyIntimatePath == null;
 
   bool get isNote => type == 'note';
 

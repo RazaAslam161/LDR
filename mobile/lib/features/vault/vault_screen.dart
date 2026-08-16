@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_viewer.dart';
 
@@ -21,6 +22,7 @@ class _VaultScreenState extends State<VaultScreen> {
   List<VaultItem> _items = const [];
   bool _loading = true;
   bool _busy = false;
+  final Set<String> _selected = <String>{};
   String? _loadError;
 
   @override
@@ -56,6 +58,68 @@ class _VaultScreenState extends State<VaultScreen> {
 
 
   /// Media first, because that is what a vault mostly holds.
+
+  void _toggle(String id) => setState(() {
+        if (!_selected.remove(id)) _selected.add(id);
+      });
+
+  /// Deletes everything selected, in one confirmation.
+  ///
+  /// Long-pressing each item and confirming one at a time is the whole reason
+  /// clearing a vault felt like a chore.
+  Future<void> _deleteSelected() async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: Text(ids.length == 1 ? 'Delete this?' : 'Delete ${ids.length}?'),
+        content: Text(
+          ids.length == 1
+              ? 'This permanently removes it from your vault.'
+              : 'This permanently removes them from your vault.',
+          style: const TextStyle(color: MilesColors.taupe),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _busy = true);
+    var failed = 0;
+    for (final id in ids) {
+      try {
+        await VaultRepository.deleteItem(id);
+      } catch (e) {
+        // Counted, not swallowed: a delete that quietly failed leaves the user
+        // believing something is gone when it is still there.
+        failed++;
+        debugPrint('[vault] delete failed: ${e.runtimeType}');
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _selected.clear();
+    });
+    if (failed > 0) {
+      _toast(failed == ids.length
+          ? 'Nothing could be deleted — check your connection.'
+          : "$failed of ${ids.length} couldn't be deleted.");
+    }
+    await _load();
+  }
+
   Future<void> _addSheet() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
@@ -196,12 +260,12 @@ class _VaultScreenState extends State<VaultScreen> {
     // A legacy bookmark row has no bytes of its own — it points into the
     // couple's shared bucket, or at a signed URL that has almost certainly
     // expired. There is nothing to show and no honest way to pretend there is.
-    if (!item.isOwned) {
-      _toast('Saved before this vault kept its own copy — re-save it from the '
+    if (item.isDeadBookmark) {
+      _toast('Saved as a link that has since expired — re-save it from the '
           'original message.');
       return;
     }
-    final owned = _items.where((i) => i.isOwned).toList();
+    final owned = _items.where((i) => !i.isDeadBookmark).toList();
     final index = owned.indexWhere((i) => i.id == item.id);
     if (index < 0) return;
     await Navigator.of(context).push(
@@ -270,8 +334,12 @@ class _VaultScreenState extends State<VaultScreen> {
             itemCount: media.length,
             itemBuilder: (_, i) => _VaultTile(
               item: media[i],
-              onTap: () => _openMedia(media[i]),
-              onLongPress: () => _delete(media[i]),
+              selected: _selected.contains(media[i].id),
+              selecting: _selected.isNotEmpty,
+              onTap: () => _selected.isEmpty
+                  ? _openMedia(media[i])
+                  : _toggle(media[i].id),
+              onLongPress: () => _toggle(media[i].id),
             ),
           ),
           const SizedBox(height: 16),
@@ -328,7 +396,32 @@ class _VaultScreenState extends State<VaultScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
+      appBar: _selected.isNotEmpty
+          ? AppBar(
+              title: Text('${_selected.length} selected'),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Cancel',
+                onPressed: () => setState(_selected.clear),
+              ),
+              actions: [
+                IconButton(
+                  tooltip: 'Select all',
+                  icon: const Icon(Icons.select_all_rounded,
+                      color: MilesColors.gilt,),
+                  onPressed: () => setState(() => _selected
+                    ..clear()
+                    ..addAll(_items.where(_isMedia).map((i) => i.id)),),
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      color: MilesColors.blush,),
+                  onPressed: _deleteSelected,
+                ),
+              ],
+            )
+          : AppBar(
         title: const Text('Vault'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -417,11 +510,15 @@ class _LoadFailed extends StatelessWidget {
 class _VaultTile extends StatefulWidget {
   const _VaultTile({
     required this.item,
+    required this.selected,
+    required this.selecting,
     required this.onTap,
     required this.onLongPress,
   });
 
   final VaultItem item;
+  final bool selected;
+  final bool selecting;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -459,8 +556,24 @@ class _VaultTileState extends State<_VaultTile> {
   }
 
   Future<void> _load() async {
+    final legacy = widget.item.legacyIntimatePath;
+    if (legacy != null) {
+      // Plaintext in the couple's bucket, so a signed URL rather than a
+      // decrypt. Showing an icon for these was the regression: the bytes are
+      // still there and still readable.
+      if (widget.item.isVideo || legacy.toLowerCase().endsWith('.mp4')) return;
+      try {
+        final url = await ChatRepository.signedVideoUrl(legacy);
+        if (url != null && _mounted) {
+          setState(() => _provider = NetworkImage(url));
+        }
+      } catch (e) {
+        if (_mounted) setState(() => _failed = true);
+      }
+      return;
+    }
     final path = widget.item.gridPath;
-    if (path == null) return; // video/audio, or a legacy row: icon only
+    if (path == null) return; // video/audio: the glyph is the preview
     try {
       final p = await EncryptedMediaCache.tileProvider(
         bucket: VaultRepository.bucket,
@@ -522,13 +635,35 @@ class _VaultTileState extends State<_VaultTile> {
                       color: Colors.white70, size: 18,),
                 ),
               ),
-            if (!widget.item.isOwned)
+            if (widget.item.isDeadBookmark)
               const Align(
                 alignment: Alignment.topRight,
                 child: Padding(
                   padding: EdgeInsets.all(4),
                   child: Icon(Icons.link_off_rounded,
                       color: MilesColors.faint, size: 14,),
+                ),
+              ),
+            if (widget.selecting)
+              Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    widget.selected
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    color: widget.selected
+                        ? MilesColors.ember
+                        : Colors.white70,
+                    size: 20,
+                  ),
+                ),
+              ),
+            if (widget.selected)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: MilesColors.ember.withValues(alpha: 0.28),
                 ),
               ),
           ],

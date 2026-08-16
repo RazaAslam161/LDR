@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+import 'package:miles/main.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -48,6 +50,11 @@ class _VaultGateScreenState extends State<VaultGateScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The biometric sheet is a system window, so raising it sends this app
+    // `inactive` — and auto-locking on that meant the vault re-locked itself
+    // the instant it asked for a fingerprint. Unlocking by biometric could
+    // never succeed. Same flag, and the same reason, as cover_gate.dart:107.
+    if (MilesApp.authInProgress) return;
     // Auto-lock the moment the app leaves the foreground.
     if (state != AppLifecycleState.resumed && _unlocked) {
       setState(() => _unlocked = false);
@@ -144,15 +151,52 @@ class _VaultGateScreenState extends State<VaultGateScreen>
 
   Future<void> _biometric() async {
     try {
+      // Checked rather than assumed: biometricOnly on a handset with nothing
+      // enrolled throws, and the old blanket catch reported that as
+      // "unavailable" whatever the real reason was.
+      final supported = await _auth.isDeviceSupported();
+      final canCheck = await _auth.canCheckBiometrics;
+      if (!supported) {
+        if (mounted) {
+          setState(() => _message = 'This phone has no screen lock set up.');
+        }
+        return;
+      }
+
+      MilesApp.authInProgress = true;
       final ok = await _auth.authenticate(
         localizedReason: 'Unlock your private vault',
-        options: const AuthenticationOptions(biometricOnly: true),
+        options: AuthenticationOptions(
+          // Falls back to the device PIN/pattern when no fingerprint or face is
+          // enrolled, rather than throwing. biometricOnly made an unenrolled
+          // phone look broken.
+          biometricOnly: canCheck,
+          stickyAuth: true,
+        ),
       );
+      MilesApp.authInProgress = false;
       if (ok && mounted) setState(() => _unlocked = true);
-    } catch (_) {
+    } on PlatformException catch (e) {
+      MilesApp.authInProgress = false;
+      if (!mounted) return;
+      // The reason is the useful part. One message for every failure is how
+      // this looked broken rather than merely unenrolled.
+      setState(() => _message = switch (e.code) {
+            'NotEnrolled' =>
+              'No fingerprint or face is set up on this phone — use your PIN.',
+            'NotAvailable' => 'Biometrics are not available — use your PIN.',
+            'LockedOut' =>
+              'Too many attempts. Wait a moment, or use your PIN.',
+            'PermanentlyLockedOut' =>
+              'Biometrics are locked. Unlock your phone first, or use your PIN.',
+            _ => 'Biometrics failed (${e.code}) — use your PIN.',
+          });
+    } catch (e) {
+      MilesApp.authInProgress = false;
       if (mounted) {
-        setState(() => _message = 'Biometrics unavailable — use your PIN');
+        setState(() => _message = 'Biometrics failed — use your PIN.');
       }
+      debugPrint('[vault] biometric failed: ${e.runtimeType}');
     }
   }
 

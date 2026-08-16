@@ -4,6 +4,7 @@ import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_video_server.dart';
@@ -83,6 +84,43 @@ class _PageState extends State<_Page> {
   VideoPlayerController? _vp;
   ChewieController? _chewie;
 
+  /// Legacy rows are PLAINTEXT in the couple's bucket, so they are fetched by
+  /// signed URL rather than decrypted. Read-only by design: nothing re-writes
+  /// them, and re-saving is what moves an item into the vault's own storage.
+  Future<void> _loadLegacy(String path) async {
+    try {
+      final url = await ChatRepository.signedVideoUrl(path);
+      if (url == null) {
+        if (mounted) setState(() => _error = "This one couldn't be opened.");
+        return;
+      }
+      if (widget.item.isVideo || widget.item.isAudio ||
+          path.toLowerCase().endsWith('.mp4')) {
+        final vp = VideoPlayerController.networkUrl(Uri.parse(url));
+        await vp.initialize();
+        if (!mounted) {
+          await vp.dispose();
+          return;
+        }
+        setState(() {
+          _vp = vp;
+          _chewie = ChewieController(
+            videoPlayerController: vp,
+            autoPlay: true,
+            allowFullScreen: true,
+            deviceOrientationsAfterFullScreen: const [
+              DeviceOrientation.portraitUp,
+            ],
+          );
+        });
+        return;
+      }
+      if (mounted) setState(() => _provider = NetworkImage(url));
+    } catch (e) {
+      if (mounted) setState(() => _error = "This one couldn't be opened.");
+    }
+  }
+
   /// Decrypts in memory and plays from loopback. See [VaultVideoServer] for why
   /// this does not decrypt to a file.
   Future<void> _loadPlayable(String path) async {
@@ -145,9 +183,20 @@ class _PageState extends State<_Page> {
   }
 
   Future<void> _load() async {
+    // A legacy row still points at real bytes in the couple's shared bucket.
+    // Refusing it was a regression: the build before this one re-signed a URL
+    // and the item opened. Only a row holding a bare signed URL is truly dead,
+    // because that signature expired within a day of being saved.
+    final legacy = widget.item.legacyIntimatePath;
+    if (legacy != null) {
+      await _loadLegacy(legacy);
+      return;
+    }
     final path = widget.item.storagePath;
     if (path == null) {
-      setState(() => _error = 'This item has no stored copy.');
+      setState(() => _error =
+          'Saved as a link that has since expired. Re-save it from the '
+          'original message and the vault will keep its own copy.');
       return;
     }
     if (widget.item.isVideo || widget.item.isAudio) {
