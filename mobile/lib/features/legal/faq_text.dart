@@ -60,23 +60,34 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
         FaqEntry(
           'Is everything end-to-end encrypted?',
           'No, and we would rather tell you plainly than imply otherwise. A '
-              'small set of especially sensitive areas — memory threads and '
-              'wish-jar entries — is end-to-end encrypted: the encryption '
-              'happens on your phone, and our servers store only ciphertext '
-              'they cannot read.\n\nEverything else (chat, media, location, '
-              'profile) is protected by strict access controls and encryption '
-              'in transit and at rest, but is not end-to-end encrypted. The '
-              'privacy policy (Settings → About) lists exactly which is '
-              'which.',
+              'small set of especially sensitive areas is end-to-end '
+              'encrypted — the encryption happens on your phone and our '
+              'servers store only ciphertext they cannot read: Memory '
+              'Threads, the text of Wish Jar entries, and the photos, videos '
+              'and files you put in the Private Vault.\n\nOne exception '
+              'inside that list, because it would be easy to assume '
+              'otherwise: a plain text note typed into the Private Vault is '
+              'stored unencrypted. Only the vault’s files are '
+              'sealed.\n\nEverything else (chat, media, location, profile) is '
+              'protected by strict access controls and encryption in transit '
+              'and at rest, but is not end-to-end encrypted. The privacy '
+              'policy (Settings → About) lists exactly which is which.',
         ),
         FaqEntry(
           'Can anyone else see what we share?',
           'Access rules on the server restrict every piece of couple content '
-              'to the two of you. Nobody else’s account can fetch it.',
+              'to the two of you. Nobody else’s account can fetch '
+              'it.\n\nA few features do have to reach an outside service to '
+              'work at all — GIF search, map tiles, and the video site behind '
+              'a Watch Together link — so those requests leave the app. They '
+              'carry the search term, the map area, or the link you pasted; '
+              'never your messages. The privacy policy (Settings → About) '
+              'names every such service.',
         ),
         FaqEntry(
           'What are covers?',
-          'An optional layer of discretion. From Settings you can choose a '
+          'An optional layer of discretion. In Settings → Disguise → '
+              '“How this app looks” you can pick a '
               'cover identity — the app then looks like an ordinary utility '
               '(a calculator, a notes app, a weather app…) on your '
               'launcher and opens on a convincing stand-in screen until you '
@@ -94,22 +105,35 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
         ),
         FaqEntry(
           'Can I lock the app?',
-          'Yes. App Lock (Settings → Security) requires your '
+          'Yes. “Biometric app lock” (Settings → Security) requires your '
               'fingerprint, face, or a PIN every time the app opens. There is '
-              'also a quick gesture that locks the app instantly if someone '
-              'picks up your phone.',
+              'also a panic gesture — shake the phone three times, or press '
+              'volume-up and volume-down together — that drops the app '
+              'straight back to its cover screen if someone picks up your '
+              'phone.',
         ),
         FaqEntry(
           'Does my partner see my location?',
-          'Only if you turn sharing on, and only at the precision you '
-              'choose: off, city-level, or precise. Turning it off deletes '
-              'the last shared position — it doesn’t just stop updating.',
+          'Only if sharing is on, and only at the precision set: off, '
+              'city-level, or precise. A new account starts at off — but know '
+              'how it gets switched on, because it is not a second tap. After '
+              'the app explains the feature, granting Android’s location '
+              'permission is taken as your answer: sharing turns on at '
+              'precise if you gave precise access, city-level if you gave '
+              'only approximate. That happens once per account on a phone; '
+              'after that the setting is only ever what you choose in '
+              'Settings.\n\nTurning it off deletes the last shared position — '
+              'it doesn’t just stop updating. Sharing runs only while the app '
+              'is open in front of you; Miles asks for no background location '
+              'at all.',
         ),
         FaqEntry(
           'Who can see the cycle tracker?',
-          'Both partners in the couple, by design — it exists to help you '
-              'care for each other. If you’d rather not share it, '
-              'don’t enable it.',
+          'You always. Your partner only while “Share with…” is on in the '
+              'cycle screen’s own settings — it starts on, and turning it off '
+              'hides your logs from them on the server, not just in their '
+              'app. What they see even then is a gentle heads-up, not your '
+              'entries.',
         ),
       ]),
       const FaqSection('Messages and calls', [
@@ -161,8 +185,9 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
           ),
         const FaqEntry(
           'How do I know if I’m up to date?',
-          'Settings → About shows your version and a “Latest '
-              'available” line telling you whether a newer one exists.',
+          'Settings → About shows your version and build number, and a '
+              '“Latest” line reading either “up to date” or the newer build '
+              'number.',
         ),
       ]),
       const FaqSection('Your account and your data', [
@@ -174,39 +199,50 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
         ),
         FaqEntry(
           'I forgot my password. Is my history gone?',
-          'Your account is recoverable by email reset. For the end-to-end '
-              'encrypted areas, your phone holds the key — so as long as '
-              'either phone still has the app signed in, everything '
-              'survives: the app walks you and your partner through a short, '
-              'one-time recovery in which their phone hands the keys back to '
-              'yours (you’ll read a 6-digit code to them; it expires '
-              'after 10 minutes).\n\nIf both phones lose the app and no '
-              'backup applies, end-to-end encrypted content is unrecoverable '
-              '— that is the honest cost of encryption nobody else holds '
-              'keys to.',
+          'Your account is recoverable by email reset. Your encryption key is '
+              'a separate matter: a copy of it is kept on the server sealed '
+              'with your password, so a password you still remember reopens '
+              'it — and a password you have forgotten does not, including '
+              'after a reset.\n\nThat is what your partner’s phone is for. As '
+              'long as either phone still has the app signed in, everything '
+              'survives: the app walks you both through a short, one-time '
+              'handover in which their phone re-seals the keys to yours '
+              '(you’ll read a 6-digit code to them; it expires after 10 '
+              'minutes).\n\nIf both phones lose the app and the password is '
+              'gone too, end-to-end encrypted content is unrecoverable. The '
+              'sealed copy on the server is not a spare key we can use — it '
+              'opens only with your password.',
         ),
         FaqEntry(
           'I got a new phone. What do I do?',
-          'Install Miles, sign in, and follow the recovery step above so '
-              'your new phone receives the encryption keys from your '
-              'partner’s. Everything not end-to-end encrypted is simply '
-              'there after signing in.',
+          'Install Miles and sign in. Signing in with your password unseals '
+              'your encryption key from the server copy, so the encrypted '
+              'areas simply open; everything not end-to-end encrypted is '
+              'there too. Only if that fails — a forgotten password, or no '
+              'sealed copy yet — do you need the handover from your '
+              'partner’s phone described above.',
         ),
         FaqEntry(
           'What happens if we break up?',
-          'Either of you can leave the couple from Settings. When the second '
-              'partner leaves (or an account is deleted), the couple’s '
-              'entire history — messages, photos, videos, everything — is '
-              'permanently deleted 30 days later, storage included. '
-              'Re-pairing within those 30 days cancels the deletion.',
+          'Either of you can end it: Settings → Partner → “Remove partner”. '
+              'It takes one of you — the couple is dissolved for both, and '
+              'neither needs the other’s agreement. From that moment the '
+              'couple’s entire history — messages, photos, videos, Closer '
+              'content, everything — is permanently deleted 30 days later. '
+              'Re-pairing within those 30 days cancels the '
+              'deletion.\n\nDeleting your account is the faster route and the '
+              'more thorough one: if your partner has already gone, it '
+              'removes the shared history immediately and erases the stored '
+              'media files with it.',
         ),
         FaqEntry(
           'How do I delete my account?',
           'Settings → Account → Delete account removes your '
-              'account and your content — a real deletion, not a '
-              'deactivation. There is also a web page for requesting '
-              'deletion without reinstalling the app, linked from the '
-              'privacy policy.',
+              'account and everything recorded against it alone — a real '
+              'deletion, not a deactivation. Shared conversation history is '
+              'the one thing that can outlive it, and only while your partner '
+              'still has their account. There is also a web page for doing it '
+              'without reinstalling the app, linked from the privacy policy.',
         ),
         FaqEntry(
           'Can I be forced to show what’s in the app?',
@@ -220,15 +256,27 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
       const FaqSection('Safety', [
         FaqEntry(
           'What if I need space from my partner inside the app?',
-          'Contact Pause (Settings) quiets calls and alerts from your '
-              'partner without announcing itself. It’s enforced on the '
-              'server, so it works even if your phone is off.',
+          '“Pause notifications” (Settings → Safety) stops this phone being '
+              'interrupted — for an hour, eight hours, a day, or until you '
+              'turn it back on. It does not announce itself: your partner is '
+              'not told and nothing on their side shows it. Nothing is '
+              'deleted, and you can still send.\n\nThe limits are worth '
+              'knowing, because a safety feature that is oversold is worse '
+              'than one that is described. Nudges and Reaches stop notifying '
+              'you, and that part is enforced on the server, so it holds '
+              'whether or not your phone is on. An incoming call is dropped '
+              'rather than rung — but that is done by this phone, so the call '
+              'notification itself can still appear, even though opening it '
+              'neither rings nor connects. Messages are not affected: they '
+              'arrive as usual and you see them when you open the app.',
         ),
         FaqEntry(
           'How do I report a problem or someone’s behaviour?',
-          'Settings → Report. Reports go to us, not to your partner — '
-              'include your app version (Settings → About) so we can '
-              'help faster.',
+          'Settings → Safety → “Report a problem”. It is also on the menu at '
+              'the top of Chat, on the toolbar when you hold a message, and '
+              'on the toolbar when you hold an item in the Gallery. Reports '
+              'go to us, not to your partner: nothing in the app can read '
+              'them back, including your partner’s account and your own.',
         ),
       ]),
     ];

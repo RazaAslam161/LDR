@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -707,20 +706,19 @@ class CallController extends ChangeNotifier {
     // _ensureRelay had already been awaited — the third of three round trips.
     servers.addAll(_cachedTurn);
 
-    final host = dotenv.maybeGet('METERED_TURN_HOST') ?? '';
-    final user = dotenv.maybeGet('METERED_TURN_USERNAME') ?? '';
-    final cred = dotenv.maybeGet('METERED_TURN_CREDENTIAL') ?? '';
-    if (host.isNotEmpty && user.isNotEmpty && cred.isNotEmpty) {
-      servers.addAll([
-        {'urls': 'turn:$host:80', 'username': user, 'credential': cred},
-        {'urls': 'turn:$host:443', 'username': user, 'credential': cred},
-        {
-          'urls': 'turns:$host:443?transport=tcp',
-          'username': user,
-          'credential': cred,
-        },
-      ]);
-    }
+    // A second relay provider used to be read from the bundled `.env` here.
+    // Those three keys were removed from `.env` in 2026-08 — it ships inside the
+    // artifact as a Flutter asset, so anything in it unzips out of the APK — and
+    // this read outlived them, quietly resolving to empty on every call since.
+    //
+    // Dead code that reads a value which no longer exists is worse than no code:
+    // it reads as a configured fallback. It cost a later reader several hours on
+    // the belief that live credentials were shipping in the binary.
+    //
+    // `turn-credentials` (v5) now appends Metered from `app_secrets` when the
+    // three rows exist, so a second provider arrives through _cachedTurn above
+    // with the rest — same fetch, same cache, no second round trip and nothing
+    // to read from disk here.
 
     debugPrint('[turn] ice config: ${servers.length} servers, '
         'relay=${relayAvailable ? 'YES' : 'NO'}'

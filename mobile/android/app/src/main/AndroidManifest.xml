@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Network access for Supabase API + Realtime -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -21,9 +22,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Keep a voice/video call alive when the app is backgrounded -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <!-- A video call runs the camera from a foreground service. Without the
-         matching type Android 14+ refuses to start it, and the call dies. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- No FOREGROUND_SERVICE_CAMERA / camera service type. The one
+         startService call site (call_foreground.dart) builds its type set from
+         callServiceTypes(), which returns microphone, plus mediaProjection
+         while a screen share is live — never camera. A declared-but-unrequested
+         FGS type still costs a Play Console declaration and a demo video for a
+         capability the app does not have. Backgrounded video capture is
+         already blocked today for the same reason the type is unused; adding it
+         means re-adding BOTH this permission and the type on the service. -->
     <!-- Screen share streams the whole display into a call, and Android 14+
          refuses to start a mediaProjection-typed service without this. Kept
          beside the call permissions it serves rather than added speculatively:
@@ -58,6 +64,42 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 13+ runtime notification permission -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Hardware opt-outs. Play derives an IMPLICIT required="true" uses-feature
+         from several of the permissions above and filters the Store listing on
+         it: CAMERA implies camera + camera.autofocus, RECORD_AUDIO implies
+         microphone, ACCESS_FINE/COARSE_LOCATION imply location(.gps/.network),
+         BLUETOOTH implies bluetooth, and Play services' own USE_FINGERPRINT
+         (merged in transitively) implies fingerprint. touchscreen is assumed
+         required for every app unless it is opted out.
+
+         None of it is actually required: this app's centre is chat, calls and
+         shared memories. A tablet with no rear camera, a Chromebook, a handset
+         with no fingerprint reader or no GPS all run it — they simply do not
+         see the one feature they lack. Left implicit, each line silently
+         subtracts devices from a Store listing with no error anywhere.
+
+         camera.any carries tools:replace because camera_android_camerax
+         declares it with no required attribute (verified in
+         build/app/intermediates/merged_manifest/playRelease/), which the merger
+         reads as required="true" and ORs over ours.
+
+         NOT opted out: Mapbox's glEsVersion 0x00030000 required="true"
+         (com.mapbox.maps:android-core-ndk27:11.28.1). Mapbox genuinely needs
+         GLES 3.0, essentially every minSdk-24 device has it, so the filter
+         costs no real devices and relaxing it would trade a clean "not
+         compatible" for a broken map. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false"
+        tools:replace="android:required" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <!-- android:label and android:icon are NOT here. They are the one thing the
          two channels must disagree about, so each flavour's manifest supplies
@@ -194,11 +236,12 @@
              starts no service, whatever this comment used to claim. The types
              here are a ceiling the runtime set must fit inside, not a
              description of it: the service starts as microphone, plus
-             mediaProjection for the duration of a screen share.
+             mediaProjection for the duration of a screen share. `camera` was
+             listed here and never requested — see the permission block above.
              Warning: do not change the service name. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="microphone|camera|mediaProjection"
+            android:foregroundServiceType="microphone|mediaProjection"
             android:exported="false"
             android:stopWithTask="true" />
     </application>

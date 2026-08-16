@@ -3541,3 +3541,255 @@ Deep tier, §34 covers-on-Play + update-sheet fix, §35 two chat fixes off the
 handsets, plus the Vault work. NOT built — build only when asked. Both testers
 are on 40, so 41 is the first release that should reach them WITHOUT a restart:
 the first real test of the §28 resume re-check.
+
+## §37 — GIFs were never wired, and two claims the app could not back (2026-08-17)
+
+### GIFs: an edge function that was never written
+
+Owner: "why giphy is not working, there is no giphy's showing to send."
+
+**Root cause.** `GiphyService._ensureKey()` calls
+`functions.invoke('giphy-key')`. **That function did not exist.** Confirmed two
+ways: `supabase/functions/` contains account-delete, care-notify, map-token,
+reach-notify, reap-storage, turn-credentials and nothing else; and the LIVE
+deployed list from the Supabase API matched. `app_secrets` held no GIPHY row
+either — only CF_TURN_API_TOKEN, CF_TURN_KEY_ID, FUNCTIONS_BASE_URL,
+MAPBOX_PUBLIC_TOKEN, NOTIFY_SHARED_SECRET.
+
+So the invoke threw, `catch (e) { debugPrint(...) }` swallowed it, `_key` stayed
+empty, and the picker rendered an empty grid. GIFs were not "off" — they were
+failing silently since the refactor that moved the key server-side. **Not caused
+by the §30 wipe**: `app_secrets` was deliberately preserved and GIPHY was never
+in it.
+
+**Fixed.** Wrote and deployed `supabase/functions/giphy-key/index.ts` (v1,
+ACTIVE, verify_jwt=true), modelled on `map-token`, which does the identical job
+for Mapbox. Returns `{key, configured}` — `configured` exists so the picker can
+say "not set up yet" rather than showing an empty grid that reads as "no
+results".
+
+**OWNER STEP — GIFs stay dark until this runs:**
+
+    insert into app_secrets(key, value) values ('GIPHY_API_KEY', '<key>')
+    on conflict (key) do update set value = excluded.value;
+
+No rebuild needed; the key is fetched at runtime. That is the whole point of it
+living in `app_secrets`.
+
+### Two claims the code could not back
+
+1. **Terms said the Closer private vault is end-to-end encrypted.** It is not,
+   for notes: `VaultRepository.addNote` inserts `content` as PLAINTEXT
+   (`vault_repository.dart:114-118`). Vault FILES are genuinely encrypted
+   (`_refuseCleartext`, :251). `terms_text.dart` now scopes the claim to "files
+   you put in the private vault" and lists vault notes with the plaintext set.
+   The same false claim was written into `web/csae.html` by a generating agent
+   and caught by its verifier before it shipped; corrected there too.
+2. **`csae.html` asserted a mail-routing rule that does not exist** ("so it is
+   routed ahead of ordinary mail" on a plain Gmail address). Reworded to a
+   commitment about how reports are handled rather than a claim about
+   infrastructure.
+
+### Deleted accounts orphaned their vault blobs
+
+`delete_my_account` swept couple_media, couple_intimate, capsule-media and
+couple_files but **never personal_vault**. Rows were fine — `owner_id` cascades
+from profiles — but the encrypted BLOBS stayed in storage forever under the uuid
+of a user who no longer existed. That is a deletion promise made in-app and on
+the Play Data safety form, so it had to become true.
+
+**Why it was missed:** every other bucket is SHARED, so its sweep sits inside
+`if v_others = 0` — wait for the last partner. The private vault belongs to one
+person and must go when THAT person goes. The new sweep is outside both the
+couple block and the `v_others` guard, which also covers a user who deletes
+without ever pairing.
+
+**READ THE LIVE DEFINITION FIRST — and this is why.** The migration file on disk
+was STALE: another session had already moved the function to the `storage_reap`
+queue and added `couple_files`. Editing the file version and applying it would
+have silently discarded their work via `create or replace`. The applied body was
+built from `pg_get_functiondef`, and the rollback in
+`supabase/migrations/20260817090000_delete_account_sweeps_personal_vault.sql`
+is that captured live body, written before the change.
+
+Verified after applying, not assumed:
+
+    sweeps_vault true | kept_couple_files true | kept_reap_queue true | security_definer true
+
+Re-running the migration is a no-op (one create-or-replace, no DDL, no data).
+
+**Gate:** `490 issues found` (0 errors/warnings), `01:46 +770: All tests passed!`
+
+**Still open for the owner:** the GIPHY secret row above; two [PLACEHOLDER]s in
+`web/csae.html` (national law-enforcement channel, and the NAMED child-safety
+contact Play requires); rotating METERED_TURN_* out of `mobile/.env`, which
+ships in the artifact as a plaintext Flutter asset (`pubspec.yaml:129`) against
+the project's own "never in the APK" rule; and hosting all five web/ pages,
+whose cross-links are relative and resolve only when uploaded together.
+
+---
+
+## §38 — The five legal pages audited as one set (2026-08-17)
+
+Four parallel auditors each corrected one page (or pair) against the code:
+`web/privacy-policy.html`, `web/terms.html`, `web/csae.html`,
+`web/delete-account.html` + `web/faq.html`. This section records the pass none
+of them could do: reading all five **together**, plus the two in-app sources
+`mobile/lib/features/legal/terms_text.dart` and `faq_text.dart`.
+
+**What only the whole-set view showed — 15 corrections, all applied:**
+
+- `leave_couple` clears `couple_id` for **both** profiles, so ONE person leaving
+  dissolves the couple. The privacy policy said "deleted 30 days after the last
+  partner leaves"; faq and delete-account already said "either of you". Privacy
+  §6 corrected.
+- Privacy §7 still said `Settings → Delete my account`. The row is
+  `Settings → Account → Delete account` (`settings_screen.dart:818,830`), which
+  the other four pages already had.
+- `memory_force_delete` (14 days) exists only for Memory Threads. The gallery
+  has `gallery_request_delete`/`gallery_confirm_delete` and **no force path**.
+  Privacy §6 and §7 claimed the 14-day force for both.
+- csae said the Chat top menu "reports the conversation". It files
+  `ReportTarget.partner` (`chat_screen.dart:1383`); there is no conversation
+  target kind.
+- faq claimed Contact Pause "quiets messages, calls and alerts… enforced on the
+  server". Live prod: only `notify_reach`/`notify_care` consult `push_muted`;
+  `notify_call` does not, and the call is dropped client-side. Terms §6 already
+  disclosed this; faq and csae now match it.
+- faq's location answer ("only if you turn sharing on") contradicted privacy's
+  disclosure that granting the OS permission is itself adopted as consent at
+  **precise** (`location_service.dart:173-193`).
+- Residual overstated-encryption, fourth and fifth instances of the class:
+  faq's "encryption nobody else holds keys to" and delete-account's "a key only
+  your phone held" — both contradicted by the server-side escrow.
+- **csae §1 said "Nothing else in Miles can be browsed, searched or
+  recommended."** False: Watch Together embeds a third-party player and
+  `staysInViewer` (`watch_viewer.dart:30-46`) **allows same-host navigation**, so
+  a viewer can move between videos on YouTube inside it, recommendations and
+  all. Disclosed now — this was a child-safety-page gap, not a wording nit.
+
+**In-app vs hosted drift, closed.** `terms.html`'s callout claims "This is the
+same document the app shows you". It was not: `terms_text.dart` still carried
+"a key the server never holds", "no report, warrant or request changes that",
+"Anything in the app can be reported", and a §6 that overstated the pause on all
+three channels. `terms_text.dart` §§3,4,5,6,8 are now substantively identical to
+the hosted page, so the callout is true again. `milesTermsVersion` deliberately
+stays **1** — the corrections are statements of fact about the app, not changes
+to the obligations accepted; a bump re-gates every user and is the owner's call.
+`faq_text.dart` got the same treatment across 13 answers.
+
+**Verified, not assumed:** `flutter analyze` 490 issues / **0 errors**;
+`flutter test` **770 passed**; all five pages parse with zero unclosed tags; the
+only `http(s)` string in `web/` is delete-account's own edge-function endpoint —
+no CDN, no remote font, no external image, no third-party script.
+
+**Found, not fixed — code defects the pages now describe honestly:**
+
+1. `public.messages` carries **zero triggers**, and `notify_message` is
+   referenced by nothing in the database. Message push notifications do not fire
+   at all. The privacy policy still discloses the `message` push type because
+   over-disclosure is the safe direction, but the feature is dead.
+2. `call_controller.dart:376` asserts in a comment that "notify_call already
+   refuses to send this push while the pause is on". Live `notify_call` does not
+   reference `push_muted`.
+3. `safety_sheets.dart:269-271` — the pause sheet still says "Messages, calls
+   and nudges stop lighting up this phone". False for calls, and messages were
+   never in scope.
+4. `prune_dissolved_couples`, `delete_message_for_everyone` and
+   `clear_conversation_everyone` still `delete from storage.objects` directly,
+   orphaning bytes instead of erasing them (`reap-storage/index.ts:7-18`). Fix
+   these and privacy §6 plus faq's break-up answer can go back to promising
+   complete erasure.
+5. `disguise_picker_screen.dart:176-178` tells users Android's app list says
+   "News"; both manifests set `android:label="Miles"`. faq is now the correct
+   one.
+
+**Still open for the owner:** the two `[PLACEHOLDER]`s in `web/csae.html` (the
+national law-enforcement channel, and the **named** child-safety contact Play
+requires) and the two in `web/privacy-policy.html` (registered postal address).
+All five pages must be hosted **in the same directory** — every cross-link is
+relative, and today only `privacy-policy.html` is known to be on R2.
+
+## §38 — Legal set audited against the code; several claims were materially false (2026-08-17)
+
+Five pages (`web/privacy-policy.html`, `terms.html`, `csae.html`,
+`delete-account.html`, `faq.html`) plus the in-app `terms_text.dart` and
+`faq_text.dart` were audited claim-by-claim against the actual code and live
+schema, then cross-checked as a set. **Gate after the last edit:**
+
+    490 issues found. (0 errors, 0 warnings)
+    02:06 +770: All tests passed!
+
+**The corrections that matter most — each was FALSE, not merely vague:**
+
+1. **"Location sharing is off by default."** The column default is `'off'`, but
+   `LocationService.adoptPermissionAsDefault` (`location_service.dart:173-193`)
+   turns it ON at **precise** the first time the OS permission is granted. A
+   user reading the old sentence would not expect that.
+2. **Cycle health data.** `cycle_settings.share_with_partner` defaults **true**.
+   Health data shared by default was disclosed nowhere.
+3. **Escrow crypto.** Policy said the password goes through "a labelled HMAC and
+   then Argon2id". `key_escrow.dart:228` writes `kdfArgon2id` — Argon2id over the
+   RAW password. The labelled-HMAC path (`kdfArgon2idV2`) is read-only and
+   nothing writes it; the live row confirms `kdf='argon2id'`. Consequence now
+   stated plainly: the auth password and the wrap key are one secret.
+4. **Google Maps was attributed to the Touch Map**, which draws no map at all.
+   It is the partner-location screens; Mapbox draws the world map. ML Kit
+   (pose + subject segmentation, on-device) was undisclosed entirely.
+5. **"System photo picker, no broad gallery access"** — false below Android 13:
+   `READ_EXTERNAL_STORAGE` with `maxSdkVersion=32` and `minSdk 24`.
+6. **Diagnostics described a retired feature.** `Diag.record` is a no-op
+   (`diag.dart:203`), `diag_events` has 0 rows, and the "no client can read them
+   back" claim was false for that table anyway (it has a select-own policy).
+7. **Couple deletion.** Pages disagreed on whether the 30-day clock starts when
+   one or both partners leave. Live `leave_couple` clears BOTH rows — there is
+   no "last partner".
+8. **Contact Pause** was described three different ways across three pages. Live:
+   `notify_reach`/`notify_care` honour `push_muted`; `notify_call` does NOT, and
+   the ring is dropped client-side, so a call notification can still appear.
+
+**In-app text had drifted from the hosted pages and was worse.** `terms.html`
+claimed "this is the same document the app shows you" while `terms_text.dart`
+still asserted "a key the server never holds" — contradicted by `key_escrow`
+upserting a sealed copy of the seed. Both `terms_text.dart` and `faq_text.dart`
+(13 answers) were synced to the corrected text. `milesTermsVersion` stays **1**
+deliberately: these correct statements of FACT about the app, not the
+obligations the user accepted, so re-consent is not required and
+`terms_gate_test.dart:25` stays green.
+
+**Owner details now filled:** child-safety contact named (Raza Aslam), postal
+address (Sector C Commercial Area, Bahria Town, Lahore, Pakistan) in the privacy
+policy ×2 and the CSAE contact table. **One placeholder remains and Play needs
+it:** `web/csae.html` §5 — the Pakistani national law-enforcement unit and its
+reporting channel. Not guessed, deliberately.
+
+**METERED TURN — I WAS WRONG, RECORD IT.** I spent several turns treating the
+Metered credentials as live and shipping inside the APK, based on
+`call_controller.dart:710-712` reading them via dotenv. They were **already
+removed from `mobile/.env` in 2026-08** by another session, with a comment
+giving the same reasoning. Nothing leaked; there was nothing to rotate. The
+`dotenv` read is now DEAD CODE that reads three variables which do not exist.
+Lesson: a `dotenv.maybeGet` in the client proves the code once wanted a value,
+never that the value is present — and `.env` is permission-blocked here, so the
+only way to know was to ask the owner to look. Ask earlier.
+
+`turn-credentials` was extended to serve Metered from `app_secrets` if the three
+rows ever exist (deployed v5, no-op today). Harmless and ready if a second relay
+provider is ever added.
+
+**found, not fixed — code defects surfaced by the audit:**
+1. `public.messages` has zero triggers and `notify_message` is referenced by
+   nothing: message push does not fire in production. **This matches the owner's
+   stated wish ("i don't want message and call notifications"), so it is
+   recorded as expected-state, not a bug to fix.**
+2. `call_controller.dart:376` comment claims `notify_call` refuses to push while
+   paused. It does not read `push_muted`.
+3. `safety_sheets.dart:269-271` tells users the pause stops "messages, calls and
+   nudges". False for calls; messages were never in scope.
+4. `prune_dissolved_couples`, `delete_message_for_everyone` and
+   `clear_conversation_everyone` still `delete from storage.objects` directly,
+   orphaning bytes instead of queueing to `storage_reap`.
+5. `disguise_picker_screen.dart:176-178` says Android's app list will show
+   "News"; both manifests set `android:label="Miles"`.
+6. Dead `GIPHY_API_KEY` line still in `mobile/.env` (a DIFFERENT key from the one
+   now in `app_secrets`); nothing reads it, but it ships in the artifact.

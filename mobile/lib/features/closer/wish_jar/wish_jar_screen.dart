@@ -8,7 +8,7 @@ import 'package:miles/features/closer/closer_load_result.dart';
 import 'package:miles/features/closer/wish_jar/add_wish_screen.dart';
 import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 
-/// Fantasy Jar — a private list of "things I want to try when we're together".
+/// Wish Jar — a private list of "things I want to try when we're together".
 ///
 /// The magic: tags are HMAC-hashed before storage, so the server never sees
 /// plaintext. When both partners independently express interest in the same
@@ -106,7 +106,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
   }
 
   /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
-  /// (fantasy_jar_repository.dart:78, closer_crypto.dart:24,32,46). Anything
+  /// (wish_jar_repository.dart, closer_crypto.dart:24,32,46). Anything
   /// else landing here is a transport failure, and rendering its toString put
   /// "Failed host lookup: 'sopictusdonlvuezmfep.supabase.co'" on screen.
   String _friendly(Object e) {

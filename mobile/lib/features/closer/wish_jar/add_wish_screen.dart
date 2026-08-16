@@ -4,7 +4,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 
-/// Compose a new Fantasy Jar entry. Text is freeform; tags come from the
+/// Compose a new Wish Jar entry. Text is freeform; tags come from the
 /// fixed taxonomy (max 3). Everything is encrypted + tag-hashed upstream.
 class AddWishScreen extends ConsumerStatefulWidget {
   const AddWishScreen({super.key});
@@ -77,7 +77,7 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
   }
 
   /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
-  /// (fantasy_jar_repository.dart:78, closer_crypto.dart:24,32,46).
+  /// (wish_jar_repository.dart, closer_crypto.dart:24,32,46).
   String _friendly(Object e) {
     final s = e.toString();
     return s.startsWith('Exception: ')

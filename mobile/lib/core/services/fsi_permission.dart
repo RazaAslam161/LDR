@@ -9,6 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// system settings — Miles does NOT auto-qualify (it's not a calling/alarm
 /// app), so we *request* it and always degrade gracefully to a heads-up
 /// notification when it's denied.
+///
+/// Its one and only use is the incoming-call ring (`showCallNotification`).
+/// Reach used to spend it too; a nudge is not a call, and the declaration Play
+/// grants for calls and alarms does not survive being pointed at nudges.
 class FsiPermission {
   FsiPermission._();
 
@@ -59,11 +63,11 @@ class FsiPermission {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: MilesColors.surface1,
-        title: const Text('Let them wake your screen 💕'),
+        title: const Text('Let calls ring on your lock screen 💕'),
         content: Text(
-          'To let $partnerName light up your phone when they reach for you '
-          "(even when it's locked), allow full-screen alerts. Without it you'll "
-          'still get a notification — just not the wake-the-screen kind.',
+          "To let a call from $partnerName light up your phone when it's "
+          "locked, allow full-screen alerts. Without it you'll still get a "
+          'notification — just not the wake-the-screen kind.',
           style: const TextStyle(color: MilesColors.taupe, height: 1.5),
         ),
         actions: [

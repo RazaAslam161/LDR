@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index,follow">
+<title>Child Safety Standards — Miles</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbf8f6;
+    --surface: #ffffff;
+    --ink: #1d1a19;
+    --ink-soft: #55504d;
+    --rule: #e6dfda;
+    --accent: #a8556b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141211;
+      --surface: #1c1917;
+      --ink: #ece7e3;
+      --ink-soft: #a49c97;
+      --rule: #322c29;
+      --accent: #e59db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 2rem 1.15rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .35rem; letter-spacing: -.015em; }
+  h2 {
+    font-size: 1.2rem; line-height: 1.3; margin: 2.75rem 0 .75rem;
+    padding-top: 1.5rem; border-top: 1px solid var(--rule); letter-spacing: -.01em;
+  }
+  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
+  p, li { color: var(--ink); }
+  .updated { color: var(--ink-soft); font-size: .95rem; margin: 0 0 1.75rem; }
+  .lede { font-size: 1.05rem; }
+  strong { font-weight: 650; }
+  a { color: var(--accent); }
+  ul { padding-left: 1.15rem; }
+  li { margin: .4rem 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .9em; background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 4px; padding: .05em .35em;
+  }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; min-width: 20rem; font-size: .95rem; }
+  th, td {
+    text-align: left; vertical-align: top; padding: .6rem .7rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  th { font-weight: 650; color: var(--ink-soft); font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+  td:first-child { font-weight: 600; }
+  .callout {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent); border-radius: 6px;
+    padding: .9rem 1rem; margin: 1.25rem 0;
+  }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  footer {
+    margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+    color: var(--ink-soft); font-size: .95rem;
+  }
+  nav.set { margin-bottom: .6rem; }
+  nav.set a { margin-right: 1rem; white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Miles — Child Safety Standards</h1>
+<p class="updated">Last updated: 17 August 2026</p>
+
+<p class="lede">Miles is a private messaging app for two adults in a
+relationship. It is rated 18+, it has no public surface, and it has no place for
+children in it at all. This page states our standards against child sexual abuse
+and exploitation (CSAE), how to report it, what we do when a report arrives, and
+who to contact. Like the rest of our documents it is written to be accurate
+rather than reassuring: where our ability to act is limited, it says so.</p>
+
+<h2>1. The standard</h2>
+
+<p>Child sexual abuse and exploitation is prohibited in Miles without exception.
+Specifically, you may not use Miles to create, request, send, receive, store,
+solicit or link to:</p>
+<ul>
+  <li><strong>Child sexual abuse material (CSAM)</strong> — sexual content
+  involving anyone under 18, in any form, real, drawn, animated or
+  computer-generated. There is no exception to this and no context that changes
+  it.</li>
+  <li><strong>Sexualisation of a minor</strong> — any depiction or description
+  of a person under 18 for sexual gratification, including material that is not
+  itself explicit.</li>
+  <li><strong>Grooming</strong> — contacting or attempting to contact a minor
+  for sexual purposes, or building a relationship with a minor with that
+  intent.</li>
+  <li><strong>Sextortion</strong> — threatening to release a minor's intimate
+  images, or coercing a minor into producing them.</li>
+  <li><strong>Trafficking or advertising a minor</strong> for sexual
+  purposes.</li>
+</ul>
+
+<p>This restates and does not replace section 3 of the
+<a href="terms.html">Terms of Use</a>, which is the agreement you accept when
+you use Miles. An account used for any of the above is closed. There is no
+warning step for material involving minors.</p>
+
+<p><strong>Miles itself writes no sexual content.</strong> The app supplies a
+private, secure space between two paired adults; it does not author or generate
+sexual material of any kind. There is no feed, no timeline, no recommendation
+engine and nothing any user posts is discoverable by anyone but their
+partner.</p>
+
+<p>Two qualifications, because they are the only third-party content the app
+puts in front of anyone. The first is the GIF picker in chat, and the GIFs come
+from <strong>Giphy</strong>: it opens on Giphy's trending list and you can
+search it. Miles does not host, choose or moderate that catalogue. What we do
+control is the ceiling we ask for — every request is sent with
+<code>rating=pg-13</code>, which is Giphy's own classification, not ours.</p>
+
+<p>The second is <strong>Watch Together</strong>, which plays a link one of you
+pastes inside an embedded player belonging to the site that link came from —
+YouTube and a few others. The player is pinned to that one site: a tap that
+would leave it is cancelled and it cannot open a new window. Within that site,
+though, its page is its own — including anything it recommends beside the
+video — and we neither choose nor moderate it. Nothing Miles writes, and nothing
+any Miles user posts, is browsable, searchable or recommended anywhere.</p>
+
+<h2>2. Why the exposure surface is narrow, and what that does not fix</h2>
+
+<p>Two structural facts matter more here than any policy sentence, so they are
+stated first.</p>
+
+<div class="scroll">
+<table>
+  <tr>
+    <td>Adults only</td>
+    <td>You must be 18 or older to hold an account. A date of birth is required
+    to finish sign-up and the app refuses to continue if it works out to under
+    18; the intimacy features re-check that stored date themselves rather than
+    trusting a flag set once. An account we learn belongs to someone under 18 is
+    closed.</td>
+  </tr>
+  <tr>
+    <td>No strangers, ever</td>
+    <td>An account pairs with exactly one other account, and only by an invite
+    code one of you gives the other directly. The cap is enforced on our server,
+    not in the app: a pairing code that would make a third member is refused
+    outright, and each code is single-use and expires. There is no directory, no
+    search for people, no discovery, no friend suggestions, no public profiles
+    and no way for an unpaired account to reach you inside the app. Nobody can
+    be contacted by a stranger in Miles, which removes the ordinary route by
+    which grooming happens on an open network.</td>
+  </tr>
+</table>
+</div>
+
+<p>Neither fact is a guarantee. A date of birth entered at sign-up is a
+declaration, not proof of age, and we do not claim to verify it. Two people who
+already know each other can still pair. So the reporting route below is a real
+part of the system, not a formality.</p>
+
+<h2>3. How to report — in the app</h2>
+
+<p>Reporting is built into the app and needs no email, no form on this site and
+no account other than your own. It is reachable from three places:</p>
+<ul>
+  <li><strong>Settings &rarr; Safety &rarr; Report a problem</strong>;</li>
+  <li>the <strong>menu at the top of Chat</strong>, which reports the person you
+  are paired with, and the selection toolbar you get by pressing and holding a
+  message, which reports that message;</li>
+  <li>the bar at the top of the <strong>Gallery</strong>, after you press and
+  hold an item to select it.</li>
+</ul>
+
+<p>The report form offers a fixed list of reasons. One of them is
+<strong>“Sexual content involving a minor”</strong> — the CSAM category, sent to
+our servers as <code>csam</code>. Choosing it marks the report as the most
+serious category we have.</p>
+
+<p>A report records who filed it, when, the reason chosen, what is being
+reported (the person you are paired with, one message, one gallery item, or
+Miles itself), an optional reference to that item, and an optional note of up to
+1,000 characters. Who is being reported is resolved on our server from the reporter's
+own pairing — the app never sends it — so no account can file a report against
+somebody it is not paired with. If you are not paired with anyone, the report is
+filed against Miles rather than against a person, so the form still works before
+you have a partner.</p>
+
+<p>Reports are write-only. There is no permission on that table for any account,
+including the one that filed the report: no phone can read a report back, so
+nothing about it can be found by someone going through a partner's device.</p>
+
+<div class="callout">
+<p><strong>Two honest limits on the in-app form.</strong></p>
+<ul>
+  <li><strong>The report does not attach the content.</strong> It records who,
+  when and why, not the message or the photograph. Section 4 explains why, and
+  what it means for what we can do. If something specific matters, describe it in
+  the note.</li>
+  <li><strong>A single account is limited to five reports in 24 hours</strong>,
+  so that the form cannot be used to flood us. The limit applies to every
+  category including <code>csam</code>. If you hit it and something urgent
+  remains unreported, email the address in section 6 — that route has no
+  limit.</li>
+</ul>
+</div>
+
+<h2>4. What we can see, and what we do about a report</h2>
+
+<p>This determines what enforcement is possible, so it is stated plainly rather
+than implied.</p>
+
+<p><strong>Nothing in Miles is proactively scanned.</strong> There is no
+automated content detection, no hash matching, no classifier and no moderation
+queue watching what two paired adults send each other. Nobody is employed to
+review content, and no such review happens.</p>
+
+<p>Some of the app is encrypted on the sending phone — Memory Threads, the text
+of Wish Jar entries, and files stored in the private vault. We hold no key to
+those, they reach our database as ciphertext, and in the ordinary course we
+cannot read them. The rest — chat text, photos, videos, voice notes, documents, and notes
+typed into the vault — is stored so that the operator of the database could read
+it, though it is not read as a matter of course. The
+<a href="privacy-policy.html">Privacy Policy</a> sets out exactly which is
+which.</p>
+
+<div class="callout">
+<p><strong>The honest limit of that encryption.</strong> So that reinstalling
+the app does not destroy a couple's encrypted history, a sealed copy of the
+device key is kept on our server, locked with a key derived from the account
+holder's own password. We cannot open it without that password — but the
+password is also what the account is signed in with, and it reaches our
+authentication provider each time. So the encryption is as strong as the
+password behind it, and we do not claim it is mathematically beyond our reach.
+Anyone who holds a user's password holds what opens their encrypted history.</p>
+</div>
+
+<p>Enforcement is therefore <strong>report-driven</strong>, and it acts on the
+account rather than on an individual message. It is also done by hand: there is
+no moderation console, no automated action and no team. Reports are read out of
+the database directly, with an administrative key, by the person named in
+section 6. When a report in the <code>csam</code> category arrives:</p>
+<ul>
+  <li>it is handled before every other category, and before ordinary
+  correspondence;</li>
+  <li>the account reported is closed, manually, without notice and without a
+  warning step. We do not commit to a response time, because a single named
+  person is the whole of the process and a number we could miss would be worth
+  less than this sentence;</li>
+  <li>the account details attached to the report may be passed to law
+  enforcement, as stated in section 5 of the
+  <a href="terms.html">Terms of Use</a>;</li>
+  <li>the report itself is kept, with no expiry and nothing that deletes it on a
+  schedule. It deliberately outlives the account it was filed against — though
+  once that account is gone the report no longer names it, and the reason, the
+  note and the timestamp are what remain. One further limit worth knowing: a
+  report is erased if the person who <em>filed</em> it deletes their own Miles
+  account. If you have reported something serious, tell us at the address in
+  section 6 before you delete, so the record does not go with you.</li>
+</ul>
+
+<p>We do not scan, and we do not claim to. What we do is act decisively on what
+is reported, and cooperate with the authorities who can investigate what we
+cannot see.</p>
+
+<h2>5. Reporting to the authorities</h2>
+
+<p>Apparent child sexual abuse material reported to us is referred onward. It is
+not handled as an internal moderation matter and closed.</p>
+<ul>
+  <li>We report to <strong>law enforcement where the developer is
+  established</strong>, which the <a href="privacy-policy.html">Privacy
+  Policy</a> states is Pakistan — [PLACEHOLDER: name the specific national
+  law-enforcement unit that receives such reports and the channel it accepts
+  them on].</li>
+  <li>We report to the <strong>U.S. National Center for Missing &amp; Exploited
+  Children (NCMEC)</strong> through its CyberTipline, which accepts reports from
+  anywhere in the world.</li>
+  <li>Where a legal request, preservation order or lawful production order
+  reaches us from a competent authority, we comply with it to the extent the
+  data exists and we can read it. Chat text and chat media we can produce.
+  Memory Threads, Wish Jar entry text and vault files we hold only as ciphertext,
+  and we would say so — together with the limit set out in section 4, rather
+  than let an authority believe the material is further out of reach than it
+  is.</li>
+</ul>
+
+<p>If you believe a child is in immediate danger, contact your local emergency
+services first. Miles is not an emergency service and cannot intervene.</p>
+
+<h2>6. Child safety point of contact</h2>
+
+<p>This is the contact for Google, for law enforcement, for NCMEC and for any
+child-protection organisation that needs to reach us about child safety. It is
+the same address Miles uses for support and privacy requests — Miles is a small
+operation and there is one inbox, not several. The subject line below is what
+separates a child-safety report from ordinary mail, and it is read first.</p>
+
+<div class="scroll">
+<table>
+  <tr><td>Role</td><td>Child Safety Point of Contact, Miles</td></tr>
+  <tr><td>Name</td><td>Raza Aslam</td></tr>
+  <tr><td>Publisher</td><td>R&amp;D Dev</td></tr>
+  <tr><td>Postal address</td><td>Sector C Commercial Area, Bahria Town,
+  Lahore, Pakistan</td></tr>
+  <tr><td>Email</td><td><a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a></td></tr>
+  <tr><td>Subject line</td><td>Please begin the subject with
+  <code>CHILD SAFETY</code>. Reports carrying it are read and acted on ahead of
+  ordinary correspondence.</td></tr>
+</table>
+</div>
+
+<p>Anyone may use this address, whether or not they use Miles: a parent, a
+platform, an investigator, or a person reporting on someone else's behalf.</p>
+
+<h2>7. Compliance</h2>
+
+<p>We comply with the child safety laws applicable to Miles in the jurisdictions
+where it is made available, including obligations to report apparent child
+sexual abuse material to the competent authority, and we comply with Google
+Play's Child Safety Standards policy and its Child Endangerment policy.</p>
+
+<p>These standards are reviewed at least once a year, and whenever the app gains
+a feature that changes what two people can send each other. The date at the top
+of this page is the date of the last review.</p>
+
+<h2>8. If you are the person at risk</h2>
+
+<p>If someone is pressuring you inside Miles, you do not have to negotiate with
+them to make it stop:</p>
+<ul>
+  <li><strong>Settings &rarr; Safety &rarr; Pause notifications</strong> stops
+  your phone being interrupted: nudges stop arriving, and an incoming call is
+  dropped instead of ringing. Be clear about what it does not do — messages
+  still reach your account and you will see them when you next open the app, a
+  nudge still appears on screen if the app is already open in front of you, and
+  a call can still post a notification even though opening it neither rings nor
+  connects. It is silent: your partner is not told, nothing on their side shows
+  it, and the setting is not readable by their phone.</li>
+  <li><strong>Settings &rarr; Account &rarr; Delete account</strong> ends it
+  entirely and removes your data, as described in the
+  <a href="privacy-policy.html">Privacy Policy</a>. If you have filed a report,
+  read the last point of section 4 first — deleting your account deletes the
+  report with it.</li>
+  <li>Reporting, as described in section 3, does not notify the person you
+  report.</li>
+</ul>
+
+<footer>
+<nav class="set">
+  <a href="privacy-policy.html">Privacy Policy</a>
+  <a href="terms.html">Terms</a>
+  <a href="faq.html">FAQ</a>
+  <a href="delete-account.html">Delete your account</a>
+</nav>
+Miles — Child Safety Standards · Last updated 17 August 2026
+</footer>
+
+</main>
+</body>
+</html>

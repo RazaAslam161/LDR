@@ -9,6 +9,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
+import 'package:miles/core/app/logging.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/router.dart';
@@ -43,6 +44,11 @@ import 'package:supabase_flutter/supabase_flutter.dart'
     show AuthChangeEvent, AuthState;
 
 Future<void> main() async {
+  // First statement on purpose: it touches no binding, and going first covers
+  // the env-check log below too. Shipped logs name partners, couple ids and
+  // message ids, and anyone with `adb logcat` reads them off a handset whose
+  // whole design goal is looking like something else.
+  silenceLogsInRelease();
   WidgetsFlutterBinding.ensureInitialized();
 
   // ── Global error nets. Keep one bad async error from blanking a whole

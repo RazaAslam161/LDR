@@ -43,16 +43,21 @@ AndroidNotificationChannel buildReachChannel() => AndroidNotificationChannel(
       vibrationPattern: reachVibrationPattern(),
     );
 
-/// Shows the Reach notification. [fullScreen] decides whether to request a
-/// full-screen intent (caller passes the live/cached permission state). When
-/// false — or when the OS withholds the permission — it degrades to a
-/// max-priority heads-up notification automatically.
+/// Shows the Reach notification: a max-importance heads-up on its own channel,
+/// with the distinctive buzz.
+///
+/// Deliberately NOT `category: call` and NOT a full-screen intent. A Reach is a
+/// nudge, not a ringing call — dressing one as a call takes over the lock
+/// screen, gets it ranked beside real telephony, and rides a
+/// USE_FULL_SCREEN_INTENT declaration that Play grants for calls and alarms
+/// only. Spending that declaration on nudges is what puts it at risk for the
+/// incoming-call ring below, which genuinely needs it. `Importance.max` +
+/// `Priority.max` still heads-up and still wakes the device's alerting path.
 Future<void> showReachNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String fromName,
   required String reachId,
   required String coupleId,
-  required bool fullScreen,
 }) async {
   // Wear this device's disguise, not the sender's and not a hardcoded one.
   final style = await currentNotificationStyle();
@@ -62,9 +67,7 @@ Future<void> showReachNotification({
     channelDescription: kReachChannelDesc,
     importance: Importance.max,
     priority: Priority.max,
-    category: AndroidNotificationCategory.call, // signals urgency
     vibrationPattern: reachVibrationPattern(),
-    fullScreenIntent: fullScreen,
     icon: style.smallIcon,
     ticker: style.ticker,
     // Privacy: hidden entirely on the lock screen; no preview anywhere.
@@ -435,20 +438,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 
   // Everything below assumes REACH. That is not a default worth relying on —
-  // a kind without its own branch above lands here and rings a full-screen
-  // alarm carrying an id that belongs to something else.
+  // a kind without its own branch above lands here and buzzes the max-importance
+  // alert carrying an id that belongs to something else.
   await androidPlugin?.createNotificationChannel(buildReachChannel());
-
-  // The background isolate has no Activity, so it can't query the FSI
-  // permission live — it reads the value the foreground last cached.
-  final prefs = await SharedPreferences.getInstance();
-  final fullScreen = prefs.getBool('fsi_can_use') ?? false;
 
   await showReachNotification(
     plugin: plugin,
     fromName: (message.data['from_name'] as String?) ?? 'Your partner',
     reachId: (message.data['reach_id'] as String?) ?? '',
     coupleId: coupleId ?? '',
-    fullScreen: fullScreen,
   );
 }

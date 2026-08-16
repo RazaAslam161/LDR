@@ -6,8 +6,12 @@ import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Desire Temperature — daily private 1–10 slider.
+/// Closeness — daily private 1–10 slider, shown on the Closer grid as
+/// "Closeness".
 /// App only reveals when BOTH scored ≥7. Protects egos from mismatched states.
+///
+/// The table is still `desire_temps`: that name is on the wire and in every
+/// shipped APK, so it is not renamed — only the words around it are.
 class WarmthMeterScreen extends ConsumerStatefulWidget {
   const WarmthMeterScreen({super.key});
 

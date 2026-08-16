@@ -9,8 +9,11 @@ import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
 
-/// Fixed tag taxonomy for Fantasy Jar entries. Tags are hashed before storage
+/// Fixed tag taxonomy for Wish Jar entries. Tags are hashed before storage
 /// (see §F2 of INTIMACY_LAYER.md) so the server never sees plaintext tags.
+///
+/// The `kFantasy…` name is the feature's old one and stays: renaming it is a
+/// code change, not a doc fix, and it buys nothing.
 const List<String> kFantasyTaxonomy = [
   'morning',
   'evening',
@@ -57,7 +60,10 @@ class WishEntry {
   final DateTime createdAt;
 }
 
-/// DB access for Fantasy Jar.
+/// DB access for the Wish Jar.
+///
+/// The table is still `fantasy_jar_entries`: that name is on the wire and in
+/// every shipped APK, so it is not renamed — only the words around it are.
 ///
 /// All entry text is XChaCha20-Poly1305 encrypted client-side. Tags are
 /// HMAC-SHA256 hashed with the couple-shared key before upload so the server
@@ -205,7 +211,7 @@ class WishJarRepository {
         // their key is legitimately unopenable here, and an empty jar reads
         // as lost data.
         unreadable++;
-        debugPrint('fantasy jar: unreadable row: $e');
+        debugPrint('wish jar: unreadable row: $e');
         continue;
       }
     }

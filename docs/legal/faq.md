@@ -1,7 +1,6 @@
 # Miles — Frequently Asked Questions
 
-> **BEFORE PUBLISHING — one placeholder to fill.** The support contact in
-> "How do I get help?" is `[support contact]`. Fill it and delete this block.
+**Last updated: 17 August 2026**
 
 Answers to the questions people actually ask. For the full detail on data
 handling, the [privacy policy](privacy-policy.md) is the authoritative
@@ -47,7 +46,7 @@ Yes — Miles is for adults, 18 and over.
 
 **Is everything end-to-end encrypted?**
 No, and we would rather tell you plainly than imply otherwise. A small set of
-especially sensitive areas — Memory Threads and Fantasy Jar entries — is
+especially sensitive areas — Memory Threads and Wish Jar entries — is
 end-to-end encrypted: the encryption happens on your phone, and our servers
 store only ciphertext they cannot read. Everything else (chat, media, location,
 profile) is protected by strict access controls and encryption in transit and
@@ -177,8 +176,12 @@ announcing itself. It's enforced on the server, so it works even if your
 phone is off.
 
 **How do I report a problem or someone's behaviour?**
-Settings → Report. Reports go to us, not to your partner.
+Settings → Report. It is also on the menu at the top of Chat, on the toolbar
+when you hold a message, and on the toolbar when you hold an item in the
+Gallery. Reports go to us, not to your partner. Anything involving a minor is
+the most serious category we have — the [Child Safety Standards](../../web/csae.html)
+page explains what happens to such a report and who to contact directly.
 
 **How do I get help?**
-`[support contact]` — include your app version (Settings → About) so we can
+Razaaslam3210@gmail.com — include your app version (Settings → About) so we can
 help faster. Never include your password; we will never ask for it.

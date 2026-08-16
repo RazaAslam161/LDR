@@ -266,9 +266,11 @@ class _PauseSheetState extends State<_PauseSheet> {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Text(
-              'Messages, calls and nudges stop lighting up this phone. They '
-              'still arrive — you see them when you open the app. Nobody else '
-              'is told, and you can turn it off whenever you want.',
+              'Reaches and nudges stop notifying this phone — that part is '
+              'enforced on the server. An incoming call is silenced rather '
+              'than rung, but its notification can still appear. Chat '
+              'messages are not affected. Nothing is deleted, nobody is '
+              'told, and you can turn it off whenever you want.',
               style: TextStyle(
                   color: MilesColors.taupe, fontSize: 12, height: 1.5,),
             ),

@@ -92,6 +92,8 @@
     margin-top: 3rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
     color: var(--ink-soft); font-size: .93rem;
   }
+  nav.set { margin-bottom: .6rem; }
+  nav.set a { margin-right: 1rem; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -104,33 +106,50 @@ app. Read what it removes first — most of it cannot be undone.</p>
 <h2>What gets deleted</h2>
 <ul>
   <li>Your account and sign-in — you will not be able to log in again.</li>
-  <li>Your profile: name, photo, time zone, date of birth, notification token.</li>
+  <li>Your profile: name, time zone, date of birth, notification token, and the
+  reference to your profile photo. The photo file itself lives in the couple’s
+  shared media and goes when that does.</li>
   <li>Your link to your partner. You are removed from the couple immediately.</li>
-  <li>Your personal vault, your cycle data, and everything else recorded against
-  your account alone.</li>
-  <li><strong>If your partner has already left or deleted their account:</strong>
-  the couple’s whole shared history goes with yours — every message, photograph,
-  video, voice note, document and Closer item. The files themselves are erased
-  from storage by a job that runs every hour.</li>
+  <li>Your personal vault, your cycle data, your saved encryption backup, and
+  everything else recorded against your account alone. Your vault’s files are
+  erased from storage by a job that runs every hour.</li>
+  <li>The diagnostic records tied to your account — your crash reports, and any
+  rows left in the retired trace table — which are removed with it rather than
+  left to expire.</li>
+  <li><strong>If nobody else is left in your couple</strong> — your partner has
+  already left or deleted their account, or you never paired — the couple’s
+  whole shared history goes with yours: every message, photograph, video, voice
+  note, document and Closer item. Those files are erased from storage by the
+  same hourly job.</li>
 </ul>
 
 <h2>What is retained, and for how long</h2>
 <ul>
   <li><strong>If your partner still has their account:</strong> the conversation
   you shared stays with them. It is their data as much as yours, so deleting your
-  account does not erase their copy. It is deleted under the rule below when they
-  leave or delete in turn.</li>
-  <li><strong>A couple nobody is left in is deleted 30 days later</strong> —
-  messages, media and Closer content, automatically and completely.</li>
-  <li>Diagnostic traces already collected expire on their own: crash reports
-  after 14 days, performance traces after 2 days. They contain no message
-  content.</li>
-  <li>Backups held by our hosting provider roll off on their own schedule.</li>
+  account does not erase their copy. If they later delete their own account, it
+  goes at once; if they only leave the couple, it goes under the rule below.</li>
+  <li><strong>A couple that was ended by leaving, rather than by deletion, is
+  removed 30 days after either of you leaves</strong> — messages, Closer
+  content and every other record of it, automatically. Re-pairing inside those
+  30 days cancels it. The stored media files are the one thing that sweep does
+  not currently erase; deleting your account, rather than leaving, is what
+  erases them.</li>
+  <li>Safety reports. A report you filed is deleted with your account. A report
+  your partner filed <em>about</em> you is not: it is kept with the link to your
+  account removed, because a record that disappears the moment its subject
+  deletes an account is not a safety record at all.</li>
+  <li>We keep no backups of our own and cannot restore a deleted account from
+  one. Our hosting provider may hold short-term disaster-recovery copies on its
+  own schedule; on our plan we can neither read them nor restore from them.</li>
 </ul>
 
-<p><strong>Content encrypted with a key only your phone held cannot be recovered
-after this, by you or by us.</strong> If you want a copy of anything, take it
-from the app before you continue.</p>
+<p><strong>End-to-end encrypted content cannot be recovered after this, by you
+or by us.</strong> Two things can open it: the key on your phone, and the sealed
+copy of that key we hold, which your password unwraps. Deleting the account
+destroys the sealed copy, so once your phone’s copy is gone there is no third
+one. If you want a copy of anything, take it from the app before you
+continue.</p>
 
 <h2>Delete it</h2>
 
@@ -156,13 +175,19 @@ from the app before you continue.</p>
 </div>
 
 <h2>Prefer to do it in the app?</h2>
-<p>Settings → Delete my account. Same effect, no code needed, because you are
-already signed in.</p>
+<p>Settings → Account → Delete account. Same effect, no code needed, because you
+are already signed in.</p>
 
 <footer>
+  <nav class="set">
+    <a href="privacy-policy.html">Privacy Policy</a>
+    <a href="terms.html">Terms</a>
+    <a href="csae.html">Child Safety Standards</a>
+    <a href="faq.html">FAQ</a>
+  </nav>
   Questions, or trouble with the code:
   <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a>.
-  See also the <a href="https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/privacy-policy.html">privacy policy</a>.
+  Last updated 17 August 2026.
 </footer>
 
 <script>

@@ -58,8 +58,9 @@ stranger to reach you inside the app.
 
 3. WHAT YOU MAY NOT SEND
 
-Everything in Miles is sent by one of you to the other. You are responsible for
-what you send. You may not use Miles to send, store or request:
+Everything you put into Miles goes to your partner or into your own private
+vault — never to a stranger, and never onto a public feed. You are responsible
+for what you send. You may not use Miles to send, store or request:
 
   - sexual content involving anyone under 18, in any form, real or generated.
     There is no exception to this and no context that changes it;
@@ -82,16 +83,25 @@ It is not assumed for anything involving a third person.
 
 This decides what enforcement is even possible, so it is stated plainly.
 
-Some of Miles is end-to-end encrypted: Memory Threads, the Closer private
-vault, and Wish Jar entries are encrypted on your phone with a key the server
-never holds. Those cannot be read by anyone operating the service, and no
-report, warrant or request changes that.
+Some of Miles is end-to-end encrypted: Memory Threads, the text of Wish Jar
+entries, and files you put in the private vault are encrypted on your phone
+before they leave it, and the server stores ciphertext it cannot open. Nobody
+operating the service can read those out of the database.
 
-The rest is not. Chat text, photos, videos, voice notes, documents, location,
-cycle logs and profile details are stored so that the operator of the database
-could read them. They are protected by per-row access rules and private storage
-so that only you and your partner can fetch them through the app — but they are
-not protected from us. The privacy policy sets this out in full.
+That is not the same as a promise they can never be read, and the difference is
+yours to know. So that reinstalling the app does not destroy your history, Miles
+keeps a sealed copy of your encryption key on the server. The seal is derived
+from your account password — the same password the sign-in service is sent every
+time you sign in — so anyone who has that password can open it. The privacy
+policy sets out that trade, and the narrower limits around it, in sections 2
+and 3.
+
+The rest is not encrypted from us at all. Chat text, photos, videos, voice
+notes, documents, location, cycle logs, profile details, and notes you type into
+the vault are stored so that the operator of the database could read them. They
+are protected by per-row access rules and private storage so that only you and
+your partner can fetch them through the app — but they are not protected from
+us. The privacy policy sets this out in full.
 
 So enforcement here does not work the way it does on a public network. Nothing
 is scanned, nothing is proactively reviewed, and there is no moderation queue
@@ -101,16 +111,24 @@ against a particular message.
 
 5. REPORTING
 
-Anything in the app can be reported. Report lives in three places:
+You can report your partner, any single message, and any item in the Gallery —
+and, before you are paired with anybody, the app itself. Report lives in three
+places:
 
   - Settings > Safety > Report a problem;
   - the menu at the top of Chat, and the toolbar that appears when you hold a
     message;
   - the toolbar that appears when you hold an item in the Gallery.
 
-A report records who, when and why. It does not attach the message or the
-photo — see section 4 for why that would not help. If something specific needs
-to be acted on, describe it in the note.
+A report records who, when and why, plus an id for the item — never a copy of
+it. Where the item is one of the encrypted kinds in section 4, there is nothing
+anyone here could open anyway. If something specific needs to be acted on,
+describe it in the note.
+
+Nothing is kept on your phone afterwards, and there is no screen anywhere that
+lists the reports you have filed. That is deliberate: on a handset the person
+being reported may pick up, such a list would be the most dangerous thing this
+app could show. You will not be told what happened either.
 
 Reports about child sexual abuse material are treated as the most serious
 category and may be passed to law enforcement along with the account details
@@ -121,14 +139,20 @@ reason to close yours.
 
 6. PAUSING CONTACT
 
-Settings > Safety > Pause notifications stops your partner's messages, calls,
-Reaches and nudges from reaching this phone, for an hour, eight hours, a day,
-or until you turn it back on.
+Settings > Safety > Pause notifications stops your partner's Reaches and nudges
+from notifying this phone, and drops an incoming call rather than ringing it,
+for an hour, eight hours, a day, or until you turn it back on.
 
 It is silent. Your partner is not told, and there is nothing on their side that
 shows it. Their messages still send and still arrive; you simply see them when
 you open the app rather than being interrupted. Nothing is deleted and the
 relationship in the app is not ended. You can lift it at any time.
+
+Two limits, said out loud, because a safety feature that is oversold is worse
+than one that is described. It pauses being NOTIFIED, not arrival: with the app
+open in front of you, a Reach still appears on screen. And a call can still post
+a notification to this phone while the pause is on — opening it neither rings
+nor connects the call, but the notification itself is not suppressed.
 
 If you are in danger, this app is not a substitute for emergency services.
 
@@ -145,9 +169,9 @@ them, and it does not delete anything already stored on their phone.
 8. YOUR OWN ACCOUNT
 
 You can delete your account at any time from Settings > Account. That erases
-your data as described in the privacy policy. Content that is encrypted under a
-key held only on the phones is unrecoverable by anybody, including us, once the
-key is gone.
+your data as described in the privacy policy. The sealed copy of your encryption
+key is deleted along with the account, so once your phone's copy is gone too,
+anything encrypted under it is unrecoverable by anybody, including us.
 
 9. NO WARRANTY
 

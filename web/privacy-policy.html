@@ -14,8 +14,6 @@
     --ink-soft: #55504d;
     --rule: #e6dfda;
     --accent: #a8556b;
-    --warn-bg: #fdf3e7;
-    --warn-rule: #e0b478;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -25,8 +23,6 @@
       --ink-soft: #a49c97;
       --rule: #322c29;
       --accent: #e59db1;
-      --warn-bg: #2a2016;
-      --warn-rule: #7a5a2c;
     }
   }
   * { box-sizing: border-box; }
@@ -75,27 +71,19 @@
   }
   .callout p:first-child { margin-top: 0; }
   .callout p:last-child { margin-bottom: 0; }
-  .todo {
-    background: var(--warn-bg); border: 1px dashed var(--warn-rule);
-    border-radius: 6px; padding: .9rem 1rem; margin: 0 0 2rem; font-size: .95rem;
-  }
   footer {
     margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
     color: var(--ink-soft); font-size: .95rem;
   }
+  nav.set { margin-bottom: .6rem; }
+  nav.set a { margin-right: 1rem; white-space: nowrap; }
 </style>
 </head>
 <body>
 <main>
 
 <h1>Miles — Privacy Policy</h1>
-<p class="updated">Last updated: 15 August 2026</p>
-
-<div class="todo">
-  <strong>Before publishing:</strong> replace <code>R&D Dev</code>,
-  <code>Pakistan</code>, <code>Razaaslam3210@gmail.com</code> and
-  <code>https://sopictusdonlvuezmfep.supabase.co/functions/v1/delete-account</code> throughout this file, then delete this box.
-</div>
+<p class="updated">Last updated: 17 August 2026</p>
 
 <p class="lede">Miles is a private app for two people in a relationship. This
 policy says what it stores, what it cannot read, who else touches your data, how
@@ -104,36 +92,62 @@ rather than reassuring — where something is <em>not</em> protected, this
 document says so.</p>
 
 <p>Miles is published by <strong>R&D Dev</strong>,
-Pakistan. Privacy questions and data requests:
+Sector C Commercial Area, Bahria Town, Lahore, Pakistan. Privacy questions and
+data requests:
 <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a>.</p>
 
 <h2>1. What Miles collects</h2>
 
 <p><strong>Your account.</strong> An email address and a password, held by our
 authentication provider. A display name, an optional profile photo, your time
-zone, and your date of birth. The date of birth is used for one thing: the
-intimacy features are refused to anyone under 18.</p>
+zone, your date of birth, and — if you set them — a gender, a status message,
+your usual wake and sleep times, and your chat theme and chat background image.
+The date of birth is used twice: sign-up refuses anyone who enters a date under
+18 years ago, and the Closer and Touch features are hidden from any account
+whose stored date of birth is under 18. It is the date you type; Miles does not
+verify it against any document.</p>
 
 <p><strong>Your pairing.</strong> Miles only works in twos. When you pair, both
 accounts are linked to a shared couple record. Invite codes and failed pairing
 attempts are recorded so codes cannot be guessed.</p>
 
 <p><strong>What you send each other.</strong> Chat messages, photographs,
-videos, voice notes and documents. Anything you write or capture inside the
-intimacy module (“Closer”) — memory threads, fantasy-jar entries. Scheduled
-rituals, visits, prompts and check-ins.</p>
+videos, voice notes and documents. Items you add to the shared gallery, with
+their captions. Time capsules and what you put inside them. Scheduled rituals,
+visits, prompts, check-ins, the shared routine chart, reasons you love each
+other, and Watch Together sessions.</p>
 
-<p><strong>Health and intimacy data.</strong> If you use the cycle tracker, its
-logs and settings. If you use Closer, the categories and content of what you
-record there. This is sensitive data and it is treated as such below.</p>
+<p><strong>What you record in Closer.</strong> Closer is the intimacy area of
+the app. It holds Memory Threads (titles, notes, places and photographs), Wish
+Jar entries and their category tags, Pick&nbsp;For&nbsp;Us dice rolls, warmth
+scores, body-map touches, and intimacy signals. Section 2 says exactly which of
+these the server can read and which it cannot — they are not all the same.</p>
+
+<p><strong>Health data.</strong> The cycle tracker is off until you switch it
+on. Once on, it stores your logged period dates, cycle events, and your average
+cycle and period lengths. <strong>It is shared with your partner by
+default</strong> — there is a switch on the cycle screen to stop that, but it
+starts on. Cycle data is not end-to-end encrypted; see section 2.</p>
 
 <p><strong>Where you are, if you turn it on.</strong> Location sharing is
-<strong>off by default</strong> and is per-account. You choose one of three
-modes: off, city (only a “City, Country” label leaves your phone — never
-coordinates), or precise (coordinates plus a finer label). It updates only while
-the app is open and in the foreground. Miles requests no background-location
-permission and runs no background location service. Turning sharing off erases
-the last position from the server.</p>
+per-account and has three modes: off, city (only a “City, Country” label leaves
+your phone — never coordinates), or precise (coordinates plus a finer label).
+A new account starts at <strong>off</strong>, and nothing is shared until the
+feature is switched on.</p>
+
+<p>Be clear about how it gets switched on, because it is not a second tap.
+Miles shows you a dialog explaining the feature, and if you then grant Android’s
+location permission, Miles treats that grant as your choice and turns sharing
+on: <strong>precise</strong> if you gave precise access, city if you gave only
+approximate. That happens once per account on a given handset; after that the
+mode is only ever what you set. You can move it to city or back to off in
+Settings at any time, and either takes effect on the next update.</p>
+
+<p>While sharing is on, your position updates about every 15 seconds and only
+while the app is open and in the foreground. Miles requests no
+background-location permission and runs no background location service. Turning
+sharing off writes empty coordinates and an empty place label over the stored
+ones.</p>
 
 <p>The Time Capsule “when you’re together” unlock is separate and stores
 nothing: both phones broadcast a coarse position over a transient realtime
@@ -141,24 +155,38 @@ channel, each device computes the distance itself, and no coordinate is ever
 written to the database.</p>
 
 <p><strong>Presence.</strong> While the app is open it writes an “online / last
-seen” heartbeat and which screen you are on, so your partner sees when you are
-there.</p>
+seen” heartbeat, which screen you are on, whether you are typing, when you last
+read the chat, and — if you set them — your current mood, its colour, a status
+activity, an avatar emoji and a check-in photo. This is what lets your partner
+see that you are there.</p>
 
 <p><strong>A push token.</strong> A Firebase Cloud Messaging registration token
 for your device, so your partner’s messages and calls can reach you.</p>
 
-<p><strong>Diagnostics.</strong> Two narrow streams, both write-only from the
-app’s point of view — no client can read them back.</p>
-<ul>
-  <li><em>Traces</em>: call, delivery-receipt, presence and app-lifecycle events
-  (event name, sequence, timing, your account and couple id).</li>
-  <li><em>Crash reports</em>: the exception’s <strong>type</strong>, a
-  machine-readable code (an SQLSTATE, an auth error code, an errno) and the Dart
-  stack frames. The exception’s <strong>message is discarded on your device
-  before anything is sent</strong>, precisely because a message like
-  <code>no key for &lt;your message text&gt;</code> is how private content
-  escapes an encrypted app.</li>
-</ul>
+<p><strong>Crash reports.</strong> One narrow stream, and the only diagnostic
+Miles still sends. A crash uploads your account id, the app’s build number, the
+exception’s <strong>type</strong>, a machine-readable code (an SQLSTATE, an auth
+error code, an errno) and the Dart stack frames — at most five a run. The
+exception’s <strong>message is discarded on your device before anything is
+sent</strong>, precisely because a message like
+<code>no key for &lt;your message text&gt;</code> is how private content escapes
+an encrypted app. This stream is genuinely write-only: no client key can read a
+crash report back, including your own.</p>
+
+<p>Miles used to also upload a behavioural event trace — calls, receipts,
+presence, app lifecycle. <strong>It was retired and no current build records
+anything into it.</strong> The table it wrote to still exists, is empty, and is
+still swept on a schedule; unlike crash reports, an account could read back its
+own rows there if there were any.</p>
+
+<p><strong>Safety and account records.</strong> If you file a report — the route
+is set out in the <a href="terms.html">Terms</a> — Miles stores who filed it,
+the reason you chose, what kind of thing you reported, an optional note you
+write, the build number, and, unless you are reporting the app itself, your
+partner’s account id, which the server fills in from your pairing rather than
+accepting it from your phone. It stores no copy of the reported content. Miles
+also records that you accepted a given version of the Terms and when, and any
+notification or contact pause you set against your partner.</p>
 
 <p>Miles contains no advertising SDK, no analytics SDK, and no third-party
 tracking. Nothing here is sold, and nothing here is used to build an advertising
@@ -175,8 +203,9 @@ Where that applies, the server stores ciphertext it cannot open.</p>
 <h3>End-to-end encrypted — the server cannot read these</h3>
 <div class="scroll">
 <table>
-  <tr><td>Memory Threads</td><td>titles, notes and photographs</td></tr>
-  <tr><td>Fantasy Jar</td><td>the text of each entry</td></tr>
+  <tr><td>Memory Threads</td><td>titles, notes, partner notes, places and photographs</td></tr>
+  <tr><td>Wish Jar</td><td>the text of each entry</td></tr>
+  <tr><td>Personal Vault</td><td>the files and thumbnails you save into it</td></tr>
 </table>
 </div>
 
@@ -184,12 +213,17 @@ Where that applies, the server stores ciphertext it cannot open.</p>
 <div class="scroll">
 <table>
   <tr><td>Chat</td><td>message text, photos, videos, voice notes, documents</td></tr>
-  <tr><td>Personal Vault (your owner-only vault)</td><td>note text is stored as plain text</td></tr>
+  <tr><td>Shared gallery</td><td>the images and videos, and their captions</td></tr>
+  <tr><td>Time capsules</td><td>contents and attachments</td></tr>
+  <tr><td>Personal Vault</td><td>the text of notes, and the label on every item</td></tr>
+  <tr><td>Closer, apart from the two rows above</td><td>dice rolls and their tags,
+  warmth scores, body-map touches and their positions, intimacy signals</td></tr>
   <tr><td>Location</td><td>coordinates and place labels</td></tr>
   <tr><td>Cycle tracker</td><td>logs, events and settings</td></tr>
-  <tr><td>Presence</td><td>online state, last seen, current screen</td></tr>
-  <tr><td>Profile</td><td>name, photo, time zone, date of birth</td></tr>
-  <tr><td>Rituals, visits, prompts, check-ins</td><td>contents</td></tr>
+  <tr><td>Presence</td><td>online state, last seen, current screen, typing, mood, check-in photo</td></tr>
+  <tr><td>Profile</td><td>name, photo, time zone, date of birth, gender, status, wake and sleep times</td></tr>
+  <tr><td>Rituals, visits, prompts, check-ins, routine chart, reasons</td><td>contents</td></tr>
+  <tr><td>Reports and Terms acceptances</td><td>contents, as described in section 1</td></tr>
 </table>
 </div>
 
@@ -200,9 +234,14 @@ encryption in transit and at rest at the hosting provider. They are
 chat as if it were end-to-end encrypted.</p>
 
 <div class="callout">
-<p><strong>Three further limits, stated because they are true.</strong></p>
+<p><strong>Four further limits, stated because they are true.</strong></p>
 <ul>
-  <li><strong>Fantasy Jar categories are effectively readable.</strong> Entry
+  <li><strong>Encryption covers the contents, not the shape.</strong> A Memory
+  Thread’s title and photographs are ciphertext, but the date you dated it to,
+  how many photographs it holds, when it was created and who proposed it are
+  stored in the clear. The server cannot read your memories; it can see that you
+  have them, and when.</li>
+  <li><strong>Wish Jar categories are effectively readable.</strong> Entry
   text is encrypted, but each entry carries a tag hash used so both phones can
   match categories. That hash is an unkeyed 32-bit FNV-1a over a fixed
   twelve-item list, so anyone with database access can compute all twelve and
@@ -225,18 +264,21 @@ chat as if it were end-to-end encrypted.</p>
 uninstalled, which would make everything encrypted permanently unreadable — so
 Miles keeps a <strong>sealed</strong> copy on the server.</p>
 
-<p>The seal is derived from your account password: the password is put through a
-labelled HMAC and then Argon2id (memory-hard, deliberately slow), and the
-resulting key wraps your private key with XChaCha20-Poly1305. The server holds
-the wrapped blob, a salt and a nonce, and can derive nothing from them alone.</p>
+<p>The seal is derived from your account password: the password is put through
+Argon2id (memory-hard, deliberately slow) with a random salt, and the resulting
+key wraps your private key with XChaCha20-Poly1305. The server holds the wrapped
+blob, the salt, a nonce and the derivation parameters, and can derive nothing
+from them alone. Seals written before Argon2id was introduced used a fast
+key derivation instead; those are re-sealed the first time they are opened.</p>
 
 <p>Two honest consequences:</p>
 <ul>
   <li><strong>Your password is the whole of that protection.</strong> The same
-  password is sent to the authentication service every time you sign in. Anyone
-  who obtains your password — or who compromises that endpoint — can open the
-  sealed key and decrypt everything it protects. The seal defends against a
-  stolen database backup, not against a stolen password.</li>
+  password is sent to the authentication service every time you sign in, and the
+  key that opens the seal is derived from that exact string — the two secrets
+  are one secret. Anyone who obtains your password, or who captures it at that
+  endpoint, can open the sealed key and decrypt everything it protects. The seal
+  defends against a stolen database backup, not against a stolen password.</li>
   <li><strong>If you forget your password, the seal cannot be opened
   either.</strong> Resetting a password restores access to your <em>account</em>,
   not to content encrypted under a key you can no longer unwrap. Miles also
@@ -262,7 +304,8 @@ the wrapped blob, a salt and a nonce, and can derive nothing from them alone.</p
     <td>your device’s push token, and per notification: a type word
     (<code>reach</code>, <code>care</code>, <code>call</code>,
     <code>message</code>, <code>memory</code>, <code>ritual</code>), your
-    couple’s id, and the id of the row that triggered it</td>
+    couple’s id, the id of the row that triggered it, and for a call whether it
+    is a video call</td>
     <td>Delivering notifications. <strong>No names, no message text, no
     photographs, and no location pass through Google.</strong> The notification
     you see is composed on your own phone from those identifiers.</td>
@@ -277,17 +320,30 @@ the wrapped blob, a salt and a nonce, and can derive nothing from them alone.</p
     <td>Mapbox</td>
     <td>map tile requests, which reveal the area of the map you are looking at,
     and your IP address</td>
-    <td>Drawing the map.</td>
+    <td>Drawing the world map.</td>
   </tr>
   <tr>
-    <td>Google — Maps SDK &amp; platform geocoder</td>
-    <td>for the Touch Map, map requests; for the “City, Country” label, the
-    coordinates your phone turns into a place name</td>
-    <td>Map display and reverse geocoding.</td>
+    <td>Google — Maps SDK</td>
+    <td>map tile requests for the area being drawn, and your IP address</td>
+    <td>The map that shows where your partner is. Only reached from the
+    location screens.</td>
+  </tr>
+  <tr>
+    <td>Google — Android geocoder</td>
+    <td>the coordinates your phone turns into a place name</td>
+    <td>Turning a fix into the “City, Country” label. This is Android’s own
+    geocoder, which on a device with Google services is answered by Google.</td>
+  </tr>
+  <tr>
+    <td>Google — ML Kit</td>
+    <td>nothing leaves the device</td>
+    <td>Pose detection and subject cut-out for Touch Map photo reactions. The
+    models run on your phone; the photograph is not uploaded to Google.</td>
   </tr>
   <tr>
     <td>Giphy</td>
-    <td>your GIF search terms</td>
+    <td>your GIF search terms, your IP address, and a request for each GIF
+    shown</td>
     <td>The GIF picker in chat. Only when you open it.</td>
   </tr>
   <tr>
@@ -316,15 +372,27 @@ one can be refused or withdrawn in Android’s app settings.</p>
   <li><strong>Camera</strong> — taking photos and video in chat, capsules and
   Closer; video calls.</li>
   <li><strong>Microphone</strong> — voice notes and voice/video calls.</li>
-  <li><strong>Photos and videos</strong> — Miles uses Android’s system photo
-  picker, so it asks only for the specific items you select. It does not request
-  broad access to your gallery and cannot browse it.</li>
+  <li><strong>Photos and videos</strong> — on Android 13 and later Miles asks
+  only for the specific items you select, through the system photo picker or the
+  document picker, and never for broad access to your gallery. On Android 12 and
+  earlier, which have no per-item grant, Miles declares the old
+  read-external-storage permission; on those versions granting it does give the
+  app read access to shared storage. Nothing in Miles scans or indexes your
+  gallery on any version.</li>
+  <li><strong>Files</strong> — choosing a document to send in chat, through the
+  system file picker.</li>
   <li><strong>Location (approximate and precise)</strong> — only for the sharing
   feature and the “when you’re together” unlock, both described in section 1.
   <strong>Foreground only.</strong> Miles does not request background
   location.</li>
   <li><strong>Notifications</strong> — messages, calls and reaches.</li>
   <li><strong>Bluetooth</strong> — choosing a headset for call audio.</li>
+  <li><strong>Biometrics</strong> — the fingerprint or face prompt that opens
+  the app lock, the Memory Threads gate and the Personal Vault. The check
+  happens on your phone; Miles never receives the biometric itself.</li>
+  <li><strong>Screen capture</strong> — only if you start a screen share during
+  a call, and Android asks you each time. Miles cannot capture your screen
+  outside a call you are in.</li>
 </ul>
 
 <h2>6. How long things are kept</h2>
@@ -333,60 +401,96 @@ one can be refused or withdrawn in Android’s app settings.</p>
 <table>
   <tr><th>Data</th><th>Kept for</th></tr>
   <tr><td>Account, profile, chat, Closer content, cycle data</td><td>until you delete them or delete your account</td></tr>
-  <tr><td>Live “reach” alerts</td><td>30 seconds (the alert); 30 days (the record)</td></tr>
+  <tr><td>Live “reach” alerts</td><td>30 days (the record). The push that carries one is given 30 seconds to arrive and is dropped if it cannot</td></tr>
   <tr><td>Care nudges</td><td>30 days</td></tr>
   <tr><td>Touch / body-map signals</td><td>7 days</td></tr>
   <tr><td>Call invitations</td><td>2 days</td></tr>
   <tr><td>Call signalling</td><td>1 day</td></tr>
   <tr><td>Very short-lived presence pulses</td><td>1 hour to 1 day</td></tr>
   <tr><td>Failed pairing attempts</td><td>1 day</td></tr>
-  <tr><td>Diagnostic traces</td><td>2 days, and capped by row count</td></tr>
-  <tr><td>Crash reports</td><td>14 days</td></tr>
+  <tr><td>Retired trace table</td><td>2 days, and capped by row count — nothing is written to it any more</td></tr>
+  <tr><td>Crash reports</td><td>14 days, and capped by row count</td></tr>
   <tr><td>Deleted memory threads</td><td>erased 30 days after deletion</td></tr>
-  <tr><td>Unanswered joint delete requests</td><td>expire after 14 days</td></tr>
+  <tr><td>Unanswered joint delete requests</td><td>for a Memory Thread, whoever asked can force it through after 14 days. There is no such route for the shared gallery — an unanswered gallery request simply stands</td></tr>
+  <tr><td>Reports you file</td><td>kept with no expiry, so that a pattern of abuse can be acted on. Deleting your account deletes the reports you filed; a report filed <em>about</em> you outlives your account, with your account id removed from it</td></tr>
+  <tr><td>Terms acceptances, call-relay credential requests</td><td>kept with no expiry</td></tr>
   <tr>
-    <td>A relationship you both leave</td>
-    <td>the couple’s entire history — messages, photographs, videos, Closer
-    content — is <strong>deleted 30 days after the last partner leaves</strong>,
-    including the files in storage. Re-pairing inside those 30 days cancels the
-    deletion.</td>
+    <td>A relationship either of you ends</td>
+    <td>removing your partner dissolves the couple <strong>for both of you at
+    once</strong> — it does not wait for the second person to act. The couple’s
+    records — messages, gallery items, Closer content — are deleted 30 days
+    after that. Re-pairing inside those 30 days cancels the deletion. The
+    stored files themselves are the exception; the note below the table says
+    what happens to them.</td>
   </tr>
 </table>
 </div>
 
-<p>Deleted files are removed from storage by a job that runs hourly, so a file
-is usually gone within the hour and always within a day of the row that
-referenced it.</p>
+<p>Two honest notes on files. Deleting your account queues every file you and
+your partner stored for real deletion, and a job runs hourly to carry it out —
+if that job is unable to run, the queue waits rather than dropping, so “usually
+within the hour” is the expectation and not a guarantee.</p>
+
+<p>The other paths — clearing a message or a whole conversation for both of you,
+and the 30-day purge after a relationship ends — remove the database record of
+the file rather than passing it to the storage service for deletion. The
+practical effect is that nothing and nobody can reach the file again: no link
+can be issued for it and it appears in no listing. The underlying bytes,
+however, remain in the hosting provider’s storage, unreferenced, rather than
+being erased. If you want the bytes themselves gone, use Settings → Account →
+Delete account, or write to us and ask.</p>
 
 <h2>7. Your rights, and how to actually use them</h2>
 
-<p><strong>See your data.</strong> Everything Miles holds about you is visible in
-the app, on the screen that produced it. For a copy in another form, write to
+<p><strong>See your data.</strong> Almost everything Miles holds about you is
+visible in the app, on the screen that produced it. Four things are not, on
+purpose: crash reports, delivery failures for notifications sent to you,
+call-relay credential requests, and reports — including reports you filed
+yourself. Reports are unreadable from every client key, because a screen listing
+“reports you have filed about your partner”, on a phone that partner may pick
+up, is the most dangerous thing this app could draw. For a copy of any of it,
+including the hidden four, write to
 <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a>.</p>
 
 <p><strong>Correct it.</strong> Profile, name, photo, time zone and every
 preference are editable in Settings.</p>
 
-<p><strong>Delete individual things.</strong> Messages, memories, vault items
-and cycle entries each delete from their own screen. Content shared with your
-partner needs both of you to agree before it is destroyed, which is deliberate —
-one person cannot erase a shared history alone.</p>
+<p><strong>Delete individual things.</strong> Messages, memories, gallery items,
+vault items and cycle entries each delete from their own screen. What that costs
+the other person differs by feature, and it is worth knowing which is which:</p>
+<ul>
+  <li><em>Both of you must agree</em> for Memory Threads and the shared gallery.
+  One of you asks, the other confirms, and only then is it destroyed. For a
+  Memory Thread, a request your partner neither confirms nor refuses can be
+  forced through after 14 days; a gallery request has no such route and simply
+  stands until they answer it.</li>
+  <li><em>Either of you can act alone</em> in chat. You can delete your own
+  message for both of you, and <strong>either partner can clear the entire
+  conversation — every message and every file in it — for both of you, with no
+  confirmation from the other.</strong> There is no undo and no copy kept.</li>
+  <li><em>Only you</em> can touch your Personal Vault and your cycle
+  entries.</li>
+</ul>
 
 <p><strong>Delete your account.</strong> Two routes, both real:</p>
 <ul>
-  <li><em>In the app</em>: Settings → Delete my account.</li>
+  <li><em>In the app</em>: Settings → Account → Delete account.</li>
   <li><em>On the web, without reinstalling</em>:
-  <a href="https://sopictusdonlvuezmfep.supabase.co/functions/v1/delete-account">https://sopictusdonlvuezmfep.supabase.co/functions/v1/delete-account</a>. You enter your email, receive a
-  code at that address, and confirm. We never delete an account on an unverified
-  request.</li>
+  <a href="delete-account.html">Delete your Miles account</a>. You enter your
+  email, receive a code at that address, and confirm. We never delete an account
+  on an unverified request.</li>
 </ul>
 
-<p>What deletion does: your account and profile are erased, and you are unlinked
-from your couple. If your partner has already left, the couple’s entire history
+<p>What deletion does: your account and profile are erased, your Personal Vault
+and its files are erased, and you are unlinked from your couple. Your crash
+reports, your escrowed key, your Terms acceptances and the reports you filed go
+with the account. If your partner has already left, the couple’s entire history
 and every file the two of you stored are deleted with it. If your partner is
 still there, their copy of the conversation you shared remains theirs — the same
-conversation is their data too — and it is deleted under the 30-day rule when
-they leave or delete in turn.</p>
+conversation is their data too. If they later delete their own account it goes
+at once; if they only remove you as a partner, the 30-day rule above applies.
+One thing survives: a report your partner filed about you, kept without your
+account id attached to it.</p>
 
 <p><strong>Withdraw consent.</strong> Turn off location sharing, revoke any
 permission in Android settings, or stop using a feature. None of it is
@@ -400,9 +504,16 @@ may complain to it directly.</p>
 
 <h2>8. Children</h2>
 
-<p>Miles is for adults. You must be 18 or older to create an account, and the
-intimacy features check your date of birth independently. If we learn that an
+<p>Miles is for adults. You must be 18 or older to create an account: sign-up
+asks for your date of birth and refuses a date under 18 years ago, and the
+Closer and Touch features check the stored date again before they will appear.
+Both checks are made against the date you typed — Miles does not verify it
+against any document — so they are a gate, not proof. If we learn that an
 account belongs to someone under 18 we delete it.</p>
+
+<p>Our standards against child sexual abuse and exploitation, and how to report
+it, are set out in full on the
+<a href="csae.html">Child Safety Standards</a> page.</p>
 
 <h2>9. Where your data is</h2>
 
@@ -413,9 +524,12 @@ outside your country.</p>
 
 <h2>10. Security, and what it does not cover</h2>
 
-<p>Data is encrypted in transit (TLS) and at rest, access is enforced per-row so
-that only you and your partner can reach your couple’s data, and the most
-sensitive surfaces are end-to-end encrypted as described in section 2.</p>
+<p>Data is encrypted in transit (TLS) and at rest, files live in private buckets
+reachable only through short-lived signed links, access is enforced per-row so
+that only you and your partner can reach your couple’s data, and the surfaces
+listed in section 2 are end-to-end encrypted on top of that.
+<strong>Chat is not one of them</strong> — read section 2 rather than assuming
+this one covers it.</p>
 
 <p>Three things that no amount of server-side security addresses, and that you
 should weigh:</p>
@@ -438,10 +552,19 @@ policy applies.</p>
 <h2>12. Contact</h2>
 
 <p>R&D Dev<br>
-Pakistan<br>
+Sector C Commercial Area, Bahria Town<br>
+Lahore, Pakistan<br>
 <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a></p>
 
-<footer>Miles — Privacy Policy · Last updated 15 August 2026</footer>
+<footer>
+<nav class="set">
+  <a href="terms.html">Terms</a>
+  <a href="csae.html">Child Safety Standards</a>
+  <a href="faq.html">FAQ</a>
+  <a href="delete-account.html">Delete your account</a>
+</nav>
+Miles — Privacy Policy · Last updated 17 August 2026
+</footer>
 
 </main>
 </body>
