@@ -5,6 +5,7 @@ import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/key_escrow.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
@@ -18,6 +19,7 @@ import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
+import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
@@ -51,6 +53,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   String _locationMode = 'off';
   LocationBlock _locationBlock = LocationBlock.none;
   bool _appLock = false;
+  bool _escrowMissing = false;
   bool _changingAvatar = false;
   String? _localAvatarUrl;
 
@@ -87,6 +90,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadLocationMode();
       _loadAppLock();
+      _loadEscrow();
     });
   }
 
@@ -103,6 +107,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _loadAppLock() async {
     final on = await AppLock.isEnabled();
     if (mounted) setState(() => _appLock = on);
+  }
+
+  Future<void> _loadEscrow() async {
+    final missing = await KeyEscrow.isMissing();
+    if (mounted) setState(() => _escrowMissing = missing);
+  }
+
+  /// The same dialog and re-authentication the launch prompt uses. That prompt
+  /// is dismissible and snoozes for a week, so this row is the standing place
+  /// to see the state and repair it without waiting to be asked again.
+  Future<void> _fixEscrow() async {
+    await EscrowPrompt.show(context);
+    await _loadEscrow();
   }
 
   Future<void> _toggleAppLock(bool v) async {
@@ -816,6 +833,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
             // ── Account ──────────────────────────────────────────
             const _SectionHeader(label: 'Account'),
+            // Whether a sealed copy of the encryption key exists server-side.
+            // isMissing() reports false when the server is unreachable, so an
+            // offline visit reads "on" — the same bias the launch prompt has,
+            // and for the same reason: a dropped connection must not accuse.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                _escrowMissing
+                    ? Icons.gpp_maybe_outlined
+                    : Icons.verified_user_outlined,
+                color: _escrowMissing ? MilesColors.ember : MilesColors.taupe,
+              ),
+              title: Text(
+                _escrowMissing
+                    ? 'Recovery backup: off'
+                    : 'Recovery backup: on',
+                style: const TextStyle(color: MilesColors.cream50),
+              ),
+              subtitle: Text(
+                _escrowMissing
+                    ? 'A reinstall would lose your encrypted memories '
+                        '— tap to fix'
+                    : 'Your key can survive a reinstall',
+                style: TextStyle(
+                  color:
+                      _escrowMissing ? MilesColors.ember : MilesColors.taupe,
+                  fontSize: 12,
+                ),
+              ),
+              onTap: _escrowMissing ? _fixEscrow : null,
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.logout, color: MilesColors.ember),
