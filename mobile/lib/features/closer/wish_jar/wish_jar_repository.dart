@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
@@ -97,6 +98,21 @@ class WishJarRepository {
     if (partnerPub == CryptoCore.legacyPublicKey) {
       throw Exception(
         'Partner has not published a key yet. Ask them to open Closer once.',
+      );
+    }
+    // Same pin, same refusal as closer_crypto's ensureSharedKey — two doors
+    // into the derive means two pins or the second door is the bypass.
+    final me = session.profile;
+    if (me == null) throw StateError('Not signed in.');
+    final verdict = await PartnerKeyPin.check(
+      myUid: me.id,
+      partnerId: partner.id,
+      partnerPubB64: partnerPub,
+    );
+    if (verdict == PinCheck.mismatch) {
+      throw PartnerKeyChangedException(
+        partnerId: partner.id,
+        newKeyB64: partnerPub,
       );
     }
     await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);

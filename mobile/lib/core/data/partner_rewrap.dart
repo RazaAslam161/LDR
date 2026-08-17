@@ -5,6 +5,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/key_escrow.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/app_lock.dart';
@@ -15,6 +16,7 @@ import 'package:miles/features/closer/closer_crypto.dart';
 class RewrapRequest {
   const RewrapRequest({
     required this.id,
+    required this.fromUser,
     required this.newPublicKeyB64,
     required this.codeHash,
     required this.expiresAt,
@@ -22,12 +24,17 @@ class RewrapRequest {
 
   factory RewrapRequest.fromRow(Map<String, dynamic> row) => RewrapRequest(
         id: row['id'] as String,
+        fromUser: row['from_user'] as String,
         newPublicKeyB64: row['new_public_key'] as String,
         codeHash: byteaToBytes(row['code_hash']),
         expiresAt: DateTime.parse(row['expires_at'] as String),
       );
 
   final String id;
+
+  /// Who is asking — the partner whose key pin the ceremony's success is
+  /// entitled to move.
+  final String fromUser;
   final String newPublicKeyB64;
   final Uint8List codeHash;
   final DateTime expiresAt;
@@ -216,7 +223,7 @@ class PartnerRewrap {
   static Future<RewrapRequest?> fetchOwn(String requestId) async {
     final row = await SupabaseService.client
         .from('partner_rewrap_requests')
-        .select('id, new_public_key, code_hash, expires_at')
+        .select('id, from_user, new_public_key, code_hash, expires_at')
         .eq('id', requestId)
         .maybeSingle();
     return row == null ? null : RewrapRequest.fromRow(row);
@@ -228,7 +235,7 @@ class PartnerRewrap {
     if (uid == null) return null;
     final row = await SupabaseService.client
         .from('partner_rewrap_requests')
-        .select('id, new_public_key, code_hash, expires_at')
+        .select('id, from_user, new_public_key, code_hash, expires_at')
         .eq('couple_id', coupleId)
         // Answering your own request is the attack this ceremony exists to
         // stop; the policy refuses it too, and this keeps it off the screen.
@@ -355,6 +362,18 @@ class PartnerRewrap {
         'Ask them to start again.',
       );
     }
+    // The voice code bound the human to exactly this key (the code hash is
+    // Argon2id over key||digits), and the answer just landed — this is the
+    // ceremony's authority over the coming change. An EXPECTATION, not a
+    // repin: the partner publishes only at claim(), so a repin here would
+    // say NEW while the directory still serves OLD, and raise the change
+    // alarm against the partner's own legitimate key for as long as the
+    // claim takes — which is unbounded if their app dies first.
+    await PartnerKeyPin.expect(
+      myUid: uid,
+      partnerId: req.fromUser,
+      partnerPubB64: req.newPublicKeyB64,
+    );
     return result.dropped;
   }
 
@@ -396,6 +415,27 @@ class PartnerRewrap {
       secretKey: await CryptoCore.rewrapKey(partnerPub),
       aad: utf8.encode('rewrap_$requestId'),
     );
+    // A check, deliberately NOT a repin. The AEAD open above is computed
+    // against the very directory value being judged — a server that
+    // substituted the giver's key can seal a chain that opens cleanly, so
+    // "it opened" is not authority to move an existing pin. On the usual
+    // fresh install there is no pin and check() records first sight; on a
+    // device that still holds one, a mismatch here is exactly the alarm the
+    // pin exists to raise, and it must not be silently overwritten.
+    final claimUid = SupabaseService.currentUserId;
+    if (claimUid != null) {
+      final verdict = await PartnerKeyPin.check(
+        myUid: claimUid,
+        partnerId: partnerId,
+        partnerPubB64: partnerPub,
+      );
+      if (verdict == PinCheck.mismatch) {
+        throw PartnerKeyChangedException(
+          partnerId: partnerId,
+          newKeyB64: partnerPub,
+        );
+      }
+    }
     // Derive BEFORE adopting. Nothing on the claiming side has run
     // ensureSharedKey — this screen is reached before Closer ever is — so
     // without this the current-key exclusion inside adoptRetiredKeys compares

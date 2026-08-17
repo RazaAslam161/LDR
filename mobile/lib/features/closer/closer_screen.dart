@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
+import 'package:miles/features/closer/partner_key_change_sheet.dart';
 
 /// Entry screen for the intimacy module ("Closer").
 ///
@@ -24,11 +26,16 @@ class CloserScreen extends ConsumerStatefulWidget {
   ConsumerState<CloserScreen> createState() => _CloserScreenState();
 }
 
-enum _KeyState { loading, ready, waitingForPartner, error }
+enum _KeyState { loading, ready, waitingForPartner, keyChanged, error }
 
 class _CloserScreenState extends ConsumerState<CloserScreen> {
   _KeyState _key = _KeyState.loading;
   String? _error;
+
+  /// The mismatch that put us in [_KeyState.keyChanged] — held because the
+  /// review sheet needs the NEW key it carries, both to render the safety
+  /// code and to repin once the couple has compared it.
+  PartnerKeyChangedException? _keyChange;
 
   @override
   void didChangeDependencies() {
@@ -50,6 +57,7 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
     setState(() {
       _key = _KeyState.loading;
       _error = null;
+      _keyChange = null;
     });
 
     try {
@@ -57,6 +65,16 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
       await ensureSharedKey(session);
       if (!mounted) return;
       setState(() => _key = _KeyState.ready);
+    } on PartnerKeyChangedException catch (e) {
+      if (!mounted) return;
+      // By TYPE, ahead of the string probes below: its toString carries no
+      // sentence, so it fell into the raw-error state — a generic apology
+      // with a retry that can never succeed, over the one failure here that
+      // is a deliberate refusal and has its own resolution.
+      setState(() {
+        _key = _KeyState.keyChanged;
+        _keyChange = e;
+      });
     } catch (e) {
       if (!mounted) return;
       // ensureSharedKey signals "not linked" with StateError, which is not an
@@ -74,6 +92,21 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
         });
       }
     }
+  }
+
+  Future<void> _reviewKeyChange() async {
+    final me = ref.read(sessionProvider).profile;
+    final change = _keyChange;
+    if (me == null || change == null) return;
+    final repinned = await PartnerKeyChangeSheet.show(
+      context,
+      myUid: me.id,
+      exception: change,
+    );
+    // Re-run the whole entry load rather than flipping state locally: the
+    // retry has to derive under the freshly pinned key, and _prepareKey is
+    // the only path that does.
+    if (repinned && mounted) await _prepareKey();
   }
 
   /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
@@ -122,6 +155,8 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
         return const _ModuleEnabled();
       case _KeyState.waitingForPartner:
         return _WaitingForPartner(onRetry: _prepareKey);
+      case _KeyState.keyChanged:
+        return _PartnerKeyChanged(onReview: _reviewKeyChange);
       case _KeyState.error:
         return _KeyError(
           message: _error ?? 'Unknown error',
@@ -215,6 +250,51 @@ class _WaitingForPartner extends StatelessWidget {
           OutlinedButton(
             onPressed: onRetry,
             child: const Text('Check again'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown when the fetched partner key contradicts this device's pin.
+///
+/// Deliberately its own state and not the waiting-for-partner one: that
+/// screen's advice ("ask them to open Closer once") cannot resolve a
+/// mismatch, and its Check-again button would just meet the same refusal.
+/// The only way forward is the review sheet, so that is the only button.
+class _PartnerKeyChanged extends StatelessWidget {
+  const _PartnerKeyChanged({required this.onReview});
+  final VoidCallback onReview;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('🔒', style: TextStyle(fontSize: 44)),
+          const SizedBox(height: 16),
+          Text(
+            "Your partner's security key changed",
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                  color: const Color(0xFFFBF8F4),
+                ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'This usually means they reinstalled the app or moved to a new '
+            'phone. It can also mean someone is interfering with your '
+            'connection. Nothing here will decrypt or send until you review '
+            'the change.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
+          ),
+          const SizedBox(height: 24),
+          OutlinedButton(
+            onPressed: onReview,
+            child: const Text('Review'),
           ),
         ],
       ),

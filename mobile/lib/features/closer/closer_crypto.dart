@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 
 /// XChaCha20-Poly1305 always produces a 24-byte nonce and a 16-byte Poly1305 MAC.
@@ -47,7 +48,23 @@ Future<void> ensureSharedKey(SessionState session) async {
         "Your partner hasn't enabled Closer yet. Ask them to open it once.",
       );
     }
-    await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);
+
+  // The pin stands between the directory and the derive. A server that
+  // substitutes a key stops HERE, on every device that has seen the real one
+  // — the mismatch surfaces as the key-change sheet, and nothing is derived
+  // or decrypted under the imposter key in the meantime.
+  final verdict = await PartnerKeyPin.check(
+    myUid: me.id,
+    partnerId: partner.id,
+    partnerPubB64: partnerPub,
+  );
+  if (verdict == PinCheck.mismatch) {
+    throw PartnerKeyChangedException(
+      partnerId: partner.id,
+      newKeyB64: partnerPub,
+    );
+  }
+  await CryptoCore.deriveSharedKey(partnerPublicKeyB64: partnerPub);
 }
 
 /// Packs an [EncryptedPayload] as `mac || ciphertext` for tables that store

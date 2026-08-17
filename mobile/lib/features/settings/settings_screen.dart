@@ -35,6 +35,7 @@ import 'package:miles/features/legal/terms_text.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/features/safety/report_service.dart';
 import 'package:miles/features/safety/safety_sheets.dart';
+import 'package:miles/features/settings/security_code_dialog.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -907,6 +908,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               subtitle: const Text(
                   'Require fingerprint / face / PIN to open Miles',
                   style: TextStyle(fontSize: 12, color: MilesColors.taupe),),
+            ),
+            // The couple's safety code (partner_key_pin.dart) — the standing
+            // place to find it, because the key-change sheet tells the OTHER
+            // phone to read theirs from exactly this row.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.pin_outlined, color: MilesColors.gilt),
+              title: const Text('Security code',
+                  style: TextStyle(color: MilesColors.cream50),),
+              subtitle: const Text(
+                  'A code you both compare to verify your encryption',
+                  style: TextStyle(fontSize: 12, color: MilesColors.taupe),),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: () =>
+                  showSecurityCodeDialog(context, partnerId: partner?.id),
             ),
 
             const SizedBox(height: 28),

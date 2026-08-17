@@ -2,9 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
+import 'package:miles/features/closer/partner_key_change_sheet.dart';
 import 'package:miles/features/closer/wish_jar/add_wish_screen.dart';
 import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 
@@ -23,6 +25,11 @@ class WishJarScreen extends ConsumerStatefulWidget {
 class _WishJarScreenState extends ConsumerState<WishJarScreen> {
   bool _loading = true;
   String? _error;
+
+  /// The pin mismatch that blocked the last load — held because the review
+  /// sheet needs the NEW key it carries, both to render the safety code and
+  /// to repin once the couple has compared it.
+  PartnerKeyChangedException? _keyChange;
   List<WishEntry> _mine = const [];
   List<String> _sharedTags = const [];
 
@@ -50,6 +57,7 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _keyChange = null;
     });
 
     try {
@@ -96,6 +104,16 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
         _sharedTags = shared;
         _loading = false;
       });
+    } on PartnerKeyChangedException catch (e) {
+      if (!mounted) return;
+      // By TYPE, ahead of the generic catch: its toString carries no
+      // sentence, so _friendly rendered a generic apology whose "Try again"
+      // meets the same refusal forever. This state has its own resolution —
+      // the review sheet — and gets its own screen.
+      setState(() {
+        _loading = false;
+        _keyChange = e;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -103,6 +121,21 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
         _error = _friendly(e);
       });
     }
+  }
+
+  Future<void> _reviewKeyChange() async {
+    final me = ref.read(sessionProvider).profile;
+    final change = _keyChange;
+    if (me == null || change == null) return;
+    final repinned = await PartnerKeyChangeSheet.show(
+      context,
+      myUid: me.id,
+      exception: change,
+    );
+    // Re-run the whole load rather than flipping state locally: the retry
+    // has to derive under the freshly pinned key, and _load is the only
+    // path that does.
+    if (repinned && mounted) await _load();
   }
 
   /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
@@ -185,7 +218,10 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFFEF6F58),
         foregroundColor: const Color(0xFF0B0F16),
-        onPressed: _loading ? null : _openAdd,
+        // Also off while the key change is unreviewed: AddWishScreen runs the
+        // same pin check, so the add could only end in the same refusal —
+        // "nothing sends until this is resolved" includes the + button.
+        onPressed: _loading || _keyChange != null ? null : _openAdd,
         child: const Icon(Icons.add),
       ),
     );
@@ -227,6 +263,15 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+    if (_keyChange != null) {
+      return _CenterMessage(
+        icon: Icons.gpp_maybe_outlined,
+        text: "Your partner's security key changed. Nothing here will "
+            'unlock until you review the change.',
+        actionLabel: 'Review',
+        onAction: _reviewKeyChange,
+      );
     }
     if (_error != null) {
       return _CenterMessage(

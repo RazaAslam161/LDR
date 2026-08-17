@@ -24,6 +24,7 @@ void main() {
 
   RewrapRequest req(String pub, Uint8List hash) => RewrapRequest(
         id: '11111111-2222-3333-4444-555555555555',
+        fromUser: '66666666-7777-8888-9999-000000000000',
         newPublicKeyB64: pub,
         codeHash: hash,
         expiresAt: DateTime.now().add(const Duration(minutes: 10)),

@@ -8,6 +8,7 @@ import 'package:cryptography/cryptography.dart'
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/data/partner_rewrap.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/server_clock.dart';
@@ -355,9 +356,30 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
         return;
       }
       // The couple key is derived, not stored, and this is the one thing being
-      // handed over. Their new key is not published yet, so this still derives
-      // the OLD key — which is exactly the one their history needs.
-      await ensureSharedKey(ref.read(sessionProvider));
+      // handed over. Their new key is normally unpublished here, so this
+      // derives the OLD key — which is exactly the one their history needs.
+      //
+      // "Normally" has one exception: a partner who DEFERRED the ceremony and
+      // opened chat or Closer first has already published the NEW key, so the
+      // fetch inside ensureSharedKey meets a changed key and the pin refuses.
+      // The digits that passed one line above are Argon2id-committed to
+      // exactly req's key — a stronger authentication than the pin — so a
+      // mismatch naming that same key is repinned and retried, and only a
+      // THIRD key is a real alarm worth the generic failure below.
+      final session = ref.read(sessionProvider);
+      try {
+        await ensureSharedKey(session);
+      } on PartnerKeyChangedException catch (e) {
+        if (e.newKeyB64 != req.newPublicKeyB64) rethrow;
+        final me = session.profile;
+        if (me == null) rethrow;
+        await PartnerKeyPin.repin(
+          myUid: me.id,
+          partnerId: e.partnerId,
+          partnerPubB64: e.newKeyB64,
+        );
+        await ensureSharedKey(session);
+      }
       final dropped =
           await PartnerRewrap.answer(req, readableConfirmed: _readableConfirmed);
       if (!mounted) return;

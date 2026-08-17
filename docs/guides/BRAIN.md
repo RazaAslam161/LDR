@@ -5257,3 +5257,322 @@ cipher session lands its suites). Nothing here depends on installed clients.
 **Exact next step:** unchanged owner trio; then the deferred sessions (crypto
 hardening: TOFU pin + zero-MAC gating; data export; ledger re-baseline). The
 §41 audit's my-side ledger is now CLOSED through low severity.
+
+### §51 addendum — a concurrent crypto_core change removes the plaintext sentinel (2026-08-18)
+
+While §51 was being written another session began editing
+`mobile/lib/core/data/crypto_core.dart` (uncommitted, +31/−59 vs HEAD). It
+removes `_plaintextAgreed`, `_isLegacy` and the zero-MAC read acceptance, and
+its own comments give the reason: a zero-MAC row is a **forgery primitive** —
+anything with database write access could mint one and every device would render
+it as authentic. That is a correct and valuable fix.
+
+**It changes two things in §51's guidance:**
+- The "guard the write against the plaintext-v1 sentinel" item becomes belt-and-
+  braces rather than load-bearing: once `encryptBytes` can no longer emit a
+  zero-nonce payload, `body_cipher` cannot receive cleartext that way. Keep the
+  guard anyway — it is three lines and it is the difference between "cannot
+  happen" and "cannot happen today".
+- `CryptoCore.legacyPublicKey`/`plaintext-v1` stops being a mode chat has to
+  tolerate. Prod already has 0 couples on it, and that session's comment records
+  that the 2026-08-16 wipe left zero plaintext-shaped rows in any E2EE table.
+
+**It also reds the full suite right now, and that red is NOT from this work:**
+`flutter test` = 4 failures, all downstream of that uncommitted edit —
+crypto_core_test "a legacy plaintext row still decrypts after the upgrade",
+crypto_core_test "a legacy binary row still decrypts", encrypted_media_test
+"decryptBytesOffThread a legacy zero-nonce blob opens with NO key at all" (all
+three now throw `Bad state: encrypted row but no couple key`), plus
+repo_hygiene_test "zero dead code". Those three tests assert the behaviour that
+session is deliberately deleting and belong to it to update. Nothing in this
+work touches crypto_core.dart, closer_crypto.dart or the media path.
+
+Verified green for this work specifically: the new
+`test/unit/chat/message_cipher_codec_test.dart` → 8/8, and
+`schema_drift_test + test/unit/chat/ + test/unit/vault/` → 189/189, which is the
+whole surface the migration and the snapshot edit can reach. The codec test was
+written to assert byte layout rather than to call `decryptBytes` on a zero-nonce
+blob, so it stays green across that session's change.
+
+### §52 — TOFU key-pin UI: change sheet, blocking states, Settings code, pin tests (2026-08-18)
+
+**DONE (working tree, uncommitted):**
+- `mobile/lib/features/closer/partner_key_change_sheet.dart` (NEW):
+  `PartnerKeyChangeSheet.show(context, myUid, exception)` → safety code from
+  `PartnerKeyPin.safetyCode(my key, exception.newKeyB64)`, two exits only —
+  "The codes match" repins THEN pops true; "Not now"/system back → false,
+  locked. Barrier does not dismiss.
+- `closer_screen.dart`: `on PartnerKeyChangedException` caught by TYPE ahead
+  of the string probes (its toString matched none of them, so a mismatch fell
+  into the raw-error state with an unwinnable retry). New `_KeyState.keyChanged`
+  → `_PartnerKeyChanged` blocking state with a Review button; pop(true) re-runs
+  `_prepareKey()` so the retry derives under the new pin.
+- `wish_jar_screen.dart`: same typed catch → blocking `_CenterMessage` with
+  Review; FAB also disabled while unreviewed (AddWishScreen runs the same pin
+  check and could only meet the same refusal).
+- `settings_screen.dart`: Security section row "Security code" (anchored after
+  the app-lock switch) → `security_code_dialog.dart` (NEW): current couple
+  code from published partner key + own key; no-partner / legacy-sentinel /
+  offline each get a plain sentence, no throw, fetch failure debugPrinted.
+- `test/unit/core/partner_key_pin_test.dart` (NEW, setMockInitialValues
+  harness): firstUse→match; mismatch does NOT move the pin (original still
+  matches); repin moves it (old key becomes the mismatch); safetyCode
+  symmetric + key-sensitive + `\d{5} \d{5} \d{5} \d{5}`.
+
+**NOT touched:** the pin core (partner_key_pin.dart, partner_rewrap.dart,
+closer_crypto.dart, wish_jar_repository.dart), vault_screen, reach/fcm,
+build.gradle.kts, schema_snapshot — those belong to other sessions.
+
+**Gates:** NOT run by this session (parent workflow runs analyze/test after
+merge of the concurrent sessions). Note §51 addendum: the suite is already red
+from the crypto_core session's deliberate deletions — do not attribute those
+4 failures here.
+
+**Open:** add_wish/memory_threads/propose_memory reach the mismatch only
+mid-session (entry gates now block first); they render partnerKeyMessage's
+generic sentence, not the sheet. Wire them only if a real path surfaces.
+
+## §52 — Step 0 done: the couple key now exists outside Closer (2026-08-18)
+
+Continues §51. §51 stopped because encrypting chat would have thrown for every
+couple without a derived key, and by default that is every couple. This is the
+prerequisite that removes that wall. It is a CLIENT change: it ships with the
+next build and changes nothing for phones already in the field.
+
+**The defect, restated in one line:** the couple key was only ever created where
+Closer had already prepared it, and Closer skips key prep whenever
+`couples.modest_mode` is on — which is the column default.
+
+**Three changes, all additive, no signatures touched.**
+1. `mobile/lib/core/data/couple_key.dart` (new) — `CoupleKey.ensure(session)`.
+   The quiet counterpart to closer_crypto's `ensureSharedKey`, which throws by
+   design so a Closer screen can explain itself. Chat cannot use a thrower:
+   chat sends and renders with no key today and must keep doing so. `ensure`
+   returns a bool and never throws. It short-circuits on
+   `exportSharedKeyBytes() != null`, publishes this device's key at most once
+   per process, refuses the `plaintext-v1` sentinel before calling
+   `deriveSharedKey` (which now THROWS on it — see §51 addendum), and logs any
+   real failure with its type rather than swallowing it.
+2. `supabase_repository.dart` — both sides of pairing now publish:
+   `createPairingInvite` (inviter) and `redeemPairingInvite` (joiner, only
+   AFTER the redeem succeeds — a failed code means no couple, and publishing
+   then would be a write for a pairing that did not happen). Both go through
+   `_publishKeyForPairing`, which catches and logs: a key publish must never be
+   the reason a pairing the user is standing in front of fails. Pairing is the
+   honest moment for this — the first instant two accounts know about each
+   other, and it happens once per couple.
+3. `chat_screen.dart` `_init()` — `unawaited(CoupleKey.ensure(...))`. Not
+   awaited and its answer is not read; it only makes the key PRESENT. This also
+   heals couples that paired BEFORE change 2 existed, because `ensure`
+   publishes as well as derives.
+
+**Why `publishMyPublicKey` at pairing is safe** (this was the thing to get
+wrong): it self-guards. `supabase_repository.dart:461` returns early when
+`CryptoCore.publicationHeld()` — a rewrap in flight means the partner is
+sealing the old couple key to this device's new public key, and republishing
+first would rotate the key they are sealing against so the blob opens nothing.
+That check is inside the function and runs BEFORE the `keyWasReplaced` probe, so
+every new call site inherits it. And re-publishing an unchanged key is a no-op
+upsert with `keyWasReplaced` untouched.
+
+**What this does NOT do.** It does not encrypt anything. `messages.body` is
+still cleartext (94 rows). Step 1 (cipher-aware READ everywhere, write nothing)
+is still the next step, and the §51 ordering stands unchanged — in particular
+the realtime broadcast at chat_screen.dart:155 is still a second plaintext wire,
+and `media_class` is still a STORED generated column that must be settled before
+any cipher row exists.
+
+**Gates.** `flutter analyze` on the three touched files: 7 issues, all `info`,
+0 errors, 0 warnings — and the count is IDENTICAL to before the edit
+(supabase_repository 2→2, chat_screen 5→5), so this added no lint;
+`couple_key.dart` itself reports zero. New test
+`test/unit/core/couple_key_test.dart` → 3/3, covering the contract that actually
+runs on a phone before pairing finishes: no session, no partner, and repeated
+calls all answer false without throwing and without touching the network. The
+paths through SupabaseRepository and the platform keystore are NOT covered —
+same limitation crypto_core_test.dart documents — and that is a stated gap, not
+an implied pass.
+Full suite: **911 passed, 1 failed**, down from the 4 failures recorded in §51.
+The remaining one is `encrypted_media_test.dart: decryptBytesOffThread a legacy
+zero-nonce blob opens with NO key at all`, failing inside
+`crypto_core.dart:787 _decryptPacked` — the other session's deliberate removal
+of the legacy zero-MAC path. Neither that test nor `encrypted_media_cache.dart`
+is modified; `crypto_core.dart` is, and it is theirs. None of this work's files
+appear in any failure, and `repo_hygiene_test: the analyzer reports no errors
+and no warnings` passes.
+
+**Concurrent work worth knowing about:** that session is also adding
+`core/data/partner_key_pin.dart`, `closer/partner_key_change_sheet.dart` and
+`settings/security_code_dialog.dart` — safety-number pinning and key-change
+detection, which closes the `partner-key-directory-unverified-mitm` finding from
+§49. Checked for collision: they did not touch the modest-mode gate and added no
+publish call site, and the only `publishMyPublicKey` callers are now pairing
+(new), `CoupleKey.ensure` (new), rewrap, closer_crypto and the settings toggle.
+
+**Exact next step:** verify on a genuinely FRESH pair of accounts that
+`partner_keys` gains two real rows from pairing alone, with modest mode left ON
+and Closer never opened — that is the whole point of this change and it cannot
+be proven from the existing couple, who already have keys. Then §51 step 1.
+
+## §53 — Step 1 done: every read path can open ciphertext, nothing writes it yet (2026-08-18)
+
+Continues §52. The read half of chat encryption. Client-only; ships with the
+next build; writes are unchanged, so `messages.body` is still cleartext and this
+changes nothing a user can see today. That is the point of doing it first — the
+fleet must be able to READ ciphertext before any client writes it.
+
+**The rule this is built around:** `_parseRows` skips any row whose decode
+throws. That is right for a malformed row and catastrophic for a decryption
+failure — a device whose key is momentarily wrong would silently erase history
+from the screen while the correct plaintext sat in `body` on the same row. So
+decryption is a SEPARATE pass that cannot drop anything, and `Message.fromJson`
+stays synchronous and never decrypts.
+
+**Changes.**
+1. `Message` gains `bodyCipher`, `bodyNonce` (`Uint8List?`) and
+   `bodyUndecryptable` (bool). `fromJson` extracts BYTES ONLY, through a
+   `_maybeBytes` that swallows a malformed column — `byteaToBytes` rejects null
+   and can throw on an unexpected driver shape, and a row is worth more than its
+   ciphertext.
+2. `ChatRepository.hydrate(List<Message>)` — the decryption pass. Returns the
+   input list untouched when nothing carries ciphertext (every row today).
+   Otherwise decrypts each blob with `unpackMacAndCiphertext` + `decryptString`,
+   binding `associatedData` to the ROW ID, matching
+   memory_thread_repository.dart:417. A failure costs the TEXT of one message
+   and nothing else: the row, its order, its media, its receipts all survive.
+   Failures are counted and reported as a `ParseShortfall` with the error CLASS
+   only — a decrypt error's text can carry the value that refused to open.
+3. Wired into all three read paths: `fetch`, `fetchSince`, and the
+   postgres_changes callback. The realtime callback keeps its synchronous
+   fast path when there is no ciphertext, so a live plaintext message is not
+   delayed by a hydration it does not need.
+4. **The broadcast wire now carries ciphertext too.**
+   `ChatBroadcastService.messageFrom` reads optional `cipher`/`nonce` keys as
+   **base64** — this is a JSON wire, NOT bytea, and hex would double every
+   payload. It still reads `body`, permanently. The message is returned
+   un-decrypted and `_onMsgBroadcast` runs it through the SAME
+   `ChatRepository.hydrate`, so there is one decryption implementation and not
+   two. This wire is the faster of the pair and the one the partner actually
+   renders from first, so it had to learn this at the same time as the column.
+5. `reconcileWith` no longer lets the server blank text we already have:
+   `body: server.body ?? body`. Once writes go cipher-only the echo of our OWN
+   send arrives with a null body, and this would otherwise blank the sender's
+   bubble on their own phone about a second after they sent it. It also clears
+   `bodyUndecryptable` whenever local text survives, so a bubble can never claim
+   to be unreadable while showing its own text.
+6. An undecryptable message renders "Can't open this message on this device"
+   rather than an empty bubble — an empty bubble is indistinguishable from a
+   deleted message and from a bug.
+
+**Gates.** Repo-wide `flutter test`: **920 passed, 0 failed** — fully green,
+which also means the other session finished the legacy-path test updates noted
+in §51/§52. New `test/unit/chat/message_hydrate_test.dart` → 8/8, run with NO
+couple key derived (the real cold-start state), pinning: the no-cipher fast path
+returns the identical list; a failed decrypt loses no message and reorders none;
+plaintext beside unopenable ciphertext still renders and is NOT flagged; cipher
+with no plaintext IS flagged; a junk bytea value cannot throw out of `fromJson`;
+the server echo cannot blank local text; the broadcast parses base64 and
+tolerates garbage. `flutter analyze` on the three touched files: 14 issues, all
+`info`, **0 errors, 0 warnings — exactly the 14 they had before the change**, so
+this added no lint (one `unnecessary_import` was introduced and removed).
+
+**Still true, unchanged by this step:** `messages.body` is plaintext, 94 rows.
+Nothing encrypts. The §51 ordering stands.
+
+**NEW BLOCKER for step 2, found while doing this.** The other session added
+`PartnerKeyPin.check(...)` inside `ensureSharedKey` (closer_crypto.dart) — a
+substituted partner key now stops there and raises the key-change sheet. But
+`CoupleKey.ensure` (§52, the chat path's derive) does NOT call it, so chat would
+derive against an UNPINNED key. Encrypting chat on top of that would ship a
+feature whose key exchange is weaker than Closer's, and it is the exact MITM
+finding §49 raised. Not fixed here on purpose: `partner_key_pin.dart` is that
+session's uncommitted, in-flight file and coupling to it now would fight them
+for it. **Step 2 must not begin until `CoupleKey.ensure` runs the same pin
+check.**
+
+**Exact next step:** the fresh-account verification still owed from §52 (pair
+two brand-new accounts, modest mode left ON, Closer never opened, confirm
+`partner_keys` gains two real rows), then wire `PartnerKeyPin.check` into
+`CoupleKey.ensure` once that file settles, and only then step 2 (dual-write the
+column and the broadcast together, with the all-zero-nonce write guard).
+
+## §55 — Crypto hardening: plaintext mode removed, partner keys pinned (2026-08-18)
+
+(Numbering note: two earlier sessions both minted §52/§53 — the sections above
+at lines ~5124/5160 are the terms/a11y session's, the ones at ~5335/5417 are
+the chat-cipher session's. This entry continues from the highest.)
+
+**The two §41 security mediums this session existed for, both closed:**
+
+**1. Plaintext mode REMOVED from crypto_core (the zero-MAC forgery door).**
+Evidence first, then the cut:
+- Every derive caller refuses the legacyPublicKey sentinel before calling
+  (closer_crypto, wish_jar, couple_key, rewrap claim) — plaintext-agreed was
+  unreachable in every shipped build ≥40.
+- Live prod scan 2026-08-18: EVERY E2EE table is empty — fantasy_jar_entries,
+  vault_items, memory_threads, memory_photos, afterglow_entries,
+  body_map_pins, personal_vault_items all 0 rows, 0 zero-nonce rows. (Proxy
+  for storage objects too: packFull blobs are only reachable via paths on
+  those empty tables. key_escrow uses its own AEAD, never this path.
+  messages.body_cipher is the cipher session's, unwritten.)
+- Cut: deriveSharedKey's sentinel branch THROWS; _plaintextAgreed deleted;
+  encryptBytes' zero-MAC write branch deleted (null key always refuses);
+  BOTH read acceptances deleted (decryptBytes + the isolate packed path).
+  A zero-MAC row now fails like any tampered row. Skeptic-forced test: a
+  zero-MAC blob WITH a real key present dies on Poly1305
+  (encrypted_media_test, keyOverride) — the no-key variants alone never
+  reached the MAC. Seven stale doc sites rewritten with the code.
+
+**2. TOFU partner-key pinning (the server-substitution MITM).**
+- New core/data/partner_key_pin.dart: pin = sha256(key) in secure storage
+  scoped myUid:partnerId; check() pins on first sight, refuses on change
+  (PartnerKeyChangedException); repin only via human paths; safetyCode = 20
+  digits (66.4 bits, symmetric via sorted concat — skeptic verified the
+  arithmetic) both phones can compare aloud.
+- ALL FOUR derive doors guarded (skeptic B-CRIT-1 found the fourth: the
+  cipher session's couple_key.dart chat door — pinned with an additive edit
+  in their file, quiet-false per chat's never-throw contract, flagged here
+  for their session).
+- Ceremony integration, skeptic-corrected twice: the answering phone
+  writes an EXPECTATION (not a repin — B-HIGH-3: the partner publishes only
+  at claim, so a repin said NEW while the directory served OLD and alarmed
+  on the legitimate key); check() consumes it exactly once for exactly that
+  key. The answering screen catches a pin refusal naming the ceremony's own
+  key and repins — the just-passed digits are Argon2id-committed to that
+  exact key and outrank TOFU (B-HIGH-2: it used to dead-end the recovery
+  behind "That didn't go through"). claim() CHECKS instead of repinning
+  (B-MED-4: the AEAD open is computed against the directory value being
+  judged — circular vs the pin's own adversary; first-sight pins, an
+  existing mismatched pin throws).
+- UI (agent-built): PartnerKeyChangeSheet (safety code + 'The codes match'
+  repin / 'Not now' locked, no third exit, TOCTOU-clean — confirm X never
+  authorizes Y); closer_screen + wish_jar_screen typed keyChanged states;
+  Settings > Security code dialog (computed from the PUBLISHED key
+  deliberately — substitution shows as two phones reading different codes);
+  memory_failure + add_wish render the refusal honestly with a pointer to
+  Closer (B-MED-5 — memory-thread pushes reach those screens directly).
+- Tests: pin semantics, expectation consume-once/never-blesses-a-third-key,
+  safety code format/symmetry, all green (55 across the four crypto suites).
+
+**Residual, stated honestly:** TOFU concedes first sight (a server lying from
+the very first fetch is undetectable — the safety code exists for exactly
+that doubt); pins are per-device (a reinstall forgets and re-trusts first
+sight — escrow/ceremony repopulate); ring-vs-null-key media path shape
+pre-existing, commented, unchanged.
+
+**found, not fixed:** rewrap answering phone deriving from a PRE-published
+new key hands over the post-rotation chain state (pre-existing subtlety,
+noted in the rewrap comment, needs its own look); closer_crypto.dart:38-50
+indentation (pre-existing); memory_failure's KeyNotYetShared copy says
+"she's" (pre-existing gendered copy, owner's voice call).
+
+**Gates:** analyze 0 errors/warnings; full flutter test — see session report
+(the suite raced the cipher session's mid-save file twice; every red
+re-verified green in isolation, final full run pasted in the report).
+Client-only change: no server dependency, ships with the next build; old
+clients keep old behavior against a database that holds no plaintext rows.
+
+**Exact next step:** the cipher session should confirm the pin check I added
+in their couple_key.dart survives their write-flip work; owner trio
+unchanged; the deferred sessions remaining are data export and the
+migration-ledger re-baseline.

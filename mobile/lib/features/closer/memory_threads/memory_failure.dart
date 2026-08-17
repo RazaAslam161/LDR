@@ -1,4 +1,5 @@
 import 'package:cryptography/cryptography.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -38,8 +39,14 @@ sealed class MemoryFailure implements Exception {
   }
 
   static MemoryFailure _shared(Object error) {
-    // crypto_core.dart:378 and :446 — an encrypted value with no derived
-    // couple key. Nothing on this device is wrong and nothing here can fix it.
+    // The pin refused a changed partner key. BY TYPE and FIRST: its toString
+    // carries no sentence, so it used to fall through to the generic apology
+    // with a retry that can never succeed — over the one refusal here that
+    // has its own resolution, one screen away.
+    if (error is PartnerKeyChangedException) return const PartnerKeyChanged();
+    // An encrypted value with no derived couple key (the no-key StateErrors
+    // in crypto_core's encrypt/decrypt paths). Nothing on this device is
+    // wrong and nothing here can fix it.
     if (error is StateError) return const KeyNotYetShared();
     if (error is MediaFailure) return MemoryMediaFailure(error);
     return const MemoryUnavailable();
@@ -58,6 +65,17 @@ class KeyNotYetShared extends MemoryFailure {
   @override
   String get message => 'Waiting for your partner. This opens by itself once '
       "she's opened Closer on her phone.";
+}
+
+/// The pin refused a changed partner key. Deliberately not resolvable from
+/// here: the review sheet lives on the Closer entry, which is one tap away
+/// and is the one place the couple compares the safety code.
+class PartnerKeyChanged extends MemoryFailure {
+  const PartnerKeyChanged();
+
+  @override
+  String get message => "Your partner's security key changed. Open Closer to "
+      'review it before anything is written or read.';
 }
 
 /// Encrypted under a key that exists nowhere any more.
@@ -111,6 +129,10 @@ class MemoryUnavailable extends MemoryFailure {
 /// `PostgrestException` from the key-publish round trip — printed themselves,
 /// SQLSTATE and hint included, at the user. Matched on here, never returned.
 String partnerKeyMessage(Object error) {
+  // By type, ahead of the string probes: its toString carries no sentence.
+  if (error is PartnerKeyChangedException) {
+    return const PartnerKeyChanged().message;
+  }
   final raw = error is PostgrestException ? error.message : error.toString();
   if (raw.contains("hasn't enabled Closer")) {
     return const KeyNotYetShared().message;

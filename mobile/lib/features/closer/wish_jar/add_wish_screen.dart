@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/wish_jar/wish_jar_repository.dart';
 
@@ -79,6 +80,12 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
   /// Closer's crypto guards throw `Exception('<sentence the user can act on>')`
   /// (wish_jar_repository.dart, closer_crypto.dart:24,32,46).
   String _friendly(Object e) {
+    // By type: the pin's refusal has its own resolution one screen away, and
+    // its toString carries no sentence — it fell into "Something went wrong"
+    // with a Save-retry that can never succeed.
+    if (e is PartnerKeyChangedException) {
+      return "Your partner's security key changed. Open Closer to review it.";
+    }
     final s = e.toString();
     return s.startsWith('Exception: ')
         ? s.substring('Exception: '.length)
