@@ -1,7 +1,6 @@
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/core/diag/diag.dart';
-import 'package:miles/core/diag/diag_event.dart';
 import 'package:video_player/video_player.dart';
 
 /// A playing video, and nothing around it.
@@ -41,7 +40,7 @@ class _VideoSurfaceState extends State<VideoSurface>
     final vp = VideoPlayerController.networkUrl(Uri.parse(widget.url));
     try {
       await vp.initialize();
-    } catch (e) {
+    } catch (e, st) {
       // Logged, not swallowed. This catch used to be `catch (_)`, which threw
       // away the only evidence of why a video would not play — and the sender
       // never sees the failure, because their own bubble renders from a file
@@ -53,11 +52,15 @@ class _VideoSurfaceState extends State<VideoSurface>
       // and a phone that recorded one can always play it while an older
       // handset cannot), an object the signed URL cannot reach, and a network
       // that died mid-initialize. Only the first is permanent.
+      //
+      // ErrorReporter, not Diag.record: Diag has been compile-time off in
+      // every shipped build since 10, so the video_init_failed events the
+      // fleet was supposed to explain itself with could never reach
+      // client_errors. The reporter sends the error class and typed code only
+      // — never the exception text, which for a network video can carry the
+      // signed URL.
       _error = e;
-      Diag.record(DiagArea.media, 'video_init_failed', fields: {
-        'error': e.runtimeType.toString(),
-        'detail': e.toString(),
-      });
+      ErrorReporter.report(e, st, kind: 'video-init');
       await vp.dispose();
       if (mounted) setState(() => _failed = true);
       return;

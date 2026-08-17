@@ -76,21 +76,27 @@ class TouchMapRepository {
   }
 
   /// Uploads the user's body photo to the private couple_intimate bucket and
-  /// stores its path on presence. Returns the storage path.
+  /// stores its path on presence. Returns the storage path, or null when
+  /// signed out.
+  ///
+  /// A failed upload THROWS. This used to fold every failure into the same
+  /// null the signed-out path returns, and the screen read null as "nothing to
+  /// do" — the spinner stopped, the silhouette stayed, and whether the tap did
+  /// anything was anyone's guess. The screen owns saying so; it can only say
+  /// what it is told.
   static Future<String?> uploadBodyPhoto(String coupleId, File file) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return null;
+    // A throw, not a null: null reads as "nothing to do" at the call site and
+    // the spinner would stop over a photo that silently went nowhere — the
+    // same success-shaped loss the chat sends had.
+    if (uid == null) throw StateError('not signed in');
     final path = '$coupleId/body/${uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-    try {
-      await _c.storage.from('couple_intimate').upload(
-            path,
-            file,
-            fileOptions: const FileOptions(upsert: true),
-          );
-      return path;
-    } catch (_) {
-      return null;
-    }
+    await _c.storage.from('couple_intimate').upload(
+          path,
+          file,
+          fileOptions: const FileOptions(upsert: true),
+        );
+    return path;
   }
 
   /// Clears a body photo — yours OR your partner's — via the couple-scoped

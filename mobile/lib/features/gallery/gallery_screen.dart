@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/net_image.dart';
@@ -23,6 +25,13 @@ import 'package:miles/features/safety/safety_sheets.dart';
 class GalleryScreen extends ConsumerStatefulWidget {
   const GalleryScreen({super.key});
 
+  /// Sign-out hook. The failed-upload record is static so a cover raise
+  /// cannot erase it — which also makes it survive a SIGN-OUT, and a failed
+  /// tile renders the previous account's actual photograph from disk to
+  /// whoever signs in next. _endSession() calls this beside the other
+  /// process-scoped clears (MediaUrls, ChatSendQueue, the caches).
+  static void clearFailedUploads() => _GalleryScreenState._failed.clear();
+
   @override
   ConsumerState<GalleryScreen> createState() => _GalleryScreenState();
 }
@@ -30,6 +39,19 @@ class GalleryScreen extends ConsumerStatefulWidget {
 class _GalleryScreenState extends ConsumerState<GalleryScreen> {
   Stream<List<GalleryItem>>? _stream;
   int _uploading = 0;
+
+  /// Picked files whose upload failed, kept as retryable tiles at the top of
+  /// the grid instead of evaporating with a snackbar's four seconds.
+  ///
+  /// STATIC on purpose: backgrounding raises the cover, which destroys this
+  /// State while the loop may still be running, and an instance list would
+  /// take the only record of what failed down with it. Each entry carries the
+  /// couple it was picked for, so a retry after an account switch posts to the
+  /// original couple or fails RLS — never the wrong gallery. Process death
+  /// still loses everything here: these are in-memory paths into the picker's
+  /// cache, and surviving that would take a persisted queue, which this is
+  /// deliberately not.
+  static final List<_PendingUpload> _failed = [];
 
   /// Ids picked in selection mode. Empty set = not selecting; a long-press
   /// starts it, which is what a phone's own gallery does, so nobody has to be
@@ -74,27 +96,72 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     }
     if (picked.isEmpty) return;
 
-    setState(() => _uploading = picked.length);
-    for (final item in picked) {
-      try {
-        await GalleryRepository.upload(
+    await _upload([
+      for (final item in picked)
+        _PendingUpload(
           coupleId: coupleId,
           uploadedBy: me,
           file: item.file,
+          isVideo: item.isVideo,
+        ),
+    ]);
+  }
+
+  /// Uploads [batch] one at a time, keeping whatever fails in [_failed].
+  ///
+  /// The old loop showed "One picture didn't upload." per failure — naming no
+  /// picture and offering no way to send it — and dropped the file on the
+  /// floor. Now a failure stays visible as a tile until it uploads or the
+  /// process dies, and the snackbar says how many and offers Retry.
+  Future<void> _upload(List<_PendingUpload> batch) async {
+    if (mounted) setState(() => _uploading += batch.length);
+    var failed = 0;
+    for (final item in batch) {
+      try {
+        await GalleryRepository.upload(
+          coupleId: item.coupleId,
+          uploadedBy: item.uploadedBy,
+          file: item.file,
           mimeType: item.isVideo ? 'video/mp4' : 'image/jpeg',
         );
-      } catch (_) {
-        // Never the exception. One failed picture out of thirty must not read
-        // as a backend error message.
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("One picture didn't upload.")),
-          );
-        }
+      } catch (e, st) {
+        // Never the exception text to the user — one failed picture out of
+        // thirty must not read as a backend error message. Reported though,
+        // because a fleet whose uploads fail quietly looks exactly like a
+        // fleet whose users stopped adding pictures.
+        ErrorReporter.report(e, st, kind: 'gallery');
+        failed++;
+        _failed.add(item);
       } finally {
         if (mounted) setState(() => _uploading--);
       }
     }
+    if (failed > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(failed == batch.length
+              ? 'Nothing uploaded — check your connection.'
+              : "$failed of ${batch.length} didn't upload.",),
+          action: SnackBarAction(label: 'Retry', onPressed: _retryAll),
+        ),
+      );
+    }
+  }
+
+  /// The snackbar's Retry: every failed item, one batch. No setState — the
+  /// first thing [_upload] does is one, and this can be tapped from a snackbar
+  /// that outlived the screen.
+  void _retryAll() {
+    final again = List.of(_failed);
+    if (again.isEmpty) return;
+    _failed.clear();
+    unawaited(_upload(again));
+  }
+
+  /// A failed tile's tap: just that one.
+  void _retryOne(_PendingUpload item) {
+    if (!_failed.remove(item)) return; // a second tap raced the first
+    unawaited(_upload([item]));
   }
 
   /// Asks about the selection, and says plainly when some of it could not be
@@ -187,7 +254,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
               return const Center(child: CircularProgressIndicator());
             }
             final items = snap.data!;
-            if (items.isEmpty) {
+            if (items.isEmpty && _failed.isEmpty) {
               return const _Message(
                 'Nothing here yet.\nAdd the first one.',
               );
@@ -222,16 +289,30 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                     // Square cells, fixed by the delegate — so a tile occupies
                     // its final shape from the first frame and nothing below it
                     // moves when a picture arrives. BoxFit.cover does the rest.
-                    itemCount: items.length,
-                    itemBuilder: (context, i) => _Tile(
-                      item: items[i],
-                      selected: _selected.contains(items[i].id),
-                      selecting: _selecting,
-                      onTap: () => _selecting
-                          ? _toggle(items[i].id)
-                          : _open(items, i),
-                      onLongPress: () => _toggle(items[i].id),
-                    ),
+                    //
+                    // Failed uploads lead the grid: they are the newest thing
+                    // the user did, and the top is where their picture would
+                    // have appeared if it had gone through.
+                    itemCount: _failed.length + items.length,
+                    itemBuilder: (context, i) {
+                      if (i < _failed.length) {
+                        final f = _failed[i];
+                        return _FailedTile(
+                          item: f,
+                          onRetry: () => _retryOne(f),
+                        );
+                      }
+                      final at = i - _failed.length;
+                      return _Tile(
+                        item: items[at],
+                        selected: _selected.contains(items[at].id),
+                        selecting: _selecting,
+                        onTap: () => _selecting
+                            ? _toggle(items[at].id)
+                            : _open(items, at),
+                        onLongPress: () => _toggle(items[at].id),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -344,6 +425,74 @@ class _ConsentBand extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One picked file that never reached the bucket. It carries everything a
+/// retry needs, because by the time Retry is tapped the session may not be
+/// the one it was picked under.
+class _PendingUpload {
+  _PendingUpload({
+    required this.coupleId,
+    required this.uploadedBy,
+    required this.file,
+    required this.isVideo,
+  });
+
+  final String coupleId;
+  final String uploadedBy;
+  final File file;
+  final bool isVideo;
+}
+
+/// A picked file that didn't upload, held in the grid where the picture would
+/// have appeared. Tapping retries that one file. Local by nature — the partner
+/// never sees these.
+class _FailedTile extends StatelessWidget {
+  const _FailedTile({required this.item, required this.onRetry});
+
+  final _PendingUpload item;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onRetry,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (item.isVideo)
+            // No cheap local video thumbnail without a decoder session; the
+            // label below carries the state.
+            const ColoredBox(color: MilesColors.surface2)
+          else
+            Image.file(
+              item.file,
+              fit: BoxFit.cover,
+              // Bounded like the thumbnail pipeline's decode width — this is a
+              // full-resolution original painting into a 3-across cell.
+              cacheWidth: 400,
+              errorBuilder: (_, __, ___) =>
+                  const ColoredBox(color: MilesColors.surface2),
+            ),
+          // scrim over the photograph, so the failed state reads on any picture
+          const ColoredBox(color: Color(0x99000000)),
+          const Center(
+            child: Icon(Icons.refresh, color: Color(0xFFFBF8F4), size: 24),
+          ),
+          const Positioned(
+            left: 4,
+            right: 4,
+            bottom: 6,
+            child: Text(
+              "Didn't upload — tap to retry",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xCCFBF8F4), fontSize: 9),
+            ),
           ),
         ],
       ),

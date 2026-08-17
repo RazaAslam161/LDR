@@ -18,6 +18,7 @@ import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -347,6 +348,10 @@ class SessionNotifier extends StateNotifier<SessionState> {
     MediaUrls.clear();
     MapToken.clear();
     ChatSendQueue.instance.clear();
+    // The gallery's failed-upload tiles render the picked file straight from
+    // disk — the previous account's photograph, shown to the next account,
+    // if this is skipped.
+    GalleryScreen.clearFailedUploads();
     // The unsent draft goes with them. It is a message body — the most personal
     // thing in the app — and it now survives a screen change on purpose, which
     // means without this it would survive a SIGN-OUT too and wait in the field

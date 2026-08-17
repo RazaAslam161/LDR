@@ -12,6 +12,7 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -759,23 +760,47 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     if (id == null) return;
     final file = await PhotoPickerService.pickFromSheet(context);
     if (file == null) return;
-    setState(() => _uploadingPhoto = true);
-    final path = await TouchMapRepository.uploadBodyPhoto(id, file);
-    if (path != null) {
-      await PresenceService.setBodyPhoto(id, path);
-      final url = await TouchMapRepository.signedBodyUrl(path);
-      if (mounted) {
-        setState(() {
-          _myPhotoUrl = url;
-          _myBodyPath = path;
-          if (_myUid != null) {
-            _frames.remove(_myUid); // fresh photo, fresh frame
-          }
-        });
+    await _uploadMyPhoto(id, file);
+  }
+
+  /// Separate from the picking so the snackbar's Retry re-sends the file
+  /// already chosen instead of marching the user back through the sheet.
+  Future<void> _uploadMyPhoto(String id, File file) async {
+    if (mounted) setState(() => _uploadingPhoto = true);
+    try {
+      final path = await TouchMapRepository.uploadBodyPhoto(id, file);
+      if (path != null) {
+        await PresenceService.setBodyPhoto(id, path);
+        final url = await TouchMapRepository.signedBodyUrl(path);
+        if (mounted) {
+          setState(() {
+            _myPhotoUrl = url;
+            _myBodyPath = path;
+            if (_myUid != null) {
+              _frames.remove(_myUid); // fresh photo, fresh frame
+            }
+          });
+        }
+        // Tell the partner to reload my photo live.
+        unawaited(_channel?.channel
+            ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid}),);
       }
-      // Tell the partner to reload my photo live.
-      unawaited(_channel?.channel
-          ?.sendBroadcastMessage(event: 'photo', payload: {'from': _myUid}),);
+    } catch (e, st) {
+      // The repository used to fold every failure into null and this method
+      // showed nothing for it — the spinner just stopped. Reported so the
+      // fleet's failures are visible; said so this user's is.
+      ErrorReporter.report(e, st, kind: 'touch');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("That photo didn't upload."),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => _uploadMyPhoto(id, file),
+            ),
+          ),
+        );
+      }
     }
     if (mounted) setState(() => _uploadingPhoto = false);
   }
