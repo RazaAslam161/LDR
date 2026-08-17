@@ -5576,3 +5576,327 @@ clients keep old behavior against a database that holds no plaintext rows.
 in their couple_key.dart survives their write-flip work; owner trio
 unchanged; the deferred sessions remaining are data export and the
 migration-ledger re-baseline.
+
+## §57 — Step 2 done: chat dual-writes ciphertext on both wires (2026-08-18)
+
+Continues §53 (chat step 1). Client-only. `messages.body` is STILL written in plaintext and
+that is the point of this step: the row now carries ciphertext beside it, so
+step 3 is a removal rather than a rewrite. No secrecy is gained yet.
+
+**The blocker from §53 was cleared first.** `CoupleKey.ensure` now runs
+`PartnerKeyPin.check` and refuses to derive on a mismatch, so the chat path no
+longer derives against an unpinned key while Closer refuses one.
+
+**What writes now.**
+- `ChatRepository.sealBody(text, rowId)` — returns a record or null and CANNOT
+  throw. Null is ordinary: no key, mid key-exchange, rewrap held, pin mismatch.
+  `sendText` has never been able to fail for a crypto reason and must not start,
+  because ChatSendQueue parks a throwing send as failed with no auto-retry and
+  never persists text bodies, so a process kill would lose the message outright.
+- `sendText` mints the row id when the caller omits it (cycle_screen x2,
+  location_map_screen once) — the ciphertext binds to the row id, so the id must
+  exist before the encrypt. Those three paths gain 23505 dedupe as a side
+  effect.
+- The insert dual-writes `body` + `body_cipher` + `body_nonce`, both cipher keys
+  under ONE `sealed != null` guard so the pair CHECK can never fire.
+- `ChatRepository.bodyAd(rowId)` is the single associated-data function both
+  halves call. Written once because a divergence would not fail loudly: it makes
+  every message after it permanently unreadable, on a fleet with no update
+  channel to fix the reader.
+- The realtime broadcast carries base64 `cipher`/`nonce` alongside plaintext
+  `body`. base64, NOT bytea hex — it is a JSON wire and hex would double every
+  payload. Its own encrypt and therefore its own nonce; two encryptions of one
+  plaintext under one key with different nonces is correct.
+
+**Red team: 4 agents, 11 findings, judge kept 6.** Ship verdict was NO — the
+change cannot lose a message, fail a send, or produce an unreadable bubble in
+any state a field build handled fine. Verified clean and NOT reported: the pair
+CHECK is unreachable; `bytesToBytea`'s write direction is proven in prod by the
+live `key_escrow` row (seed 48 / salt 16 / nonce 24) since memory_threads and
+vault_items are both empty; media_class still classifies because body is still
+written; old clients ignore the two new columns (fromJson reads named keys only,
+and the realtime publication already carries them); the nonce is
+`Random.secure` per encrypt; `server.body ?? body` cannot resurrect deleted text
+because delete-for-everyone only sets a flag.
+
+**Five of the six were fixed in this session, not deferred.**
+1. **The key was never actually waited for.** `CoupleKey.ensure` had ONE call
+   site — chat_screen, unawaited — so whether a message got sealed depended on
+   the user's navigation history, and the three non-chat callers never sealed at
+   all. Fixed at the root: `session_provider` now calls `CoupleKey.prime(state)`
+   the moment a partner is known, `CoupleKey` memoises that single in-flight
+   derive, and `sealBody` and `hydrate` both `await CoupleKey.ready()`. One
+   derive per process, every caller inherits it.
+2. **Cold-start reads failed against a null key.** Same fix — `hydrate` waits.
+   This mattered because `withDecrypted` drops the ciphertext once resolved, so
+   nothing retries a row that failed.
+3. **`_maybeBytes` swallowed a failed bytea decode silently** — a straight
+   violation of the repo's no-unlogged-catch rule, and the blind spot that
+   mattered most: a dropped cipher column is indistinguishable downstream from
+   an old plaintext row, so BOTH rollout counters would report a ready fleet
+   while ciphertext was being discarded. Now counted in
+   `Message.cipherDecodeFailures` and folded into hydrate's ParseShortfall.
+4. **Cipher-without-nonce was passed through unflagged.** Now counted and
+   flagged like any other decrypt failure.
+5. **`previewText` had no undecryptable case**, so a reply chip read 'Message'
+   while the bubble it quoted said it could not be opened. Now agrees.
+6. **`debugPrint` on every unsealed send was unguarded in release** — logcat is
+   readable over adb and this app does not write things down. Now `kDebugMode`
+   only; the release signal is the `sealed` boolean already in the diag.
+
+**Left open, deliberately:** the broadcast payload roughly doubles (base64
+cipher + plaintext body) against Supabase Free's 256 KB broadcast cap, and the
+composer has no length limit. Blast radius is one lost fast path — the message
+still arrives over the DB insert — so it is a step-3 item, together with a
+composer cap.
+
+**Rollout telemetry.** `msg_insert_result` now carries `sealed: bool`. That is
+the number step 3 is gated on and the only way to know the fleet is ready
+without reading anyone's messages — a boolean, never the text, never the
+ciphertext.
+
+**Gates.** `flutter test` **955 passed, 0 failed**. `flutter analyze` **532
+info, 0 errors, 0 warnings**. Touched-file lint parity held at every step (one
+`unnecessary_import` and one `comment_references` were introduced and removed).
+New `test/unit/chat/message_seal_test.dart` 4/4 and `message_hydrate_test.dart`
+now 10/10. Mid-session the suite briefly could not compile because another
+session's untracked `data_export_service.dart:758` used `BytesBuilder` without
+`dart:typed_data`; that was theirs, it resolved on retry, and nothing here
+touched it.
+
+**COVERAGE GAP, stated not implied:** nothing tests sealBody and hydrate against
+each other under a REAL derived key. A unit test has no platform keystore
+(crypto_core_test.dart documents the same limit) and `sealBody` takes no
+keyOverride, so only the failure path and the byte layout are covered. The AEAD
+leg — seal with the real key, open with the real key, and the negative twin
+where the AD is a different row id — is unproven and is the FIRST thing to watch
+on a two-handset run.
+
+**Exact next step:** the two-handset check — send a text with both phones paired
+and confirm `select count(*) from messages where body_cipher is not null` is
+non-zero and that the partner renders it, then confirm a row sealed under id A
+does not open under id B. Only after that: step 3 (drop the plaintext write),
+which still needs the media_class replacement decided, the Play floor held, the
+composer capped, and documents left plaintext.
+
+## §58 — Step 3 is BUILT but NOT THROWN, and cannot be thrown yet (2026-08-18)
+
+Continues §57. Step 3 is "stop writing messages.body in the clear". The switch,
+the client logic and the proof are all in place; the flip itself is blocked on a
+release, not on code, and throwing it today would blank messages on every phone
+in the field.
+
+**Precondition audit against production, not assumption:**
+- `messages` is now EMPTY — 0 rows (it held 94-97 earlier today; the test data
+  was cleared by someone else). So there is no legacy plaintext history left to
+  protect, though the CLIENT constraint is unchanged.
+- **0 rows have ever had body_cipher set.** The seal path has never once
+  produced a real row anywhere.
+- `app_release`: min_build 42, min_build_play 0, **latest_build 45**. The
+  working tree is `ReleaseGate.buildNumber = 46`, uncommitted and never built.
+  **Every phone in the field runs <= 45 and reads only `body`.** Cipher-only
+  writes would render as blank bubbles on all of them, permanently, with no
+  update channel. That is arithmetic, not judgement.
+
+**THE GAP FROM §57 IS CLOSED.** `message_cipher_codec_test.dart` now proves the
+whole chain under a real key: encrypt -> packMacAndCiphertext -> bytesToBytea ->
+`Message.fromJson`'s own decoder -> unpackMacAndCiphertext -> open, with the
+associated data bound through `ChatRepository.bodyAd` at BOTH ends, plus the
+negative twin where a blob sealed for row A refuses to open as row B. 10/10.
+Substitution stated in the test: the AEAD leg uses
+encrypt/decryptBytesOffThread with an explicit keyOverride, because the shipped
+path reads `_sharedKey` and a unit test has no keystore. Same cipher, same AD,
+same layout — only the key's provenance differs.
+
+**The flip, built as a server switch.**
+- `20260818110500_chat_cipher_only_switch.sql` adds
+  `app_release.chat_cipher_only boolean not null default false`. Applied to
+  staging and prod; verified present, NOT NULL, defaulting false.
+  It is a switch and not a release because the instant one client writes
+  cipher-only every un-updated client draws a blank bubble, and `ReleaseGate`
+  FAILS OPEN so no build number proves they are gone. One row to throw, one row
+  to undo.
+- `ReleaseGate.chatCipherOnly` reads it, and only from the PRIMARY select. The
+  existing fallback select (added for the min_build_play rollout) omits the
+  column, so a rolled-back or fresh environment degrades to false. Parsed with
+  `row['chat_cipher_only'] == true`, so absent and null both read false.
+- `ChatRepository.omitPlaintext({cipherOnly, sealed})` is the whole of step 3,
+  named and tested: the plaintext is omitted only when the server says the fleet
+  is ready AND this body actually sealed. **The flag alone is never enough.** If
+  sealBody answered null — no key, rewrap held, pin mismatch — dropping the
+  plaintext too would write a message with no readable text anywhere, for
+  anyone, including its author. That is worse than a row the server can read, so
+  the client refuses it whatever the flag says.
+
+**media_class: decided, and NO migration needed.** The blocker was overstated in
+§51. The generated expression reads `kind` for its 'media' and 'file' arms and
+only the 'link' arm touches `body`, so cipher-only costs the LINK shelf and
+nothing else. Links inside a conversation still render — chat_screen runs
+LinkScan over the DECRYPTED text. Preserving the server-side shelf would mean
+the client telling the server "this message contains a URL" on every send: a
+per-message metadata leak to the exact party this app exists to keep out.
+The shelf loses. Prod has 0 rows with media_class='link' and never has had one.
+No ALTER TABLE, no rewrite, and the decision is cheap precisely because it was
+made before any cipher row existed.
+
+**Also done:** the composer is capped at 20,000 characters via
+`LengthLimitingTextInputFormatter` (not `maxLength`, which would paint a counter
+under a chat). Encryption put base64 ciphertext on the broadcast BESIDE the
+plaintext, so a message now costs ~2.3x its length against Supabase Free's
+256 KB broadcast cap; past it the broadcast is rejected with no retry and no
+user-visible signal.
+
+**Multi-session:** another session created
+`20260818110000_content_reports_fk_index.sql` at the same timestamp as my
+switch. `migrations_hygiene_test: ordering keys are unique` CAUGHT it — the
+duplicate-timestamp hazard from §49 now has a gate. I renamed MINE to
+...110500 and left theirs alone.
+
+**Gates.** `flutter test` **962 passed, 0 failed**. `flutter analyze` **532
+info, 0 errors, 0 warnings**. New tests: the round trip and its negative twin
+(codec 10/10), and the flip rule (`message_seal_test` now covers off/unsealed/
+both, plus `ReleaseGate.applyRow` for absent, null and true).
+
+**WHAT REMAINS BEFORE THE FLIP CAN BE THROWN — in order, none of them code:**
+1. Commit and BUILD 46, publish it, and install it. Nothing below is possible
+   until a field build can read ciphertext.
+2. Watch `msg_insert_result.sealed` across the fleet. A low rate means clients
+   are writing plaintext-only rows and flipping would make those unreadable.
+3. Raise `min_build` for SIDELOAD only and let those clients self-update.
+4. `update public.app_release set chat_cipher_only = true;` — sideload is now
+   cipher-only. Watch for blank bubbles; `set ... = false` undoes it instantly.
+5. `min_build_play` LAST and separately. It is 0, the Play build has no
+   self-updater, and raising it locks Play users out of a disguised couples app
+   until Google's staged rollout reaches them.
+6. Documents (`kind='file'`, where body IS the filename) stay plaintext through
+   all of this. Encrypting them is its own change to sendFile, file_bubble,
+   previewText and the optimistic bubble, in one commit.
+7. ONLY when the flip is live and holding: move the copy that currently says
+   chat is not encrypted — safety_sheets.dart:132, the comment in
+   20260816120000:142-147, and privacy-policy §2 — in a single commit. Moving it
+   earlier would make the app claim more than it does.
+
+**VERIFICATION FLAW WORTH INHERITING, corrected here.** Several gate reports in
+sections 57 and earlier said "0 errors, 0 warnings" on the strength of
+`flutter analyze | grep -E '^\s+(error|warning) -'`. That pattern CANNOT match a
+warning: `flutter analyze` prints `info` lines with three leading spaces and
+`warning` lines with NONE, so the filter silently dropped every warning it was
+written to catch. Errors were matched correctly (two leading spaces), so the
+error counts stand; the warning counts in those entries were unverified rather
+than verified. Use `grep -E '^\s*(error|warning) -'` — zero-or-more, not
+one-or-more. Re-checked with the correct pattern, every file committed here is
+genuinely 0 errors and 0 warnings.
+
+**Exact next step:** the two-handset check on a real build — pair both phones,
+send a text, confirm `select count(*) from messages where body_cipher is not
+null` is non-zero and that the partner renders it. That is step 2's proof and
+step 3's precondition, and it cannot be done from a session.
+
+## §56 — Data export shipped: the history can finally leave through the front door (2026-08-18)
+
+(Moved to the file's end 2026-08-18: it had been inserted ABOVE §57, breaking
+append-only order. Text below also updated by the same skeptic pass — the
+paragraph at the bottom names what changed.)
+
+**What (the §41 finding closed):** the app held a couple's entire history and
+offered only destroy buttons; E2EE means only the owner's device can ever
+build an export. New Settings > Account > "Export your data" → screen →
+user-picked SAF folder, decrypted copies, foreground-only v1. Every run
+writes into its own container folder at the picked root —
+`export-<yyyy-MM-dd-HHmm>/`, no app name — with a raw `.nomedia` inside so
+the OS media scanner does not index the decrypted files.
+
+**Native (MainActivity.kt, additive):** new 'miles/export' MethodChannel —
+pickFolder (ACTION_OPEN_DOCUMENT_TREE + takePersistableUriPermission, classic
+onActivityResult under request code 4207 because registerForActivityResult
+must precede STARTED and the channel wires in configureFlutterEngine; only
+consumed while a pick is actually pending, so a plugin whose hashed request
+code lands on 4207 still reaches its own handler), createFile
+(DocumentsContract, creates subdirectories, provider dedupes names so
+re-runs never overwrite; answers {id, name} where name is the display name
+the provider ACTUALLY created — collision suffixes and added extensions
+included — so Dart's manifests point at files that exist), writeChunk
+(~512KB ByteArray appends), closeFile. All I/O on a single-thread executor
+(map confinement + ordering); results answered on the platform thread;
+error codes carry exception class names only, never messages (a message can
+embed the picked folder URI); onDestroy closes leaked streams.
+
+**Dart (new core/services/data_export_service.dart):** modules are
+independent steps — profile.json (+ container README.txt + .nomedia, written
+FIRST and the only fatal failures: a folder refusing 40 lines refuses
+everything), chat (uid guarded — signed-out surfaces as a 'NotSignedIn'
+failure row, never a transcript mis-attributed to the partner; full
+transcript via fetchSince seq-pagination + hydrate; delete-for-me stays
+deleted; media downloaded BEFORE the transcript so pointers carry the
+provider's actual names; summary counts MESSAGES plus media files, so an
+empty transcript reads as 0, not "1 exported"), gallery (paginated
+GalleryRepository.fetchPage on a created_at cursor, walked to exhaustion —
+the grid's 500 cap is not the export's), memories (closer ensureSharedKey,
+fetchThreads cursor pagination with overlap-page unreadable counts no longer
+double-counted; happenedOn exported via toLocal() so east-of-UTC dates stop
+landing one day early; repository decrypt helpers + the exact
+`_pnote`/`_place` ADs, photos via EncryptedMediaCache + fullAdFor, legacy
+inline photo via decryptPhoto), wish_jar (fetchMyEntries ONLY — partner's
+unmatched entries stay hidden by design), vault (screen-verified PIN, vault
+key via exportVaultKeyBytes keyOverride, legacy intimate rows re-signed,
+dead bookmarks named 'ExpiredLink'). Every path is built through
+relativePath(), so each segment is sanitized in production, not just in the
+test ('.nomedia' alone bypasses it, deliberately and commented). Per-module
+summary: exported count + failures (item + reason class); one ErrorReporter
+report per run, kind 'export', counts only, `force: true` — a failing run
+has usually burnt the 5-per-process cap on the same outage before its own
+summary row is built (ErrorReporter.report gained the optional force
+parameter; dedup still applies).
+
+**Screen (new features/settings/export_screen.dart, route
+/app/settings/export):** unencrypted-copy warning (now names the concrete
+harm: the phone's gallery app and any cloud backup covering the folder can
+pick the files up), module checkboxes (vault toggle demands the vault PIN
+via the gate's own verifyPin verdicts), AppLock gate before the folder pick,
+progress + "Stop after this file", honest final summary (with a note when
+anything failed that a part-written file may sit in the folder truncated).
+The screen holds a wakelock for the run — WakelockPlus.toggle, the call
+screen's idiom — released in _start's finally AND dispose, and the copy says
+the screen is kept awake. Leaving the screen cancels (dispose sets the poll
+flag) — stated in the UI copy.
+
+**Tests (test/unit/export/data_export_test.dart):** behavioral for the pure
+parts (transcript shaping incl. sender names/ISO-UTC/deleted/undecryptable/
+provider-name override, SAF name sanitisation incl. '..' and ':' —
+tail-preserving cap, run-folder naming, summary arithmetic); source-scan for
+what a unit test cannot run (channel name + every invoked method exists in
+MainActivity, persistable grant, wish-jar own-entries-only, vault
+keyOverride, counts-only + forced reporting, message-count arithmetic,
+gallery pagination, raw .nomedia, route + settings row, cancel-on-dispose).
+The dead 'fetchPartnerEntries' pin (a symbol that exists nowhere) was
+removed; the fetchPartnerTagHashes pin stays.
+
+**Honest limits:** foreground-only — process death loses the run's progress
+(files already written stay; a re-run writes a NEW dated container beside
+the old, so runs never collide); within one run a name collision still gets
+a provider suffix, and the manifests record it; partial files from a
+mid-download failure stay in the folder and are listed as failures; the two
+decrypt paths (owned vault files, memory photos) hold the whole file in
+memory briefly — EncryptedMediaCache's shape, same as the in-app viewer —
+only downloads are chunk-streamed.
+
+**Skeptic pass (2026-08-18), all fixed in place:** happenedOn one-day-early
+east of UTC (H1); gallery silent 500-cap truncation → paginated fetchPage
+(H2); chat uid guard + message counting (H3); provider's actual names in
+manifests (M4); per-run container folder (M4b); ErrorReporter force (M5);
+relativePath routed at every call site (M6); memories overlap-page
+unreadable double-count (M7); wakelock + partial-file copy (M8); Kotlin
+error payloads to class names (L9); .nomedia + concrete warning copy (L10);
+memory-honest comments (L11); request-code 4207 only consumed when pending
+(L12); this entry moved to append order (L13); wish_jar debugPrint to
+runtimeType (L14); dead test pin removed, tests extended (L15).
+
+**Gates NOT run here** (parent session runs analyze/test — this entry
+precedes that verdict). Shared files touched: MainActivity.kt (additive
+blocks only), router.dart (one route), settings_screen.dart (one Account
+row above Change email), gallery_repository.dart (additive fetchPage),
+diag.dart (optional force param), wish_jar_repository.dart (one debugPrint).
+Chat feature files untouched; called read-only.
+
+**Exact next step:** run `flutter analyze` + `flutter test` from /e/LDR/mobile;
+if green, the remaining deferred session is the migration-ledger re-baseline.

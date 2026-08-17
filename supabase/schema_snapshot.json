@@ -326,6 +326,8 @@
     "messages": [
       "album_id",
       "body",
+      "body_cipher",
+      "body_nonce",
       "couple_id",
       "created_at",
       "deleted_at",

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -10,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/couple_key.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
@@ -152,13 +154,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         sendStatus: SendStatus.sending,
       ), source: 'local_send',);
     }
-    unawaited(_moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
-      'id': id,
-      'sender': myUid,
-      'body': body,
-      'createdAt': now.toUtc().toIso8601String(),
-      'replyToId': replyId,
-    },),);
+    // The broadcast is the FASTER of the two wires and the one the partner
+    // renders from first, so it seals alongside the column rather than after
+    // it — encrypting only the row would still put every message across
+    // Supabase Realtime in the clear. Sealed against the same row id, so the
+    // associated data matches whichever copy the partner opens.
+    //
+    // Its own encrypt, and therefore its own nonce: two encryptions of one
+    // plaintext under one key with DIFFERENT nonces is exactly correct, and
+    // threading the blob through the send queue to save a few microseconds
+    // would couple three layers together for nothing.
+    //
+    // 'body' stays in the payload during dual-write. Every build in the field
+    // reads only that key, and this send has to keep rendering on their phones.
+    unawaited(() async {
+      final sealed = await ChatRepository.sealBody(body.trim(), id);
+      await _moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
+        'id': id,
+        'sender': myUid,
+        'body': body,
+        if (sealed != null) 'cipher': base64Encode(sealed.blob),
+        if (sealed != null) 'nonce': base64Encode(sealed.nonce),
+        'createdAt': now.toUtc().toIso8601String(),
+        'replyToId': replyId,
+      },);
+    }(),);
     ChatSendQueue.instance
         .enqueueText(coupleId, body, replyToId: replyId, id: id);
   }
@@ -167,7 +187,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// then deduped when the slower postgres echo arrives (same id).
   void _onMsgBroadcast(Map<String, dynamic> payload) {
     final m = ChatBroadcastService.messageFrom(payload);
-    if (m != null) _onIncoming(m, source: 'broadcast');
+    if (m == null) return;
+    // Plaintext (every sender in the field today) goes straight through on this
+    // turn — the whole value of the broadcast path is that it beats the
+    // database echo, and an await here would hand that lead back.
+    if (m.bodyCipher == null) {
+      _onIncoming(m, source: 'broadcast');
+      return;
+    }
+    unawaited(ChatRepository.hydrate([m]).then((r) {
+      if (mounted) _onIncoming(r.first, source: 'broadcast');
+    }),);
   }
 
   void _sendGifBurst(String url) {
@@ -727,6 +757,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
     _coupleId = couple.id;
+    // Derive the couple key here, where nothing has ever derived it. It is not
+    // awaited and its answer is not read: chat works without a key today and
+    // must keep working without one on every build already in the field. This
+    // only makes the key PRESENT for the encryption that follows, and heals a
+    // couple that paired before pairing published keys.
+    // prime, not ensure: session_provider already started this when the partner
+    // became known, and this joins that future instead of running a second
+    // publish + fetch + derive. Still unawaited — the send and read paths await
+    // it themselves, so nothing here needs to hold up the first frame.
+    unawaited(CoupleKey.prime(ref.read(sessionProvider)));
     // Opening the chat IS reading it. Both halves together, or the shade keeps
     // an entry the owner has already dealt with and the next message counts up
     // from a number nothing on screen agrees with.
@@ -2438,6 +2478,21 @@ class _Content extends StatelessWidget {
       case 'file':
         return FileBubble(message: m);
       default:
+        // Ciphertext this device cannot open. An empty bubble here is
+        // indistinguishable from a message that was deleted, or from a bug, so
+        // it says so instead — and says the one thing that actually resolves
+        // it, which is that the other device holds the key.
+        if (m.bodyUndecryptable) {
+          return Text(
+            "Can't open this message on this device",
+            style: TextStyle(
+              color: textColor.withValues(alpha: 0.7),
+              fontSize: 15,
+              height: 1.35,
+              fontStyle: FontStyle.italic,
+            ),
+          );
+        }
         final body = m.body ?? '';
         final spans = LinkScan.spans(body);
         final style = TextStyle(

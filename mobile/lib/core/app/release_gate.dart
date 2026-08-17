@@ -76,6 +76,21 @@ class ReleaseGate {
   static String? apkSha256;
   static String? latestVersionName;
 
+  /// Whether this fleet has been declared ready to stop writing chat message
+  /// bodies in the clear.
+  ///
+  /// Server-side because it cannot be a release: the instant one client writes
+  /// cipher-only, every client that has not updated draws a blank bubble, and
+  /// [check] fails open so no build number proves they are gone. The operator
+  /// flips one row when the `sealed` telemetry says the fleet can read
+  /// ciphertext, and flips it back in one statement if it cannot.
+  ///
+  /// Defaults FALSE and stays false on ANY failure — an unreachable gate, a
+  /// project that has auto-paused, a column that does not exist yet on a fresh
+  /// environment. Every one of those must mean "keep writing plaintext", never
+  /// "stop", because the failure mode of guessing wrong is unreadable messages.
+  static bool chatCipherOnly = false;
+
   /// Which channel this install is — 'sideload' or 'play', as the Android
   /// side's BuildConfig reports it. The two fleets need separate floors:
   /// raising min_build tells sideload clients to install the published APK
@@ -132,7 +147,7 @@ class ReleaseGate {
           .from('app_release')
           .select(
             'min_build, min_build_play, latest_build, message, '
-            'apk_url, apk_sha256, latest_version_name',
+            'apk_url, apk_sha256, latest_version_name, chat_cipher_only',
           )
           .limit(1)
           .maybeSingle();
@@ -188,6 +203,11 @@ class ReleaseGate {
     apkUrl = row['apk_url'] as String?;
     apkSha256 = row['apk_sha256'] as String?;
     latestVersionName = row['latest_version_name'] as String?;
+    // `== true`, not a cast: the fallback select above omits this column
+    // entirely, so on a rolled-back or fresh environment the key is absent and
+    // this must read false. Anything other than an explicit true keeps chat
+    // writing plaintext, which is the safe direction.
+    chatCipherOnly = row['chat_cipher_only'] == true;
     if (_blocked != wasBlocked || latestBuild != wasLatest) {
       revision.value++;
     }

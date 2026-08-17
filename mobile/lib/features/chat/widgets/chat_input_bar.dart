@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -513,6 +514,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           controller: _text,
                           minLines: 1,
                           maxLines: 5,
+                          // A ceiling, not a counter: maxLength would paint a
+                          // "0/20000" under the composer, which is noise on a
+                          // chat. This only stops a paste nobody types.
+                          //
+                          // Encrypting the body put base64 ciphertext on the
+                          // realtime broadcast BESIDE the plaintext, so a
+                          // message now costs roughly 2.3x its length on that
+                          // wire against Supabase Free's 256 KB broadcast cap.
+                          // Past it the broadcast is rejected with no retry and
+                          // no user-visible signal, and the message arrives a
+                          // beat later over the database instead. 20k
+                          // characters is far above anything a person writes
+                          // and far below the cap either way.
+                          inputFormatters: [
+                            LengthLimitingTextInputFormatter(20000),
+                          ],
                           onChanged: widget.onChanged,
                           // Phone's built-in emoji work automatically; this lets
                           // the keyboard's GIF/sticker picker (Gboard) insert

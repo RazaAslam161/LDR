@@ -562,10 +562,34 @@ class SupabaseRepository {
       params: {'p_ttl_minutes': ttlMinutes},
     );
     final m = _singleRow(res);
+    await _publishKeyForPairing('invite');
     return (
       code: JsonUtils.parseString(m['code']),
       expiresAt: JsonUtils.parseDate(m['expires_at']).toLocal(),
     );
+  }
+
+  /// Publish this device's public key as part of pairing, for both sides.
+  ///
+  /// Until now the ONLY things that published were Closer's entry point, the
+  /// rewrap ceremony, and the settings toggle — and Closer skips key prep
+  /// entirely while `couples.modest_mode` is on, which is the DEFAULT. A couple
+  /// that never opened Closer therefore had no key published, so nothing
+  /// outside Closer could ever encrypt for them. Pairing is the honest moment:
+  /// it is the first instant two accounts are known to each other, and it
+  /// happens exactly once per couple.
+  ///
+  /// Best effort on purpose. publishMyPublicKey refuses while a rewrap is held
+  /// and can fail on a bad connection, and neither is a reason to fail the
+  /// pairing the user is standing in front of — the key is re-published from
+  /// the chat path (CoupleKey.ensure) on the next open.
+  static Future<void> _publishKeyForPairing(String stage) async {
+    try {
+      await publishMyPublicKey();
+    } catch (e) {
+      debugPrint('[key] pairing($stage): publish failed, will retry on '
+          'chat open: ${e.runtimeType} $e');
+    }
   }
 
   /// Redeems an invite code and joins the inviter's couple (validated server
@@ -576,6 +600,10 @@ class SupabaseRepository {
         'redeem_pairing_invite',
         params: {'p_code': code},
       );
+      // Only after the redeem succeeded: a failed code means no couple, and
+      // publishing then would be a write on behalf of a pairing that did not
+      // happen.
+      await _publishKeyForPairing('redeem');
     } on PostgrestException catch (e) {
       final m = e.message;
       if (m.contains('invalid_code')) {

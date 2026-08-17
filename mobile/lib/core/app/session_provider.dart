@@ -5,6 +5,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/data/couple_key.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
@@ -214,6 +215,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // change it without a new session — and a stale value would either drop
       // this couple's pushes or admit the previous one's.
       unawaited(SessionScope.setCouple(couple?.id));
+
+      // The couple key starts deriving the moment a partner is known, not when
+      // some screen happens to need it. Every encrypted write outside Closer
+      // used to depend on the user's navigation history: a note sent from the
+      // cycle screen or an ETA from the map went out unsealed unless the chat
+      // tab had been opened earlier in the same process. Unawaited — nothing
+      // here waits on it, and the derive parks itself in CoupleKey for whoever
+      // asks next.
+      if (partner != null) unawaited(CoupleKey.prime(state));
 
       if (couple == null) {
         // No couple (just left, or never paired): clear any stale presence

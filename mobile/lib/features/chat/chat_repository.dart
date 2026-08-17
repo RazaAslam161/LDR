@@ -1,14 +1,21 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/app/release_gate.dart';
+import 'package:miles/core/data/couple_key.dart';
+import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/media/thumbnails.dart';
 import 'package:miles/core/utils/json_utils.dart';
+import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 
 /// Flip to true to log realtime channel-join status to the console (for the
@@ -48,12 +55,22 @@ class Message {
     this.seq = 0,
     this.albumId,
     this.hasThumb = false,
+    this.bodyCipher,
+    this.bodyNonce,
+    this.bodyUndecryptable = false,
   });
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
         id: JsonUtils.parseString(j['id']),
         senderId: JsonUtils.parseString(j['sender_id']),
         body: JsonUtils.parseStringOrNull(j['body']),
+        // Bytes only. Decryption is async and MUST NOT happen here: _parseRows
+        // drops any row whose decode throws, so a decrypt failure inside this
+        // factory would delete messages from the screen whose correct plaintext
+        // is sitting in `body` on the very same row. Hydration is a separate
+        // pass that cannot drop anything — see [ChatRepository.hydrate].
+        bodyCipher: _maybeBytes(j['body_cipher']),
+        bodyNonce: _maybeBytes(j['body_nonce']),
         imagePath: JsonUtils.parseStringOrNull(j['image_path']),
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
         voiceDurationMs: j['voice_duration_ms'] == null
@@ -73,6 +90,48 @@ class Message {
         albumId: JsonUtils.parseStringOrNull(j['album_id']),
         hasThumb: JsonUtils.parseBool(j['has_thumb']),
       );
+
+  /// `mac || ciphertext` for [body], and its nonce. Null on every row written
+  /// before chat encryption, and on every row written by a client that has no
+  /// couple key — which the release gate cannot rule out, because it fails
+  /// open. Both stay null today: nothing writes them yet.
+  final Uint8List? bodyCipher;
+  final Uint8List? bodyNonce;
+
+  /// This row carried ciphertext and it could not be opened — a key this device
+  /// does not have, or a corrupt column.
+  ///
+  /// Distinct from `body == null`, and the distinction is the point: an empty
+  /// bubble is indistinguishable from data loss, so the UI renders a stated
+  /// "can't open this" instead of nothing at all.
+  final bool bodyUndecryptable;
+
+  /// Never throws, so a malformed cipher column costs the text and nothing
+  /// else. `byteaToBytes` rejects null outright and can throw on a value the
+  /// driver hands over in an unexpected shape; a row is worth more than its
+  /// ciphertext.
+  static Uint8List? _maybeBytes(dynamic v) {
+    if (v == null) return null;
+    try {
+      return byteaToBytes(v);
+    } catch (e) {
+      // Counted, never silent. A cipher column that fails to decode looks
+      // downstream EXACTLY like a plaintext-only row from an old client:
+      // hydrate skips it, the shortfall counter never sees it, and the write
+      // counter still says `sealed: true`. Both of the numbers step 3 is gated
+      // on would report a clean fleet while ciphertext was being thrown away on
+      // every fetch. The class only — the value can be anyone's message.
+      cipherDecodeFailures++;
+      debugPrint('[chat] body cipher column unreadable: ${e.runtimeType}');
+      return null;
+    }
+  }
+
+  /// Rows whose cipher column could not even be decoded into bytes this run.
+  ///
+  /// Read by [ChatRepository.hydrate] so the failure lands in the same
+  /// ParseShortfall the decrypt failures use, rather than vanishing.
+  static int cipherDecodeFailures = 0;
 
   /// Server-assigned monotonic order. Receipts compare THIS, never a clock:
   /// created_at is stamped by Postgres while the old read watermark was
@@ -106,6 +165,40 @@ class Message {
         sendStatus: sendStatus ?? this.sendStatus,
         albumId: albumId,
         hasThumb: hasThumb,
+        bodyCipher: bodyCipher,
+        bodyNonce: bodyNonce,
+        bodyUndecryptable: bodyUndecryptable,
+      );
+
+  /// The result of hydration: the opened text, or the admission that it could
+  /// not be opened. The ciphertext is dropped once it has been resolved —
+  /// nothing downstream re-decrypts, and holding it would keep the encrypted
+  /// copy alive in memory next to the plaintext for no reason.
+  Message withDecrypted(String? text) => Message(
+        id: id,
+        senderId: senderId,
+        createdAt: createdAt,
+        seq: seq,
+        body: text ?? body,
+        imagePath: imagePath,
+        voicePath: voicePath,
+        voiceDurationMs: voiceDurationMs,
+        videoPath: videoPath,
+        filePath: filePath,
+        fileSize: fileSize,
+        replyToId: replyToId,
+        kind: kind,
+        deletedForEveryone: deletedForEveryone,
+        deletedBy: deletedBy,
+        localPath: localPath,
+        sendStatus: sendStatus,
+        albumId: albumId,
+        hasThumb: hasThumb,
+        // Undecryptable only when there was ciphertext, it did not open, AND no
+        // plaintext survived on the row to show instead. During the dual-write
+        // era `body` is still populated, so a key problem is invisible to the
+        // reader — which is the entire reason dual-write exists.
+        bodyUndecryptable: text == null && bodyCipher != null && body == null,
       );
 
   /// Adopt the authoritative server row (its created_at fixes cross-device
@@ -115,7 +208,12 @@ class Message {
         id: id,
         senderId: server.senderId,
         createdAt: server.createdAt,
-        body: server.body,
+        // The server wins on everything EXCEPT losing text we already have.
+        // The echo of our own send arrives without the plaintext once writes go
+        // cipher-only, and a hydrated echo can still resolve to null on a
+        // device mid-key-exchange — either way this used to blank the sender's
+        // own bubble about a second after they sent it, on their own phone.
+        body: server.body ?? body,
         imagePath: server.imagePath,
         voicePath: server.voicePath,
         voiceDurationMs: server.voiceDurationMs,
@@ -141,6 +239,13 @@ class Message {
         // stale by construction and would keep the tile on the original.
         albumId: server.albumId,
         hasThumb: server.hasThumb,
+        bodyCipher: server.bodyCipher,
+        bodyNonce: server.bodyNonce,
+        // Only if the reconciled row ends up with no text at all. Keeping the
+        // local plaintext above must also clear the "can't open this" state, or
+        // the bubble would claim to be unreadable while showing its own text.
+        bodyUndecryptable:
+            server.bodyUndecryptable && (server.body ?? body) == null,
       );
 
   final String id;
@@ -193,6 +298,11 @@ class Message {
   /// A short preview of a message for quote-replies.
   String previewText() {
     if (deletedForEveryone) return 'deleted message';
+    // Before the kind switch, or the default arm answers the literal 'Message'
+    // for an empty body — so a reply chip would read as an ordinary short
+    // message while the bubble it quotes says it cannot be opened. Two accounts
+    // of one row on one screen, and the quote is the wrong one.
+    if (bodyUndecryptable) return "can't open this";
     switch (kind) {
       case 'image':
         return '📷 Photo';
@@ -310,7 +420,7 @@ class ChatRepository {
         .order('seq', ascending: true)
         .limit(500);
     // Skip a malformed row rather than aborting the whole catch-up.
-    final out = _parseRows(res as List, 'chat catch-up');
+    final out = await hydrate(_parseRows(res as List, 'chat catch-up'));
     await warmMedia(out);
     return out;
   }
@@ -334,7 +444,7 @@ class ChatRepository {
         .order('created_at', ascending: false)
         .limit(300);
     // Skip a malformed row rather than blanking the whole conversation.
-    final out = _parseRows(res as List, 'chat fetch');
+    final out = await hydrate(_parseRows(res as List, 'chat fetch'));
     if (warm) await warmMedia(out);
     return out;
   }
@@ -374,6 +484,162 @@ class ChatRepository {
     return out;
   }
 
+  /// Seal a message body for [rowId], or answer null if it cannot be sealed.
+  ///
+  /// Null is an ORDINARY answer and the caller must carry on with plaintext.
+  /// `encryptString` throws whenever there is no couple key — a partner who has
+  /// not published yet, a device mid key-exchange, a rewrap in flight, a pin
+  /// mismatch — and `sendText` has never been able to fail for a crypto reason.
+  /// It must not start now: ChatSendQueue parks a throwing send as failed and
+  /// never retries it, and text bodies are deliberately not persisted, so a
+  /// process kill would lose the message outright. A message that sends in the
+  /// clear is worth incomparably more than one that does not send.
+  ///
+  /// The associated data is the row id, binding the ciphertext to its row
+  /// exactly as memory_thread_repository.dart:417 does. The id therefore has to
+  /// exist before the encrypt, which is why sendText mints one when the caller
+  /// omits it.
+  /// The associated data both halves of the message cipher must agree on.
+  ///
+  /// One function rather than the row id written out twice, because the two
+  /// uses are 200 lines apart and a divergence would not fail loudly: it makes
+  /// every message written after it permanently undecryptable, on a fleet with
+  /// no update channel to correct the reader.
+  @visibleForTesting
+  static String bodyAd(String rowId) => rowId;
+
+  /// Whether this insert may leave the plaintext out. The whole of step 3.
+  ///
+  /// Named and separate because it is the one rule that decides whether a
+  /// message can end up with no readable text anywhere. BOTH conditions are
+  /// required: the server has declared the fleet ready, AND this body actually
+  /// sealed. A cipher-only row whose cipher never got written is a message
+  /// nobody can read — not the partner, not the sender, not later. That is
+  /// strictly worse than a row the server can read, so the flag alone can never
+  /// cause it.
+  @visibleForTesting
+  static bool omitPlaintext({required bool cipherOnly, required bool sealed}) =>
+      cipherOnly && sealed;
+
+  static Future<({Uint8List blob, Uint8List nonce})?> sealBody(
+    String text,
+    String rowId,
+  ) async {
+    try {
+      // Join the derive that session_provider started when the partner became
+      // known, instead of racing it. Without this, whether a message is sealed
+      // depended on how long the user had been in the app — and the `sealed`
+      // counter below would read low for reasons that have nothing to do with
+      // the fleet's build level, which is the number step 3 is gated on.
+      await CoupleKey.ready();
+      final p =
+          await CryptoCore.encryptString(text, associatedData: bodyAd(rowId));
+      final nonce = base64Decode(p.nonceB64);
+      final blob = packMacAndCiphertext(p);
+      // Refuse the plaintext shape. An all-zero nonce or an all-zero MAC is
+      // CryptoCore's old plaintext-v1 sentinel — base64 of the CLEARTEXT — and
+      // storing that in a column named body_cipher would move cleartext into
+      // the encrypted column and call it encrypted. The layout here is
+      // mac(16)||ciphertext, so the MAC is the FIRST 16 bytes; the vault's
+      // 40-byte guard is written for nonce||mac||ct and would not fire.
+      if (nonce.every((b) => b == 0) ||
+          blob.take(16).every((b) => b == 0)) {
+        debugPrint('[chat] refusing to store an unencrypted body as cipher');
+        return null;
+      }
+      return (blob: blob, nonce: nonce);
+    } catch (e) {
+      // Debug only. The failure is already recorded for release in the
+      // `sealed` field of msg_insert_result — a couple with no key hits this on
+      // EVERY send, and debugPrint is not stripped from a release build, so
+      // leaving it unguarded writes a line to logcat per message on a handset
+      // whose whole premise is that it does not write things down.
+      if (kDebugMode) {
+        debugPrint('[chat] body not sealed, sending plaintext: '
+            '${e.runtimeType}');
+      }
+      return null;
+    }
+  }
+
+  /// Open any ciphertext a page carries, and never lose a message doing it.
+  ///
+  /// Separate from [_parseRows] on purpose. That skips rows whose decode
+  /// throws, which is right for a malformed row and catastrophic for a
+  /// decryption failure: a device whose key is momentarily wrong would silently
+  /// erase history from the screen. Here a failure costs the TEXT of one
+  /// message and nothing else — the row, its timestamp, its media, its receipts
+  /// and its place in the order all survive.
+  ///
+  /// Rows with no ciphertext are returned untouched, which is every row today
+  /// and every row any old client will ever write. That fallback is permanent:
+  /// the release gate fails open, so a client below min_build can always still
+  /// insert plaintext.
+  static Future<List<Message>> hydrate(List<Message> messages) async {
+    if (!messages.any((m) => m.bodyCipher != null)) return messages;
+
+    // The first page of a cold start arrives before the derive finishes, and
+    // withDecrypted drops the ciphertext once it has resolved — so a row that
+    // failed here is not retried by anything. Wait for the key that is already
+    // on its way rather than failing the whole page against a null one.
+    await CoupleKey.ready();
+
+    var failed = 0;
+    Object? firstError;
+    final out = <Message>[];
+    for (final m in messages) {
+      if (m.bodyCipher == null) {
+        out.add(m);
+        continue;
+      }
+      // Cipher without its nonce. The DB CHECK constrains the COLUMNS, not the
+      // decode, so either decoder answering null on its own input produces this
+      // half-formed shape. Passing it through unflagged would leave it counted
+      // as an ordinary plaintext row and render blank once body is dropped.
+      if (m.bodyNonce == null) {
+        failed++;
+        out.add(m.withDecrypted(null));
+        continue;
+      }
+      try {
+        final text = await CryptoCore.decryptString(
+          unpackMacAndCiphertext(blob: m.bodyCipher!, nonce: m.bodyNonce!),
+          // Through the same function the sealer used — see [bodyAd]. The row's
+          // own id, matching how every other encrypted table in this app binds
+          // a blob to its row (memory_thread_repository.dart:417).
+          associatedData: bodyAd(m.id),
+        );
+        out.add(m.withDecrypted(text));
+      } catch (e) {
+        failed++;
+        firstError ??= e;
+        out.add(m.withDecrypted(null));
+      }
+    }
+    // Rows whose cipher never made it as far as a decrypt attempt, because the
+    // column itself would not decode. Folded in here so there is ONE number for
+    // "ciphertext this device could not use", not two with a blind spot between
+    // them.
+    final undecodable = Message.cipherDecodeFailures;
+    Message.cipherDecodeFailures = 0;
+    if (failed > 0 || undecodable > 0) {
+      // Counted and surfaced, never silent — the same contract _parseRows
+      // holds. The error CLASS only: a decrypt failure's message can carry the
+      // value that refused to open, and this is an E2EE app.
+      ErrorReporter.report(
+        ParseShortfall('chat decrypt',
+            parsed: messages.length - failed - undecodable,
+            of: messages.length,
+            first: firstError != null
+                ? '${firstError.runtimeType}'
+                : 'cipher column unreadable',),
+        StackTrace.current,
+        kind: 'chat-decrypt',
+      );
+    }
+    return out;
+  }
+
   /// Sign everything a page of messages will render — one round trip per
   /// bucket, whatever the page holds.
   ///
@@ -398,6 +664,12 @@ class ChatRepository {
     if (uid == null) throw StateError('not signed in');
     final trimmed = body.trim();
     if (trimmed.isEmpty) return;
+    // Minted here when the caller omitted it (cycle_screen twice,
+    // location_map_screen once). The ciphertext is bound to the row id, so the
+    // id must exist BEFORE the encrypt — and sending it explicitly also gives
+    // those three paths the 23505 dedupe that only the queue's sends had.
+    final rowId = id ?? const Uuid().v4();
+    final sealed = await sealBody(trimmed, rowId);
     final sw = Stopwatch()..start();
     try {
       // .select('seq') is here for the trace, not for the send. Acks are
@@ -408,16 +680,39 @@ class ChatRepository {
       // predicate as the insert's check, so a row this call may write is a row
       // it may read back.
       final rows = await _c.from('messages').insert({
-        if (id != null) 'id': id,
+        'id': rowId,
         'couple_id': coupleId,
         'sender_id': uid,
-        'body': trimmed,
+        // The plaintext goes UNLESS the server has declared the fleet ready to
+        // stop AND this particular body actually sealed.
+        //
+        // Both halves matter. The flag alone is not enough: if sealBody
+        // answered null — no couple key, a rewrap in flight, a pin mismatch —
+        // omitting the plaintext too would write a message with no readable
+        // text anywhere, for anyone, including its author. That is strictly
+        // worse than a message the server can read, so the client refuses it
+        // regardless of what the flag says.
+        //
+        // ReleaseGate.chatCipherOnly is false by default and stays false on any
+        // failure to read it, so the safe direction is also the resting state.
+        if (!omitPlaintext(
+          cipherOnly: ReleaseGate.chatCipherOnly,
+          sealed: sealed != null,
+        ))
+          'body': trimmed,
+        if (sealed != null) 'body_cipher': bytesToBytea(sealed.blob),
+        if (sealed != null) 'body_nonce': bytesToBytea(sealed.nonce),
         'kind': 'text',
         if (replyToId != null) 'reply_to_id': replyToId,
       }).select('seq');
-      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: rowId, fields: {
         'kind': 'text',
         'body_len': trimmed.length,
+        // Whether the body actually sealed. The one number that says how far
+        // the rollout has got in the field, and the only way to know the fleet
+        // is ready for step 3 without reading anyone's messages. A boolean —
+        // never the ciphertext, never the plaintext.
+        'sealed': sealed != null,
         'ok': true,
         'server_seq':
             rows.isEmpty ? null : JsonUtils.parseInt(rows.first['seq']),
@@ -425,9 +720,10 @@ class ChatRepository {
       },);
     } catch (e) {
       final landed = _alreadyLanded(e);
-      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: rowId, fields: {
         'kind': 'text',
         'body_len': trimmed.length,
+        'sealed': sealed != null,
         'ok': landed,
         'dedupe': landed,
         'error_class': e.runtimeType.toString(),
@@ -665,7 +961,17 @@ class ChatRepository {
             column: 'couple_id',
             value: coupleId,
           ),
-          callback: (payload) => onInsert(Message.fromJson(payload.newRecord)),
+          callback: (payload) {
+            final m = Message.fromJson(payload.newRecord);
+            // The overwhelmingly common case, and the only one today: no
+            // ciphertext, so deliver on this turn of the loop exactly as
+            // before. Hydration is async and must not delay a live message.
+            if (m.bodyCipher == null) {
+              onInsert(m);
+              return;
+            }
+            unawaited(hydrate([m]).then((r) => onInsert(r.first)));
+          },
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.delete,

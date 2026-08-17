@@ -9,6 +9,7 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/main.dart';
 import 'package:miles/features/vault/vault_repository.dart';
@@ -34,7 +35,19 @@ class _VaultScreenState extends State<VaultScreen> {
   @override
   void initState() {
     super.initState();
+    // A WINDOW flag, so this one call also covers VaultViewer: it is pushed
+    // above this route (line 318) and this State is not disposed while it is
+    // up. Memory Threads and Touch Trace already set it; the vault was the one
+    // intimate surface still landing in screenshots and in the recent-apps
+    // thumbnail, which is the disguise's whole point.
+    SecureScreen.setSecure();
     _load();
+  }
+
+  @override
+  void dispose() {
+    SecureScreen.clearSecure();
+    super.dispose();
   }
 
   Future<void> _load() async {

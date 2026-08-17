@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -58,6 +61,20 @@ class ChatBroadcastService {
 
   /// The receiving half of [imagePayload]. Null when the payload names no
   /// message, which the chat treats as nothing to show.
+  ///
+  /// This is a SECOND wire for the message text, independent of the database
+  /// row, and it is the faster of the two — the partner renders from this
+  /// before the Postgres echo lands. So it has to learn to carry ciphertext at
+  /// the same time the column does, or encrypting the column would still leave
+  /// every message crossing Supabase Realtime in the clear.
+  ///
+  /// `body` is still read, and permanently: this build must keep rendering
+  /// messages from senders that only ever send plaintext, which is every build
+  /// currently in the field.
+  ///
+  /// The returned message is NOT yet decrypted — [Message.bodyCipher] is set
+  /// and the caller runs it through [ChatRepository.hydrate], the same pass the
+  /// database rows use. One decryption implementation, not two.
   static Message? messageFrom(Map<String, dynamic> payload) {
     final id = payload['id']?.toString();
     final sender = payload['sender']?.toString();
@@ -71,8 +88,23 @@ class ChatBroadcastService {
               DateTime.now(),
       kind: kind,
       body: kind == 'text' ? payload['body']?.toString() : null,
+      // base64, NOT the `\x` hex the bytea columns use — this is a JSON wire,
+      // and hex would silently double the payload of every message.
+      bodyCipher: kind == 'text' ? _b64(payload['cipher']) : null,
+      bodyNonce: kind == 'text' ? _b64(payload['nonce']) : null,
       imagePath: kind == 'image' ? payload['imagePath']?.toString() : null,
       replyToId: payload['replyToId']?.toString(),
     );
+  }
+
+  /// A malformed key costs the ciphertext, never the message: the plaintext
+  /// `body` beside it may still be perfectly renderable.
+  static Uint8List? _b64(dynamic v) {
+    if (v == null) return null;
+    try {
+      return base64Decode(v.toString());
+    } catch (_) {
+      return null;
+    }
   }
 }
