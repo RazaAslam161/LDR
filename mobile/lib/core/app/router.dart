@@ -6,6 +6,7 @@ import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/realtime/presence_route_observer.dart';
 import 'package:miles/features/auth/couple_page.dart';
 import 'package:miles/features/auth/new_password_page.dart';
+import 'package:miles/features/auth/offline_screen.dart';
 import 'package:miles/features/auth/rewrap_screen.dart';
 import 'package:miles/features/auth/role_setup_screen.dart';
 import 'package:miles/features/auth/sign_in_page.dart';
@@ -101,6 +102,18 @@ GoRouter buildRouter(Ref ref) {
         return path == '/terms' ? null : '/terms';
       }
 
+      // ── Signed in, but the last profile load FAILED. ──
+      // Above the funnel, because the funnel reads a null profile as a
+      // brand-new account. For a paired user cold-starting offline that
+      // reading is destructive, not just wrong: the welcome form they landed
+      // on upserts a blank name, timezone and date of birth over their real
+      // ones the moment connectivity returns. A failed fetch waits on a screen
+      // that says so and retries; only a server that ANSWERED "no row" may
+      // send anyone to onboarding.
+      if (session.profileLoadFailed) {
+        return path == '/offline' ? null : '/offline';
+      }
+
       // ── Signed in: walk the onboarding funnel profile → couple → app. ──
       // This now runs on EVERY route (including /app), so a half-onboarded
       // user can never slip straight into the app and get stuck.
@@ -143,6 +156,7 @@ GoRouter buildRouter(Ref ref) {
           path == '/couple' ||
           path == '/role-setup' ||
           path == '/terms' ||
+          path == '/offline' ||
           path == '/') {
         return '/app';
       }
@@ -179,6 +193,13 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/terms',
         builder: (context, state) => const TermsScreen(),
+      ),
+      // Where a failed profile load waits — see the redirect above. In the
+      // funnel's sweep list, so the moment a retry answers, the session state
+      // moves the user on without this screen doing any navigating of its own.
+      GoRoute(
+        path: '/offline',
+        builder: (context, state) => const OfflineScreen(),
       ),
       // Deliberately outside the funnel's sweep-to-/app list: a phone that
       // reached here has no key, and bouncing it into the app is how that

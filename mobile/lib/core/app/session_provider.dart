@@ -47,6 +47,16 @@ class SessionState {
   bool get hasProfile => profile != null;
   bool get isLinked => couple != null;
 
+  /// The last [SessionNotifier.loadProfile] THREW rather than answering.
+  ///
+  /// A fetch that failed and a fetch that found no row both leave [profile]
+  /// null, and the router used to read the two identically — so a paired user
+  /// cold-starting in airplane mode waited out the timeout and was handed the
+  /// blank new-user form, whose submit upserts over their real name, timezone
+  /// and date of birth the moment connectivity returns. Failure has to be its
+  /// own state: the router holds it on /offline until the server answers.
+  bool get profileLoadFailed => profile == null && error != null;
+
   /// Deliberately without `session`.
   ///
   /// It used to take one, as `session: session ?? this.session` — which meant
@@ -167,6 +177,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
       final profile = await SupabaseRepository.fetchMyProfile()
           .timeout(const Duration(seconds: 10));
       if (profile == null) {
+        // A reachable server answered "no row": a genuinely new account.
+        // copyWith drops any previous error, so this lands as a definite
+        // answer and is never mistaken for a failed fetch (profileLoadFailed).
         state = state.copyWith(loading: false);
         return;
       }
@@ -259,8 +272,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
         await PresenceService.setOnline(coupleId, online: true);
       } catch (_) {}
     } catch (e) {
-      // TimeoutException or network error — stop loading and let the
-      // router redirect to sign-in so the user is never stuck forever.
+      // TimeoutException, a dead radio, or the server refusing: the fetch
+      // FAILED, which is not the same as fetching a null row. The error is
+      // what makes the difference visible (profileLoadFailed) — without it
+      // this state looked identical to a brand-new account, and the router
+      // sent paired users offline to the blank onboarding form.
+      debugPrint('[session] loadProfile failed: $e');
       state = state.copyWith(loading: false, error: e.toString());
     }
   }

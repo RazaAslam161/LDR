@@ -330,6 +330,9 @@ String? screenNameForPath(String path) {
     '/couple',
     '/role-setup',
     '/app/rapid-camera', // a capture action, not somewhere you linger
+    // A failed profile load, not a room — publishing it would tell the
+    // partner "Offline" as if it were a place being visited.
+    '/offline',
     // A call is not a room either, and publishing it was a presence oracle in
     // both directions. The CALLER pushes /call at CallState.calling, which is
     // set before the offer is sent and up to ~15s before it on a cold relay

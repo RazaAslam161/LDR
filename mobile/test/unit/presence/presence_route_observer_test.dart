@@ -39,6 +39,7 @@ void main() {
         '/couple',
         '/role-setup',
         '/app/rapid-camera',
+        '/offline',
       ]) {
         expect(screenNameForPath(p), isNull, reason: '$p should not report');
       }
