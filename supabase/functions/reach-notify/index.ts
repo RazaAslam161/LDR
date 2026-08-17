@@ -53,14 +53,14 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 // it, at which point the instance is replaced anyway.
 let _secret: string | null | undefined;
 async function notifySecret(): Promise<string | null> {
-  if (_secret !== undefined) return _secret;
+  if (_secret !== undefined) return _secret ?? null;
   const { data } = await admin
     .from("app_secrets")
     .select("value")
     .eq("key", "NOTIFY_SHARED_SECRET")
     .maybeSingle();
   _secret = data?.value ?? null;
-  return _secret;
+  return _secret ?? null;
 }
 
 // Constant time. `!==` stops at the first byte that differs, and this endpoint
@@ -272,9 +272,24 @@ Deno.serve(async (req) => {
     // Recipient: the explicit callee for a call, otherwise the OTHER member of
     // the couple.
     const recipientQuery = admin.from("profiles").select("id, fcm_token");
-    const { data: recipients } = explicitRecipient
+    const { data: recipients, error: recipientErr } = explicitRecipient
       ? await recipientQuery.eq("id", explicitRecipient).limit(1)
       : await recipientQuery.eq("couple_id", coupleId).neq("id", fromUser).limit(1);
+    if (recipientErr) {
+      // A failed lookup is NOT "partner has no token". That exit below is
+      // silent by design, and a transient PostgREST failure was taking it —
+      // a missed call ring with no log and no push_failures row, identical
+      // from the outside to a contact pause. Record it against the one id
+      // this path still holds; the FCM-failure branch further down is the
+      // model.
+      console.error("recipient lookup failed", kind, recipientErr.message);
+      await admin.from("push_failures").insert({
+        user_id: explicitRecipient ?? fromUser,
+        kind,
+        reason: "recipient_lookup_failed",
+      });
+      return OK();
+    }
     const recipient = recipients?.[0];
     if (!recipient?.fcm_token) {
       return OK();

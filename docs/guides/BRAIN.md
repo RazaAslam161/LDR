@@ -4619,3 +4619,208 @@ three checks that have never been run: (1) cold start -> Vault -> Add -> pick a
 photo must SAVE; (2) a Reach on the calculator cover must make NO sound; (3) ten
 rapid messages must produce ONE notification counting to ten. After that, the
 escrow gap for zunairaaleem1202 is the highest-value open item in the project.
+
+## §43 — The my-side HIGH findings from §41: fixed, skeptic-hardened (2026-08-17)
+
+**Scope:** every §41 high fixable without owner money/hardware. Four
+implementation agents in parallel + my backend pieces, then a skeptic pass
+that FAILED the first cut with 3 highs — all fixed before this entry. Owner
+items untouched (SMTP config, health/org account check, store assets, device
+tests). Migration-ledger re-baseline deliberately deferred: needs its own
+session, not launch-gating.
+
+**Fixed and verified:**
+1. **reach-notify silent missed pushes** — recipient-lookup error now logged +
+   push_failures row (reason `recipient_lookup_failed`, user_id
+   explicitRecipient ?? fromUser — guards at index.ts:245/248 make that
+   non-null on every kind). Also fixed the pre-existing `notifySecret` deno
+   type error (`?? null`). **Deployed v14 to prod**, verify_jwt still false;
+   probed live: no-secret → 403; trigger-path probe via net.http_post →
+   id 1543, `200 {"ok":true}`. Residual: the error branch itself can't be
+   forced without breaking the DB — deployed, reviewed, not live-exercised.
+   deno unavailable on this machine — type-check gate not run (flagged).
+2. **Closer blanket-E2EE overclaim** — closer_screen.dart now names the exact
+   encrypted subset, wording matched to faq_text.dart (entry TEXT, vault
+   FILES).
+3. **Covers lockout pair** — per-cover way-back instruction interpolated into
+   the apply dialog (each of 9 strings verified against its trigger code;
+   Timer's was wrong even in the profile — button reads Reset, not Lap);
+   visible `CoverExitButton` ring on all nine covers (contract item 3), test
+   pins both. **Skeptic H2:** the ring was a one-tap disguise bypass when App
+   Lock was never enrolled. Fixed: App Lock is now a PRECONDITION — picker
+   refuses to apply a cover without it (onboarding gets "later" wording), and
+   app_shell._nudgeLockForCover() asks every session on installs whose cover
+   predates the rule. cover_gate.dart + disguises.md claims rewritten to
+   match.
+4. **Offline cold start ate profiles** — fetch-failure no longer routes to
+   /welcome (the overwrite hazard): session_provider distinguishes failure
+   from no-row via the previously-dead `error` field; new /offline screen
+   (retry button + auto-retry on resume and on mount); real new users still
+   reach /welcome. **Skeptic M2:** /offline added to presence notAPlace (+
+   test) so the partner never sees "Offline" as a room.
+5. **min_build learned channels** — additive `min_build_play int not null
+   default 0` applied to staging AND prod
+   (`20260817150000_min_build_learns_channels.sql`; staging also got the
+   app_release table itself — it was missing entirely, more drift).
+   MainActivity answers 'channel' (BuildConfig.FLAVOR); ReleaseGate reads the
+   play floor only when channel=='play', any failure stays 'sideload'
+   (pinned by a new throwing-handler test). Play block screen gets a
+   market:// + https fallback button. **Skeptic H1:** that button was gated
+   on !available — a slow sideload boot would be sent to Play, refused on
+   signature, and the uninstall "fix" wipes the X25519 seed. Now gated on
+   `ReleaseGate.channel == 'play'`. **Skeptic H3:** the new select column
+   400s on a column-less server and the catch would silently kill the
+   updater — check() now retries once with the legacy column list.
+6. **Escrow once-ever prompt** — 7-day snooze while isMissing() (legacy flag
+   migrated to declined-now); Settings Account row shows recovery-backup
+   state and opens the same re-authenticated flow. Skeptic lows fixed:
+   empty-password Protect no longer counts as a decline (button disabled),
+   snooze key now account-scoped (`:uid` suffix — the device-scoped-state
+   class again).
+7. **Single-disk repo** — private GitHub remote created and pushed:
+   github.com/RazaAslam161/LDR (fix-sprint + both other sessions' worktree
+   branches; no >50MB blobs in history, Miles.apk untracked). The upload
+   keystore is deliberately NOT in git — owner still owes an off-machine copy
+   of miles-upload.jks + passwords.
+
+**Also:** my min_build migration renamed 140000→150000 (another session took
+20260817140000_storage_quota_per_user meanwhile); schema_snapshot.json gained
+min_build_play (its app_release entry is otherwise stale — missing
+apk_url/apk_sha256/latest_version_name — found, not fixed); prod app_release
+moved to latest_build 45→46 mid-session (other sessions shipping) — lockstep
+held (pubspec +46 == ReleaseGate 46).
+
+**found, not fixed (skeptic + this pass):** /terms and /rewrap also absent
+from presence notAPlace (same class as /offline, pre-existing);
+disguise_picker_screen still claims the play channel ships no covers while
+build.gradle.kts sets DISGUISE_ENABLED=true for play (stale, pre-existing);
+/offline screen has no sign-out escape for a persistently-throwing
+loadProfile (skeptic M1 — copy assumes network); push_failures doc says
+per-recipient but lookup-failure rows can carry the sender's id;
+build.gradle.kts carries a foreign uncommitted hunk (sideload
+arm64-v8a-only filter) contradicting the universal-APK rule — ANOTHER
+SESSION'S, left untouched, flagged; timer/recorder/news covers keep
+deliberate silent catches (commented as cover-must-not-fail-visibly);
+snooze legacy _askedKey migration is first-account-wins on a shared handset.
+
+**Gates:** see the end of this session's report — analyze 0 errors/warnings,
+full `flutter test` re-run after the last edit. Client fixes ship with the
+NEXT build; nothing here depends on installed clients upgrading (server
+changes are additive; reach-notify v14 is payload-compatible).
+
+**Exact next step:** owner trio unchanged (Supabase Pro, CSAE confirm +
+Vercel redeploy, health/org account check before console purchase) + keystore
+off-machine copy; then the play AAB device pass; then the deferred
+migration-ledger re-baseline in its own session.
+
+## §49 — White-box pentest of the whole app and server: 83 verified findings, three fixed server-side (2026-08-17)
+
+**What ran.** A 26-agent white-box audit (11 recon dimensions → adversarial
+verifier per dimension → 3 sweep critics → sweep verifier), plus first-hand
+live-catalog queries against production `sopictusdonlvuezmfep`. 87 findings
+reported, **83 confirmed, 4 refuted or graded NOT-A-BUG**: 10 HIGH, 41 MEDIUM,
+32 LOW. **Zero CRITICAL** — no stranger-facing auth bypass and no cross-couple
+read survived verification.
+
+**The isolation model is sound, and this is worth recording so nobody re-audits
+it.** Verified by query, not by reading migrations:
+- RLS is ENABLED on all 63 public tables; none is RLS-off-with-a-grant.
+- `profiles.couple_id` is NOT in the `authenticated` UPDATE column grants, so
+  no one can self-assign into a stranger's couple. Column-level grants are what
+  hold this, not the policy — `profiles_update_self`'s WITH CHECK only pins `id`.
+- `net.http_post` has NO grant to anon/authenticated/public → no in-database
+  SSRF primitive. The 20260815234147 revoke really landed.
+- There are ZERO views and ZERO matviews in `public` → no security_invoker
+  bypass, the usual silent CRITICAL in a Supabase app.
+- All 6 storage buckets are `public=false`.
+- EVERY `SECURITY DEFINER` function has `search_path` pinned. The linter's
+  `storage_quota_bytes` warning is a false alarm: it is SECURITY **INVOKER**
+  and its whole body is `select 5368709120::bigint`.
+- Vault PIN is bcrypt (`crypt`/`gen_salt('bf')`) with a 5-fail/15-min lockout;
+  pairing codes are 32 bits of `gen_random_uuid()`, collision-checked, TTL'd.
+
+**FIXED and verified on prod (staging first, both projects):**
+1. `reconcile_storage_usage()` was executable by **anon** over
+   `/rest/v1/rpc/` — a SECURITY DEFINER full aggregate scan of
+   `storage.objects` plus an anti-join, loopable by an unauthenticated caller
+   against a free-tier instance. Revoked. `storage_quota_ok(uuid)` revoked from
+   anon (kept for `authenticated`: `storage_quota_limit`'s WITH CHECK calls it).
+   Migration `20260817160000_audit_close_anon_rpc_and_cycle_consent.sql`.
+2. `cycle_settings_read` scoped to the couple with **no `share_with_partner`
+   term**, while its siblings `cycle_logs_read`/`cycle_events_read` both gate on
+   it — so with the sharing switch OFF a partner could still `GET
+   /rest/v1/cycle_settings?user_id=eq.<victim>` and read `on_period_now`,
+   `avg_cycle_length`, `avg_period_length`. Same migration.
+3. Contact pause only ever covered two of four interruptions: `notify_reach`
+   and `notify_care` called `push_muted`, `notify_call` and `notify_memory` did
+   not — a paused contact still rang a full-screen intent. Guards added,
+   mirroring notify_care exactly. Migration
+   `20260817160100_contact_pause_covers_calls_and_memories.sql`.
+   `notify_message` deliberately NOT changed: it posts the silent `msg_sync`
+   delivery wake, so muting it would interrupt nobody and would break the
+   sender's second grey tick.
+
+**Two traps worth remembering.**
+- `revoke execute ... from anon, authenticated` **succeeded and changed
+  nothing**: the ACL was `=X/postgres`, i.e. granted to PUBLIC, and the named
+  roles held no direct grant to remove. Only `revoke ... from public` works.
+  Caught solely because the postcondition was asserted with
+  `has_function_privilege()` rather than trusting `{"success":true}`.
+- **Staging is NOT a faithful mirror of production.** On staging
+  `notify_memory` has no trigger attached at all and `notify_message` already
+  contained `push_muted`; on prod both triggers are attached and neither had it.
+  "Test on staging first" is weaker assurance here than it looks.
+
+**BIGGEST OPEN FINDING — the E2EE claim is false for chat.** `messages.body` is
+`text` with no cipher/nonce counterpart, and production holds 49 rows of which
+0 are base64-shaped, 42 contain whitespace and 17 contain punctuation: that is
+natural-language plaintext, not ciphertext. (Checked as aggregate format stats;
+no message content was read.) `love_reasons.text`,
+`capsule_items.content_text` and `personal_vault_items.content` are the same
+shape. Meanwhile `vault_items`, `fantasy_jar_entries`, `memory_threads` and
+`afterglow_entries` DO carry real `bytea` cipher+nonce pairs — so the app is
+half-encrypted and `notify_message`'s own comment ("`body` is ciphertext")
+is factually wrong. Either encrypt message bodies to a new `bytea` column
+additively (3-step: tolerant client → raise min_build → switch writers) or
+retract the "no plaintext at rest" claim. NOT started — architectural, and it
+touches installed clients.
+
+**Other HIGH, not fixed here:** capsule-media storage policy has no unlock
+predicate so a partner can list+sign SEALED capsule media (row stays hidden,
+`unlocked_at` stays null, victim sees nothing); `unlock_date`/`unlock_mode` are
+still client-writable so `unlock_capsule()` can be made to pass its own check;
+`set_vault_pin` resets the PIN with no old-PIN proof AND clears
+`failed_attempts`/`locked_until`, so the lockout is bypassable by anyone
+holding the session; GoTrue password floor is the 6-char default with HIBP
+leaked-password protection OFF, and that password wraps the server-held E2EE
+seed — owner dashboard action.
+
+**found, not fixed:** `redeem_pairing_invite` selects the invite without `for
+update`, so two concurrent redeems can both pass the `consumed_at is null` and
+`count < 2` checks (32-bit code space makes it low-yield); the pairing
+brute-force limiter is inert because every `insert into pairing_attempts` on a
+failure path is rolled back by the `raise exception` that follows it;
+`create_pairing_invite(p_ttl_minutes)` has `greatest(...,1)` but no UPPER bound,
+so a patched client can mint an effectively permanent code; the release gate is
+client-side only and fails OPEN, and `channel` comes from a MethodChannel a
+repacked APK controls, so claiming `play` yields `min_build_play ?? 0` and the
+gate never blocks — a security fix cannot be forced onto the field;
+`20260817150000_min_build_learns_channels.sql` is applied to prod but UNTRACKED
+in git; local migration filenames have drifted from the applied
+`schema_migrations` versions, so a replay from the repo does not reproduce
+prod's ordering.
+
+**Gates:** `flutter analyze` = 513 issues, ALL `info`, 0 errors, 0 warnings
+(exit 1 — analyze exits non-zero on info; the earlier "exit 0" was `tail`
+masking it). **I changed no Dart** — all three fixes are SQL. Dart files listed
+as modified in `git status` belong to ANOTHER SESSION editing concurrently
+(it renamed the min_build migration 140000→150000 mid-audit and added
+offline_screen.dart / calculator_cover.dart / weather_cover.dart); I touched
+none of them and staged nothing.
+
+**Exact next step:** owner does the two dashboard actions (raise GoTrue minimum
+password length to 12, enable leaked-password protection) — they are the
+cheapest HIGH closures and need no code. Then the capsule seal: revoke
+`update (unlock_date, unlock_mode)` and add the unlock predicate to the
+`capsule_media_select` storage policy, in one migration with both halves.
+Then `set_vault_pin(p_old_pin)`. The chat-plaintext decision is its own session.

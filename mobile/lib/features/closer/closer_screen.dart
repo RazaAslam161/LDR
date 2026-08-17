@@ -204,8 +204,10 @@ class _WaitingForPartner extends StatelessWidget {
             'Your end-to-end encryption key is set up. Ask your partner to '
             'open the Closer tab once on their phone — that publishes their '
             'key and unlocks everything here.\n\n'
-            'Nothing in Closer is readable by anyone but the two of you — '
-            'not even us.',
+            'Memory Threads, the text of Wish Jar entries and the files in '
+            'your Private Vault are end-to-end encrypted — readable by '
+            'nobody but the two of you. The FAQ in Settings lists exactly '
+            'what is and is not.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
           ),
