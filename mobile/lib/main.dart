@@ -43,6 +43,7 @@ import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show AuthChangeEvent, AuthState;
+import 'package:url_launcher/url_launcher.dart';
 
 Future<void> main() async {
   // First statement on purpose: it touches no binding, and going first covers
@@ -762,8 +763,18 @@ class _MilesAppState extends ConsumerState<MilesApp>
                       ),
                       // A blocked client can now rescue itself instead of being
                       // told to go find an APK by hand — the whole reason the
-                      // self-updater exists. Absent when no APK is published or
-                      // on the play build (UpdateService.available is false).
+                      // self-updater exists. On the play build the way out is
+                      // the store listing instead: a block screen with no
+                      // button at all is a dead end on exactly the install
+                      // that must update.
+                      //
+                      // The store button is gated on the CHANNEL, never on
+                      // !available: available goes false on a sideload phone
+                      // too (slow platform call, no APK published yet), and
+                      // sending that phone to Play offers it a release-signed
+                      // package over a debug-signed install — refused, and the
+                      // uninstall "fix" wipes secure storage and the X25519
+                      // seed with it.
                       if (UpdateService.available) ...[
                         const SizedBox(height: 28),
                         Builder(
@@ -782,6 +793,49 @@ class _MilesAppState extends ConsumerState<MilesApp>
                                 style: TextStyle(
                                     fontSize: 16, fontWeight: FontWeight.w600,),),
                           ),
+                        ),
+                      ] else if (ReleaseGate.channel == 'play') ...[
+                        const SizedBox(height: 28),
+                        ElevatedButton(
+                          onPressed: () async {
+                            // market:// lands inside the Play app; a device
+                            // without one gets the web listing, which any
+                            // browser renders. Both failures are logged —
+                            // this button is the only exit on this screen.
+                            const id = 'com.miles.miles';
+                            try {
+                              if (await launchUrl(
+                                Uri.parse('market://details?id=$id'),
+                              )) {
+                                return;
+                              }
+                            } catch (e) {
+                              debugPrint('[release] market launch failed: '
+                                  '${e.runtimeType}');
+                            }
+                            try {
+                              await launchUrl(
+                                Uri.parse(
+                                  'https://play.google.com/store/apps/details?id=$id',
+                                ),
+                                mode: LaunchMode.externalApplication,
+                              );
+                            } catch (e) {
+                              debugPrint('[release] store listing failed: '
+                                  '${e.runtimeType}');
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: MilesColors.ember,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 32, vertical: 14,),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),),
+                          ),
+                          child: const Text('Update on Google Play',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w600,),),
                         ),
                       ],
                     ],

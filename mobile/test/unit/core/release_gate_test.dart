@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/app/release_gate.dart';
 
@@ -12,10 +13,14 @@ import 'package:miles/core/app/release_gate.dart';
 void main() {
   // Whatever a previous test in this file left behind — these are process-wide
   // statics, so every case starts from a known row rather than an assumed one.
-  void reset() => ReleaseGate.applyRow({
-        'min_build': 1,
-        'latest_build': ReleaseGate.buildNumber,
-      });
+  // The channel goes first: applyRow reads it to pick which floor applies.
+  void reset() {
+    ReleaseGate.channel = 'sideload';
+    ReleaseGate.applyRow({
+      'min_build': 1,
+      'latest_build': ReleaseGate.buildNumber,
+    });
+  }
 
   group('release gate', () {
     test('a floor above this build blocks it, and says so once', () {
@@ -94,12 +99,86 @@ void main() {
       expect(ReleaseGate.latestBuild, ReleaseGate.buildNumber);
     });
 
+    test('the play channel reads its own floor, not the sideload one', () {
+      reset();
+      ReleaseGate.channel = 'play';
+      // Belt for a failure mid-test: reset() also restores this, but only in
+      // tests that run after this one AND get that far.
+      addTearDown(() => ReleaseGate.channel = 'sideload');
+
+      // min_build rises with every forced sideload rollout, and it points at
+      // an APK a Play install must never be told to sideload over itself — so
+      // a raised sideload floor alone must not block a play client.
+      ReleaseGate.applyRow({
+        'min_build': ReleaseGate.buildNumber + 1,
+        'min_build_play': 1,
+        'latest_build': ReleaseGate.buildNumber + 1,
+      });
+      expect(ReleaseGate.isBlocked, isFalse);
+
+      // And its own floor does block it.
+      ReleaseGate.applyRow({
+        'min_build': 1,
+        'min_build_play': ReleaseGate.buildNumber + 1,
+        'latest_build': ReleaseGate.buildNumber + 1,
+      });
+      expect(ReleaseGate.isBlocked, isTrue);
+    });
+
+    test('the sideload channel ignores min_build_play', () {
+      reset();
+      // The play floor will trail the sideload one for as long as store review
+      // takes; it must never hold back the fleet that can already update.
+      ReleaseGate.applyRow({
+        'min_build': 1,
+        'min_build_play': ReleaseGate.buildNumber + 1,
+        'latest_build': ReleaseGate.buildNumber,
+      });
+      expect(ReleaseGate.isBlocked, isFalse);
+    });
+
+    test('a row without min_build_play never blocks a play client', () {
+      reset();
+      ReleaseGate.channel = 'play';
+      addTearDown(() => ReleaseGate.channel = 'sideload');
+
+      // The column may not exist yet (staging trails production, or the other
+      // way round), and min_build's default of 1 must not leak across: play
+      // stays open until the owner deliberately raises ITS floor.
+      ReleaseGate.applyRow({
+        'min_build': ReleaseGate.buildNumber + 1,
+        'latest_build': ReleaseGate.buildNumber + 1,
+      });
+      expect(ReleaseGate.isBlocked, isFalse);
+    });
+
     test('the build stamp matches the build number release.sh greps for', () {
       // release.sh proves the shipped snapshot is the Dart it just compiled by
       // finding this literal in libapp.so. If the two ever drift, the guard
       // passes on a stale snapshot — which is how six builds shipped build-31
       // Dart under fresh version codes.
       expect(ReleaseGate.buildStamp, 'miles-build-${ReleaseGate.buildNumber}');
+    });
+
+    test('a failed channel query leaves the fleet on the sideload floor', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      reset();
+      // Every client shipped before the play channel existed is sideload, so
+      // a platform query that throws must change nothing: answering 'play'
+      // here would swap in the min_build_play floor (0 by default) and
+      // unblock exactly the phones min_build exists to block.
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('miles/updater'),
+        (call) async => throw PlatformException(code: 'gone'),
+      );
+      await ReleaseGate.loadChannelForTest();
+      expect(ReleaseGate.channel, 'sideload');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('miles/updater'),
+        null,
+      );
     });
   });
 }

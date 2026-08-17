@@ -44,6 +44,7 @@
       "latest_build",
       "message",
       "min_build",
+      "min_build_play",
       "updated_at"
     ],
     "app_secrets": [

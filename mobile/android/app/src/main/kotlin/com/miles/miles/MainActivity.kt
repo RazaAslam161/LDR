@@ -332,6 +332,13 @@ class MainActivity : FlutterFragmentActivity() {
                     // those describe what the launcher shows and have already
                     // changed meaning once.
                     "isAllowed" -> result.success(BuildConfig.SELF_UPDATE)
+                    // Which channel this build is — "sideload" or "play",
+                    // verbatim from the flavour name AGP wrote into
+                    // BuildConfig, so it cannot drift from the artifact the
+                    // way a hand-set field could. The release gate uses it to
+                    // pick which floor (min_build vs min_build_play) applies
+                    // to this install.
+                    "channel" -> result.success(BuildConfig.FLAVOR)
                     "canInstall" -> {
                         result.success(
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

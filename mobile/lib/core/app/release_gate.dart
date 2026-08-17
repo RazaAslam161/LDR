@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:miles/core/data/supabase_service.dart';
 
 /// Whether this build is still allowed to talk to the backend.
@@ -75,6 +76,47 @@ class ReleaseGate {
   static String? apkSha256;
   static String? latestVersionName;
 
+  /// Which channel this install is — 'sideload' or 'play', as the Android
+  /// side's BuildConfig reports it. The two fleets need separate floors:
+  /// raising min_build tells sideload clients to install the published APK
+  /// over themselves, an instruction a Play install must never receive, and
+  /// the Play rollout will trail the sideload one anyway.
+  ///
+  /// Defaults to 'sideload' and stays there on ANY failure — every client
+  /// shipped before the play channel existed is sideload, so an unknown
+  /// channel must behave as one or an error would move the installed base
+  /// onto the wrong floor. Writable so tests can stand in either fleet
+  /// without a platform channel.
+  static String channel = 'sideload';
+
+  /// The same native handler UpdateService talks to; it answers 'channel' on
+  /// both flavours.
+  static const _updater = MethodChannel('miles/updater');
+  static bool _channelKnown = false;
+
+  /// Exposed so a test can prove the safety-critical half: ANY failure of
+  /// the platform query leaves the channel at 'sideload', because moving an
+  /// unknown client onto the play floor would unblock phones min_build
+  /// exists to block.
+  @visibleForTesting
+  static Future<void> loadChannelForTest() => _loadChannel();
+
+  static Future<void> _loadChannel() async {
+    if (_channelKnown) return;
+    try {
+      channel = await _updater
+              .invokeMethod<String>('channel')
+              .timeout(const Duration(seconds: 2)) ??
+          'sideload';
+      _channelKnown = true;
+    } catch (e) {
+      // Non-Android host, or a native side that predates the method. The
+      // default stands; the next check() may ask again.
+      debugPrint('[release] channel query failed, assuming sideload: '
+          '${e.runtimeType}');
+    }
+  }
+
   /// Checked at startup, before sign-in — an out-of-date build may be broken in
   /// ways that stop it reaching a session at all.
   ///
@@ -83,11 +125,13 @@ class ReleaseGate {
   /// because a gate was unreachable is a worse outage than the one it guards.
   static Future<void> check() async {
     _lastCheck = DateTime.now();
+    // Settled before the row is read — the row's meaning depends on it.
+    await _loadChannel();
     try {
       final row = await SupabaseService.client
           .from('app_release')
           .select(
-            'min_build, latest_build, message, '
+            'min_build, min_build_play, latest_build, message, '
             'apk_url, apk_sha256, latest_version_name',
           )
           .limit(1)
@@ -95,7 +139,26 @@ class ReleaseGate {
       if (row == null) return;
       applyRow(row);
     } catch (e) {
-      debugPrint('[release] gate unreachable, allowing: ${e.runtimeType}');
+      // An environment without min_build_play 400s the WHOLE select, and one
+      // swallowed 400 here would not fail open — it would turn the updater
+      // off: apkUrl/latestBuild never load, UpdateService.available stays
+      // false, and the sideload fleet quietly loses its only update channel.
+      // Retry once with the pre-20260817150000 column list so a stale or
+      // rolled-back environment degrades to the old behaviour instead.
+      try {
+        final row = await SupabaseService.client
+            .from('app_release')
+            .select(
+              'min_build, latest_build, message, '
+              'apk_url, apk_sha256, latest_version_name',
+            )
+            .limit(1)
+            .maybeSingle();
+        if (row == null) return;
+        applyRow(row);
+      } catch (e2) {
+        debugPrint('[release] gate unreachable, allowing: ${e2.runtimeType}');
+      }
     }
   }
 
@@ -108,7 +171,15 @@ class ReleaseGate {
   /// a cold start — which is the bug this whole path exists to fix.
   @visibleForTesting
   static void applyRow(Map<String, dynamic> row) {
-    final min = (row['min_build'] as num?)?.toInt() ?? 1;
+    // Each fleet reads its own floor. Shipped sideload clients predate
+    // min_build_play and keep reading min_build unchanged; the play channel
+    // reads its own column, and until the owner deliberately raises it an
+    // absent or null min_build_play means 0 — play never blocks by default,
+    // because blocking is only useful where the way out (a newer build on the
+    // store) actually exists yet.
+    final min = channel == 'play'
+        ? ((row['min_build_play'] as num?)?.toInt() ?? 0)
+        : ((row['min_build'] as num?)?.toInt() ?? 1);
     final wasBlocked = _blocked;
     final wasLatest = latestBuild;
     _blocked = buildNumber < min;
