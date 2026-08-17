@@ -18,6 +18,26 @@
 //
 // Recipient lookup uses public.profiles.couple_id (this app links couples via
 // profiles.couple_id — there is NO couple_members table).
+//
+// ── kind 'msg_sync' — the silent delivery wake ───────────────────────────────
+// Every other kind here exists to INTERRUPT someone. 'msg_sync' exists to
+// interrupt nobody: it carries no title, no body and no notification block, and
+// the only thing the receiving client does with it is call ack_delivered(seq)
+// so the sender's one grey tick becomes two. It is what makes "my phone was
+// offline, I got signal back, and it went double-tick without me touching the
+// app" true, because FCM queues an undeliverable data message and hands it over
+// on reconnect.
+//
+// It is deliberately NOT kind 'message'. 'message' is a live wire: every
+// handset already in the field draws a visible banner for it — the `type ==
+// 'message'` branch of firebaseMessagingBackgroundHandler calls
+// showMessageNotification (reach_notifications.dart) — and those builds are
+// sideloaded with no update channel, so that branch is permanent. The owner
+// does not want message notifications. 'msg_sync' is a string those clients
+// have never heard of, so it falls off the end of that handler's opening
+// allow-list and returns before it even calls Firebase.initializeApp — no
+// banner, no channel, no work. Reusing 'message' would have handed a banner to
+// every installed phone.
 // ─────────────────────────────────────────────────────────────────────────────
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -74,7 +94,36 @@ function pemToDer(pem: string): Uint8Array {
 }
 
 // ── OAuth2: service-account JWT → access token ───────────────────────────────
-async function getAccessToken(): Promise<string> {
+// Cached for the life of the instance, less a minute of clock skew. This used
+// to sign a fresh RS256 JWT and round-trip Google on EVERY push, which was
+// merely wasteful while pushes were one-per-Reach. Message delivery wakes are
+// one per message, so a ten-message burst meant ten key imports and ten token
+// exchanges to send ten payloads that are ~120 bytes each — the auth cost was
+// about to dwarf the send.
+//
+// The in-flight promise is cached, not just the result, so a burst that arrives
+// on a cold instance mints once and the rest await it rather than each starting
+// their own exchange. A rejection clears the cache so the next push retries
+// instead of inheriting a permanently poisoned one.
+let _token: { value: string; expiresAt: number } | null = null;
+let _tokenInFlight: Promise<string> | null = null;
+
+function getAccessToken(): Promise<string> {
+  if (_token && Date.now() < _token.expiresAt) return Promise.resolve(_token.value);
+  if (_tokenInFlight) return _tokenInFlight;
+  _tokenInFlight = mintAccessToken()
+    .then((t) => {
+      _tokenInFlight = null;
+      return t;
+    })
+    .catch((e) => {
+      _tokenInFlight = null;
+      throw e;
+    });
+  return _tokenInFlight;
+}
+
+async function mintAccessToken(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const claims = {
@@ -112,7 +161,13 @@ async function getAccessToken(): Promise<string> {
   if (!res.ok) {
     throw new Error(`token exchange failed: ${res.status} ${await res.text()}`);
   }
-  return (await res.json()).access_token as string;
+  const body = await res.json();
+  const token = body.access_token as string;
+  // Google returns expires_in seconds (3600). Hold it 60s short of that so a
+  // token can never expire mid-flight between this check and FCM reading it.
+  const ttlSec = typeof body.expires_in === "number" ? body.expires_in : 3600;
+  _token = { value: token, expiresAt: Date.now() + Math.max(ttlSec - 60, 30) * 1000 };
+  return token;
 }
 
 // ── handler ──────────────────────────────────────────────────────────────────
@@ -153,8 +208,14 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     // Our triggers deliver { kind, record }. Bare rows (an older reach trigger
     // that posted to_jsonb(new) directly) still work and default to "reach".
-    const kind: "reach" | "care" | "call" | "message" | "memory" | "ritual" =
-      payload.kind ?? payload.type ?? "reach";
+    const kind:
+      | "reach"
+      | "care"
+      | "call"
+      | "message"
+      | "memory"
+      | "ritual"
+      | "msg_sync" = payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
 
@@ -165,7 +226,7 @@ Deno.serve(async (req) => {
     // is the other couple member.
     const fromUser: string | undefined = kind === "call"
       ? row?.caller_id
-      : kind === "message"
+      : kind === "message" || kind === "msg_sync"
       ? row?.sender_id
       : kind === "memory"
       ? row?.proposer
@@ -246,6 +307,13 @@ Deno.serve(async (req) => {
           ...(kind === "message" ? { message_id: rowId } : {}),
           ...(kind === "memory" ? { memory_id: rowId } : {}),
           ...(kind === "ritual" ? { ritual_id: rowId } : {}),
+          // seq, and never the body. The receiving client needs exactly one
+          // number to answer with — ack_delivered(seq) — and FCM data values
+          // are map<string,string>, so a bigint from jsonb must be stringified
+          // here or the send is rejected outright.
+          ...(kind === "msg_sync"
+            ? { message_id: rowId, seq: String(row?.seq ?? "") }
+            : {}),
         },
         // A call is worthless if it arrives late, but a MESSAGE must survive a
         // doze window or an offline stretch — a 30s TTL made FCM discard it
@@ -261,14 +329,39 @@ Deno.serve(async (req) => {
           // it is worth having whenever the phone next comes back, and a 30s
           // TTL would drop it for anyone whose handset was dozing at 10 PM —
           // which is most people, at 10 PM.
-          ttl: kind === "message" || kind === "memory" || kind === "ritual"
+          ttl: kind === "message" || kind === "memory" || kind === "ritual" ||
+              kind === "msg_sync"
             ? "86400s"
             : "30s",
+          // A delivery wake is worth exactly as much as the newest one. Ten
+          // messages sent while the partner's phone is offline queue ten
+          // identical "go ack yourself" pokes; FCM keeps only the last per
+          // collapse_key and drops the rest, so reconnecting costs one wakeup
+          // instead of ten.
+          //
+          // This is only safe because the receipt is a high-water mark:
+          // ack_delivered() stores greatest(existing, incoming), so acking the
+          // newest seq marks every earlier message delivered too. Collapsing a
+          // counter would lose writes; collapsing a maximum cannot.
+          //
+          // Scoped per couple, because the key is global to the app on that
+          // device and two couples' wakes must never evict each other.
+          ...(kind === "msg_sync" ? { collapse_key: `msg:${coupleId}` } : {}),
         },
-        apns: {
-          headers: { "apns-priority": "10" },
-          payload: { aps: { sound: "default", "content-available": 1 } },
-        },
+        // The wake is silent on iOS too: content-available with no sound and no
+        // alert. apns-priority 10 is for something the user should see and
+        // Apple throttles it for background-only payloads — 5 is the correct
+        // priority for a push whose entire job is to hand the app a few CPU
+        // cycles.
+        apns: kind === "msg_sync"
+          ? {
+            headers: { "apns-priority": "5", "apns-push-type": "background" },
+            payload: { aps: { "content-available": 1 } },
+          }
+          : {
+            headers: { "apns-priority": "10" },
+            payload: { aps: { sound: "default", "content-available": 1 } },
+          },
       },
     };
 

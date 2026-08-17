@@ -118,18 +118,49 @@ class Presence {
   bool get isActivelyInChat => typingInChat && isTrulyOnline;
 
   /// GETTER 1 — is the partner genuinely using the app right now?
-  /// Source: app_last_active_at (NEVER updated_at / location). Window 45s — the
-  /// 30s foreground heartbeat keeps it fresh while active; on a kill it expires
-  /// within 45s. Drives: Online subtitle, delivered tick, online dot.
+  /// Source: app_last_active_at (NEVER updated_at / location), plus an explicit
+  /// goodbye. Window 45s — the 30s foreground heartbeat keeps it fresh while
+  /// active; on a kill it expires within 45s. Drives: Online subtitle, online
+  /// dot, isActivelyInChat.
   bool get isTrulyOnline {
     final ts = appLastActiveAt;
     if (ts == null) return false;
+    if (saidGoodbye) return false;
     // ServerClock, not DateTime.now(). app_last_active_at is stamped by the
     // SERVER now, so comparing it to this device's clock reintroduced exactly
     // the error the trigger removed — and directionally: a reader whose clock
     // runs slow sees their partner as permanently offline while looking online
     // to them.
     return ServerClock.now().difference(ts).inSeconds <= 45;
+  }
+
+  /// The partner's app said it was leaving, and nothing has happened since.
+  ///
+  /// Freshness alone can only DECAY, never switch. The heartbeat re-stamps
+  /// every 30s against a 45s window, so at the moment the app backgrounds the
+  /// stamp is 0-30s old and keeps testing fresh for another 15-45s: the avatar
+  /// held "Online" for 45-75s after the phone was put down, then jumped to "1
+  /// minute ago". main.dart has always written `is_online:false` on the way
+  /// out; no reader had ever looked at it.
+  ///
+  /// One-way, and that is the whole design. A false flag may push the partner
+  /// offline; a true one may never pull them online, because a force-kill
+  /// leaves `is_online` true on the row forever and the 45s window is the only
+  /// thing that ever catches that. Freshness stays the backstop for every exit
+  /// with no goodbye — crash, force-stop, battery death, dead network.
+  ///
+  /// The ordering guard is ONE clock, not two. Both timestamps are written by
+  /// the same BEFORE trigger on the same row: `updated_at` on every upsert,
+  /// `app_last_active_at` only on an activity write. So a goodbye that loses a
+  /// race with a later resume carries the older stamp of the two and is
+  /// discarded here rather than blinking the partner offline. (`isBefore`
+  /// compares absolute instants, so the local/UTC parse split does not matter.)
+  bool get saidGoodbye {
+    if (isOnlineFlag) return false;
+    final bye = updatedAt;
+    final active = appLastActiveAt;
+    if (bye == null || active == null) return false;
+    return !bye.isBefore(active);
   }
 
   /// HONEST online for every reader (Home, drawer, chat) — same as
@@ -266,7 +297,14 @@ class PresenceService {
   /// Stamp app activity ONLY when coming online. Going offline (online:false on
   /// pause/detach) must NOT stamp app_last_active_at — otherwise the partner
   /// would read "Online" for the full 45s window after the app is backgrounded.
-  /// last_seen/is_online stay advisory; the honest clock is app_last_active_at.
+  ///
+  /// `online:false` is the app's explicit goodbye and [Presence.saidGoodbye]
+  /// now reads it, so this is the write that SWITCHES the partner's avatar off
+  /// instead of letting it decay. It has exactly one caller — main.dart on
+  /// paused/detached — and that must stay true: anything else writing false
+  /// would blink a partner offline while they were sitting in the app.
+  /// last_seen stays advisory; the honest clocks are app_last_active_at and
+  /// updated_at, both server-stamped.
   static Future<void> setOnline(String coupleId, {required bool online}) =>
       _upsert(
         coupleId,
@@ -459,6 +497,9 @@ class PresenceService {
                   ServerClock.now().difference(active).inMilliseconds,
             'truly_online': p?.isTrulyOnline,
             'is_online_flag': p?.isOnlineFlag,
+            // Distinguishes the two ways of being offline: an explicit goodbye
+            // (they backgrounded) from a decayed window (they vanished).
+            'said_goodbye': p?.saidGoodbye,
             'has_screen': p?.currentScreen != null,
             // False means freshness was measured against the raw device clock,
             // which is indistinguishable from a partner who is simply offline.

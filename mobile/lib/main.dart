@@ -385,15 +385,13 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // and the camera as well as a real app switch, so without this a user
       // attaching one picture goes invisible for the rest of the session.
       _clearScreenTimer?.cancel();
+      _offlineTimer?.cancel();
       presenceRouteObserver?.restore();
       unawaited(_refreshOnResume());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _stopHeartbeat();
-      // Write offline hint + clear chat presence (kills phantom "is here"
-      // avatar and stale seen/delivered ticks on the partner's screen).
-      // Best-effort; the freshness TTL is the real safety net on a hard kill.
-      PresenceService.setOnline(couple.id, online: false);
+      _goOffline(couple.id, dying: state == AppLifecycleState.detached);
       PresenceService.clearChatPresence(couple.id);
       // Leave the room as well as the app. Without this the last published
       // screen stood for up to 45s (the freshness window) after the app was
@@ -419,6 +417,45 @@ class _MilesAppState extends ConsumerState<MilesApp>
     }
   }
 
+  /// Say goodbye, so the partner's avatar SWITCHES off instead of decaying.
+  ///
+  /// The write itself is not new — `is_online:false` has always been sent here.
+  /// What is new is that [Presence.saidGoodbye] reads it, so it now has to be
+  /// right rather than merely advisory. Two consequences:
+  ///
+  /// 1. Never during an overlay we opened. A full-screen picker, the camera and
+  ///    a PiP call all report `paused` on most Android builds. The same guard
+  ///    the cover uses (:305) applies for the same reason — attaching one photo
+  ///    must not tell the partner you left.
+  /// 2. Settled, not instant, on `paused`. The disguise cover flips this app
+  ///    through inactive/hidden/paused every few seconds, and the traced cost of
+  ///    treating each flip as real is recorded above this. 1.5s is five times
+  ///    the 300ms the `inactive` branch already treats as transient, and still
+  ///    thirty times faster than the 45-75s decay it replaces.
+  ///
+  /// `detached` is the process dying — a timer would never run, so write it now.
+  /// If the process dies inside the settle window nothing is written at all, and
+  /// the 45s freshness window catches it exactly as it does a force-kill.
+  ///
+  /// Fire-and-forget: the cover is already up by the time this is reached, and
+  /// nothing here is awaited on the path to raising it.
+  void _goOffline(String coupleId, {required bool dying}) {
+    _offlineTimer?.cancel();
+    if (MilesApp.systemOverlayActive || PipMode.active.value) return;
+    if (dying) {
+      unawaited(PresenceService.setOnline(coupleId, online: false));
+      return;
+    }
+    _offlineTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (WidgetsBinding.instance.lifecycleState ==
+          AppLifecycleState.resumed) {
+        return;
+      }
+      unawaited(PresenceService.setOnline(coupleId, online: false));
+    });
+  }
+
+  Timer? _offlineTimer;
   Timer? _clearScreenTimer;
 
   /// The last time a resume refresh ran, so a burst of lifecycle events — and
@@ -595,6 +632,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // pending it outlives the state that owns it, and a widget test that
     // disposes the tree fails on the timer rather than on what it was testing.
     _clearScreenTimer?.cancel();
+    _offlineTimer?.cancel();
     super.dispose();
   }
 

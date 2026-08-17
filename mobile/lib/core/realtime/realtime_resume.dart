@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/features/chat/chat_receipts.dart';
 
 /// Ticks whenever the realtime socket (re)connects. EVERY per-screen realtime
 /// subscription listens to this and re-subscribes its channel, so sync survives
@@ -22,5 +25,19 @@ bool _hooked = false;
 void initRealtimeAutoResume() {
   if (_hooked) return;
   _hooked = true;
-  SupabaseService.client.realtime.onOpen(() => realtimeResumed.value++);
+  SupabaseService.client.realtime.onOpen(() {
+    realtimeResumed.value++;
+    // The socket opening is the most literal signal this app has for "the
+    // network came back". A message that arrived while the handset was offline
+    // must turn the sender's tick from one grey to two the moment it does,
+    // with nobody opening anything — the silent push is the fast path for
+    // that, and this is the backstop for when it was dropped, throttled, or
+    // (until the trigger was restored) never sent at all.
+    //
+    // Delivered only. Reconnecting is not reading, and it is the chat screen's
+    // sole privilege to say otherwise.
+    unawaited(
+      ChatReceiptRepository.ackHighestDelivered(trigger: 'socket_open'),
+    );
+  });
 }

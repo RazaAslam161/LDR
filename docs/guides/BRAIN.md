@@ -3843,3 +3843,122 @@ without it, but Play expects the local authority. Not guessed: naming the wrong
 agency in a child-safety policy is worse than an honest gap.
 
 **Gate:** `490 issues found` (0 errors/warnings), `01:56 +770: All tests passed!`
+
+## §40 — The delivery tick: the server half of one grey → two grey (2026-08-17)
+
+**Scope of this entry: server only** (`supabase/migrations`, `supabase/functions`).
+The client half — the `msg_sync` handler and the receipt high-water mark — is
+another session's and is NOT done as of this writing.
+
+**The defect.** A message stayed on one grey tick until the recipient opened the
+conversation, then jumped straight to two green. Live proof, `chat_receipts` on
+production before any change:
+
+    user 8bfaaeb3…  delivered_seq 3419  read_seq 3419
+    user 8f9461d9…  delivered_seq 3418  read_seq 3418
+
+`delivered_seq == read_seq` for both members: delivered and read only ever move
+together, because the only site that acks either is the chat screen's catch-up.
+Nothing ever told a backgrounded or offline handset a message existed.
+
+**What was actually wrong — verified, not inferred.** `public.messages` carried
+ZERO triggers on production. `public.notify_message()` existed and was orphaned.
+So "it was never wired" is FALSE and "the trigger was dropped" is TRUE: the drop
+lives only in the prod ledger as `20260812013012 no_message_push`, with no file
+in this repo. `20260601003100` creates it, but prod was baselined with
+`migration repair --status applied`, so no `20260601*` version can ever replay.
+Repo and production disagreed and only production was wrong.
+
+**`20260816140000_restore_message_push_trigger.sql` was dead on arrival** — it
+has never been applied to anything and never could be. Its guard refused to run
+unless `notify_message()` consulted `push_muted()`, naming `20260816120000` as
+the migration that would put it there. `20260816120000` explicitly does not
+("notify_message and notify_call are deliberately NOT touched here"), and its
+verify loop covers `notify_reach`/`notify_care` only. Confirmed live:
+`pg_get_functiondef('notify_message')` contained no `push_muted`, while
+`20260816120000` IS applied (ledger `20260815222837`). Left alone it would
+**abort the bootstrap of every fresh database, including staging**. Emptied to a
+documented no-op, filename kept as a breadcrumb.
+
+**The push is NOT kind `message`, and this is the load-bearing decision.**
+Re-attaching the old trigger would have sent kind `message`, and every handset
+in the field draws a **visible banner** for it
+(the `type == 'message'` branch of `firebaseMessagingBackgroundHandler` calls
+`showMessageNotification`). Those builds are
+sideloaded with no update channel, so that branch is permanent, and the owner
+has said repeatedly he does not want message notifications. Restoring `message`
+would have handed a banner to every installed phone as a side effect of fixing a
+tick.
+
+New kind **`msg_sync`** instead — a string no shipped client has ever heard of.
+It falls off the end of the background handler's allow-list
+(the handler's opening allow-list) and returns *before* `Firebase.initializeApp`,
+and in the foreground it falls past every branch to `if (type != 'reach')
+return`. An old client therefore does **nothing at all** with it. That is why
+the server half was safe to ship on its own, ahead of the client.
+
+**Not gated on `push_muted`, deliberately.** A delivery receipt is not a
+notification. Gating it would freeze the SENDER's ticks at one grey forever for
+a paused contact — a false statement in the sender's UI — and would **leak the
+pause**: ticks that stop advancing with one specific person tell that person
+they were paused. `20260816120000`'s own thesis is that the pause must be
+invisible to the other side. The pause loses nothing: `msg_sync` draws nothing
+anywhere, and reach/care stay guarded as before.
+
+**Also changed:** the body no longer posts `to_jsonb(new)` (which shipped the
+ciphertext `body`, `image_path`, `voice_path` and both mood columns to the edge
+function to read three fields off). It now names `id`, `couple_id`, `sender_id`,
+`seq`. Never the body, never the sender's name.
+
+**FCM payload (data-only, no `notification` block):**
+
+    data:  { type: "msg_sync", couple_id, message_id, seq }   // all strings
+    android: { priority: "high", ttl: "86400s",
+               collapse_key: "msg:<couple_id>" }
+    apns:    { "apns-priority": "5", "apns-push-type": "background",
+               aps: { "content-available": 1 } }
+
+`collapse_key` is the burst answer: ten messages to an offline phone collapse to
+ONE queued wake. Safe only because the receipt is a high-water mark — acking the
+newest `seq` marks every earlier message delivered too.
+
+**Verified (all on production):**
+- trigger attached: `CREATE TRIGGER message_notify_on_insert AFTER INSERT ON public.messages FOR EACH ROW EXECUTE FUNCTION notify_message()`
+- trigger fires, exact enqueued body, captured in a rolled-back probe:
+  `{"kind":"msg_sync","record":{"id":"666678ee…","seq":3420,"couple_id":"676fa191…","sender_id":"8bfaaeb3…"}}`
+  — rollback verified clean (0 message rows, 0 queue rows left).
+- end-to-end send: `net._http_response` id 1360 → `200 {"ok":true}`, function
+  booted cold (25 ms), **no** `FCM send failed` log, **0** rows in
+  `push_failures`. Both members hold tokens, so the recipient resolved and FCM
+  accepted the send.
+- `ack_delivered` needs no fix — proven a high-water mark in a rolled-back probe:
+  `start=3419 | after_9000=9000 | after_stale_50=9000 | after_replay_9000=9000 | after_negative=9000`
+- `notify_message` ACL: `postgres=X | service_role=X` — not callable by anon or
+  authenticated.
+- `reach-notify` deployed **version 13**, `verify_jwt` still false; repo file and
+  deployed source are identical. Re-verified after that deploy:
+  `net._http_response` id 1361 → `200 {"ok":true}`, `push_failures` still 0.
+- prod ledger row for the migration: `20260816234023 message_delivery_wake`
+  (Supabase mints its own version; the repo filename is `20260817110000_*`, the
+  usual divergence noted in PLAY-RELEASE-RUNBOOK §1.5).
+- `deno check` clean on the edited function (one PRE-EXISTING error remains at
+  `index.ts:62`, `_secret` return type — not mine, not fixed).
+
+**Rollback** is written at the top of
+`20260817110000_message_delivery_wake.sql`: drop the trigger, restore the prior
+`notify_message()` body (captured verbatim from production). The `msg_sync`
+branch in `reach-notify` is inert without a caller and needs no revert.
+
+**Exact next step — the client half, and nothing here works without it.** The
+server now wakes the phone and no shipped client listens. Add a `msg_sync`
+branch to `firebaseMessagingBackgroundHandler`
+(`reach_notifications.dart`) and to `FcmService._onMessage` that calls
+`ackDelivered(int.parse(data['seq']))` and **shows no notification**. It must
+run before the `SessionScope.allows` early-return is reached for other kinds —
+i.e. keep the couple check, but add `msg_sync` to the allow-list at
+the handler's opening allow-list or it will keep returning early.
+
+**Found, not fixed:** `supabase/functions/reach-notify/index.ts:62` —
+`notifySecret()` returns `string | null | undefined` against a declared
+`Promise<string | null>`; `deno check` fails on it. Pre-existing, outside this
+change.

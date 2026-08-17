@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -8,6 +10,7 @@ import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
+import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/main.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
@@ -85,6 +88,11 @@ class FcmService {
     // account this handset was last signed in as or it would discard the very
     // tap that launched the app.
     await SessionScope.hydrate();
+    // Open the channel the FCM background isolate uses to hand a delivery ack
+    // to this isolate. Registered before any handler below, because a push can
+    // arrive the moment the process exists and the background isolate decides
+    // whether the app is alive by whether this port answers.
+    DeliveryAckPort.listen();
     await _fln.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -134,6 +142,14 @@ class FcmService {
   /// stale token after a reinstall/GMS hiccup), which silently stops their
   /// pushes. Re-registering on the next launch/resume self-heals that.
   static Future<void> registerToken() async {
+    // Piggy-backs the one hook that already runs on every resume
+    // (main.dart:364). A push can be dropped, throttled by FCM, or never sent
+    // at all — coming back to the app is the moment to settle what this
+    // handset already holds, and it is emphatically not a moment anyone read
+    // anything: the app resumes onto the News cover.
+    unawaited(
+      ChatReceiptRepository.ackHighestDelivered(trigger: 'app_resume'),
+    );
     await requestPermission();
     String? token;
     for (var i = 0; i < 4 && token == null; i++) {
@@ -185,6 +201,25 @@ class FcmService {
     }
   }
 
+  // ── delivery receipts ──────────────────────────────────────────────────────
+
+  /// Say "this handset has it" for a message push, without saying it was read.
+  ///
+  /// The payload carries `message_id` and not `seq` (reach-notify/index.ts:246),
+  /// so the seq is resolved server-side; the `seq` branch is here for the day
+  /// the edge function starts sending one, and costs an old client nothing.
+  static Future<void> _ackDelivery(
+    Map<String, dynamic> data, {
+    required String trigger,
+  }) async {
+    final seq = int.tryParse('${data['seq']}') ?? 0;
+    if (seq > 0) {
+      await ChatReceiptRepository.ackDelivered(seq, trigger: trigger);
+    } else {
+      ChatReceiptRepository.ackHighestDeliveredSoon(trigger: trigger);
+    }
+  }
+
   // ── handlers ───────────────────────────────────────────────────────────────
   static void _onForeground(RemoteMessage m) {
     if (!_forThisSession(m)) return;
@@ -223,11 +258,12 @@ class FcmService {
       );
       return;
     }
-    if (type == 'message') {
-      // This device HAD the message. Nothing below acks it, and ackDelivered
-      // has one call site — the chat screen's catch-up — so a push landing
-      // with chat_mounted=false and no receipt_ack_attempt after it is the
-      // proof that the message arrived with no ack path at all.
+    // `msg_sync` is the delivery wake the trigger actually sends; `message` is
+    // the older name, kept because a push already queued under it must still
+    // ack rather than be dropped on the floor. Both are silent in the
+    // foreground — the chat's own realtime subscription is what shows a message
+    // to someone looking at it.
+    if (type == 'msg_sync' || type == 'message') {
       Diag.record(DiagArea.receipt, 'push_msg_received',
           corr: m.data['message_id'] as String?,
           fields: {
@@ -237,11 +273,17 @@ class FcmService {
             'chat_mounted': ChatBroadcastService.active != null,
             'has_message_id': m.data['message_id'] != null,
           },);
-      // In the foreground the chat's realtime subscription already delivers
-      // the message, and the catch-up fetch covers a dropped socket — so a
-      // notification here would double up on a conversation the user is
-      // looking at. The push exists for the backgrounded case, handled in the
-      // background isolate.
+      // This device HAS the message — say so, whether or not anything is on
+      // screen. `onMessage` fires for a foregrounded app, which includes the
+      // app sitting on the News cover with no chat mounted; that used to reach
+      // here and return, leaving the sender on one grey tick.
+      //
+      // Delivered, never read. Nobody has looked at anything: the app may be
+      // behind the cover, behind the biometric lock, or on another tab.
+      unawaited(_ackDelivery(m.data, trigger: 'push_fg'));
+      // No notification. The chat's realtime subscription already delivers the
+      // message when it is mounted, and the owner does not want message
+      // banners — the push is here to move the tick, nothing else.
       return;
     }
     if (type == 'memory') {

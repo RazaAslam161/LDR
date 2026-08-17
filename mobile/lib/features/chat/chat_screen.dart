@@ -96,6 +96,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// The partner's delivery/read position. Live via realtime, so the sender's
   /// tick updates the moment they ack.
+  ///
+  /// Seeded from [_ReceiptMemory] before the first frame rather than starting
+  /// null, because null renders as a single grey tick on every message in the
+  /// conversation — see [_ReceiptMemory] for why that was visible on every
+  /// tab change.
   ChatReceipt? _partnerReceipt;
   RealtimeChannel? _receiptChannel;
 
@@ -113,9 +118,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// that actually moved.
   final Map<String, _MsgStatus> _tracedTick = {};
 
-  /// IDs of my messages that have reached 'seen'. Seen is permanent — once a
-  /// message is in here it never downgrades back to delivered, even after the
-  /// partner leaves the chat / goes offline (WhatsApp semantics). Only grows.
   final List<_ActiveBurst> _bursts = [];
   int _burstId = 0;
   static const _uuid = Uuid();
@@ -487,24 +489,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// The partner's position, clamped upward.
   ///
-  /// Three sources feed it now — the broadcast fast path, the receipts channel
-  /// and the refetch — and they do not arrive in order. A tick that has gone
-  /// green must never turn black again because the slowest of the three
-  /// answered last with what it knew a moment ago.
+  /// Four sources feed it now — the broadcast fast path, the receipts channel,
+  /// the refetch and [_ReceiptMemory] — and they do not arrive in order. A tick
+  /// that has gone green must never turn black again because the slowest of
+  /// them answered last with what it knew a moment ago.
+  ///
+  /// The clamp records BEFORE it renders. An ack landing as the screen is torn
+  /// down used to be dropped at the `mounted` check, which is precisely the
+  /// receipt the next mount needed most.
   void _applyPartnerReceipt(ChatReceipt r) {
-    if (!mounted) return;
     final prev = _partnerReceipt;
-    if (prev == null) {
-      setState(() => _partnerReceipt = r);
-      return;
-    }
-    final delivered = r.deliveredSeq > prev.deliveredSeq
+    final delivered = (prev == null || r.deliveredSeq > prev.deliveredSeq)
         ? r.deliveredSeq
         : prev.deliveredSeq;
-    final read = r.readSeq > prev.readSeq ? r.readSeq : prev.readSeq;
-    if (delivered == prev.deliveredSeq && read == prev.readSeq) return;
-    setState(() =>
-        _partnerReceipt = ChatReceipt(deliveredSeq: delivered, readSeq: read),);
+    final read =
+        (prev == null || r.readSeq > prev.readSeq) ? r.readSeq : prev.readSeq;
+    final next = ChatReceipt(deliveredSeq: delivered, readSeq: read);
+    final key = _receiptKey;
+    if (key != null) _ReceiptMemory.remember(key, next);
+    if (!mounted) return;
+    if (prev != null &&
+        delivered == prev.deliveredSeq &&
+        read == prev.readSeq) {
+      return;
+    }
+    setState(() => _partnerReceipt = next);
+  }
+
+  /// Per couple AND per signed-in user, matching [_clearedKey]: one handset can
+  /// carry two accounts, and the second must never inherit the first's ticks.
+  String? get _receiptKey {
+    final couple = _coupleId;
+    final uid = SupabaseService.currentUserId;
+    if (couple == null || uid == null) return null;
+    return 'chat_receipt_${couple}_$uid';
   }
 
   Future<void> _refreshPartnerReceipt({required String source}) async {
@@ -691,6 +709,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
     _coupleId = couple.id;
+    // Before anything is awaited, so the first frame of a re-entered chat draws
+    // the ticks it was already showing when the user left it. The disk copy
+    // (one frame later, or a whole process later) goes through the same upward
+    // clamp, so it can only ever confirm or raise what is on screen.
+    final key = _receiptKey;
+    if (key != null) {
+      _partnerReceipt = _ReceiptMemory.peek(key);
+      unawaited(_ReceiptMemory.load(key).then((r) {
+        if (r != null) _applyPartnerReceipt(r);
+      }),);
+    }
     _clearedBefore = await _loadClearedBefore(couple.id);
     try {
       // warm: false — signing is a round trip per bucket and nothing below
@@ -950,21 +979,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return st;
   }
 
+  /// The rung to draw. Only ever rises for a given message, by construction:
+  /// `seq` is fixed once bound, and `_partnerReceipt` is clamped upward by
+  /// [_applyPartnerReceipt] and survives a remount via [_ReceiptMemory].
   _MsgStatus _rawStatusFor(Message m) {
-    // The send states its own fate until a row exists. seq alone could not:
-    // it is 0 both for a message still on the wire and for one whose insert
-    // threw, so a message that never reached the server drew the delivered
-    // tick. reconcileWith() clears this back to 'sent' when the row echoes.
-    switch (m.sendStatus) {
-      case SendStatus.sending:
-        return _MsgStatus.sending;
-      case SendStatus.failed:
-        return _MsgStatus.failed;
-      case SendStatus.sent:
-        break;
+    // A bound seq means the row IS on the server — that is where seq comes
+    // from. So the queue's opinion is stale from that moment on, and reading it
+    // first let a delivered message fall back to the clock (or to "didn't
+    // send") if a retry re-marked an entry the echo had already reconciled.
+    // Below it, the send states its own fate: seq alone could not, being 0
+    // both for a message still on the wire and for one whose insert threw, so
+    // a message that never reached the server drew the delivered tick.
+    if (m.seq <= 0) {
+      switch (m.sendStatus) {
+        case SendStatus.sending:
+          return _MsgStatus.sending;
+        case SendStatus.failed:
+          return _MsgStatus.failed;
+        case SendStatus.sent:
+          // On the server, but this device has not been told its seq yet.
+          return _MsgStatus.sent;
+      }
     }
-    // A message that has not reached the server has no seq and no receipt.
-    if (m.seq <= 0) return _MsgStatus.sent;
     final r = _partnerReceipt;
     if (r == null) return _MsgStatus.sent;
     if (r.readSeq >= m.seq) return _MsgStatus.seen;
@@ -1868,8 +1904,109 @@ class _Bubble extends StatelessWidget {
   }
 }
 
+/// The highest receipt position this handset has ever seen, kept across a
+/// remount so a re-entered chat never redraws backwards.
+///
+/// THE BUG THIS EXISTS FOR. AppShell renders `bodies[bodyIndex]` inside a plain
+/// Column (app_shell.dart:441), not an IndexedStack — so changing tab DISPOSES
+/// ChatScreen, and MilesApp.raiseCover() disposes it again on every background.
+/// The next visit began with `_partnerReceipt` null, and `_rawStatusFor` maps
+/// null to `sent`. Every message the partner had already read redrew as ONE
+/// GREY TICK and stayed there for the length of one network round trip — the
+/// 2-3 seconds the owner reported. Nothing was wrong with the upward clamp in
+/// `_applyPartnerReceipt`: it clamps the new value against the previous one,
+/// and after a remount there is no previous one.
+///
+/// WHY REMEMBERING IS SOUND. Both seqs are server-assigned watermarks that only
+/// ever rise: `ack_delivered` and `ack_read` take the max, so the partner's
+/// true position is always >= any value this device has observed. A remembered
+/// value is therefore a lower bound on the truth. It can leave a tick one rung
+/// low for the moment before the live value lands; it can never invent a rung
+/// the partner has not actually reached. Under-stating for 200ms is a tick that
+/// climbs; over-stating would be a lie about whether she has read you.
+///
+/// The seq pair IS the per-message high-water mark — status is a pure function
+/// of (m.seq, receipt), and m.seq never changes once bound — so no per-message
+/// set is needed to stop a single bubble falling back.
+class _ReceiptMemory {
+  _ReceiptMemory._();
+
+  /// Mirrors what is on disk so a remount inside a live process restores on the
+  /// FIRST FRAME rather than a beat later. That is the ordinary case; the disk
+  /// copy only really answers after a process death.
+  static final Map<String, ChatReceipt> _cache = {};
+
+  /// What this process already knows, with no await between it and the frame.
+  static ChatReceipt? peek(String key) => _cache[key];
+
+  /// What a previous process left behind. Null when there is nothing usable.
+  static Future<ChatReceipt?> load(String key) async {
+    final cached = _cache[key];
+    if (cached != null) return cached;
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(key);
+      if (raw == null) return null;
+      final parts = raw.split(':');
+      final d = parts.length == 2 ? int.tryParse(parts[0]) : null;
+      final r = parts.length == 2 ? int.tryParse(parts[1]) : null;
+      if (d == null || r == null) {
+        // Never silently: an unreadable watermark is the tick flashing grey
+        // again, which is the whole defect this class closes.
+        debugPrint('[receipts] unreadable stored receipt for $key: "$raw"');
+        return null;
+      }
+      final stored = ChatReceipt(deliveredSeq: d, readSeq: r);
+      _cache[key] = stored;
+      return stored;
+    } catch (e) {
+      debugPrint('[receipts] receipt memory read failed for $key: $e');
+      return null;
+    }
+  }
+
+  /// Record [r], keeping whichever seq is higher. A no-op when nothing rises,
+  /// so the callers may hand it every observation without costing a disk write
+  /// per realtime event.
+  static void remember(String key, ChatReceipt r) {
+    final prev = _cache[key];
+    if (prev != null &&
+        r.deliveredSeq <= prev.deliveredSeq &&
+        r.readSeq <= prev.readSeq) {
+      return;
+    }
+    final merged = prev == null
+        ? r
+        : ChatReceipt(
+            deliveredSeq: r.deliveredSeq > prev.deliveredSeq
+                ? r.deliveredSeq
+                : prev.deliveredSeq,
+            readSeq: r.readSeq > prev.readSeq ? r.readSeq : prev.readSeq,
+          );
+    _cache[key] = merged;
+    unawaited(_persist(key, merged));
+  }
+
+  static Future<void> _persist(String key, ChatReceipt r) async {
+    try {
+      await (await SharedPreferences.getInstance())
+          .setString(key, '${r.deliveredSeq}:${r.readSeq}');
+    } catch (e) {
+      // The in-memory copy still covers a tab change, which is the common case;
+      // only a cold start loses the head start. Worth knowing, never fatal.
+      debugPrint('[receipts] receipt memory write failed for $key: $e');
+    }
+  }
+}
+
 /// Read-receipt state for a message, plus the two states a send passes through
 /// before there is a row for anyone to receipt.
+///
+/// Three rungs, exactly as WhatsApp draws them, plus two that are not rungs:
+///   sending   — still on this phone (clock icon, distinct from any tick)
+///   failed    — never reached the server (ember icon + "tap to retry")
+///   sent      — the SERVER has it, their phone does not      ONE GREY
+///   delivered — their PHONE has it, app open or closed       TWO GREY
+///   seen      — they opened the chat and saw it              TWO GREEN
 enum _MsgStatus { sending, failed, sent, delivered, seen }
 
 class _StatusTick extends StatelessWidget {

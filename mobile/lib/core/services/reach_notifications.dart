@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
+import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/features/disguise/disguise_notification.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -350,6 +351,17 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       type != 'care' &&
       type != 'call' &&
       type != 'message' &&
+      // The DELIVERY WAKE, and the reason it is not called 'message'. The
+      // trigger sends `msg_sync`, a string no shipped build knows, so build 41
+      // and older fall out of this very list and return — which is deliberate:
+      // reaching the 'message' branch below would post a BANNER on every
+      // handset in the field, and the owner does not want message
+      // notifications. A name nothing recognises is what let the server half
+      // ship before the client half without notifying anybody.
+      //
+      // Here it must be recognised, and it must stay silent: it exists only to
+      // say "this handset has it".
+      type != 'msg_sync' &&
       type != 'memory' &&
       type != 'ritual') {
     return;
@@ -397,13 +409,33 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
+  if (type == 'msg_sync') {
+    // The delivery wake, and it draws NOTHING. No channel, no notification, no
+    // sound, no badge — the recipient is never told anything arrived. It exists
+    // for one purpose: this handset now HAS the message, so say so while the
+    // app is closed and the recipient does nothing at all. That ack is what
+    // turns the sender's single grey tick into two.
+    //
+    // Awaited rather than fire-and-forget: the isolate is torn down the moment
+    // this returns, and an unawaited request dies with it.
+    await BackgroundReceiptAck.onMessagePush(message.data);
+    return;
+  }
+
   if (type == 'message') {
+    // The whole reason a message push exists: this handset now HAS the message,
+    // so say so, with the app closed and the recipient doing nothing. Started
+    // before the notification so a failure there cannot swallow it, awaited
+    // after so the isolate is not torn down with the request in flight.
+    // Delivered only — nobody has read anything; opening the chat does that.
+    final ack = BackgroundReceiptAck.onMessagePush(message.data);
     await androidPlugin?.createNotificationChannel(buildMsgChannel());
     await showMessageNotification(
       plugin: plugin,
       messageId: (message.data['message_id'] as String?) ?? '',
       coupleId: coupleId ?? '',
     );
+    await ack;
     return;
   }
 
