@@ -90,6 +90,25 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
             if (mounted) ref.read(roomWarmthProvider.notifier).state++;
           },
         )
+        // Leaving and arriving, on the same rail as typing — so the avatar
+        // moves in ~100ms instead of waiting on a database write and a
+        // postgres_changes hop, which is what made it linger. The DB write
+        // still happens and is still the source of truth; this only stops the
+        // screen waiting for it.
+        .onBroadcast(
+          event: 'live',
+          callback: (payload) {
+            if (payload['from'] == myUid) return; // our own echo
+            final online = payload['online'];
+            final atRaw = payload['at'];
+            if (online is! bool || atRaw is! String) return;
+            final at = DateTime.tryParse(atRaw);
+            // The sender's clock, not ours: it orders the sender's own events,
+            // which is all that is needed to reject a reordered broadcast.
+            if (at == null) return;
+            PresenceService.applyLiveHint(online: online, at: at.toUtc());
+          },
+        )
         .subscribe();
     _channel = ch;
   }
@@ -105,6 +124,31 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
         payload: {'from': myUid, 'screen': screen},
       );
     } catch (_) {}
+  }
+
+  /// Tell the partner we arrived or left, immediately.
+  ///
+  /// Sent BESIDE the database write, never instead of it — if the socket is
+  /// down this simply does nothing and the existing postgres_changes path still
+  /// carries the change, a little slower. Failures are logged rather than
+  /// swallowed: a broadcast that never leaves the device looks exactly like a
+  /// partner who never moved.
+  void announceLive({required bool online}) {
+    final myUid = ref.read(currentProfileProvider)?.id;
+    final ch = _channel;
+    if (ch == null || myUid == null) return;
+    try {
+      ch.sendBroadcastMessage(
+        event: 'live',
+        payload: {
+          'from': myUid,
+          'online': online,
+          'at': DateTime.now().toUtc().toIso8601String(),
+        },
+      );
+    } catch (e) {
+      debugPrint('[presence] live broadcast failed (online=$online): $e');
+    }
   }
 
   /// Warm the room: a bloom that lands on BOTH screens at once.

@@ -22,6 +22,7 @@ import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart' show partnerScreenProvider;
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/time/tz_helper.dart';
@@ -456,11 +457,24 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void _goOffline(String coupleId, {required bool dying}) {
     _offlineTimer?.cancel();
     if (MilesApp.systemOverlayActive || PipMode.active.value) return;
+    // Announced with NO settle, deliberately. The settle below guards the
+    // durable write against a momentary pause; the broadcast does not need it,
+    // because if this turns out to be a blink the resume path announces `true`
+    // again within a few hundred milliseconds and the hint's timestamp ordering
+    // sorts it out. A brief flicker is a better trade than a second of watching
+    // somebody who has already gone.
+    ref.read(partnerScreenProvider.notifier).announceLive(online: false);
     if (dying) {
       unawaited(PresenceService.setOnline(coupleId, online: false));
       return;
     }
-    _offlineTimer = Timer(const Duration(milliseconds: 1500), () {
+    // 500ms, down from 1500. The settle exists so a momentary pause does not
+    // blink the partner offline, but the two causes of a momentary pause are
+    // already excluded above — a system overlay we opened, and PiP — so the
+    // long wait was protecting against a case the guards had taken. It cost the
+    // partner over a second of watching an avatar that had already left, and
+    // the re-check below still cancels a false positive.
+    _offlineTimer = Timer(const Duration(milliseconds: 500), () {
       if (WidgetsBinding.instance.lifecycleState ==
           AppLifecycleState.resumed) {
         return;
@@ -589,7 +603,13 @@ class _MilesAppState extends ConsumerState<MilesApp>
     PresenceService.humanPresent = present;
     if (!present) return;
     final c = ref.read(currentCoupleProvider);
-    if (c != null) unawaited(PresenceService.setOnline(c.id, online: true));
+    if (c == null) return;
+    // The socket first — it lands on her phone in ~100ms. The write below is
+    // the durable record and takes a database round trip plus a
+    // postgres_changes hop to become visible, which is the second-and-a-bit
+    // that made arriving feel slow.
+    ref.read(partnerScreenProvider.notifier).announceLive(online: true);
+    unawaited(PresenceService.setOnline(c.id, online: true));
   }
 
   void _dropPlaintextBehindCover() {

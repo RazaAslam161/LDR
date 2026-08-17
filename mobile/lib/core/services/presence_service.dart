@@ -39,6 +39,37 @@ class Presence {
     this.chatLastRead,
   }) : isOnlineFlag = isOnline;
 
+  /// This row with only its LIVENESS changed — everything else carried over.
+  ///
+  /// Deliberately not a general copyWith. The broadcast hint that calls this
+  /// knows two things and nothing else; a full copyWith would invite a caller
+  /// to blank the screen, mood or location from a payload that never carried
+  /// them, a moment before the database says otherwise.
+  Presence withLiveness({bool? isOnline, DateTime? appLastActiveAt}) => Presence(
+        userId: userId,
+        isOnline: isOnline ?? isOnlineFlag,
+        lastSeen: lastSeen,
+        updatedAt: updatedAt,
+        appLastActiveAt: appLastActiveAt ?? this.appLastActiveAt,
+        isTyping: isTyping,
+        typingInChat: typingInChat,
+        currentMood: currentMood,
+        moodColor: moodColor,
+        locationLabel: locationLabel,
+        locationSharingMode: locationSharingMode,
+        latitude: latitude,
+        longitude: longitude,
+        locationAccuracy: locationAccuracy,
+        locationUpdatedAt: locationUpdatedAt,
+        currentActivity: currentActivity,
+        currentScreen: currentScreen,
+        bodyPhotoPath: bodyPhotoPath,
+        avatarEmoji: avatarEmoji,
+        checkinPhotoUrl: checkinPhotoUrl,
+        checkinPhotoAt: checkinPhotoAt,
+        chatLastRead: chatLastRead,
+      );
+
   factory Presence.fromJson(Map<String, dynamic> j) => Presence(
         userId: JsonUtils.parseString(j['user_id']),
         isOnline: JsonUtils.parseBool(j['is_online']),
@@ -320,6 +351,29 @@ class PresenceService {
   /// it invents evidence of being ignored.
   static bool humanPresent = false;
 
+  /// The partner's online/offline as it arrives over the BROADCAST rail, ahead
+  /// of the database.
+  ///
+  /// Presence used to be visible only after a Postgres write and a
+  /// postgres_changes hop — ~750ms to 1.2s to notice somebody left, which reads
+  /// as the avatar lingering. The socket already carries typing and read
+  /// receipts in ~100ms on `screen_presence:<coupleId>`; this puts leaving and
+  /// arriving on the same rail. The database write is untouched and remains the
+  /// durable record for anyone who was not connected when it happened.
+  ///
+  /// Carries the sender's clock so a REORDERED broadcast cannot win: broadcasts
+  /// are best-effort and unordered, and a stale "online" arriving after a fresh
+  /// "offline" would resurrect an avatar that had already gone.
+  static final ValueNotifier<({bool online, DateTime at})?> liveHint =
+      ValueNotifier(null);
+
+  /// Applied from the broadcast handler. Older-or-equal hints are dropped.
+  static void applyLiveHint({required bool online, required DateTime at}) {
+    final prev = liveHint.value;
+    if (prev != null && !at.isAfter(prev.at)) return;
+    liveHint.value = (online: online, at: at);
+  }
+
   static Future<void> setOnline(String coupleId, {required bool online}) {
     // Claiming presence requires a person. Going OFFLINE is always allowed —
     // it is the honest direction, and a goodbye written as the app dies must
@@ -579,6 +633,26 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
       }
     }, fireImmediately: true,);
     realtimeResumed.addListener(_refetchOnResume); // read the gap on reconnect
+    PresenceService.liveHint.addListener(_onLiveHint);
+  }
+
+  /// The socket said the partner arrived or left. Show it now.
+  ///
+  /// Only the liveness fields move — a hint carries no screen, mood or
+  /// location, and inventing those from it would blank real values a moment
+  /// before the database confirms them. The postgres_changes event that follows
+  /// ~500ms later carries the whole row and reconciles.
+  void _onLiveHint() {
+    final hint = PresenceService.liveHint.value;
+    final cur = state;
+    if (hint == null || cur == null) return;
+    _apply(cur.withLiveness(
+      isOnline: hint.online,
+      // isTrulyOnline reads app_last_active_at against the 45s window, so an
+      // arrival has to move that clock or the avatar stays dark until the
+      // database catches up — which is the latency this exists to remove.
+      appLastActiveAt: hint.online ? hint.at : null,
+    ),);
   }
 
   final Ref ref;
@@ -674,10 +748,39 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
                     SupabaseService.currentUserId,
                 'has_app_active': activeAt != null,
               },);
-          // A single move can produce several writes in a row — leaving the
-          // chat clears typing and stamps the watermark, arriving somewhere
-          // sets the screen — and each one used to trigger a full SELECT here.
-          // Only the newest value matters, so coalesce the burst.
+          // APPLY WHAT THE EVENT ALREADY CARRIES, IMMEDIATELY.
+          //
+          // The row is in the payload. This used to throw it away and schedule
+          // a debounced SELECT, so every presence change — going offline,
+          // coming back, entering the chat — cost 800ms of timer plus a network
+          // round trip before anything moved on screen. Both directions felt
+          // laggy for the same reason, and no amount of speeding up the WRITER
+          // could fix it, because the delay was entirely on the reader.
+          //
+          // Guarded on user_id: this channel carries BOTH rows in the couple,
+          // and applying our own row as the partner's would show us our own
+          // presence — which is why the refetch below asks for the partner by
+          // id rather than trusting the event.
+          final rowUser = payload.newRecord['user_id'];
+          final me = SupabaseService.currentUserId;
+          if (rowUser is String && rowUser.isNotEmpty && rowUser != me) {
+            try {
+              final live = Presence.fromJson(
+                Map<String, dynamic>.from(payload.newRecord),
+              );
+              if (mounted) _apply(live);
+            } catch (e) {
+              // A partial payload is not a reason to drop the update — the
+              // reconcile below still runs and is authoritative.
+              debugPrint('[presence] realtime row unparsable: $e');
+            }
+          }
+
+          // Reconcile. A single move can produce several writes in a row —
+          // leaving the chat clears typing and stamps the watermark, arriving
+          // somewhere sets the screen — and this collapses the burst into one
+          // SELECT. It is now a CORRECTION rather than the thing the UI waits
+          // on, so the delay costs nothing the user can see.
           _refetchDebounce?.cancel();
           _refetchDebounce =
               Timer(const Duration(milliseconds: 800), () async {
