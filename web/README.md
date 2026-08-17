@@ -46,8 +46,9 @@ reasoning is here rather than beside the config.
 
 ## Outstanding
 
-`csae.html` still carries one `[PLACEHOLDER]`: the Pakistani national
-law-enforcement unit that receives CSAM reports, and the channel it accepts them
-on. NCMEC's CyberTipline is already named as the international route, so the
-page works without it — but Play expects the local authority named, and guessing
-the wrong agency in a child-safety policy is worse than an honest gap.
+Nothing. The last `[PLACEHOLDER]` in `csae.html` was filled 2026-08-17: the
+National Cyber Crime Investigation Agency (NCCIA — absorbed the FIA Cybercrime
+Wing in 2025), complaint portal complaint.nccia.gov.pk, helpline 1799
+(sources: nccia.gov.pk; thenews.pk/print/1402642 — Senate told NCCIA received
+138k+ CSAM reports; nr3c.gov.pk now redirects to NCCIA). The live site serves
+the old text until the next Vercel deploy.

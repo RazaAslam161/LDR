@@ -3962,3 +3962,198 @@ the handler's opening allow-list or it will keep returning early.
 `notifySecret()` returns `string | null | undefined` against a declared
 `Promise<string | null>`; `deno check` fails on it. Pre-existing, outside this
 change.
+
+## §41 — Full pre-market audit before the Play console purchase (2026-08-17)
+
+**What this was:** read-only audit/QA of everything — app flaws, broken systems,
+missing table-stakes, Play readiness — run as 15 agents (7 auditors, 8
+adversarial verifiers) against the tree AND live production. **No code, config,
+or DB changes were made.** 57 findings; every blocker/high that was verified
+survived verification (0 refuted).
+
+**Gates (run 2026-08-17):** `flutter analyze` — 0 errors, 0 warnings, 499 infos.
+`flutter test` — 823 passed, 1 "failure" = loading
+`test/unit/core/audit_vault_key_probe_test.dart`, a file that exists in NO
+commit and is NOT on disk — a concurrent session's scratch file deleted
+mid-run, not a real red.
+
+**CORRECTIONS to earlier sections (BRAIN was wrong, code is right):**
+- §40's "exact next step" is DONE: the msg_sync client half shipped in commit
+  20cf774 (reach_notifications.dart:364,412 allow-list + silent ack branch,
+  fcm_service.dart:266, chat_receipts.dart ackDelivered + delivery_ack_test).
+  Do not rebuild it.
+- §30/§31 "no keystore": android/key.properties + miles-upload.jks exist now
+  (2026-08-17, gitignored, never committed).
+- chat_receipts.dart:414 comment "edge fn does not send seq" — it does
+  (reach-notify/index.ts:315).
+
+**Blockers (all adversarially confirmed on live prod / tree):**
+1. **"Delete for everyone" / "Clear chat" never delete media; the 30-day
+   dissolved-couple purge is a time bomb.** All three functions
+   (delete_message_for_everyone, clear_conversation_everyone,
+   prune_dissolved_couples) hit storage.protect_delete()'s 42501 — proven live
+   with `delete from storage.objects where false;` → 42501 even on zero rows.
+   The two RPCs swallow it (`exception when others then null` — permanent
+   silent no-op); the purge has no handler, so the FIRST dissolved couple past
+   30 days aborts every nightly run forever (currently latent: 0 dissolved
+   couples). Fix = route through the storage_reap queue (20260601007500
+   pattern; drain-storage-reap cron already succeeds hourly).
+2. **The play flavor has never been built.** No .aab anywhere; merged_manifest
+   has only sideloadRelease; R8/shrink are play-only (build.gradle.kts:190-198)
+   so R8 has run zero times; proguard keep rules for WebRTC/ML Kit are
+   unexercised. Keystore blocker is cleared; the build+device pass is not.
+3. **csae.html ships a literal "[PLACEHOLDER: name the specific national
+   law-enforcement unit…]"** — live at miles-legal.vercel.app/csae.html:285,
+   the URL destined for the Console child-safety declaration. Owner input
+   needed (e.g. FIA Cybercrime Wing).
+4. **Prod is on the Supabase FREE plan** (org fpmfuptznczuuksqybnx →
+   {"plan":"free"}). Auto-pause after ~7 idle days withdraws DNS (this project
+   paused once already, 2026-08-06); 90-day restore window; pg_cron does NOT
+   count as activity per Supabase docs. Pro upgrade is a launch precondition —
+   payment, owner only.
+5. **Free-tier ceilings are couple-scale:** 70.7 MB storage across 97 objects
+   for ONE media-active couple vs 1 GB cap; 5 GB/mo egress; 500k/mo edge
+   invocations with reach-notify firing per message.
+6. **The Play channel has no pipeline:** release.sh is sideload-only (no
+   --play mode); none of its gates (analyze/test, version lockstep, stale-Dart
+   stamp, post-bump cache purge) cover `flutter build appbundle --flavor play`
+   — the stale-snapshot class that shipped six bad sideload releases has zero
+   guards on the channel where a fix costs days of review.
+
+**High (confirmed or evidence-strong, unrefuted):** escrow coverage ~50% on the
+only live couple (signup-with-email-confirmation structurally never captures
+the password; one-shot EscrowPrompt; partner-rewrap ceremony is the surviving
+second door — so high, not blocker); reach-notify ignores the recipient-lookup
+error (silent missed calls/reaches, index.ts:275-281); closer_screen.dart:207
+still overclaims blanket E2EE (own migration 20260601008000 calls it false);
+covers: "visible way out" (build.gradle.kts contract item 3) unimplemented on
+all nine covers, AND disguise_picker_screen.dart:55 shows the News unlock
+gesture for all nine covers (8/9 get wrong instructions = lockout); cycle/BPM
+= Health declaration mandatory + possible org-account requirement (verify in
+Console BEFORE paying the $25); no store listing assets exist; airplane-mode
+cold start routes existing users into the NEW-USER onboarding form
+(session_provider.dart:261 + router.dart:107 — filling it overwrites their real
+profile); min_build block screen is a dead end on play (UpdateService.available
+permanently false, no store link) and min_build is channel-blind (one row gates
+both channels); auth email delivery depends on built-in SMTP (~2-4/hr dev
+cap — custom SMTP unverified, dashboard-only); prod migration ledger (170) vs
+repo (111) drifted bidirectionally; no git remote, no CI, keystore exists only
+on this one disk; sideload→Play cert change forces uninstall → wipes secure
+storage → escrow/rewrap on real hardware never tested (runbook phase 3).
+
+**Medium/low worth remembering:** video_init_failed diagnostics go through
+Diag.record which is compile-time off (client_errors can never receive them);
+notify_call still ignores push_muted (call_controller.dart:376 comment claims
+otherwise — false); escrow v1 kdf still written though min_build 42 ≥ 28 gate
+passed long ago; `if (uid == null) return;` in every ChatRepository send = the
+queue records success and deletes the pending item (silent loss on auth race);
+touch-map body-photo upload failure = silent null; keyboard-GIF path doubly
+silent; gallery batch upload is in-memory only (process death drops the tail —
+chat_send_queue.dart:100 documents why that's the ordinary case here);
+partner-key changes have no TOFU pin/alert (server can substitute keys);
+zero-nonce/zero-MAC legacy rows render as authentic forever; HIBP
+leaked-password protection off (dashboard toggle); apk_url + MILES_APK_URL on
+rate-limited r2.dev; versionCode dual-sourced with no test asserting lockstep;
+release.sh stale-gate greps UI copy ('Update available') and only libapp.so[0]
+of three ABIs; no email change; no sign-out-everywhere; no data export;
+ErrorReporter loses startup/offline rows; ToS gate has no sign-out;
+cron.job_run_details unbounded; tos_acceptances RLS per-row auth.uid();
+app-lock PIN = constant-salt SHA-256 in SharedPreferences.
+
+**Clean (verified, so don't re-audit):** all 65 public tables RLS-enabled, no
+ERROR-level advisors; verify_jwt=false trio each enforces its own auth (probed
+live → 403); no secrets in client code or git (anon JWT via uncommitted .env);
+account deletion meets Play both ways (in-app + live web+OTP page); password
+reset, rewrap ceremony, unpair, report flow, 18+ DOB gate, terms gate all
+exist and are solid; targetSdk 36 meets the Aug 31, 2026 bar; v1+v2+v3
+signing; sideload updater properly gated off the play flavor; push_failures 0,
+cron 100% success, net._http_response all 200.
+
+**Exact next step:** owner decisions first — (a) Supabase Pro upgrade, (b)
+csae.html placeholder text, (c) Health-apps org-account check in Console
+before paying for it. Then in-repo, in order: fix the three storage-delete
+functions via storage_reap (staging first, red→green); build the play AAB +
+full device pass; the covers unlock-instruction fix + visible-way-out
+decision; the offline-cold-start → onboarding-form overwrite; play block
+screen store link + min_build_play column. Nothing from this audit has been
+fixed yet — every item above is open unless marked otherwise.
+
+## §42 — Three audit blockers fixed: deletion is real, the play AAB exists, the play path has gates (2026-08-17)
+
+**Scope:** §41's my-side blockers (1, 2, 6) + the CSAE draft (3). Owner items
+untouched (Supabase Pro, account-type decision). Nothing committed.
+
+**Blocker 1 — storage deletes go through the reap queue. FIXED on staging AND
+production.** Two migrations, both in repo and both prod-applied:
+- `20260817120000_storage_deletes_queue_not_orphan.sql` (prod ledger
+  `storage_deletes_queue_not_orphan`): rewrites delete_message_for_everyone,
+  clear_conversation_everyone, prune_dissolved_couples AND **clear_body_photo**
+  — a fourth class member §41 missed, found by scanning pg_proc for
+  `delete from storage.objects` — to insert into storage_reap (007500
+  pattern). Silent `exception when others then null` blocks REMOVED; RPC
+  signatures unchanged, ACLs preserved by create-or-replace.
+- `20260817130000_reap_covers_thumbnails.sql` (prod ledger
+  `reap_covers_thumbnails`): skeptic caught a HIGH defect in the first cut —
+  chat images/videos carry sibling thumbs at `<couple>/thumb/<name>` (same
+  bucket), which the path-column queue missed: the original would reap and the
+  thumb orphan forever (clear_conversation deletes the message rows in the
+  same txn, so the thumb name would survive in NO row). Fixed via
+  regexp_replace deriving the thumb name; also dropped the dead message-join
+  insert from prune (chat paths are couple-prefixed, prefix sweep covers all).
+- Evidence, all first-hand: prod RED `flagged=t object_rows_after=1
+  reap_rows=0` (silent no-op live) and prune RED `42501 ... at prune_dissolved_couples line 12`
+  (the bomb, reproduced); staging+prod GREEN after both migrations:
+  `img_plus_thumb=2of2 msgs_after_clear=0 all_media_reaped=4of4
+  couple_after_prune=0 prune_reaped=2of2`. All probes rolled back; residue
+  check: reap_rows=0, probe_users=0, probe_objects=0.
+- Rollback: verbatim prior bodies in the 120000 file's header; 130000 rolls
+  back to 120000's bodies. Both idempotent on re-run.
+
+**Blocker 2 — the play AAB exists.** First build ever, exit 0:
+`build/app/outputs/bundle/playRelease/app-play-release.aab`, 167,235,335 bytes
+(159.5 MB), SHA-256
+`982508a543ac0515eb5d4283102ec85d2f156466afddf2ca0d663f2eb0553a8e`. R8 +
+shrinkResources + play manifest merge all ran (Gradle bundlePlayRelease
+737s). All THREE ABI `libapp.so` carry `miles-build-43` — no stale snapshot.
+**Still open: the device pass.** R8 keep-rule survival (WebRTC, ML Kit) is
+proven compiling, NOT proven running — install the AAB's universal APK on
+hardware and exercise calls/touch-map/FCM before any Console upload.
+
+**Blocker 6 — the play channel has a pipeline.**
+- `tool/release.sh --play`: shares gates (pub get/analyze/test), --bump +
+  cache purge, and the pubspec↔ReleaseGate lockstep with the sideload path;
+  builds the play AAB with daemon-stop retry; stamp-checks EVERY libapp.so
+  (sideload checks only so[0]); refuses --upload/--verify/--publish (sideload
+  channel). No 'Update available' assertion — self-update is deliberately off
+  on play; the buildStamp is the freshness proof. Skeptic verified the
+  sideload path is byte-identical below the branch (git diff: one removed
+  line, the flag init). `bash -n` clean.
+- NEW `test/unit/hygiene/version_lockstep_test.dart`: pubspec `+N` must equal
+  `ReleaseGate.buildNumber`; now runs inside `flutter test` on every path.
+  Skeptic proved it non-vacuous by mutation (drift either direction fails;
+  CRLF safe).
+
+**Blocker 3 (owner to confirm) — CSAE placeholder drafted.** `web/csae.html`
+now names the **National Cyber Crime Investigation Agency (NCCIA)** (absorbed
+FIA Cybercrime Wing 2025), portal complaint.nccia.gov.pk, helpline 1799 —
+verified via 2026 press + nccia.gov.pk (site is Cloudflare-fronted, 403 to
+bots; content unverifiable mechanically — owner should eyeball the portal
+once). `web/README.md` "Outstanding" updated with sources. **Live page still
+serves the old text until the owner redeploys web/ to Vercel.**
+
+**Gates after the last code edit:** `flutter analyze` 0 errors / 0 warnings
+(502 infos); `flutter test` → `+824: All tests passed!` (823 + new lockstep
+test). Skeptic re-ran both independently, same result.
+
+**Found, not fixed (skeptic + this session):**
+- `supabase/migrations/20260817090000_delete_account_sweeps_personal_vault.sql:108,133` — delete_my_account still swallows reap-queue failures.
+- `supabase/functions/reap-storage/index.ts:123-127` — total failure returns `200 {ok:true,drained:0}`, indistinguishable from an empty queue.
+- `public.storage_reap` — no index on `queued_at`; the drain orders by it (limit 2000).
+- Staging has NO drain (no reap_storage_objects, no drain-storage-reap cron) and its `messages` lacks voice_path/video_path — the §41 staging-drift finding is worse than recorded; staging queues would grow unreaped.
+- Two untracked audit-agent docs at `docs/guides/MARKET-READINESS-AUDIT.md` + `market-readiness-findings.json` — not mine, left alone.
+
+**Exact next step:** owner — Supabase Pro upgrade, confirm CSAE text + Vercel
+redeploy, account-type check re: health apps. Then the device pass on the play
+AAB (bundletool universal APK → hardware → calls/touch-map/ML Kit/FCM), and
+after that the remaining §41 highs (covers lockout fix is the next my-side
+item).
