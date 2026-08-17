@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag_event.dart';
@@ -19,8 +21,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// throws on launch for every user looks exactly like a build nobody opened.
 ///
 /// Best-effort by construction. Nothing here is awaited on a user path, the
-/// send is wrapped, and a report that cannot be delivered is dropped rather
-/// than surfaced: a reporter that can break the app is worse than no reporter.
+/// send is wrapped, and a report that cannot be delivered waits on disk for a
+/// launch that can deliver it — see [flushBuffered]. A reporter that can break
+/// the app is worse than no reporter, and a reporter that loses the launch
+/// crash — the one report a broken build produces — is barely one at all.
 class ErrorReporter {
   ErrorReporter._();
 
@@ -33,6 +37,15 @@ class ErrorReporter {
   static const _maxPerRun = 5;
   static final _seen = <String>{};
   static var _sent = 0;
+
+  /// A fresh run: the dedup set, the cap, and both seams back to real.
+  @visibleForTesting
+  static void resetForTest() {
+    _seen.clear();
+    _sent = 0;
+    insertRow = _insertRow;
+    hasSession = _hasSession;
+  }
 
   /// The answer is in the top frames; below them is the framework stack, which
   /// is identical for every error of that kind.
@@ -54,7 +67,10 @@ class ErrorReporter {
     if (_sent >= _maxPerRun) return;
     final type = _cap(error.runtimeType.toString(), _maxTypeChars);
     final trace = _stack(stack);
-    if (!_seen.add('$type\n${trace.split('\n').first}')) return;
+    // kind is part of the key: chat-fetch and shared-media can both die
+    // inside Message.fromJson with the same type and first frame, and one
+    // must not suppress the other for the whole run.
+    if (!_seen.add('$kind\n$type\n${trace.split('\n').first}')) return;
     _sent++;
 
     final detail = _detail(error);
@@ -70,12 +86,138 @@ class ErrorReporter {
 
   static Future<void> _send(Map<String, Object?> row) async {
     try {
-      await SupabaseService.client.from('client_errors').insert(row);
-    } catch (_) {
+      await insertRow(row);
+    } catch (e) {
       // Signed out, offline, rate-limited, or thrown before SupabaseService
-      // finished initialising — all of which mean the row is lost and the app
-      // carries on. Reporting a reporting failure is a loop with nowhere to
-      // report to.
+      // finished initialising — and that last one is the report that matters
+      // most: a build that dies before init() produces exactly one row, and
+      // this catch is where it used to vanish. Parked on disk instead, for
+      // [flushBuffered] to deliver from a launch that gets further than this
+      // one did. The row already went through redaction when it was built —
+      // type, machine code, frames, never message text — so nothing waiting
+      // in the buffer is anything a report was not already allowed to carry.
+      debugPrint('[report] insert failed (${e.runtimeType}); buffering');
+      await _buffer(row);
+    }
+  }
+
+  /// The insert, injectable so the buffer tests can run without a database —
+  /// the seam `TermsGate.fetchAcceptedVersion` cut for the same reason:
+  /// `SupabaseService.client` is a `late final` and throws anywhere the app
+  /// has not booted.
+  @visibleForTesting
+  static Future<void> Function(Map<String, Object?> row) insertRow = _insertRow;
+
+  static Future<void> _insertRow(Map<String, Object?> row) =>
+      SupabaseService.client.from('client_errors').insert(row);
+
+  /// Whether an insert can land at all. client_errors is insert-only for
+  /// `authenticated`, so with no session every attempt is a guaranteed
+  /// failure — and each one would burn one of a buffered row's three tries on
+  /// a launch that could never have delivered it. A seam because the real
+  /// answer goes through `SupabaseService.client`.
+  @visibleForTesting
+  static bool Function() hasSession = _hasSession;
+
+  static bool _hasSession() =>
+      SupabaseService.client.auth.currentSession != null;
+
+  /// Twenty rows, oldest out first, three launches each to land.
+  ///
+  /// Twenty is four runs of the per-run cap — enough to hold a broken build's
+  /// whole story without ever being a disk-growth vector on a handset that
+  /// stays broken for weeks. Oldest dropped first because the newest rows
+  /// describe the build installed NOW, which is the one that can be fixed.
+  static const _bufferKey = 'client_errors_pending';
+  static const _bufferMax = 20;
+  static const _maxFlushTries = 3;
+
+  /// SharedPreferences rather than a file under the support directory: the
+  /// rows are small, bounded and already strings, [Diag] keeps its own flag
+  /// there, and the plugin's read-modify-write runs synchronously against its
+  /// in-memory cache — so two reports failing in the same run cannot lose
+  /// each other's rows the way two unsynchronised file writes can.
+  static Future<void> _buffer(Map<String, Object?> row) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pending = prefs.getStringList(_bufferKey) ?? <String>[];
+      pending.add(jsonEncode({'tries': 0, 'row': row}));
+      while (pending.length > _bufferMax) {
+        pending.removeAt(0);
+      }
+      await prefs.setStringList(_bufferKey, pending);
+    } catch (e) {
+      // The end of the line: a reporter that cannot reach its own disk has
+      // nowhere left to say so but a debug console.
+      debugPrint('[report] buffer write failed (${e.runtimeType})');
+    }
+  }
+
+  /// Deliver what previous runs could not. Called once per launch from
+  /// main(), after `SupabaseService.init` has assigned the client — getting
+  /// that far is what "a launch that works" means to the rows waiting here.
+  ///
+  /// Each attempt stamps the row's `tries`, and the third failure drops it: a
+  /// row the server refuses by policy — a check constraint, a column mismatch
+  /// — would otherwise ride the buffer forever, re-failing on every launch.
+  /// The list is taken OFF disk before the first insert and the survivors
+  /// written back after the last, so a crash mid-flush loses rows rather than
+  /// duplicating them, which for crash reports is the cheap direction. The
+  /// write-back re-reads the list instead of overwriting it, because a live
+  /// report failing DURING the flush has already buffered itself into it.
+  static Future<void> flushBuffered() async {
+    try {
+      if (!hasSession()) return;
+      final prefs = await SharedPreferences.getInstance();
+      final pending = prefs.getStringList(_bufferKey);
+      if (pending == null || pending.isEmpty) return;
+      await prefs.remove(_bufferKey);
+      final kept = <String>[];
+      var delivered = 0;
+      var dropped = 0;
+      for (final entry in pending) {
+        Map<String, Object?>? row;
+        var tries = 0;
+        try {
+          final decoded = jsonDecode(entry) as Map<String, dynamic>;
+          tries = (decoded['tries'] as num? ?? 0).toInt();
+          row = (decoded['row'] as Map<String, dynamic>?)
+              ?.cast<String, Object?>();
+        } catch (e) {
+          debugPrint('[report] undecodable buffered row (${e.runtimeType})');
+        }
+        if (row == null) {
+          dropped++;
+          continue;
+        }
+        try {
+          await insertRow(row);
+          delivered++;
+        } catch (e) {
+          if (tries + 1 >= _maxFlushTries) {
+            dropped++;
+            debugPrint('[report] dropped after $_maxFlushTries tries '
+                '(${e.runtimeType})');
+          } else {
+            kept.add(jsonEncode({'tries': tries + 1, 'row': row}));
+          }
+        }
+      }
+      if (kept.isNotEmpty) {
+        final current = prefs.getStringList(_bufferKey) ?? <String>[];
+        final merged = [...kept, ...current];
+        while (merged.length > _bufferMax) {
+          merged.removeAt(0);
+        }
+        await prefs.setStringList(_bufferKey, merged);
+      }
+      debugPrint('[report] flushed $delivered of ${pending.length}; '
+          'kept ${kept.length}, dropped $dropped');
+    } catch (e) {
+      // Never rethrows. This runs unawaited in main(), and an error escaping
+      // an unawaited future lands in platformDispatcher.onError — which calls
+      // report(), which is the loop this class must never close.
+      debugPrint('[report] flush failed (${e.runtimeType})');
     }
   }
 
@@ -96,6 +238,16 @@ class ErrorReporter {
         PostgrestException(:final code) => code,
         AuthException(:final code) => code,
         SocketException(osError: final os?) => 'errno.${os.errorCode}',
+        // The typed code only, never the message — a PlatformException from
+        // the video player can carry a signed URL in its message, and a
+        // StorageException names the object it refused.
+        PlatformException(:final code) => code,
+        StorageException(:final statusCode) => 'storage.$statusCode',
+        // Safe by construction: counts and a class name, assembled by the
+        // reporter itself. Without this case the whole point of a shortfall
+        // report — the N of M — died right here in the switch.
+        ParseShortfall(:final where, :final parsed, :final of, :final first) =>
+          '$where: $parsed/$of, first=$first',
         _ => null,
       };
 
@@ -218,4 +370,31 @@ class Diag {
     String? corr,
   }) =>
       ({String? outcome, Map<String, Object?> fields = const {}}) {};
+}
+
+/// A decode shortfall, made reportable without ever being able to leak.
+///
+/// [ErrorReporter] discards message text by design, so a shortfall phrased as
+/// a StateError reached the server as a bare 'StateError' — the count and the
+/// failing class died on the way. This type carries them in fields the
+/// `_detail` switch reads directly: two numbers and a class NAME, nothing a
+/// row's contents could ride in on.
+class ParseShortfall implements Exception {
+  ParseShortfall(
+    this.where, {
+    required this.parsed,
+    required this.of,
+    required this.first,
+  });
+
+  /// Which fetch fell short — a code location, never data.
+  final String where;
+  final int parsed;
+  final int of;
+
+  /// runtimeType name of the first failure, e.g. 'FormatException'.
+  final String first;
+
+  @override
+  String toString() => 'ParseShortfall';
 }

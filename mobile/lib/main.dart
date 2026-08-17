@@ -114,6 +114,12 @@ Future<void> main() async {
   // to the terms for a frame and back out again), and MilesApp.build reads
   // ReleaseGate.isBlocked, a plain static with no listenable.
   await Future.wait([TermsGate.load(), ReleaseGate.check()]);
+  // Crash reports parked by launches that could not deliver them — signed out,
+  // offline, or dead before SupabaseService.init assigned the client. Sent now
+  // because reaching this line is the thing those launches failed to do, and
+  // below the group above so the client exists to send with. Not awaited: the
+  // first frame owes nothing to old crashes, and it never throws.
+  unawaited(ErrorReporter.flushBuffered());
   // Not awaited: nothing before the first frame reads it, and the server-side
   // mute is the real enforcement — this copy only exists so the ring that
   // arrives over the realtime channel can be dropped too.
