@@ -13,8 +13,10 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/services/notification_channel_settings.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -634,12 +636,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             // ── Profile ──────────────────────────────────────────
             const _SectionHeader(label: 'Profile'),
             Center(
-              child: GestureDetector(
+              // With a photo set the child is an unlabeled image, so TalkBack
+              // walked straight past the only way to change it. One node named
+              // for what tapping does; the tap lives on the Semantics because
+              // excludeSemantics drops the detector's own.
+              child: Semantics(
+                button: true,
+                // enabled tracks the in-flight state: a button that announces
+                // itself and then ignores the double-tap reads as broken.
+                enabled: !_changingAvatar,
+                label: 'Change profile photo',
                 onTap: _changingAvatar ? null : _changeAvatar,
-                child: _AvatarEditor(
-                  url: _localAvatarUrl ?? profile?.avatarUrl,
-                  name: profile?.displayName ?? '',
-                  busy: _changingAvatar,
+                excludeSemantics: true,
+                child: GestureDetector(
+                  onTap: _changingAvatar ? null : _changeAvatar,
+                  child: _AvatarEditor(
+                    url: _localAvatarUrl ?? profile?.avatarUrl,
+                    name: profile?.displayName ?? '',
+                    busy: _changingAvatar,
+                  ),
                 ),
               ),
             ),
@@ -778,8 +793,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
             const SizedBox(height: 28),
 
-            // ── Reach alerts ─────────────────────────────────────
-            const _SectionHeader(label: 'Reach alerts'),
+            // ── Notifications ────────────────────────────────────
+            // Android already holds the real per-type controls — every alert
+            // below is a notification channel with its own OS page for sound,
+            // vibration and importance. Until now the only route there was
+            // Settings > Apps > (whatever the launcher calls this) >
+            // Notifications, which nobody finds. Each row deep-links straight
+            // to its channel's page. The titles here say what the channel is
+            // actually for; the page Android opens shows only the channel's
+            // neutral OS-visible name, so the disguise holds outside the app.
+            // notification_channel_rows_test.dart pins every channel id
+            // created in code to a row here, so a new channel cannot ship
+            // with controls nobody can reach.
+            const _SectionHeader(label: 'Notifications'),
             const ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text('Full-screen alerts',
@@ -791,6 +817,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: FsiPermission.openSettings,
             ),
+            for (final (String id, String title, String subtitle) in const [
+              (
+                kReachChannelId,
+                'Reach alerts',
+                'The buzz when your partner reaches for you',
+              ),
+              (
+                kCallChannelId,
+                'Incoming calls',
+                'How a call rings on this phone',
+              ),
+              (
+                kMsgChannelId,
+                'Messages',
+                'The alert for new chat messages',
+              ),
+              (
+                kCareChannelId,
+                'Reminders',
+                'Care reminders, rituals and memory proposals',
+              ),
+              (
+                kQuietChannelId,
+                'Silent delivery',
+                'Alerts that arrive without sound on quiet covers',
+              ),
+              (
+                kCallServiceChannelId,
+                'Ongoing calls',
+                'The quiet notice shown while a call is running',
+              ),
+              (
+                kTimerChannelId,
+                'Timer cover',
+                'The countdown finishing in the Timer cover',
+              ),
+            ])
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(title,
+                    style: const TextStyle(color: MilesColors.cream50),),
+                subtitle: Text(subtitle,
+                    style: const TextStyle(
+                        color: MilesColors.taupe, fontSize: 12,),),
+                trailing:
+                    const Icon(Icons.chevron_right, color: MilesColors.gilt),
+                onTap: () =>
+                    NotificationChannelSettings.open(context, channelId: id),
+              ),
 
             const SizedBox(height: 28),
 
@@ -1210,15 +1285,41 @@ class _AboutLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    // A bare GestureDetector around 12px text was ~15dp of target and reached
+    // TalkBack as plain words with no role — and two of these four front the
+    // Privacy Policy and Child Safety pages, the documents this app is least
+    // allowed to make unreachable. One node, announced as a link, named by its
+    // own text. The tap lives on the Semantics itself: excludeSemantics drops
+    // the detector's, and without it a screen reader is handed a link it
+    // cannot open. The box puts a 48dp floor under the finger — the glyphs
+    // keep their size but each link's ROW grows to 48dp tall, which is the
+    // point, not a side effect; opaque, because deferToChild hands the
+    // padding back.
+    return Semantics(
+      link: true,
+      label: label,
       onTap: onTap,
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: MilesColors.gilt,
-          fontSize: 12,
-          decoration: TextDecoration.underline,
-          decorationColor: MilesColors.gilt,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          child: Align(
+            // widthFactor pins the Align to its text: inside the Wrap the
+            // incoming width is the whole card, and an unfactored Align takes
+            // it all — four links, four full-width runs.
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: MilesColors.gilt,
+                fontSize: 12,
+                decoration: TextDecoration.underline,
+                decorationColor: MilesColors.gilt,
+              ),
+            ),
+          ),
         ),
       ),
     );

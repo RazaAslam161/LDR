@@ -339,6 +339,45 @@ class MainActivity : FlutterFragmentActivity() {
                     // pick which floor (min_build vs min_build_play) applies
                     // to this install.
                     "channel" -> result.success(BuildConfig.FLAVOR)
+                    // Android's own per-notification-type controls (sound,
+                    // vibration, importance) already exist as channel pages in
+                    // system settings; this deep-links straight to one instead
+                    // of asking the user to dig for it. Channels are created
+                    // lazily — the message channel by the first background
+                    // push, the timer channel by the Timer cover — and firing
+                    // the channel intent for an id the OS has never seen shows
+                    // a broken page on several OEMs, so an unknown or null id
+                    // falls back to the app's notification page, which lists
+                    // every channel that does exist.
+                    "notificationChannelSettings" -> {
+                        val channelId = call.argument<String>("id")
+                        try {
+                            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                val exists = channelId != null &&
+                                    getSystemService(NotificationManager::class.java)
+                                        .getNotificationChannel(channelId) != null
+                                if (exists) {
+                                    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                        .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+                                } else {
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                }
+                            } else {
+                                // Pre-O has no channels; the app-info page is
+                                // where its notification toggle lives.
+                                Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.parse("package:$packageName")
+                                )
+                            }
+                            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("settings_failed", e.message, null)
+                        }
+                    }
                     "canInstall" -> {
                         result.success(
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
