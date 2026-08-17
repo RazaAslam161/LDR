@@ -6,6 +6,7 @@
 #   bash tool/release.sh                  # build + hash only
 #   bash tool/release.sh --ship           # bump, build, upload, verify, publish
 #   bash tool/release.sh --upload --verify --publish   # ...without bumping
+#   bash tool/release.sh --play           # gates + play AAB for the Console
 #
 # Uploads with curl's built-in SigV4 against R2's S3 API and publishes through
 # PostgREST — no aws CLI, no rclone, no psql. Never put a key in this file;
@@ -13,7 +14,7 @@
 # docs/guides/SIDELOAD-UPDATE-RUNBOOK.md.
 set -euo pipefail
 
-bump=false; upload=false; verify=false; publish=false
+bump=false; upload=false; verify=false; publish=false; play=false
 for arg in "$@"; do
   case "$arg" in
     --ship) bump=true; upload=true; verify=true; publish=true ;;
@@ -21,9 +22,17 @@ for arg in "$@"; do
     --upload) upload=true ;;
     --verify) verify=true ;;
     --publish) publish=true ;;
+    --play) play=true ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
+
+# The play artifact goes to the Console by hand; R2 and app_release are the
+# sideload channel. Mixing them would upload an .aab no phone can install.
+if $play && { $upload || $verify || $publish; }; then
+  echo "--play cannot combine with --upload/--verify/--publish (sideload only)" >&2
+  exit 1
+fi
 
 cd "$(dirname "$0")/.."   # mobile/
 
@@ -204,6 +213,51 @@ fi
 echo "build $pubspec_build (version $version_name)"
 
 # ── 2. Build ────────────────────────────────────────────────────────────────
+if $play; then
+  # The Console artifact. Everything above this line — gates, bump + cache
+  # purge, lockstep — is shared with the sideload path on purpose: play is the
+  # channel where a stale snapshot costs days of review instead of minutes of
+  # re-upload, and six releases shipped stale before the sideload guard
+  # existed. No Miles.apk copy, no R2, no app_release row.
+  AAB="build/app/outputs/bundle/playRelease/app-play-release.aab"
+  echo "building play release AAB..."
+  if ! flutter build appbundle --release --flavor play; then
+    echo "build failed — stopping gradle daemons and retrying once" >&2
+    (cd android && ./gradlew --stop >/dev/null 2>&1) || true
+    flutter build appbundle --release --flavor play
+  fi
+  [ -f "$AAB" ] || { echo "expected an AAB at $AAB and found none" >&2; exit 1; }
+
+  sha="$(sha256sum "$AAB" | cut -d' ' -f1)"
+  bytes="$(wc -c < "$AAB" | tr -d ' ')"
+  echo "sha256 $sha"
+  echo "size   $(( bytes / 1048576 )) MB"
+
+  # The stale-snapshot proof, on every libapp.so in the bundle — one ABI can
+  # be stale alone. No updater-copy assertion here: self-update is
+  # deliberately absent from the play flavor, and the buildStamp is the part
+  # that proves the Dart inside is the Dart just compiled.
+  python -c "
+import sys, zipfile
+z = zipfile.ZipFile('$AAB')
+so = [n for n in z.namelist() if n.endswith('libapp.so')]
+if not so:
+    print('no libapp.so in the AAB'); sys.exit(1)
+stamp = b'miles-build-' + b'$pubspec_build'
+stale = [n for n in so if stamp not in z.read(n)]
+if stale:
+    print('STALE SNAPSHOT: no ' + stamp.decode() + ' in: ' + ', '.join(stale))
+    sys.exit(1)
+print('checked %d libapp.so, all stamped %s' % (len(so), stamp.decode()))
+" || {
+    echo "REFUSING THIS ARTIFACT — the Dart inside is not build $pubspec_build." >&2
+    echo "Run: flutter clean && bash tool/release.sh --play" >&2
+    exit 1
+  }
+  echo "play AAB is build $pubspec_build: $AAB"
+  exit 0
+fi
+
 # --flavor sideload is mandatory: a bare release build enters the play graph and
 # stops on the missing upload key, deliberately.
 echo "building sideload release APK..."
