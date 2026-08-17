@@ -162,6 +162,30 @@ if $bump; then
   sed -i "s/^\(version: *[0-9.]*\)+${current}$/\1+${next}/" pubspec.yaml
   sed -i "s/buildNumber = ${current};/buildNumber = ${next};/" "$GATE"
   echo "bumped $current -> $next"
+
+  # THROW AWAY EVERYTHING COMPILED BEFORE THIS BUMP.
+  #
+  # The gate above runs `flutter test`, which COMPILES the app — seeding
+  # .dart_tool with a kernel built from the pre-bump source, where buildStamp
+  # still reads the old number. The AOT build below then reuses that kernel, and
+  # Gradle stamps the NEW versionCode onto an APK carrying the OLD Dart. Build 43
+  # was produced exactly this way: pubspec 0.1.0+43, buildNumber = 43, and
+  # `miles-build-42` inside libapp.so.
+  #
+  # Gating before the bump is right and stays — a red tree must not spend a build
+  # number. What was missing is that the gate leaves a cache behind, and the bump
+  # invalidates the source that cache was built from. So the cache goes with it.
+  #
+  # Only flutter_build: package_config.json and the pub resolution above it
+  # survive, so this costs one AOT recompile rather than a `flutter clean` plus
+  # another `pub get`.
+  #
+  # The snapshot guard further down stays as the backstop. It caught this, and a
+  # release script that needs its own guard to notice a stale build is one edit
+  # away from shipping one — but a guard that never fires is also the one nobody
+  # maintains, so both remain.
+  rm -rf .dart_tool/flutter_build
+  echo "dropped the pre-bump build cache"
 fi
 
 pubspec_build="$(read_build)"
