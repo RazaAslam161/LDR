@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/media/media_normalize.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
@@ -159,21 +163,43 @@ class _VaultScreenState extends State<VaultScreen> {
     var failed = 0;
     for (final file in picked) {
       try {
-        final bytes = await file.readAsBytes();
+        var mime = _mimeOf(file.path, file.mimeType);
+        final isVideo = mime.startsWith('video/');
+
+        Uint8List bytes;
+        if (isVideo) {
+          bytes = await file.readAsBytes();
+        } else {
+          // The step this was missing. A modern Android camera writes HEIC, and
+          // the Dart `image` package cannot decode it — deriveImage returns
+          // null and the save throws before a byte is uploaded. toSendable
+          // converts through the PLATFORM codec, which does read it.
+          final ready = await MediaNormalize.toSendable(File(file.path));
+          if (ready == null) {
+            failed++;
+            ErrorReporter.report(
+              StateError('vault: undecodable ${MediaNormalize.extensionOf(file.path)}'),
+              StackTrace.current,
+              kind: 'vault',
+            );
+            continue;
+          }
+          bytes = await ready.readAsBytes();
+          if (!MediaNormalize.isSupported(file.path)) mime = 'image/jpeg';
+        }
+
         await VaultRepository.saveMedia(
           bytes: bytes,
-          mimeType: _mimeOf(file.path, file.mimeType),
+          mimeType: mime,
           label: file.name,
-          type: _mimeOf(file.path, file.mimeType).startsWith('video/')
-              ? 'saved_video'
-              : 'saved_photo',
+          type: isVideo ? 'saved_video' : 'saved_photo',
         );
-      } catch (e) {
-        // Counted and reported, never swallowed: a save that silently did
-        // nothing is the worst outcome for something the user believes is now
-        // kept safe.
+      } catch (e, st) {
+        // Reported to Diag, not just debugPrint: release builds compile
+        // debugPrint out, so the last version of this counted a failure the
+        // user could see and left nothing anyone could diagnose.
         failed++;
-        debugPrint('[vault] save failed: ${e.runtimeType}');
+        ErrorReporter.report(e, st, kind: 'vault');
       }
     }
     if (!mounted) return;
