@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,7 +19,24 @@ class AppLock {
   AppLock._();
 
   static const _enabledKey = 'app_lock_enabled';
-  static const _pinKey = 'app_lock_pin_hash';
+
+  /// Where the PIN hash used to live: SharedPreferences, sha256 over one
+  /// CONSTANT salt. allowBackup=false keeps that file off cloud backups, but
+  /// backups were never the exposure — the file is plain XML on the
+  /// filesystem, so anything that reads the app's files (root, a forensic
+  /// image of the partition) gets the hash, and 10,000 candidates against a
+  /// salt every install shares is a millisecond of work. Kept only so PINs
+  /// set before the move keep verifying; see [verifyPin] for the upgrade.
+  static const _legacyPinKey = 'app_lock_pin_hash';
+
+  /// Today's home: the platform keystore via `flutter_secure_storage`, same
+  /// idiom as CryptoCore's key material, holding [_encode]'s
+  /// `sha256:<saltB64>:<hashB64>` under a per-install random salt.
+  static const _pinKey = 'app_lock_pin_v2';
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
   static final _auth = LocalAuthentication();
 
   /// Whether the lock overlay should currently cover the app.
@@ -34,18 +53,99 @@ class AppLock {
   }
 
   // ── App-lock PIN (local, hashed) ──────────────────────────────────────────
-  static String _hash(String pin) =>
+  /// The pre-migration hash. Only [verifyPin]'s legacy branch may call this;
+  /// nothing writes it again.
+  static String _legacyHash(String pin) =>
       sha256.convert(utf8.encode('miles-applock::$pin')).toString();
 
-  static Future<bool> hasPin() async =>
-      (await SharedPreferences.getInstance()).getString(_pinKey) != null;
+  static final _rng = Random.secure();
 
-  static Future<void> setPin(String pin) async =>
-      (await SharedPreferences.getInstance()).setString(_pinKey, _hash(pin));
+  /// `sha256:<saltB64>:<hashB64>` under a fresh 16-byte random salt. The salt
+  /// buys no brute-force resistance for four digits — 10,000 candidates fall
+  /// instantly to anyone holding the value — it stops one precomputed table
+  /// covering every install, and stops two users with the same PIN sharing a
+  /// hash. Resistance comes from WHERE the value lives: the keystore-encrypted
+  /// store, not a prefs file any filesystem reader can lift.
+  static String _encode(String pin) {
+    final salt = List<int>.generate(16, (_) => _rng.nextInt(256));
+    final digest = sha256.convert([...salt, ...utf8.encode(pin)]);
+    return 'sha256:${base64Encode(salt)}:${base64Encode(digest.bytes)}';
+  }
 
+  static bool _matches(String stored, String pin) {
+    final parts = stored.split(':');
+    if (parts.length != 3 || parts[0] != 'sha256') {
+      // Only setPin writes this key, so an unreadable value is a defect worth
+      // naming, not a silent false.
+      debugPrint('AppLock: stored PIN value in unknown format');
+      return false;
+    }
+    final salt = base64Decode(parts[1]);
+    final digest = sha256.convert([...salt, ...utf8.encode(pin)]);
+    return base64Encode(digest.bytes) == parts[2];
+  }
+
+  /// True when a PIN exists in EITHER home. The legacy check is load-bearing:
+  /// the lock screen only offers the PIN pad when this is true, so reporting
+  /// false for a not-yet-migrated user would leave a failed biometric with no
+  /// way in at all.
+  static Future<bool> hasPin() async {
+    // The keystore can throw where prefs never could, and this is the answer
+    // the lock screen uses to decide whether to OFFER the pad — a throw here
+    // would leave a legacy-PIN user with a single dead Unlock button. Fall
+    // through to the legacy check instead; a dead keystore must not also
+    // silence the one record that a way in exists.
+    try {
+      if (await _storage.read(key: _pinKey) != null) return true;
+    } catch (e) {
+      debugPrint('[applock] secure read failed: ${e.runtimeType}');
+    }
+    return (await SharedPreferences.getInstance()).getString(_legacyPinKey) !=
+        null;
+  }
+
+  static Future<void> setPin(String pin) async {
+    await _storage.write(key: _pinKey, value: _encode(pin));
+    // Remove the legacy hash only AFTER the v2 write lands: this order means
+    // a process death between the two leaves both present, and verifyPin
+    // reads v2 first — the stale legacy copy is swept on the next verified
+    // unlock, and a keystore that later loses the v2 record still finds no
+    // retired hash to fall back to once this line has run.
+    await (await SharedPreferences.getInstance()).remove(_legacyPinKey);
+  }
+
+  /// Verify-then-upgrade. The new home is checked first; a PIN still in the
+  /// legacy prefs is verified against the old constant-salt hash and — only
+  /// on SUCCESS — rewritten in the new format and deleted from prefs. A wrong
+  /// PIN migrates nothing, so a typo can never move or corrupt the stored
+  /// secret, and no existing user is ever locked out by the format change.
   static Future<bool> verifyPin(String pin) async {
-    final stored = (await SharedPreferences.getInstance()).getString(_pinKey);
-    return stored != null && stored == _hash(pin);
+    // Same guard as hasPin, same reason: a throwing keystore must degrade to
+    // the legacy branch, not to a lockout.
+    String? stored;
+    try {
+      stored = await _storage.read(key: _pinKey);
+    } catch (e) {
+      debugPrint('[applock] secure read failed: ${e.runtimeType}');
+    }
+    if (stored != null) {
+      final ok = _matches(stored, pin);
+      if (ok) {
+        // A process death between setPin's two writes can leave the retired
+        // constant-salt hash sitting in prefs; sweep it whenever a verified
+        // unlock proves the new record is the live one.
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.containsKey(_legacyPinKey)) {
+          await prefs.remove(_legacyPinKey);
+        }
+      }
+      return ok;
+    }
+    final legacy =
+        (await SharedPreferences.getInstance()).getString(_legacyPinKey);
+    if (legacy == null || legacy != _legacyHash(pin)) return false;
+    await setPin(pin);
+    return true;
   }
 
   // ── Capability ────────────────────────────────────────────────────────────

@@ -1,3 +1,8 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:miles/main.dart' show MilesApp;
@@ -42,15 +47,25 @@ class MemoryPinGate {
     if (pin.length != _pinLength || !RegExp(r'^\d+$').hasMatch(pin)) {
       throw ArgumentError('PIN must be $_pinLength digits.');
     }
-    await _storage.write(key: _pinKey, value: _hash(pin));
+    await _storage.write(key: _pinKey, value: _encode(pin));
   }
 
   /// Returns true if [pin] matches the stored hash. If no PIN is set, returns
   /// false (caller should prompt to set one first).
+  ///
+  /// Verify-then-upgrade: a value the FNV-1a era wrote is verified with the
+  /// old arithmetic and — only on SUCCESS — rewritten as salted sha256 under
+  /// the same key, so no existing user is ever asked to reset. A wrong PIN
+  /// rewrites nothing.
   static Future<bool> verifyAppPin(String pin) async {
     final stored = await _storage.read(key: _pinKey);
     if (stored == null) return false;
-    return _hash(pin) == stored;
+    if (stored.startsWith('fnv1a:')) {
+      if (_legacyHash(pin) != stored) return false;
+      await _storage.write(key: _pinKey, value: _encode(pin));
+      return true;
+    }
+    return _matches(stored, pin);
   }
 
   /// Wipes the stored PIN (e.g. on sign-out). Kept separate from the crypto
@@ -86,16 +101,43 @@ class MemoryPinGate {
   // returned its result unchanged, behind a name promising it also handled the
   // PIN. Zero call sites — the gate calls authenticateBiometric directly.
 
-  /// Naive hash. PINs are short, so we don't pretend this is a password KDF —
-  /// we rely on `flutter_secure_storage`'s hardware-backed encryption to keep
-  /// the value safe at rest. The hash here is just so a casual DB / backup
-  /// inspection doesn't reveal the raw PIN.
-  static String _hash(String pin) {
+  /// The value the previous build stored: FNV-1a, 32 bits, no salt — one
+  /// precomputed table of 10,000 entries read every user's PIN at sight. Kept
+  /// only so [verifyAppPin] can recognise and upgrade an existing value;
+  /// nothing writes it again.
+  static String _legacyHash(String pin) {
     var h = 0x811c9dc5;
     for (final c in pin.codeUnits) {
       h ^= c;
       h = (h * 0x01000193) & 0xFFFFFFFF;
     }
     return 'fnv1a:$h';
+  }
+
+  static final _rng = Random.secure();
+
+  /// `sha256:<saltB64>:<hashB64>` under a fresh 16-byte random salt — the same
+  /// shape [AppLock] stores. PINs are short, so this still isn't a password
+  /// KDF: 10,000 candidates fall instantly to anyone holding the value, and
+  /// resistance at rest comes from `flutter_secure_storage`'s hardware-backed
+  /// encryption. The hash keeps the raw PIN off disk; the salt stops one
+  /// precomputed table (or one shared PIN) covering every install.
+  static String _encode(String pin) {
+    final salt = List<int>.generate(16, (_) => _rng.nextInt(256));
+    final digest = sha256.convert([...salt, ...utf8.encode(pin)]);
+    return 'sha256:${base64Encode(salt)}:${base64Encode(digest.bytes)}';
+  }
+
+  static bool _matches(String stored, String pin) {
+    final parts = stored.split(':');
+    if (parts.length != 3 || parts[0] != 'sha256') {
+      // Only setAppPin and the upgrade above write this key, so an unreadable
+      // value is a defect worth naming, not a silent false.
+      debugPrint('MemoryPinGate: stored PIN value in unknown format');
+      return false;
+    }
+    final salt = base64Decode(parts[1]);
+    final digest = sha256.convert([...salt, ...utf8.encode(pin)]);
+    return base64Encode(digest.bytes) == parts[2];
   }
 }

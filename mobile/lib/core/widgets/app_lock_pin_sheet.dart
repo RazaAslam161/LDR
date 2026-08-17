@@ -71,7 +71,22 @@ class _PinSheetState extends State<_PinSheet> {
       });
       return;
     }
-    await AppLock.setPin(pin);
+    // The write goes to the keystore now, which can refuse where prefs never
+    // did — and a sheet that closes as if it saved is a PIN the user believes
+    // in and the phone has never heard of.
+    try {
+      await AppLock.setPin(pin);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _message = "Couldn't save that PIN — try again";
+          _errorSignal++;
+          _padKey++;
+          _firstPin = null;
+        });
+      }
+      return;
+    }
     if (mounted) Navigator.pop(context, true);
   }
 
