@@ -181,6 +181,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
       setState(() => _sending = true);
       await widget.onFlingGif(f); // rises on both phones like a mood burst
     } catch (_) {
+      // Said out loud like every other picker here — this was the one attach
+      // path that failed without a word.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not send that GIF.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }

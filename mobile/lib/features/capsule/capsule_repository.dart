@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -141,15 +142,35 @@ class CapsuleRepository {
       'capsule_seal_summary',
       params: {'p_capsule_id': capsuleId},
     );
+    final rows = res as List? ?? const [];
     final out = <CapsuleItemType, int>{};
-    for (final row in (res as List? ?? const [])) {
+    var skipped = 0;
+    Object? firstError;
+    StackTrace? firstStack;
+    for (final row in rows) {
       try {
         final m = JsonUtils.asMap(row);
         out[_typeFrom(JsonUtils.parseString(m['item_type']))] =
             JsonUtils.parseInt(m['n']);
-      } catch (_) {
-        // Skip a malformed summary row rather than blanking the whole capsule.
+      } catch (e, st) {
+        // Skip a malformed summary row rather than blanking the whole capsule
+        // — but counted and reported below, never silently: a summary that
+        // decodes N of M rows understates what the capsule holds. The report
+        // carries the count and the error class only, no row contents.
+        skipped++;
+        firstError ??= e;
+        firstStack ??= st;
       }
+    }
+    if (skipped > 0) {
+      ErrorReporter.report(
+        ParseShortfall('capsule seal summary',
+            parsed: rows.length - skipped,
+            of: rows.length,
+            first: '${firstError.runtimeType}',),
+        firstStack,
+        kind: 'capsule',
+      );
     }
     return out;
   }

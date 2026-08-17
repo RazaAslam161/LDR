@@ -211,8 +211,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (cid == null) return;
     try {
       final url = await ChatRepository.uploadGif(cid, f);
-      if (url != null) _sendGifBurst(url);
-    } catch (_) {}
+      // Null is a real failure here, not a cancel: the upload landed but
+      // signing died (MediaUrls.sign swallows to null). Without the throw it
+      // took the success path with no burst and no word.
+      if (url == null) throw StateError('gif sign failed');
+      _sendGifBurst(url);
+    } catch (_) {
+      // The keyboard panel has already closed over the chat, so a fling that
+      // dies on upload looked exactly like one that sent.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not send that GIF.')),
+        );
+      }
+    }
   }
 
   /// Open the in-app GIPHY picker and SEND the chosen GIF into the chat as an
@@ -225,7 +237,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     try {
       final res =
           await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
-      if (res.statusCode != 200) return;
+      // A refusal surfaces exactly like a timeout — the catch below owns the
+      // snackbar, where a bare return here dropped the GIF without a word.
+      if (res.statusCode != 200) {
+        throw HttpException('GIF fetch returned ${res.statusCode}');
+      }
       final dir = await getTemporaryDirectory();
       final f =
           File('${dir.path}/gif_${DateTime.now().millisecondsSinceEpoch}.gif');

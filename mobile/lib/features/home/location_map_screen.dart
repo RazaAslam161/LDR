@@ -424,10 +424,21 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                             enabled: partnerPoint != null && myPoint != null,
                             onTap: () async {
                               final dist = _distanceText(partnerPoint, myPoint);
-                              await ChatRepository.sendText(
-                                widget.coupleId,
-                                "I'm $dist away, heading your way 💕",
-                              );
+                              try {
+                                await ChatRepository.sendText(
+                                  widget.coupleId,
+                                  "I'm $dist away, heading your way 💕",
+                                );
+                              } catch (_) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text(
+                                            "Couldn't send — try again.",),),
+                                  );
+                                }
+                                return;
+                              }
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(

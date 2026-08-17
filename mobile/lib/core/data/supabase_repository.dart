@@ -325,6 +325,26 @@ class SupabaseRepository {
     return outcome;
   }
 
+  /// Asks the server to move this account to [newEmail].
+  ///
+  /// Nothing has changed when this returns: Supabase's secure-email-change
+  /// default mails a confirmation link to BOTH mailboxes — the current address
+  /// and the new one — and the account only moves once both are opened. That
+  /// double confirmation is the point, not friction: whoever is holding an
+  /// unlocked phone cannot quietly re-home the account to an address they
+  /// control, because the mailbox they do not hold has to agree.
+  ///
+  /// E2EE is unaffected. Email is a sign-in name and nothing more in this app:
+  /// the couple key comes from the device seed and the escrow is sealed under
+  /// the password, neither derived from the address — so no re-wrap, no
+  /// re-publish and no ceremony follows a change.
+  static Future<void> changeEmail(String newEmail) async {
+    await _c.auth.updateUser(
+      UserAttributes(email: newEmail.trim()),
+      emailRedirectTo: authCallbackUrl,
+    );
+  }
+
   static Future<void> signInWithGoogle() async {
     // Native Google sign-in requires the google_sign_in package + config.
     // For v1 we ship email-only; Google lands in v1.1.
@@ -333,6 +353,24 @@ class SupabaseRepository {
 
   static Future<void> signOut() async {
     await _c.auth.signOut();
+  }
+
+  /// Revokes every session this account holds EXCEPT this device's.
+  ///
+  /// The scenario is a handset that is gone — lost, stolen, traded in, or an
+  /// old install nobody can reach — still signed in and still able to open
+  /// everything. [SignOutScope.others] is what keeps THIS session alive:
+  /// gotrue skips the local session removal entirely for that scope (it fires
+  /// no signedOut event here), so the device the user is holding stays signed
+  /// in while the server invalidates the rest.
+  static Future<void> signOutOtherDevices() async {
+    // gotrue swallows 401/403/404 from this endpoint and returns normally —
+    // an expired local JWT would revoke nothing while Settings toasts
+    // success. Refreshing first either yields a token the revoke accepts or
+    // throws, which the caller surfaces. In a lost-phone feature the one
+    // unacceptable outcome is a silent no-op.
+    await _c.auth.refreshSession();
+    await _c.auth.signOut(scope: SignOutScope.others);
   }
 
   // ─── Profile ─────────────────────────────────────────────────
@@ -568,7 +606,10 @@ class SupabaseRepository {
     String? statusMessage,
   }) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown like upsertProfile above, not returned: Settings awaits this and
+    // then toasts 'Updated', so a silent return told the user a write happened
+    // that never did. Same guard on setAvatarUrl and setGender below.
+    if (uid == null) throw StateError('Not signed in');
     final patch = <String, dynamic>{};
     if (displayName != null) patch['display_name'] = displayName;
     if (timezone != null) patch['timezone'] = timezone;
@@ -608,7 +649,8 @@ class SupabaseRepository {
   /// Sets the user's avatar URL (Issue 7 — profile photo).
   static Future<void> setAvatarUrl(String url) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned — the caller toasts success on a normal return.
+    if (uid == null) throw StateError('Not signed in');
     await _c.from('profiles').update({'avatar_url': url}).eq('id', uid);
   }
 
@@ -616,7 +658,8 @@ class SupabaseRepository {
   /// feature. Marks gender_set so the role-setup screen isn't shown again.
   static Future<void> setGender(String gender) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned — the caller toasts success on a normal return.
+    if (uid == null) throw StateError('Not signed in');
     await _c
         .from('profiles')
         .update({'gender': gender, 'gender_set': true}).eq('id', uid);

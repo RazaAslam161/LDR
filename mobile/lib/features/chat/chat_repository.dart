@@ -309,14 +309,8 @@ class ChatRepository {
         .gt('seq', afterSeq)
         .order('seq', ascending: true)
         .limit(500);
-    final out = <Message>[];
-    for (final row in (res as List)) {
-      try {
-        out.add(Message.fromJson(JsonUtils.asMap(row)));
-      } catch (_) {
-        // Skip a malformed row rather than aborting the whole catch-up.
-      }
-    }
+    // Skip a malformed row rather than aborting the whole catch-up.
+    final out = _parseRows(res as List, 'chat catch-up');
     await warmMedia(out);
     return out;
   }
@@ -339,15 +333,44 @@ class ChatRepository {
         .eq('couple_id', coupleId)
         .order('created_at', ascending: false)
         .limit(300);
+    // Skip a malformed row rather than blanking the whole conversation.
+    final out = _parseRows(res as List, 'chat fetch');
+    if (warm) await warmMedia(out);
+    return out;
+  }
+
+  /// Decode one fetched page, skipping any row whose decode throws.
+  ///
+  /// Counted and reported rather than silent: a conversation that parses N of
+  /// M rows is a finding to explain, never a state to render as though it were
+  /// complete — silently thinner history is indistinguishable from deletion.
+  /// The report carries the count and the first error's class only. Row
+  /// contents never go into diagnostics: this is an E2EE app, and a decode
+  /// error's text can hold whatever value refused to parse.
+  static List<Message> _parseRows(List<dynamic> rows, String where) {
     final out = <Message>[];
-    for (final row in (res as List)) {
+    var skipped = 0;
+    Object? firstError;
+    StackTrace? firstStack;
+    for (final row in rows) {
       try {
         out.add(Message.fromJson(JsonUtils.asMap(row)));
-      } catch (_) {
-        // Skip a malformed row rather than blanking the whole conversation.
+      } catch (e, st) {
+        skipped++;
+        firstError ??= e;
+        firstStack ??= st;
       }
     }
-    if (warm) await warmMedia(out);
+    if (skipped > 0) {
+      ErrorReporter.report(
+        ParseShortfall(where,
+            parsed: out.length,
+            of: rows.length,
+            first: '${firstError.runtimeType}',),
+        firstStack,
+        kind: 'chat-fetch',
+      );
+    }
     return out;
   }
 
@@ -366,7 +389,13 @@ class ChatRepository {
   static Future<void> sendText(String coupleId, String body,
       {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned. A bare return completes normally, and a normal
+    // completion is ChatSendQueue's signal that the send LANDED: it deletes
+    // the pending item and its persisted copy. So a send racing an auth loss
+    // was recorded as delivered while the message existed nowhere at all. A
+    // throw keeps the item in the queue as a retryable failure, which is what
+    // it is. Same guard on every send below.
+    if (uid == null) throw StateError('not signed in');
     final trimmed = body.trim();
     if (trimmed.isEmpty) return;
     final sw = Stopwatch()..start();
@@ -412,12 +441,13 @@ class ChatRepository {
 
   /// Uploads an image to couple_media/<coupleId>/<rand>.<ext> and inserts a
   /// message row of kind='image'. Returns the storage path (so callers can
-  /// broadcast the fast-path 'msg'), or null if there's no signed-in user or
-  /// the row this [id] names was already written by an earlier attempt.
+  /// broadcast the fast-path 'msg'), or null if the row this [id] names was
+  /// already written by an earlier attempt.
   static Future<String?> sendImage(String coupleId, File file,
       {String? replyToId, String? id, String? albumId,}) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return null;
+    // Thrown, not returned — a return reads as success to the queue (sendText).
+    if (uid == null) throw StateError('not signed in');
 
     final ext = _ext(file.path) ?? 'jpg';
     final path = '$coupleId/${_randomName('img', ext)}';
@@ -484,7 +514,8 @@ class ChatRepository {
   static Future<void> sendVideo(String coupleId, File file,
       {String? replyToId, String? id, String? albumId,}) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned — a return reads as success to the queue (sendText).
+    if (uid == null) throw StateError('not signed in');
 
     final ext = _ext(file.path) ?? 'mp4';
     final path = '$coupleId/${_randomName('vid', ext)}';
@@ -548,7 +579,8 @@ class ChatRepository {
   static Future<void> sendFile(String coupleId, File file, String name,
       {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned — a return reads as success to the queue (sendText).
+    if (uid == null) throw StateError('not signed in');
 
     final ext = _ext(name) ?? _ext(file.path) ?? 'bin';
     final path = '$coupleId/${_randomName('file', ext)}';
@@ -587,7 +619,9 @@ class ChatRepository {
   static Future<void> sendVoice(String coupleId, File file,
       {String? replyToId, String? id,}) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned — a return reads as sent to the input bar's retry
+    // snackbar too, and the recording is the only copy of the note (sendText).
+    if (uid == null) throw StateError('not signed in');
 
     final ext = _ext(file.path) ?? 'm4a';
     final path = '$coupleId/${_randomName('voice', ext)}';

@@ -1,4 +1,5 @@
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 
@@ -63,12 +64,31 @@ class SharedMediaRepository {
 
     final res = await q.order('seq', ascending: false).limit(pageSize);
     final out = <Message>[];
+    var skipped = 0;
+    Object? firstError;
+    StackTrace? firstStack;
     for (final row in res) {
       try {
         out.add(Message.fromJson(JsonUtils.asMap(row)));
-      } catch (_) {
-        // Skip a malformed row rather than emptying the whole shelf.
+      } catch (e, st) {
+        // Skip a malformed row rather than emptying the whole shelf — but
+        // counted and reported below, never silently: a shelf that decodes N
+        // of M rows reads as media having vanished. The report carries the
+        // count and the error class only, no row contents.
+        skipped++;
+        firstError ??= e;
+        firstStack ??= st;
       }
+    }
+    if (skipped > 0) {
+      ErrorReporter.report(
+        ParseShortfall('shared media page',
+            parsed: out.length,
+            of: res.length,
+            first: '${firstError.runtimeType}',),
+        firstStack,
+        kind: 'shared-media',
+      );
     }
     // One signing request for the page, not one per tile. Thirty tiles each
     // signing on their own is thirty round trips before the grid can paint.
