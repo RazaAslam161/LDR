@@ -5,9 +5,10 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/data/crypto_core.dart';
 
-/// The point of this change is a rollout that encrypts new data without
-/// breaking a single existing row. These prove both halves: real AEAD when a
-/// couple key exists, and legacy plaintext rows still readable regardless.
+/// Real AEAD when a couple key exists, and — since 2026-08-18 — NOTHING else:
+/// the zero-MAC plaintext shape that carried the rollout is refused on read
+/// and impossible on write, because a shape any database writer can mint and
+/// have rendered as the partner's is a forgery primitive, not compatibility.
 ///
 /// CryptoCore.deriveSharedKey needs the platform keystore, which is not
 /// available in a plain unit test, so the pure encode/decode contract is
@@ -16,28 +17,29 @@ import 'package:miles/core/data/crypto_core.dart';
 void main() {
   final aead = Xchacha20.poly1305Aead();
 
-  /// A legacy / plaintext-mode payload: bytes verbatim, zero nonce, zero MAC.
-  /// This is exactly what the old base64 pass-through and the new plaintext
-  /// fallback both write.
+  /// The retired plaintext-mode shape: bytes verbatim, zero nonce, zero MAC.
+  /// Nothing writes it any more and zero rows of it exist (scanned live
+  /// 2026-08-18) — what these tests pin now is that nothing READS it either:
+  /// a zero-MAC row was the one shape any database writer could mint and
+  /// have rendered as authentically the partner's.
   EncryptedPayload legacy(List<int> bytes) => EncryptedPayload(
         ciphertextB64: base64Encode(bytes),
         nonceB64: base64Encode(Uint8List(24)),
         macB64: base64Encode(Uint8List(16)),
       );
 
-  test('a legacy plaintext row still decrypts after the upgrade', () async {
-    // No shared key derived (fresh process) — the read must NOT depend on one.
+  test('a zero-MAC row is refused, never rendered as authentic', () async {
     CryptoCore.clearCache();
-    final p = legacy(utf8.encode('an old note from before encryption'));
-    expect(await CryptoCore.decryptString(p),
-        'an old note from before encryption',);
+    final p = legacy(utf8.encode('a forged note the server minted'));
+    // No key derived, so this exits at the no-key StateError; the WITH-key
+    // refusal is pinned on the media path (encrypted_media_test.dart).
+    await expectLater(CryptoCore.decryptString(p), throwsStateError);
   });
 
-  test('a legacy binary row still decrypts', () async {
+  test('a zero-MAC binary row is refused too', () async {
     CryptoCore.clearCache();
     final bytes = Uint8List.fromList(List.generate(256, (i) => i));
-    final out = await CryptoCore.decryptBytes(legacy(bytes));
-    expect(out, bytes);
+    await expectLater(CryptoCore.decryptBytes(legacy(bytes)), throwsStateError);
   });
 
   test('a real AEAD row round-trips, and the nonce/mac are not zero', () async {
@@ -94,9 +96,11 @@ void main() {
     expect(() => CryptoCore.decryptBytes(notLegacy), throwsStateError);
   });
 
-  test('legacy detection needs BOTH nonce and mac to be zero', () async {
-    // A zero nonce alone (real mac) is a real row, not legacy — otherwise a
-    // one-in-2^192 real nonce would be mistaken for plaintext.
+  test('a zero nonce with a real mac is refused like everything unverified',
+      () async {
+    // Every partially-zero shape takes the same exit as the fully-zero one
+    // now: no branch anywhere inspects the nonce or MAC for zeros, so there
+    // is no boundary left for a forged row to sit exactly on.
     CryptoCore.clearCache();
     final zeroNonceRealMac = EncryptedPayload(
       ciphertextB64: base64Encode(utf8.encode('x')),

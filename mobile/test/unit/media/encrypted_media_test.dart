@@ -113,14 +113,38 @@ void main() {
       expect(out, clear);
     });
 
-    test('a legacy zero-nonce blob opens with NO key at all', () async {
-      // One production row is in exactly this shape. The read path keeps it
-      // forever, and it must not require a key that no longer exists.
+    test('a zero-nonce blob is refused on the media path too', () async {
+      // The zero-MAC acceptance this test used to pin was the forgery door on
+      // the media path: a blob any storage writer could mint rendered as the
+      // partner's photograph. Zero rows/objects of the shape exist (scanned
+      // live 2026-08-18), and now zero are readable. With no key this takes
+      // the no-key StateError exit — the WITH-key case below is the one that
+      // proves the branch itself is gone.
       CryptoCore.clearCache();
       final clear = Uint8List.fromList(utf8.encode('a photo from before'));
-      final packed = Uint8List(40 + clear.length)..setRange(40, 40 + clear.length, clear);
-      final out = await CryptoCore.decryptBytesOffThread(packed);
-      expect(out, clear);
+      final packed = Uint8List(40 + clear.length)
+        ..setRange(40, 40 + clear.length, clear);
+      await expectLater(
+        CryptoCore.decryptBytesOffThread(packed),
+        throwsStateError,
+      );
+    });
+
+    test('a zero-MAC blob is refused even WITH a couple key present', () async {
+      // The test above never reaches the MAC — the no-key guard throws first.
+      // This one hands the isolate a real key the way it receives one, so the
+      // only thing standing between a forged zero-MAC blob and "authentic
+      // plaintext" is the deleted acceptance itself. Poly1305 rejects the
+      // all-zero tag; if this ever passes without throwing, the forgery door
+      // is back.
+      final key = Uint8List.fromList(List.generate(32, (i) => i * 7 % 256));
+      final clear = Uint8List.fromList(utf8.encode('a forged photograph'));
+      final packed = Uint8List(40 + clear.length)
+        ..setRange(40, 40 + clear.length, clear);
+      await expectLater(
+        CryptoCore.decryptBytesOffThread(packed, keyOverride: key),
+        throwsA(isA<SecretBoxAuthenticationError>()),
+      );
     });
 
     test('a blob too short to hold a nonce and MAC is rejected', () async {

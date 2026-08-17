@@ -8,21 +8,15 @@ import 'package:miles/core/services/server_clock.dart';
 /// Couple-shared authenticated encryption for the Closer module.
 ///
 /// History: real E2EE was stripped in 2026-06 back when this was a private
-/// two-person app, and encrypt/decrypt became base64 pass-throughs. Shipping
-/// to strangers put every intimate note and photo in the database as plaintext,
-/// so real AEAD is back — but rolled in without breaking a single existing row.
-///
-/// Two rules make that safe:
-///
-///   1. OPPORTUNISTIC. A message is only encrypted once BOTH partners have
-///      published a real X25519 key. Until then [encryptBytes] writes the same
-///      zero-nonce base64 shape it always did, so nothing breaks while one side
-///      is still on the old build.
-///
-///   2. SELF-DESCRIBING ON READ. A legacy (or plaintext-mode) row carries an
-///      all-zero nonce and all-zero MAC; a real row never does. [decryptBytes]
-///      branches on that, so old plaintext rows keep reading forever alongside
-///      new encrypted ones.
+/// two-person app, and encrypt/decrypt became base64 pass-throughs. Real AEAD
+/// came back "opportunistically" — plaintext-mode writes and a zero-MAC read
+/// branch kept mixed couples working during the rollout. That era ENDED on
+/// 2026-08-18: every shipped build refuses the no-key sentinel before deriving,
+/// the 2026-08-16 wipe left zero plaintext-shaped rows in any E2EE table
+/// (scanned live), and the read branch had become a pure forgery door — a
+/// zero-MAC row minted by anything with database write access rendered as
+/// authentically the partner's. Both halves are gone: [encryptBytes] refuses
+/// without a derived key, and [decryptBytes] verifies every row or fails.
 ///
 /// Key exchange: each device holds one X25519 private key in the platform
 /// keystore (never leaves the device, never backed up), publishes its public
@@ -189,17 +183,10 @@ class CryptoCore {
 
   static SimpleKeyPair? _myKeyPair;
 
-  /// The derived couple key. Null means plaintext mode — the partner has not
-  /// published a real key yet, so writes stay in the legacy shape.
+  /// The derived couple key. Null means "not derived" — a state in which
+  /// every encrypt and every decrypt REFUSES; there is no plaintext mode for
+  /// it to fall into any more.
   static SecretKey? _sharedKey;
-
-  /// True only when the partner explicitly published [legacyPublicKey].
-  ///
-  /// Guards the plaintext branch in [encryptBytes]. A null [_sharedKey] alone
-  /// used to be enough to write cleartext, which meant every failure path —
-  /// corruption, a cleared cache, a key not derived yet — silently disabled
-  /// encryption. Now only an explicit agreement does.
-  static bool _plaintextAgreed = false;
 
   /// The PERSONAL vault's key, derived from this account's own seed alone.
   ///
@@ -263,7 +250,6 @@ class CryptoCore {
     // the new account's vault under the previous one's key — which on a shared
     // handset is the other person's.
     _vaultKey = null;
-    _plaintextAgreed = false;
     _derivedFrom = null;
     // Keyed on the account that just left, and read under the new one's key
     // from here on.
@@ -294,7 +280,6 @@ class CryptoCore {
     _accountId = null;
     _myKeyPair = null;
     _sharedKey = null;
-    _plaintextAgreed = false;
     _derivedFrom = null;
     _ring = null;
     _ringHit = -1;
@@ -366,7 +351,6 @@ class CryptoCore {
     // stale key here would fail to open the user's own vault on the very phone
     // the escrow restore exists to rescue.
     _vaultKey = null;
-    _plaintextAgreed = false;
     _derivedFrom = null;
     // Immediately, not on the next derive: an escrow restore mid-session means
     // every plaintext already in memory was decrypted under the key this call
@@ -382,24 +366,25 @@ class CryptoCore {
 
   /// Derives the shared couple key from the partner's published public key.
   ///
-  /// Falls back to plaintext mode — not an error — when the partner has no
-  /// real key yet ([legacyPublicKey], a malformed value, or the wrong length).
-  /// That keeps Closer fully working during the window where one partner has
-  /// upgraded and the other has not.
+  /// Fails closed on EVERYTHING that is not a real 32-byte key — the
+  /// [legacyPublicKey] sentinel included, since 2026-08-18. Callers refuse
+  /// the sentinel themselves first (they own the words on the screen);
+  /// reaching the throw here is a caller bug, never a user state.
   static Future<void> deriveSharedKey({
     required String partnerPublicKeyB64,
   }) async {
-    // The ONLY value that may turn encryption off. It is a deliberate sentinel
-    // meaning "my partner is on a build with no key yet", and plaintext there
-    // is a considered decision.
+    // Plaintext mode is OVER (2026-08-18). The sentinel used to switch this
+    // class into writing zero-nonce, zero-MAC cleartext for couples where one
+    // partner had no key yet; every caller has refused the sentinel before
+    // calling here since build 40, the database was wiped 2026-08-16, and a
+    // live scan found ZERO plaintext-shaped rows in any E2EE table. Keeping
+    // the branch kept a permanent authenticity bypass: anything with write
+    // access to the database could mint a zero-MAC row and every device would
+    // render it as if the partner wrote it. Reaching this line is therefore a
+    // caller bug, and it fails closed like every other bad key.
     if (partnerPublicKeyB64 == legacyPublicKey) {
-      _plaintextAgreed = true;
       _sharedKey = null;
-      if (_derivedFrom != null) {
-        _derivedFrom = null;
-        _bumpEpoch();
-      }
-      return;
+      throw StateError('partner has no key — encryption cannot be derived');
     }
 
     // Everything below is a partner who DOES have a key. If it cannot be read,
@@ -412,7 +397,6 @@ class CryptoCore {
     // encryption off for every subsequent write, on an app whose entire premise
     // is that its contents cannot be read, and nothing anywhere said so.
     // Encryption must fail closed.
-    _plaintextAgreed = false;
     Uint8List partnerPub;
     try {
       partnerPub = base64Decode(partnerPublicKeyB64);
@@ -452,7 +436,6 @@ class CryptoCore {
     _sharedKey = null;
     // Reset with it. A cleared cache is "we do not know yet", never "write
     // cleartext" — and this is the state after sign-out.
-    _plaintextAgreed = false;
     _derivedFrom = null;
     _ring = null;
     _ringHit = -1;
@@ -603,9 +586,6 @@ class CryptoCore {
   static Future<List<List<int>>> _ringBytes() async =>
       Future.wait((await _loadRing()).map((k) => k.extractBytes()));
 
-  static bool _isLegacy(Uint8List nonce, Uint8List mac) =>
-      nonce.every((b) => b == 0) && mac.every((b) => b == 0);
-
   static Future<EncryptedPayload> encryptString(
     String plaintext, {
     String? associatedData,
@@ -617,18 +597,17 @@ class CryptoCore {
   /// A SecretKey cannot cross an isolate boundary, so the raw bytes are
   /// exported once on the caller's side and the isolate rebuilds the key.
   /// [keyOverride] encrypts under a key that is not the couple key — the
-  /// personal vault, which derives its own from the owner's seed. Passing it
-  /// also removes the plaintext branch below from reach, which is the point:
-  /// the vault has no legacy plaintext era to be compatible with, so "no key"
-  /// there is a bug and must throw rather than quietly write cleartext.
+  /// personal vault, which derives its own from the owner's seed. With
+  /// plaintext mode gone, "no key" throws on every path; the override only
+  /// decides WHICH key seals, never whether one does.
   static Future<EncryptedPayload> encryptBytesOffThread(
     Uint8List bytes, {
     String? associatedData,
     List<int>? keyOverride,
   }) async {
     final keyBytes = keyOverride ?? await exportSharedKeyBytes();
-    // No key means plaintext mode, which is a base64 encode and nothing else —
-    // not worth an isolate spawn.
+    // No key is a refusal, and encryptBytes owns the throw — not worth an
+    // isolate spawn to reach it.
     if (keyBytes == null) {
       return encryptBytes(bytes, associatedData: associatedData);
     }
@@ -648,19 +627,11 @@ class CryptoCore {
   }) async {
     final key = _sharedKey;
     if (key == null) {
-      // Cleartext ONLY where the partner published the plaintext sentinel.
-      // Without this check any state with no derived key — a cleared cache, a
-      // failed derivation, a race before pairing — wrote unencrypted content
-      // into a database whose whole point is that it holds none.
-      if (!_plaintextAgreed) {
-        throw StateError(
-          'no shared key — refusing to write unencrypted content',
-        );
-      }
-      return EncryptedPayload(
-        ciphertextB64: base64Encode(bytes),
-        nonceB64: base64Encode(Uint8List(_nonceLength)),
-        macB64: base64Encode(Uint8List(_macLength)),
+      // Any state with no derived key — a cleared cache, a failed derivation,
+      // a race before pairing — must refuse, never write cleartext. The
+      // plaintext-mode escape that used to live here is gone with the mode.
+      throw StateError(
+        'no shared key — refusing to write unencrypted content',
       );
     }
     final box = await _aead.encrypt(
@@ -700,9 +671,12 @@ class CryptoCore {
           'carry a nonce and a MAC');
     }
     final keyBytes = keyOverride ?? await exportSharedKeyBytes();
-    // With no couple key this is a legacy blob or a throw, and the ring can
-    // help with neither — loading it here would put a keystore read on every
-    // plaintext-era object.
+    // With no couple key this is a throw either way — the isolate's own
+    // no-key guard fires before any ring key could be tried, so loading the
+    // ring here would spend a keystore read on a blob that cannot open. (A
+    // couple-key blob that WOULD open under a retired ring key still needs
+    // the current key derived first; that is the pre-existing shape of this
+    // path, unchanged by plaintext mode's removal.)
     //
     // The ring is retired COUPLE keys. A vault blob was never written under
     // one, so trying them would be a keystore read per tile to attempt keys
@@ -735,8 +709,11 @@ class CryptoCore {
     final mac = base64Decode(payload.macB64);
     final ct = base64Decode(payload.ciphertextB64);
 
-    // Legacy / plaintext-mode row: the bytes are the cleartext.
-    if (_isLegacy(nonce, mac)) return Uint8List.fromList(ct);
+    // No zero-MAC acceptance. The plaintext-mode shape used to pass here
+    // verbatim, which handed anything with database write access a permanent
+    // forgery primitive: a minted zero-MAC row rendered as authentically the
+    // partner's. Zero rows of that shape exist (scanned live 2026-08-18), so
+    // it now fails exactly like any other row whose MAC does not verify.
 
     final key = _sharedKey;
     if (key == null) {
@@ -771,7 +748,8 @@ const int _nonceLength = 24;
 const int _macLength = 16;
 
 /// Container for one encrypted value: ciphertext, its nonce, and its MAC, each
-/// base64. A legacy/plaintext-mode value has an all-zero nonce and MAC.
+/// base64. Every value is a real AEAD box now — the zero-nonce/zero-MAC
+/// plaintext shape is refused on read and impossible on write.
 class EncryptedPayload {
   const EncryptedPayload({
     required this.ciphertextB64,
@@ -805,12 +783,8 @@ Future<Uint8List> _decryptPacked(_DecryptRequest r) async {
   final mac = Uint8List.sublistView(r.packed, _nonceLength, _nonceLength + _macLength);
   final ct = Uint8List.sublistView(r.packed, _nonceLength + _macLength);
 
-  // The legacy / plaintext-mode shape, preserved on the read path forever:
-  // an all-zero nonce and MAC means the bytes are the cleartext. One
-  // production row is in exactly this state.
-  if (nonce.every((b) => b == 0) && mac.every((b) => b == 0)) {
-    return Uint8List.fromList(ct);
-  }
+  // No zero-MAC acceptance here either — this is the same forgery door as
+  // decryptBytes', on the media path. See the comment there.
   if (r.keyBytes == null) {
     throw StateError('encrypted media but no couple key — partner key missing');
   }
