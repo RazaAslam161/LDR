@@ -208,10 +208,16 @@ class VaultRepository {
       height = derived.height;
     }
 
+    // Derived once for the whole save. This is the fix: the vault used to
+    // encrypt with the COUPLE key, which nothing on this path ever derived, so
+    // every save after a cold start threw 'no shared key' before reaching the
+    // first upload. See CryptoCore._vaultKey.
+    final vaultKey = await CryptoCore.exportVaultKeyBytes();
+
     final fullPath = _fullPath(uid, id);
     final packedFull = packFull(
       await CryptoCore.encryptBytesOffThread(bytes,
-          associatedData: fullAdFor(id),),
+          associatedData: fullAdFor(id), keyOverride: vaultKey,),
     );
     _refuseCleartext(packedFull);
 
@@ -220,7 +226,7 @@ class VaultRepository {
       thumbPath = _thumbPath(uid, id);
       final packedTile = packFull(
         await CryptoCore.encryptBytesOffThread(tile,
-            associatedData: thumbAdFor(id),),
+            associatedData: thumbAdFor(id), keyOverride: vaultKey,),
       );
       _refuseCleartext(packedTile);
       await _upload(thumbPath, packedTile);

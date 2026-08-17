@@ -122,15 +122,43 @@ void main() {
       expect(_codeOnly(background), contains("type != 'msg_sync'"));
     });
 
-    test('the delivery wake draws no notification', () {
-      // The whole reason it is not called 'message': that branch posts a banner.
-      // This one must ack and return, showing nothing — the owner does not want
-      // message notifications, and a delivery receipt is not one.
-      final i = background.indexOf("if (type == 'msg_sync')");
+    test('the delivery wake acks BEFORE it draws anything', () {
+      // This used to assert the wake drew nothing at all. That was the right
+      // rule while the app had no message notifications; it now has them, and
+      // the rule that replaces it is about ORDER.
+      //
+      // The receipt is the part that has been working for weeks. It is started
+      // first and awaited last, so a notification that throws — a bad icon, a
+      // channel that does not exist, a plugin failure in the background isolate
+      // — cannot cost the sender their second grey tick. A new feature must not
+      // be able to break an old one.
+      final i = background.indexOf("type == 'msg_sync'");
       expect(i, greaterThan(-1));
-      final branch = _codeOnly(background.substring(i, i + 700));
-      expect(branch, contains('BackgroundReceiptAck.onMessagePush'));
-      expect(branch, isNot(contains('showMessageNotification')));
+      final branch = _codeOnly(background.substring(i, i + 1600));
+      final ack = branch.indexOf('BackgroundReceiptAck.onMessagePush');
+      final show = branch.indexOf('showMessageNotification');
+      expect(ack, greaterThan(-1));
+      expect(show, greaterThan(-1),
+          reason: 'the wake now also draws the coalesced unread alert',);
+      expect(ack, lessThan(show),
+          reason: 'the receipt must be in flight before anything is drawn',);
+    });
+
+    test('the unread alert is one per conversation, not one per message', () {
+      // The defect this exists to prevent, in the owner's words: a weather app
+      // that notifies on every message is not a weather app anyone believes.
+      // The id keys on the couple and updates in place; onlyAlertOnce means
+      // only the first of a burst makes a sound.
+      final rn = _read('lib/core/services/reach_notifications.dart');
+      final i = rn.indexOf('Future<void> showMessageNotification');
+      expect(i, greaterThan(-1));
+      final fn = _codeOnly(rn.substring(i, i + 1800));
+      expect(fn, contains('coupleId.hashCode'),
+          reason: 'one notification per conversation, not per message',);
+      expect(fn, isNot(contains('messageId.hashCode')));
+      expect(fn, contains('onlyAlertOnce'));
+      expect(fn, contains('isSilentCover'),
+          reason: 'covers that never notify must post nothing at all',);
     });
 
     test('a push with the app closed acks it', () {

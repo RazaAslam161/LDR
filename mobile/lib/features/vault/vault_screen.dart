@@ -9,6 +9,8 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/main.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_viewer.dart';
 
@@ -157,7 +159,24 @@ class _VaultScreenState extends State<VaultScreen> {
   /// Copies the picked files INTO the vault, encrypted, under this user's own
   /// folder — it does not bookmark them where they already live.
   Future<void> _addMedia() async {
-    final picked = await ImagePicker().pickMultipleMedia();
+    // The picker is a full-screen system window: Android reports `paused`, the
+    // disguise cover raises, the vault gate auto-locks, and this widget is
+    // disposed while the picker is still up. The files then came back to a
+    // `!mounted` check and were dropped without a byte uploaded or a word
+    // logged. Every other picker in the app sets this; the vault never did.
+    final List<XFile> picked;
+    MilesApp.systemOverlayActive = true;
+    try {
+      picked = await ImagePicker().pickMultipleMedia();
+    } catch (e, st) {
+      // Was outside the try below, so a PlatformException escaped _addMedia,
+      // escaped the unawaited _addSheet, and showed the user nothing at all.
+      MilesApp.systemOverlayActive = false;
+      ErrorReporter.report(e, st, kind: 'vault');
+      if (mounted) _toast("Couldn't open the picker.");
+      return;
+    }
+    MilesApp.systemOverlayActive = false;
     if (picked.isEmpty || !mounted) return;
     setState(() => _busy = true);
     var failed = 0;
@@ -607,6 +626,7 @@ class _VaultTileState extends State<_VaultTile> {
         associatedData: widget.item.thumbPath != null
             ? VaultRepository.thumbAdFor(widget.item.id)
             : VaultRepository.fullAdFor(widget.item.id),
+        keyOverride: await CryptoCore.exportVaultKeyBytes(),
       );
       if (_mounted) setState(() => _provider = p);
     } catch (e) {

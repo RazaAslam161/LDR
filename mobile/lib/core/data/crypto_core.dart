@@ -201,6 +201,38 @@ class CryptoCore {
   /// encryption. Now only an explicit agreement does.
   static bool _plaintextAgreed = false;
 
+  /// The PERSONAL vault's key, derived from this account's own seed alone.
+  ///
+  /// Deliberately NOT the couple key, which is what the vault used to encrypt
+  /// with. That was wrong three separate ways, and only the first was visible:
+  ///
+  ///   1. It did not work. The couple key is derived on entry to Closer, the
+  ///      wish jar or a memory thread, and [bindAccount] nulls it on every cold
+  ///      start. Nothing on the vault path ever derived it, so a cold start
+  ///      into the vault threw 'no shared key' on the first save — every time,
+  ///      for every user. The vault has never once stored a file in production.
+  ///
+  ///   2. A private vault the partner can read is not private. They hold the
+  ///      identical symmetric key on their own phone; owner-only was enforced by
+  ///      RLS alone, so any route to the bytes — a dump, a leaked service key, a
+  ///      policy regression, the on-disk ciphertext cache — hands them the
+  ///      plaintext. This is the one thing the feature promises on its own gate
+  ///      screen: "Your partner can never open this."
+  ///
+  ///   3. It made the owner's private vault depend on the partner's device. The
+  ///      partner reinstalls, their public key changes, the couple key changes,
+  ///      and the vault stops opening. A breakup orphans it permanently.
+  ///
+  /// The seed is per-account, present before pairing, restored by [KeyEscrow]
+  /// on a new phone, and does not move when the partner does — so the vault
+  /// works for a solo user, survives a re-pair, and stays shut to everyone else.
+  ///
+  /// Changing this derivation strands existing vault media. It costs nothing
+  /// today: production holds zero vault rows and zero vault objects, precisely
+  /// because of defect 1. That is the whole reason this is safe to change now
+  /// and will not be later.
+  static SecretKey? _vaultKey;
+
   /// Bumped every time the key this device decrypts with could have changed.
   ///
   /// Plaintext caches key themselves on this, and listen to it so they can
@@ -227,6 +259,10 @@ class CryptoCore {
     _accountId = uid;
     _myKeyPair = null;
     _sharedKey = null;
+    // Derived from the OUTGOING account's seed. Left standing it would encrypt
+    // the new account's vault under the previous one's key — which on a shared
+    // handset is the other person's.
+    _vaultKey = null;
     _plaintextAgreed = false;
     _derivedFrom = null;
     // Keyed on the account that just left, and read under the new one's key
@@ -325,6 +361,11 @@ class CryptoCore {
     await _storage.write(key: _seedKey, value: base64Encode(seed));
     _myKeyPair = await _x25519.newKeyPairFromSeed(seed);
     _sharedKey = null;
+    // Derived from the seed being replaced. This is the case it matters most:
+    // the recovered seed is the one the vault was actually written under, and a
+    // stale key here would fail to open the user's own vault on the very phone
+    // the escrow restore exists to rescue.
+    _vaultKey = null;
     _plaintextAgreed = false;
     _derivedFrom = null;
     // Immediately, not on the next derive: an escrow restore mid-session means
@@ -423,6 +464,32 @@ class CryptoCore {
   static Future<List<int>?> exportSharedKeyBytes() async {
     if (_sharedKey == null) return null;
     return _sharedKey!.extractBytes();
+  }
+
+  /// The personal vault's key — see [_vaultKey] for why it is not the couple key.
+  ///
+  /// Derives on demand rather than needing a screen to have primed it first.
+  /// That is the entire defect being fixed: the couple key had to be derived by
+  /// visiting Closer, and the vault never did it, so the vault only worked by
+  /// accident. Nothing about opening a private vault should depend on which
+  /// other screen the user happened to visit this session.
+  ///
+  /// Its own HKDF label holds it apart from every other key derived here, so a
+  /// vault blob cannot be opened with a couple key and vice versa, even though
+  /// both ultimately trace back to the same seed.
+  ///
+  /// Returns non-null or throws. There is no plaintext fallback: a vault that
+  /// writes cleartext when a derivation fails is worse than one that refuses.
+  static Future<List<int>> exportVaultKeyBytes() async {
+    final cached = _vaultKey;
+    if (cached != null) return cached.extractBytes();
+    final seed = await (await _keyPair()).extract();
+    final key = await _hkdf.deriveKey(
+      secretKey: SecretKey(seed.bytes),
+      info: utf8.encode('miles-vault-v1'),
+    );
+    _vaultKey = key;
+    return key.extractBytes();
   }
 
   // ─── The key ring ────────────────────────────────────────────────────────
@@ -549,24 +616,30 @@ class CryptoCore {
   ///
   /// A SecretKey cannot cross an isolate boundary, so the raw bytes are
   /// exported once on the caller's side and the isolate rebuilds the key.
+  /// [keyOverride] encrypts under a key that is not the couple key — the
+  /// personal vault, which derives its own from the owner's seed. Passing it
+  /// also removes the plaintext branch below from reach, which is the point:
+  /// the vault has no legacy plaintext era to be compatible with, so "no key"
+  /// there is a bug and must throw rather than quietly write cleartext.
   static Future<EncryptedPayload> encryptBytesOffThread(
     Uint8List bytes, {
     String? associatedData,
+    List<int>? keyOverride,
   }) async {
-    final keyBytes = await exportSharedKeyBytes();
+    final keyBytes = keyOverride ?? await exportSharedKeyBytes();
     // No key means plaintext mode, which is a base64 encode and nothing else —
     // not worth an isolate spawn.
     if (keyBytes == null) {
       return encryptBytes(bytes, associatedData: associatedData);
     }
+    final request = _EncryptRequest(bytes, associatedData, keyBytes);
     // Small payloads cost more to ship across the boundary than to encrypt.
+    // Run the same function inline rather than falling back to encryptBytes,
+    // which reads _sharedKey and would silently ignore [keyOverride].
     if (bytes.length < 256 * 1024) {
-      return encryptBytes(bytes, associatedData: associatedData);
+      return _isolateEncrypt(request);
     }
-    return compute(
-      _isolateEncrypt,
-      _EncryptRequest(bytes, associatedData, keyBytes),
-    );
+    return compute(_isolateEncrypt, request);
   }
 
   static Future<EncryptedPayload> encryptBytes(
@@ -620,16 +693,23 @@ class CryptoCore {
   static Future<Uint8List> decryptBytesOffThread(
     Uint8List packed, {
     String? associatedData,
+    List<int>? keyOverride,
   }) async {
     if (packed.length < _nonceLength + _macLength) {
       throw ArgumentError('packed blob is ${packed.length} bytes, too short to '
           'carry a nonce and a MAC');
     }
-    final keyBytes = await exportSharedKeyBytes();
+    final keyBytes = keyOverride ?? await exportSharedKeyBytes();
     // With no couple key this is a legacy blob or a throw, and the ring can
     // help with neither — loading it here would put a keystore read on every
     // plaintext-era object.
-    final ring = keyBytes == null ? const <List<int>>[] : await _ringBytes();
+    //
+    // The ring is retired COUPLE keys. A vault blob was never written under
+    // one, so trying them would be a keystore read per tile to attempt keys
+    // that cannot match.
+    final ring = keyOverride != null || keyBytes == null
+        ? const <List<int>>[]
+        : await _ringBytes();
     if (packed.length < 256 * 1024) {
       return _decryptPacked(
         _DecryptRequest(packed, associatedData, keyBytes, ring),

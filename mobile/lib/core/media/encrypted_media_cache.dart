@@ -89,6 +89,7 @@ class EncryptedMediaCache {
     required String bucket,
     required String path,
     required String associatedData,
+    List<int>? keyOverride,
   }) {
     _wire();
     final k = _key(bucket, path);
@@ -100,7 +101,7 @@ class EncryptedMediaCache {
     final flying = _inFlight[k];
     if (flying != null) return flying;
 
-    final job = _load(bucket, path, associatedData).then((plain) {
+    final job = _load(bucket, path, associatedData, keyOverride).then((plain) {
       _admit(k, plain);
       return plain;
     }).whenComplete(() => _inFlight.remove(k));
@@ -117,9 +118,11 @@ class EncryptedMediaCache {
     required String associatedData,
     required int decodeWidth,
     String bucket = privateBucket,
+    List<int>? keyOverride,
   }) async {
     final raw = await bytes(
-        bucket: bucket, path: path, associatedData: associatedData,);
+        bucket: bucket, path: path, associatedData: associatedData,
+        keyOverride: keyOverride,);
     return _provider(bucket, path, raw, decodeWidth);
   }
 
@@ -133,9 +136,11 @@ class EncryptedMediaCache {
     required String path,
     required String associatedData,
     String bucket = privateBucket,
+    List<int>? keyOverride,
   }) async {
     final raw = await bytes(
-        bucket: bucket, path: path, associatedData: associatedData,);
+        bucket: bucket, path: path, associatedData: associatedData,
+        keyOverride: keyOverride,);
     return _provider(bucket, path, raw, null);
   }
 
@@ -146,9 +151,11 @@ class EncryptedMediaCache {
     required String associatedData,
     int? decodeWidth,
     String bucket = privateBucket,
+    List<int>? keyOverride,
   }) async {
     final raw = await bytes(
-        bucket: bucket, path: path, associatedData: associatedData,);
+        bucket: bucket, path: path, associatedData: associatedData,
+        keyOverride: keyOverride,);
     return _provider(bucket, path, raw, decodeWidth);
   }
 
@@ -184,11 +191,13 @@ class EncryptedMediaCache {
     String bucket,
     String path,
     String associatedData,
+    List<int>? keyOverride,
   ) async {
     final packed = await _cipherBytes(bucket, path);
     return CryptoCore.decryptBytesOffThread(
       packed,
       associatedData: associatedData,
+      keyOverride: keyOverride,
     );
   }
 

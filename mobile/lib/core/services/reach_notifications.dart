@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/features/disguise/disguise_notification.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,13 +63,26 @@ Future<void> showReachNotification({
 }) async {
   // Wear this device's disguise, not the sender's and not a hardcoded one.
   final style = await currentNotificationStyle();
+
+  // A Reach is urgent, but urgency cannot buy plausibility. On a cover that
+  // never notifies in real life, the max-importance buzz below produced a
+  // heads-up banner reading "Calculator — Tap to open", with the distinctive
+  // Reach vibration, on a phone whose owner is relying on that calculator to be
+  // uninteresting. It shipped that way.
+  //
+  // So on those covers it still arrives, and still says the same words, but on
+  // the low-importance channel: no sound, no vibration, no heads-up. Visible
+  // when the owner looks, silent to the room. That is a real cost — a Reach on
+  // a silent cover will not get anyone's attention until they pick the phone up
+  // — and it is the cost that cover is chosen for.
+  final quiet = style.isSilentCover;
   final android = AndroidNotificationDetails(
-    kReachChannelId,
-    kReachChannelName,
-    channelDescription: kReachChannelDesc,
-    importance: Importance.max,
-    priority: Priority.max,
-    vibrationPattern: reachVibrationPattern(),
+    quiet ? kQuietChannelId : kReachChannelId,
+    quiet ? kQuietChannelName : kReachChannelName,
+    channelDescription: quiet ? kQuietChannelDesc : kReachChannelDesc,
+    importance: quiet ? Importance.low : Importance.max,
+    priority: quiet ? Priority.low : Priority.max,
+    vibrationPattern: quiet ? null : reachVibrationPattern(),
     icon: style.smallIcon,
     ticker: style.ticker,
     // Privacy: hidden entirely on the lock screen; no preview anywhere.
@@ -175,10 +189,36 @@ Future<void> showCallNotification({
   );
 }
 
-// ── Care Nudges ──────────────────────────────────────────────────────────────
-const String kMsgChannelId = 'msg_channel';
-const String kMsgChannelName = 'Messages';
-const String kMsgChannelDesc = 'New messages';
+// ── Quiet delivery, for covers that must never make a sound ─────────────────
+// On Android 8+ the CHANNEL decides whether something buzzes; importance set on
+// an individual notification is only a pre-O fallback. So a silent variant is
+// not a flag, it is a second channel.
+const String kQuietChannelId = 'quiet_updates';
+const String kQuietChannelName = 'Silent updates';
+const String kQuietChannelDesc = 'Delivered without sound';
+
+AndroidNotificationChannel buildQuietChannel() =>
+    const AndroidNotificationChannel(
+      kQuietChannelId,
+      kQuietChannelName,
+      description: kQuietChannelDesc,
+      importance: Importance.low,
+    );
+
+// ── Message alerts ──────────────────────────────────────────────────────────
+// The retired channel, and why. It was named 'Messages', described as 'New
+// messages', while every other channel in this file was already named
+// generically — 'Alerts', 'Background activity', 'Timers', 'Reminders'.
+// Android lists channel names under Settings > Apps > <cover> > Notifications,
+// so a "Messages / New messages" channel inside what claims to be a weather app
+// was the disguise undone by someone who never even opened it. A channel cannot
+// be renamed once created (see the note at the top of this file), so the only
+// way out is a new id and deleting this one.
+const String kLegacyMsgChannelId = 'msg_channel';
+
+const String kMsgChannelId = 'content_updates';
+const String kMsgChannelName = 'Updates';
+const String kMsgChannelDesc = 'Content updates';
 
 const String kCareChannelId = 'care_channel';
 const String kCareChannelName = 'Reminders';
@@ -206,26 +246,58 @@ AndroidNotificationChannel buildMsgChannel() =>
 /// disguised, so the notification wears the same cover as every other one.
 /// Whoever picks up the phone sees a generic alert; the content is behind the
 /// app lock.
+///
+/// ONE notification per conversation, counting up — not one per message. The id
+/// keys on the couple, not the message, which is the whole fix: this used to be
+/// `messageId.hashCode`, so thirty messages over lunch produced thirty separate
+/// entries. A weather app that adds thirty notifications in an hour is not a
+/// weather app anyone believes.
+///
+/// [unreadCount] is what the body counts. Three behaviours, chosen by the
+/// cover's budget rather than by what happened:
+///
+///   none       — nothing is posted at all. Not silently, not minimised: a
+///                calculator with an entry in the shade is a calculator someone
+///                picks up. The unread signal lives in the cover's own UI.
+///   persistent — an ongoing, silent entry that is REWRITTEN in place, the way a
+///                weather app shows current conditions all day. The number of
+///                notifications on the phone never changes, so there is nothing
+///                new for anyone to notice.
+///   otherwise  — a normal alert, but `onlyAlertOnce` so only the FIRST message
+///                of a burst makes a sound. Everything after it updates the
+///                count in silence.
 Future<void> showMessageNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String messageId,
   required String coupleId,
+  required int unreadCount,
 }) async {
   final style = await currentNotificationStyle();
+  // The cover never notifies in real life, so neither do we. Returning here is
+  // the feature, not a failure to handle a case.
+  if (style.isSilentCover) return;
+
+  final persistent = style.budget == NotificationBudget.persistent;
   final android = AndroidNotificationDetails(
-    kMsgChannelId,
-    kMsgChannelName,
-    channelDescription: kMsgChannelDesc,
-    importance: Importance.high,
-    priority: Priority.high,
+    persistent ? kQuietChannelId : kMsgChannelId,
+    persistent ? kQuietChannelName : kMsgChannelName,
+    channelDescription: persistent ? kQuietChannelDesc : kMsgChannelDesc,
+    importance: persistent ? Importance.low : Importance.high,
+    priority: persistent ? Priority.low : Priority.high,
+    // Ongoing: it sits in the shade permanently and cannot be swiped away, which
+    // is exactly what a weather app's conditions entry does.
+    ongoing: persistent,
+    // The rate limiter, and it is the platform's own: an update to an existing
+    // notification never re-alerts. One sound per burst, however many arrive.
+    onlyAlertOnce: true,
     icon: style.smallIcon,
     ticker: style.ticker,
     visibility: NotificationVisibility.secret,
   );
   await plugin.show(
-    id: messageId.hashCode & 0x7fffffff,
+    id: coupleId.hashCode & 0x7fffffff,
     title: style.title,
-    body: style.body,
+    body: style.unreadBody(unreadCount),
     notificationDetails: NotificationDetails(android: android),
     payload: 'message|$messageId|$coupleId',
   );
@@ -409,35 +481,41 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
-  if (type == 'msg_sync') {
-    // The delivery wake, and it draws NOTHING. No channel, no notification, no
-    // sound, no badge — the recipient is never told anything arrived. It exists
-    // for one purpose: this handset now HAS the message, so say so while the
-    // app is closed and the recipient does nothing at all. That ack is what
-    // turns the sender's single grey tick into two.
+  // Both kinds, one path. 'message' is still accepted by the edge function even
+  // though only the DB trigger fires today, and it sends 'msg_sync' — leaving a
+  // second copy of this logic behind the other name is how the two drift until
+  // one of them is the per-message flood again.
+  if (type == 'msg_sync' || type == 'message') {
+    // The delivery wake. Its first job is unchanged and still comes first: this
+    // handset now HAS the message, so say so while the app is closed and the
+    // recipient does nothing at all. That ack is what turns the sender's single
+    // grey tick into two.
     //
-    // Awaited rather than fire-and-forget: the isolate is torn down the moment
-    // this returns, and an unawaited request dies with it.
-    await BackgroundReceiptAck.onMessagePush(message.data);
-    return;
-  }
-
-  if (type == 'message') {
-    // The whole reason a message push exists: this handset now HAS the message,
-    // so say so, with the app closed and the recipient doing nothing. Started
-    // before the notification so a failure there cannot swallow it, awaited
-    // after so the isolate is not torn down with the request in flight.
-    // Delivered only — nobody has read anything; opening the chat does that.
+    // Started before the notification and awaited after, so a failure drawing
+    // the alert cannot cost the receipt — the ticks are the part that has been
+    // working, and a new feature must not be able to break an old one.
     final ack = BackgroundReceiptAck.onMessagePush(message.data);
+
+    // Deliberately still the 'msg_sync' kind, and not switched to 'message'.
+    // Flipping the server trigger would start drawing notifications on every
+    // handset ALREADY in the field, using their old per-message code — the
+    // exact breakage the version gate exists to prevent. The wake already
+    // arrives for every message; whether anything is drawn is decided here, by
+    // this build, on this device.
+    final unread = await UnreadTally.increment(coupleId ?? '');
+    await androidPlugin?.createNotificationChannel(buildQuietChannel());
     await androidPlugin?.createNotificationChannel(buildMsgChannel());
     await showMessageNotification(
       plugin: plugin,
       messageId: (message.data['message_id'] as String?) ?? '',
       coupleId: coupleId ?? '',
+      unreadCount: unread,
     );
+
     await ack;
     return;
   }
+
 
   if (type == 'care') {
     await androidPlugin?.createNotificationChannel(buildCareChannel());
@@ -473,6 +551,9 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // a kind without its own branch above lands here and buzzes the max-importance
   // alert carrying an id that belongs to something else.
   await androidPlugin?.createNotificationChannel(buildReachChannel());
+  // Both, always: which one a Reach lands on is decided per-notification by the
+  // cover, and a channel that does not exist drops the notification silently.
+  await androidPlugin?.createNotificationChannel(buildQuietChannel());
 
   await showReachNotification(
     plugin: plugin,

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_video_server.dart';
 import 'package:video_player/video_player.dart';
@@ -129,6 +130,7 @@ class _PageState extends State<_Page> {
         bucket: VaultRepository.bucket,
         path: path,
         associatedData: VaultRepository.fullAdFor(widget.item.id),
+        keyOverride: await CryptoCore.exportVaultKeyBytes(),
       );
       final server = await VaultVideoServer.start(
         bytes: bytes,
@@ -208,6 +210,7 @@ class _PageState extends State<_Page> {
         bucket: VaultRepository.bucket,
         path: path,
         associatedData: VaultRepository.fullAdFor(widget.item.id),
+        keyOverride: await CryptoCore.exportVaultKeyBytes(),
       );
       if (mounted) setState(() => _provider = p);
     } catch (e) {

@@ -185,16 +185,52 @@ if $bump; then
   # number. What was missing is that the gate leaves a cache behind, and the bump
   # invalidates the source that cache was built from. So the cache goes with it.
   #
-  # Only flutter_build: package_config.json and the pub resolution above it
-  # survive, so this costs one AOT recompile rather than a `flutter clean` plus
-  # another `pub get`.
+  # A FULL clean, and it is VERIFIED rather than trusted, because on Windows
+  # `flutter clean` can fail and still exit 0.
   #
-  # The snapshot guard further down stays as the backstop. It caught this, and a
-  # release script that needs its own guard to notice a stale build is one edit
-  # away from shipping one — but a guard that never fires is also the one nobody
-  # maintains, so both remain.
-  rm -rf .dart_tool/flutter_build
-  echo "dropped the pre-bump build cache"
+  # Two narrower fixes are recorded here because each looked right and was not.
+  # Dropping only `.dart_tool/flutter_build` made Flutter recompile correctly —
+  # build 44's jniLibs really did contain `miles-build-44` — and the APK still
+  # shipped 43, because the stale copy was one layer further on, in GRADLE:
+  #
+  #   intermediates/flutter/sideloadRelease/jniLibs/…/libapp.so   miles-build-44
+  #   intermediates/merged_jni_libs/sideloadRelease/…/libapp.so   miles-build-43
+  #   app-sideload-release.apk                                    miles-build-43
+  #
+  # Adding `flutter clean` did not fix it either, and why it did not is the
+  # whole reason this block exists: the Gradle daemon holds open handles under
+  # build\, so the delete fails — and flutter prints "Failed to remove build"
+  # and then EXITS 0. The script believed it had cleaned. Gradle found
+  # mergeSideloadReleaseJniLibFolders up to date against its own earlier output
+  # and packaged that instead of the fresh compile; the merge it reused was
+  # eleven hours old. A clean that reports success without cleaning is worse
+  # than no clean at all, because it is the thing everyone downstream trusts.
+  #
+  # So: stop the daemon to release the handles, clean, then PROVE build/ is gone.
+  #
+  # The cost is a full rebuild on every bumped release. That is the right price:
+  # the alternative is shipping the wrong Dart under a fresh version number,
+  # which this project has now done six times.
+  echo "stopping the gradle daemon so build/ can actually be deleted"
+  (cd android && ./gradlew --stop >/dev/null 2>&1) || true
+  flutter clean >/dev/null
+  if [ -e build ]; then
+    echo "CLEAN FAILED: build/ still exists after flutter clean." >&2
+    echo "Something holds a handle under it — a gradle daemon, an open editor," >&2
+    echo "a running emulator, an antivirus scan. Close it and re-run." >&2
+    echo "Do NOT build on this tree: Gradle will package a stale merged_jni_libs" >&2
+    echo "under the new version number, which is exactly how builds 39-44 went" >&2
+    echo "out carrying older Dart." >&2
+    exit 1
+  fi
+  echo "build/ is gone — every Gradle output below is recomputed, not reused"
+  # pub get afterwards because clean takes package_config.json with it.
+  flutter pub get >/dev/null
+
+  # The snapshot guard further down stays as the backstop. It caught this three
+  # times, and a release script that needs its own guard to notice a stale build
+  # is one edit away from shipping one — but a guard that never fires is also
+  # the one nobody maintains, so both remain.
 fi
 
 pubspec_build="$(read_build)"

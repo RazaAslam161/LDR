@@ -111,6 +111,15 @@ class FcmService {
     await android?.deleteNotificationChannel(
       channelId: kLegacyCallServiceChannelId,
     );
+    // Same reasoning, different leak: this one was named 'Messages', described
+    // as 'New messages', and sat in the notification settings of an app whose
+    // launcher says Weather. Anyone scrolling that list found a messenger
+    // without ever opening it. Replaced by kMsgChannelId ('Updates'); a channel
+    // cannot be renamed, so this id must never be created again.
+    await android?.deleteNotificationChannel(
+      channelId: kLegacyMsgChannelId,
+    );
+    await android?.createNotificationChannel(buildQuietChannel());
 
     // Cold start via a tapped notification of any kind.
     final launch = await _fln.getNotificationAppLaunchDetails();
@@ -188,6 +197,23 @@ class FcmService {
   ///
   /// Must run while still authenticated: setFcmToken writes as the current
   /// user, so calling this after signOut() silently does nothing.
+  /// Removes the conversation's unread entry from the shade.
+  ///
+  /// Keyed on the couple, matching showMessageNotification's id, because there
+  /// is exactly ONE entry per conversation rather than one per message — the
+  /// thing that made a disguised app buzz like a messenger.
+  static Future<void> clearMessageNotification(String coupleId) async {
+    if (coupleId.isEmpty) return;
+    try {
+      await _fln.cancel(id: coupleId.hashCode & 0x7fffffff);
+    } catch (e, st) {
+      // Not fatal: the count is already cleared, so the worst case is a stale
+      // entry the owner can swipe. Reported rather than swallowed so a platform
+      // channel that starts failing here is visible from the server.
+      ErrorReporter.report(e, st, kind: 'notify');
+    }
+  }
+
   static Future<void> forgetDevice() async {
     pendingReach.value = null;
     pendingCall.value = null;

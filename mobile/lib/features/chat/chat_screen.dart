@@ -34,6 +34,8 @@ import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_media_source.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
+import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
@@ -709,6 +711,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
     _coupleId = couple.id;
+    // Opening the chat IS reading it. Both halves together, or the shade keeps
+    // an entry the owner has already dealt with and the next message counts up
+    // from a number nothing on screen agrees with.
+    unawaited(UnreadTally.clear(couple.id));
+    unawaited(FcmService.clearMessageNotification(couple.id));
     // Before anything is awaited, so the first frame of a re-entered chat draws
     // the ticks it was already showing when the user left it. The disk copy
     // (one frame later, or a whole process later) goes through the same upward

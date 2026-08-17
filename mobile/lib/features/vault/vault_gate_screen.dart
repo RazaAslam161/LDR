@@ -55,6 +55,10 @@ class _VaultGateScreenState extends State<VaultGateScreen>
     // the instant it asked for a fingerprint. Unlocking by biometric could
     // never succeed. Same flag, and the same reason, as cover_gate.dart:107.
     if (MilesApp.authInProgress) return;
+    // A picker or camera is a system window over our own app, not the user
+    // leaving it. Locking on it disposed VaultScreen mid-pick and silently
+    // discarded the files it was about to save.
+    if (MilesApp.systemOverlayActive) return;
     // Auto-lock the moment the app leaves the foreground.
     if (state != AppLifecycleState.resumed && _unlocked) {
       setState(() => _unlocked = false);
@@ -93,7 +97,19 @@ class _VaultGateScreenState extends State<VaultGateScreen>
     setState(() => _busy = true);
     try {
       await VaultRepository.setPin(pin);
-      if (mounted) setState(() => _unlocked = true);
+      if (mounted) {
+        setState(() {
+          _unlocked = true;
+          // Both of these, or the next lock re-renders the SETUP pad: it asked
+          // "Confirm your PIN" out of nowhere, offered no biometrics, and — the
+          // real problem — accepted ANY two matching digits as a new PIN and
+          // opened the vault. An auto-lock that anyone can walk through is not
+          // a lock.
+          _hasPin = true;
+          _firstPin = null;
+          _message = null;
+        });
+      }
     } catch (e, st) {
       // Surface the real error (logged) instead of a blanket generic message.
       debugPrint('Vault setPin failed: $e\n$st');

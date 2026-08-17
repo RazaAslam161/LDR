@@ -4157,3 +4157,318 @@ redeploy, account-type check re: health apps. Then the device pass on the play
 AAB (bundletool universal APK → hardware → calls/touch-map/ML Kit/FCM), and
 after that the remaining §41 highs (covers lockout fix is the next my-side
 item).
+
+## §43 — Builds 39-44 all shipped older Dart than their number claimed; the cause was a clean that lied (2026-08-17)
+
+**Root cause, one sentence:** `flutter clean` cannot delete `build\` on Windows
+while the Gradle daemon holds handles under it, and it prints "Failed to remove
+build" and then **exits 0** — so the release script believed the tree was clean,
+Gradle found `mergeSideloadReleaseJniLibFolders` up to date against its own
+earlier output, and packaged that stale merge under the new versionCode.
+
+**The evidence that settled it** (build 44, first attempt):
+
+| artifact | mtime | stamp |
+|---|---|---|
+| `.dart_tool/flutter_build/.../app.so` | 16:30 | `miles-build-44` |
+| `build/.../flutter/sideloadRelease/jniLibs/libapp.so` | 16:30:30 | `miles-build-44` |
+| `build/.../merged_jni_libs/sideloadRelease/.../libapp.so` | **06:49:49** | `miles-build-43` |
+| `app-sideload-release.apk` | 16:31:49 | `miles-build-43` |
+
+Flutter compiled 44 correctly EVERY time, all six releases. Gradle packaged the
+older merge. Both halves were "working" — the same seam-failure shape as the
+voice-duration and `msg_sync` bugs in §37.
+
+Two tells were walked past and are worth naming for next time:
+- The APK SHA-256 was **byte-identical** across a supposed clean rebuild
+  (`e5a1216…` twice). Identical bytes after a clean is proof nothing rebuilt.
+- `build/app/intermediates/.../playRelease/...` existed after a run that only
+  built `sideload` — impossible if `build/` had actually been deleted.
+
+Two earlier fixes were wrong and are recorded in `tool/release.sh` so they are
+not retried: `rm -rf .dart_tool/flutter_build` (f3fe1d0) fixed a cache that was
+never stale, and a plain `flutter clean` fixed nothing because it silently
+failed.
+
+**DONE + verified — `mobile/tool/release.sh`, bump path:**
+- `(cd android && ./gradlew --stop)` before the clean, to release the handles.
+  Verified: with the daemon running `flutter clean` prints "Failed to remove
+  build" and exits 0; with it stopped, "Deleting build... 5.5s" and the dir is
+  gone.
+- `flutter clean`, then an **assert that `build/` is actually gone**, `exit 1`
+  with a loud message if not. The assert is the durable part — the exit code
+  cannot be trusted on this platform.
+
+**Build 44 — verified, NOT published:**
+```
+gate: flutter analyze / flutter test -> 02:30 +824: All tests passed!
+build 44 (version 0.1.0)
+sha256 fe56c6bdc3ebd2537e0fab4ab073cd5fb13786eb6117fb79542584ac5d436ee5
+self-updater present, and the snapshot really is build 44
+sideload copy: Miles.apk is build 44
+```
+Independently re-scanned outside the script: both `app-sideload-release.apk` and
+`E:\LDR\Miles.apk` contain ONLY `miles-build-44` (zero occurrences of 43),
+219.5MB, same SHA. `aapt2 dump badging` -> `versionCode='44' versionName='0.1.0'`,
+package `com.miles.miles`. Disguise intact (sideload manifest still carries the
+News/Calculator/Notes/... activity-aliases).
+
+**This is the first build in six whose Dart matches its version number.** Builds
+39-44-attempt-1 on the testers' phones contain older code than their number
+says, so any earlier "that fix didn't work on my phone" report from those builds
+is not evidence about the fix.
+
+**NOT done:** build 44 is not uploaded to R2 and `app_release` is not published.
+Nothing was shipped this session.
+
+**Found, not fixed:**
+- `mobile/.dart_tool` — `flutter clean` still cannot remove it even with the
+  Gradle daemon stopped (holder unidentified; likely the Dart analysis server).
+  Harmless here because Flutter's compile was correct throughout, but it is the
+  same silent-failure shape and will bite something else eventually.
+
+**Exact next step:** install `Miles.apk` (build 44) on both handsets and test the
+instant-presence avatar — that is the change the owner has not been able to
+verify, because build 43 on her phone does not contain it. Only after it is
+installed, raise `app_release.min_build`.
+
+## §44 — The private vault never worked: it encrypted with the couple key, which nothing on its path ever derived (2026-08-17)
+
+**Root cause, one sentence:** `VaultRepository.saveMedia` encrypted with the
+COUPLE key (`CryptoCore._sharedKey`), which `bindAccount` nulls on every cold
+start and which is only derived by entering Closer / a memory thread / the wish
+jar — so a cold start into the vault threw `StateError('no shared key')` before
+the first upload, 100% of the time, for every user.
+
+Confirmed independently by two audits given different files that did not share
+findings. Production corroborates: **0 rows in `personal_vault_items`, 0 objects
+in the `personal_vault` bucket**, while infra is entirely correct (bucket, 4
+storage policies scoped to `auth.uid()`, all 14 columns, owner-only RLS, bcrypt
+PIN RPCs with lockout, owner's PIN set and not locked). Nothing was ever
+misconfigured; the client could not get past encryption.
+
+**Why the two previous fixes (9ac2769, 60ac3b3) did not move it:** both treated
+symptoms above the crypto layer — HEIC normalisation and error reporting.
+Neither touched key derivation, so the throw stayed where it was. 60ac3b3's
+instrumentation is why this was findable: `kind='vault'` rows would have named
+it, and there are none, because nobody reached a build carrying it.
+
+**DONE + verified — the vault has its own key.**
+`CryptoCore.exportVaultKeyBytes()` derives from THIS account's own X25519 seed
+via HKDF label `miles-vault-v1`, on demand, cached, cleared in both
+`bindAccount` and `adoptPrivateSeed`. Fixes three defects at once:
+1. needs no other screen to have primed it, so a cold start works;
+2. the partner can no longer decrypt the owner's private vault — previously
+   owner-only was RLS alone while the partner held the identical key, against
+   the gate screen's own promise "Your partner can never open this";
+3. the vault no longer breaks when the partner reinstalls or the couple re-pairs.
+
+Safe to change the derivation ONLY because production holds zero vault objects —
+itself a consequence of defect 1. It will not be safe later.
+
+Plumbing: `encryptBytesOffThread` / `decryptBytesOffThread` /
+`EncryptedMediaCache.{bytes,tileProvider,coverProvider,fullProvider}` take an
+optional `keyOverride`; the three vault read sites and both write sites pass it.
+The retired-key ring is skipped for vault blobs (it holds retired COUPLE keys,
+which can never match).
+
+**DONE + verified — two lifecycle defects that broke it independently of crypto:**
+- `vault_screen.dart` opened `ImagePicker` without `MilesApp.systemOverlayActive`
+  (every other picker in the app sets it). The disguise cover raised, the gate
+  auto-locked, `VaultScreen` was disposed mid-pick, and the picked files returned
+  to a `!mounted` check and were dropped silently. `vault_gate_screen.dart` now
+  also exempts `systemOverlayActive`, or the gate locks regardless of the caller.
+  The picker call was also OUTSIDE the try, so a `PlatformException` escaped an
+  unawaited call and showed the user nothing at all.
+- After first-run PIN setup, `_hasPin` was never set and `_firstPin` never
+  cleared. The next auto-lock re-rendered the SETUP pad: "Confirm your PIN" out
+  of nowhere, no biometrics, and — the real problem — **any two matching digits
+  set a new PIN and opened the vault.** A lock anyone could walk through.
+
+**Gates:** `flutter analyze` 0 errors / 0 warnings; `flutter test` →
+`+828: All tests passed!` (824 + 4 new).
+
+**NEW `test/unit/vault/vault_key_test.dart`** — 4 tests: round-trip with no
+couple key derived; the sub-256KB branch honours `keyOverride` (that branch used
+to call `encryptBytes`, which reads `_sharedKey` and would silently ignore the
+override); another key cannot open vault media; AD binds a blob to its row.
+**Proved non-vacuous by mutation:** reverting the one-line fix fails all four.
+`exportVaultKeyBytes` itself is not covered — it reads the platform keystore,
+which a unit test cannot reach (the same limitation `crypto_core_test.dart`
+records for `deriveSharedKey`).
+
+**NOT verified:** on a handset. The decisive test is one tap on a cold-started
+build: Vault, Add, pick a photo. It must now save.
+
+**Found, not fixed (from the three audits):**
+- `vault_screen.dart` uses raw `ImagePicker()` instead of `PhotoPickerService`,
+  so the vault opens the document browser rather than the gallery.
+- `saveMedia` derives no thumbnail for video (`Thumbnails.forVideo` exists and
+  chat uses it), so `gridPath` is null and a vault of videos is a wall of
+  identical grey icons.
+- `MediaNormalize.toSendable` writes a PLAINTEXT JPEG into the temp dir for
+  HEIC/DNG input and nothing deletes it — a decrypted copy on disk, in the one
+  feature built to avoid exactly that.
+- `router.dart:114-117` forces `/couple` while unpaired, so a solo user has no
+  personal vault although nothing in `VaultRepository` needs a couple.
+- `vault_gate_screen.dart:173` `biometricOnly: canCheck` falls back to the
+  DEVICE unlock code when no biometric is enrolled — the partner is the person
+  most likely to know it.
+- `vault_repository.dart` `saveMedia`/`addNote` return silently when
+  `currentUserId` is null; `deleteItem` treats a hidden row as success.
+- `vault_screen.dart` error copy says "check your connection" for every cause
+  including crypto, 403 and 413.
+- `VaultRepository.saveMediaToVault` is dead code with two silent-success returns.
+- Vault notes are still stored as plaintext `content`.
+
+## §45 — Per-user storage quota, 5 GB, enforced server-side (2026-08-17)
+
+Owner asked for "5 GB per user of every storage". Supabase has no per-user
+quota: buckets carry a per-FILE limit, the plan carries a per-PROJECT total, and
+nothing sits between them. Built the missing middle.
+
+**Applied to staging, verified, then production.** Both green.
+- `public.storage_quota_bytes()` — the limit in ONE place, `5368709120`.
+- `public.storage_usage(user_id, bytes)` — counter; RLS lets a user read only
+  their own row so the app can show "3.1 GB of 5 GB".
+- `public.reconcile_storage_usage()` — full recompute (not a delta: a delta
+  cannot self-heal), on `cron.schedule('reconcile-storage-usage', '*/5 * * * *')`.
+- `storage_quota_limit` — a RESTRICTIVE INSERT policy on `storage.objects`, so
+  it is ANDed with every bucket's own policy and cannot be granted around.
+
+Two constraints found the hard way, both recorded in the migration header:
+- **A trigger on `storage.objects` is impossible** — `42501: must be owner of
+  table objects`. `create policy` on it IS permitted; `create index` is NOT.
+- **`sum(size)` inside the policy would seq scan** — no index on `owner` and one
+  cannot be created. Hence the counter, read by primary key. Cost: usage can lag
+  the 5-minute cron, so a user may overshoot by one interval's uploads.
+
+**A bug in my own migration, caught by its negative test:**
+`(5 * 1024 * 1024 * 1024)::bigint` raises `22003 integer out of range` — Postgres
+multiplies the int4 literals first and only casts the result. Since the policy
+calls that function on every insert, this would have **rejected every upload in
+every bucket**. Written as the literal `5368709120` now.
+
+Negative test (staging): under quota to `true`, over quota to `false`, with
+`raise exception` guards that fail the run otherwise. Production after apply:
+zunaira 60 MB / 5120 MB, raza 7836 kB / 5120 MB, both `can_upload = true`; cron
+job `active = true`; policy `permissive = false`.
+
+**Owner decision recorded: Supabase Pro comes AFTER the app is market-ready.**
+Until then the org is `plan: free` and these are the binding ceilings, none of
+which this migration can lift:
+- max file size **50 MB** (Pro: 500 GB) — and `couple_intimate` +
+  `personal_vault` are configured at 100 MB, ABOVE that cap, so 50-100 MB
+  uploads fail today with a confusing error. **Open item.**
+- total project storage **1 GB** (Pro: 100 GB, then $0.0213/GB/mo).
+- At 1000 users x 5 GB = 5 TB, roughly $104/mo storage alone, egress separate.
+- Independently, the client cannot upload anywhere near 5 GB: `uploadBinary`
+  holds the whole file in RAM and encryption makes a second copy.
+
+Rollback SQL for both is in the migration header at
+`supabase/migrations/20260817140000_storage_quota_per_user.sql`.
+
+**Exact next step:** install build 44 and tap Vault, Add, pick a photo on a cold
+start. That single tap is what confirms the vault fix; it has never once
+succeeded in production. Then the §44 found-not-fixed list, of which the video
+thumbnail gap and the plaintext temp file matter most.
+
+## §46 — Message notifications, built around what each cover can plausibly do (2026-08-17)
+
+Owner's objection, and it was correct: a weather app that buzzes on every
+message, or a calculator that notifies at all, is the disguise gone. The earlier
+plan in this session was wrong because it designed the WORDING; the problem is
+FREQUENCY and EXISTENCE.
+
+**Already shipping, now fixed.** The Reach channel is `Importance.max` and calls
+`currentNotificationStyle()`, so a Reach on the calculator cover produced a
+buzzing heads-up reading **"Calculator — Tap to open"** with the distinctive
+Reach vibration. Rare enough not to have been reported; wrong since the cover
+work landed.
+
+**NEW model — `NotificationBudget` in `disguise_notification.dart`.** Covers are
+different species, not variations:
+- `frequent` — news. The only cover where regular alerting is in character.
+- `occasional` — notes, timer.
+- `persistent` — weather. ONE permanent silent entry, rewritten in place, the
+  way a weather app shows conditions all day. The NUMBER of notifications on the
+  phone never changes, so there is nothing new for a bystander to notice. The
+  strongest cover of the set.
+- `none` — calculator, level, convert, recorder, device. Real ones never notify,
+  so these post NOTHING. Not minimised, not silent-but-present: nothing.
+
+**DONE + verified:**
+- `showReachNotification` routes `none` covers to a new low-importance channel
+  (`quiet_updates`): no sound, no vibration, no heads-up. On Android 8+ the
+  CHANNEL decides alerting, so a silent variant has to be a second channel, not
+  a flag. Cost, stated plainly: a Reach on a silent cover will not get anyone's
+  attention until they pick the phone up. That is what those covers are for.
+- `showMessageNotification` is now **one entry per conversation**, id keyed on
+  `coupleId` — it was `messageId.hashCode`, i.e. one notification per message,
+  exactly the flood the owner described. `onlyAlertOnce: true` means only the
+  first of a burst makes a sound; the rest update the count in silence. Thirty
+  messages over lunch = one sound, one entry reading "30 new stories".
+- Body carries a COUNT and never a name or preview. For a disguised app there is
+  no safe "sender name only" mode, so none is offered.
+- `UnreadTally` (new, `core/services/unread_tally.dart`) counts per couple in
+  SharedPreferences, because the FCM background isolate has no app state.
+  Cleared by the chat opening, together with the notification — separately and
+  the count resumes from a number nothing on screen agrees with.
+- **No server change.** The `msg_sync` wake already fires for every message;
+  whether anything is drawn is decided on-device by this build. Flipping the
+  trigger to `kind:'message'` would have started drawing notifications on every
+  handset already in the field using their old per-message code — the exact
+  breakage the version gate exists to prevent. The `'message'` kind is still
+  accepted and now shares one code path with `msg_sync` rather than keeping a
+  second copy that drifts.
+- Receipt ordering preserved: the delivery ack is started BEFORE the
+  notification and awaited after, so a drawing failure cannot cost the sender
+  their second grey tick.
+
+**CHANNEL LEAK FIXED.** `kMsgChannelName` was `'Messages'`, described `'New
+messages'`, while every other channel here was already generic ('Alerts',
+'Background activity', 'Timers', 'Reminders'). Android lists channel names under
+Settings > Apps > <cover> > Notifications, so a "Messages" channel inside what
+claims to be a weather app was the disguise undone by someone who never opened
+the app. Retired to `content_updates` / 'Updates'; the old `msg_channel` id is
+deleted on start in `fcm_service.dart` and must never be created again (a
+channel cannot be renamed).
+
+**Gates:** `flutter analyze` 0 errors / 0 warnings; `flutter test` →
+`+834: All tests passed!` (828 + 6).
+
+**NEW `test/unit/disguise/notification_budget_test.dart`** — 5 tests over the
+REAL shipped `kDisguises` list (not synthetic profiles), so a cover added without
+a budget decision fails here rather than shipping. Asserts: the five silent
+covers are silent; news is the only `frequent`; weather is `persistent`; unread
+wording counts and never contains 'message'/'chat'/'partner'; every cover
+resolves a real `@drawable/ic_notif_*`.
+
+**One existing test was UPDATED, not deleted** — `delivery_ack_test.dart`'s "the
+delivery wake draws no notification" asserted the old rule, which the owner has
+now changed. Replaced with the rule that actually matters going forward: the ack
+must be started BEFORE anything is drawn, plus a new test pinning
+one-per-conversation (`coupleId.hashCode`, `onlyAlertOnce`, `isSilentCover`).
+Flagged because deleting a red test to go green is bypassing; this is a spec
+change by explicit instruction.
+
+**NOT done (design agreed, not built):**
+- The in-app unread signal for `none` covers. Those users currently get nothing
+  at all until they open the app — acceptable but incomplete; the cover's own UI
+  should carry a subtle indicator.
+- The setting at disguise-selection time telling the user what their cover can
+  and cannot do ("Calculator can't show alerts"). Without it the constraint is a
+  surprise rather than an informed choice.
+- Per-cover hard rate limits beyond `onlyAlertOnce` (e.g. news at most one
+  digest an hour). `onlyAlertOnce` already removes the flood; the time-based cap
+  is refinement.
+- Notification tap currently routes by payload as before — NOT verified that it
+  lands on the cover rather than straight into the chat.
+
+**NOT verified:** on a handset. Everything here is source-level plus tests; the
+decisive checks are (a) a Reach on the calculator cover makes no sound, (b) ten
+rapid messages produce ONE entry that counts to ten, (c) Settings > Apps shows
+no "Messages" channel.
+
+**Exact next step:** handset pass on the three checks above, then the in-app
+signal for silent covers.
