@@ -57,14 +57,24 @@ class ErrorReporter {
   static const _maxTypeChars = 64;
   static const _maxDetailChars = 64;
 
-  static void report(Object error, StackTrace? stack, {required String kind}) {
+  /// [force] lets one report past the per-run cap — never past the dedup.
+  /// The data export's single end-of-run shortfall row is why it exists: a
+  /// run failing across hundreds of items shares its broken backend with the
+  /// rest of the app, so by the time that one summary row is built the cap
+  /// is usually already spent on the same outage's other reports.
+  static void report(
+    Object error,
+    StackTrace? stack, {
+    required String kind,
+    bool force = false,
+  }) {
     // The raw text never leaves the device, so a debug build has every reason
     // to print it and a release build every reason not to: logcat is readable
     // over adb, the message may hold plaintext, and the product's name is not
     // something this app writes down.
     if (kDebugMode) debugPrint('$kind error: $error\n$stack');
 
-    if (_sent >= _maxPerRun) return;
+    if (!force && _sent >= _maxPerRun) return;
     final type = _cap(error.runtimeType.toString(), _maxTypeChars);
     final trace = _stack(stack);
     // kind is part of the key: chat-fetch and shared-media can both die

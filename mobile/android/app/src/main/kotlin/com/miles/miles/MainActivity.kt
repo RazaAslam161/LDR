@@ -15,8 +15,11 @@ import android.os.Build
 import android.app.PictureInPictureParams
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Rational
 import android.view.KeyEvent
@@ -24,6 +27,8 @@ import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.OutputStream
+import java.util.concurrent.Executors
 
 // Must extend FlutterFragmentActivity (NOT FlutterActivity): local_auth's
 // biometric prompt requires a FragmentActivity host. With FlutterActivity,
@@ -57,6 +62,32 @@ class MainActivity : FlutterFragmentActivity() {
     // key pipeline sees them, so we must bridge them ourselves.
     private var volumeChannel: MethodChannel? = null
 
+    // ── Data export (SAF) ──
+    //
+    // The Dart result waiting on the ACTION_OPEN_DOCUMENT_TREE picker. Classic
+    // onActivityResult rather than registerForActivityResult: the launcher API
+    // must be registered before the activity is STARTED, and this channel is
+    // wired in configureFlutterEngine — which for a warm engine can run after
+    // that. Flutter's own plugins ride onActivityResult already; claiming one
+    // request code beside them is the supported shape.
+    private var pendingFolderPick: MethodChannel.Result? = null
+
+    // Open streams into the user's chosen folder, keyed by the handle Dart
+    // holds. Everything that touches this map (and the counter) runs on
+    // [exportExecutor] — a SINGLE thread, which is both the confinement that
+    // makes the map safe without locks and the ordering guarantee that a
+    // writeChunk can never land after its closeFile. The Dart side awaits each
+    // call anyway; the executor's job is keeping half-megabyte writes off the
+    // platform UI thread, where they would jank every other channel on it.
+    private val exportStreams = HashMap<Int, OutputStream>()
+    private var nextExportHandle = 1
+    private val exportExecutor = Executors.newSingleThreadExecutor()
+    private val exportMain = Handler(Looper.getMainLooper())
+
+    private companion object {
+        const val REQUEST_EXPORT_TREE = 4207
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> volumeChannel?.invokeMethod("volume", "up")
@@ -75,6 +106,64 @@ class MainActivity : FlutterFragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         captureSharedText(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Streams die with the activity. A recreation mid-export (rotation, a
+        // kill in the background) invalidates every handle Dart holds; each
+        // later writeChunk then fails and the Dart run counts that file as a
+        // failure — which is the truth. Nothing to report from here: the
+        // process is on its way out.
+        exportExecutor.execute {
+            for (stream in exportStreams.values) {
+                try {
+                    stream.close()
+                } catch (e: Exception) {
+                    // Closing a stream whose file is already lost; the Dart
+                    // summary carries the failure.
+                }
+            }
+            exportStreams.clear()
+        }
+        exportExecutor.shutdown()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        val result = pendingFolderPick
+        if (requestCode != REQUEST_EXPORT_TREE || result == null) {
+            // Not ours — every plugin's picker still arrives through here.
+            // The pendingFolderPick check matters as much as the code: some
+            // plugins (file_picker) register runtime request codes by hashing,
+            // and a hash landing on 4207 while no export pick is open must
+            // reach its own plugin, not be swallowed here.
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        pendingFolderPick = null
+        val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+        if (uri == null) {
+            // Backed out of the picker. An ordinary answer, not an error —
+            // the Dart side reads null as "nothing chosen, do nothing".
+            result.success(null)
+            return
+        }
+        try {
+            // Persist the grant, or it dies with this task: the export walks
+            // thousands of files and the app can be relaunched mid-run, and a
+            // tree URI without a persisted grant answers every reopen with
+            // SecurityException.
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            result.success(uri.toString())
+        } catch (e: Exception) {
+            // Class only, like runExportIo: a SecurityException's message can
+            // embed the folder URI the user picked.
+            result.error("no_permission", e.javaClass.simpleName, null)
+        }
     }
 
     /// Instagram, TikTok and the rest all share a plain-text link.
@@ -428,6 +517,189 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Data export: streams decrypted copies into a folder the user picked.
+        // SAF is the only way to write somewhere the user chose that survives
+        // scoped storage, needs no permission dialog of its own, and keeps
+        // working on every Android this app runs on. The protocol is
+        // deliberately dumb — open, append, close, by handle — because the
+        // policy (what to export, how to name it, what a failure means) all
+        // lives on the Dart side where the repositories are. Chunked so a
+        // multi-GB video is never in memory on either side of the channel.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/export")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "pickFolder" -> {
+                        if (pendingFolderPick != null) {
+                            result.error("busy", "a folder pick is already open", null)
+                            return@setMethodCallHandler
+                        }
+                        pendingFolderPick = result
+                        try {
+                            startActivityForResult(
+                                Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                                ),
+                                REQUEST_EXPORT_TREE
+                            )
+                        } catch (e: Exception) {
+                            // No documents UI on this device. Answered as an
+                            // error, not a null: null means "the user said no",
+                            // and this is "the user was never asked". Class
+                            // only, like runExportIo — an ActivityNotFound
+                            // message can carry intent details.
+                            pendingFolderPick = null
+                            result.error("no_picker", e.javaClass.simpleName, null)
+                        }
+                    }
+                    "createFile" -> {
+                        val treeUri = call.argument<String>("treeUri")
+                        val relativePath = call.argument<String>("relativePath")
+                        val mime = call.argument<String>("mime")
+                        if (treeUri.isNullOrBlank() || relativePath.isNullOrBlank() ||
+                            mime.isNullOrBlank()
+                        ) {
+                            result.error(
+                                "bad_args", "treeUri, relativePath and mime are required", null
+                            )
+                            return@setMethodCallHandler
+                        }
+                        runExportIo(result) { exportCreateFile(treeUri, relativePath, mime) }
+                    }
+                    "writeChunk" -> {
+                        val id = call.argument<Int>("id")
+                        val bytes = call.argument<ByteArray>("bytes")
+                        if (id == null || bytes == null) {
+                            result.error("bad_args", "id and bytes are required", null)
+                            return@setMethodCallHandler
+                        }
+                        runExportIo(result) {
+                            val stream = exportStreams[id]
+                                ?: throw IllegalStateException("no open file for handle $id")
+                            stream.write(bytes)
+                            null
+                        }
+                    }
+                    "closeFile" -> {
+                        val id = call.argument<Int>("id")
+                        if (id == null) {
+                            result.error("bad_args", "id is required", null)
+                            return@setMethodCallHandler
+                        }
+                        runExportIo(result) {
+                            // remove() before close(): even a close that throws
+                            // must not leave a dead handle a retry could write
+                            // into.
+                            val stream = exportStreams.remove(id)
+                                ?: throw IllegalStateException("no open file for handle $id")
+                            try {
+                                stream.flush()
+                            } finally {
+                                stream.close()
+                            }
+                            null
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /// Runs [op] on the export thread and answers on the platform thread,
+    /// which is the only thread a MethodChannel.Result may be completed from.
+    /// Only the exception's CLASS crosses back as the code: an IOException's
+    /// message can name the folder the user picked, and the Dart side reports
+    /// failure classes, never paths.
+    private fun runExportIo(result: MethodChannel.Result, op: () -> Any?) {
+        exportExecutor.execute {
+            try {
+                val value = op()
+                exportMain.post { result.success(value) }
+            } catch (e: Exception) {
+                exportMain.post {
+                    result.error("io_failed", e.javaClass.simpleName, null)
+                }
+            }
+        }
+    }
+
+    /// Creates every directory along [relativePath] under [treeUriStr], then
+    /// the file itself, and answers the handle Dart appends through PLUS the
+    /// display name the provider actually gave the file. The provider owns
+    /// that name — a taken one gains a " (1)" suffix, and some providers
+    /// append the mime's extension — and Dart's manifests must point at the
+    /// file that exists, not the one that was asked for.
+    ///
+    /// DocumentsContract rather than DocumentFile: DocumentFile.findFile lists
+    /// the whole directory per lookup, and the export creates hundreds of files
+    /// under the same few directories. This walks each directory level once per
+    /// call with one child query, which is the same work DocumentFile does
+    /// internally minus the per-file re-listing.
+    private fun exportCreateFile(
+        treeUriStr: String,
+        relativePath: String,
+        mime: String
+    ): Map<String, Any> {
+        val treeUri = Uri.parse(treeUriStr)
+        val segments = relativePath.split('/').filter { it.isNotBlank() }
+        require(segments.isNotEmpty()) { "relativePath has no segments" }
+        var parentDoc = DocumentsContract.getTreeDocumentId(treeUri)
+        for (dir in segments.dropLast(1)) {
+            parentDoc = findOrCreateDir(treeUri, parentDoc, dir)
+        }
+        val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDoc)
+        // If the name is already taken the provider appends a suffix rather
+        // than overwriting — the right default for an export, where clobbering
+        // a file from a previous run would silently shorten it.
+        val fileUri = DocumentsContract.createDocument(
+            contentResolver, parentUri, mime, segments.last()
+        ) ?: throw IllegalStateException("provider refused to create ${segments.last()}")
+        // Read the real name back off the created document. A provider that
+        // answers no display name leaves the requested one standing, which is
+        // no worse than not asking.
+        var name = segments.last()
+        contentResolver.query(
+            fileUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null
+        )?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) name = c.getString(0)
+        }
+        val stream = contentResolver.openOutputStream(fileUri, "w")
+            ?: throw IllegalStateException("provider opened no stream")
+        val id = nextExportHandle++
+        exportStreams[id] = stream
+        return mapOf("id" to id, "name" to name)
+    }
+
+    /// The document id of the child directory [name] under [parentDoc],
+    /// creating it if it does not exist yet.
+    private fun findOrCreateDir(treeUri: Uri, parentDoc: String, name: String): String {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDoc)
+        contentResolver.query(
+            children,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            ),
+            null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                if (c.getString(1) == name &&
+                    c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                ) {
+                    return c.getString(0)
+                }
+            }
+        }
+        val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDoc)
+        val made = DocumentsContract.createDocument(
+            contentResolver, parentUri, DocumentsContract.Document.MIME_TYPE_DIR, name
+        ) ?: throw IllegalStateException("provider refused to create directory $name")
+        return DocumentsContract.getDocumentId(made)
     }
 
     private fun deviceStats(): Map<String, Any?> {

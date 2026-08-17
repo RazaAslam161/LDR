@@ -227,7 +227,8 @@ class WishJarRepository {
         // their key is legitimately unopenable here, and an empty jar reads
         // as lost data.
         unreadable++;
-        debugPrint('wish jar: unreadable row: $e');
+        // Class only: a decrypt error's message can carry plaintext.
+        debugPrint('wish jar: unreadable row: ${e.runtimeType}');
         continue;
       }
     }

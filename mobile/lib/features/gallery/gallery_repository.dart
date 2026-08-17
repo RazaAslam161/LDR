@@ -133,6 +133,33 @@ class GalleryRepository {
     return items;
   }
 
+  static const pageSize = 500;
+
+  /// One page for a caller that must see EVERYTHING — the data export walks
+  /// this to exhaustion, because [fetch]'s 500 cap is a grid decision and an
+  /// export truncated at it would be silent loss. Same select and order as
+  /// [fetch]; the cursor is `created_at` rather than an offset, exactly as
+  /// VaultRepository.items() pages, and for the same reasons. No URL warming:
+  /// the export signs originals itself, and warming thousands of grid thumbs
+  /// would be pure waste.
+  static Future<List<GalleryItem>> fetchPage(
+    String coupleId, {
+    DateTime? before,
+  }) async {
+    var q = _c
+        .from('gallery_items')
+        .select(_columns)
+        .eq('couple_id', coupleId)
+        .eq('deleted', false);
+    if (before != null) {
+      q = q.lt('created_at', before.toUtc().toIso8601String());
+    }
+    final rows = await q.order('created_at', ascending: false).limit(pageSize);
+    return [
+      for (final r in rows as List) GalleryItem.fromJson(JsonUtils.asMap(r)),
+    ];
+  }
+
   /// One createSignedUrls call for every path the grid is about to ask for.
   /// Signing per tile is a network round trip behind every picture.
   static Future<void> _warm(List<GalleryItem> items) =>

@@ -1052,6 +1052,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               ),
               onTap: _escrowMissing ? _fixEscrow : null,
             ),
+            // The counterpart to the destroy buttons below: everything the
+            // couple keeps here, copied out unencrypted to a folder the user
+            // picks. E2EE means only their own device can ever build it.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.drive_file_move_outline,
+                  color: MilesColors.taupe,),
+              title: const Text('Export your data',
+                  style: TextStyle(color: MilesColors.cream50),),
+              subtitle: const Text(
+                  'An unencrypted copy, in a folder you choose',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: () => context.push('/app/settings/export'),
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading:

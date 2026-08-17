@@ -44,6 +44,7 @@ import 'package:miles/features/legal/terms_screen.dart';
 import 'package:miles/features/profile/partner_profile_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
+import 'package:miles/features/settings/export_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
@@ -216,6 +217,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/settings',
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: '/app/settings/export',
+        builder: (context, state) => const ExportScreen(),
       ),
       // No partner id in the path. The screen reads the session, so a link that
       // outlives a sign-out opens the new account's partner or nothing at all —
