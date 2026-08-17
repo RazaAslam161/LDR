@@ -269,6 +269,20 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void _startHeartbeat() {
     _heartbeat?.cancel();
     void beat() {
+      // ONLINE MEANS A PERSON IS LOOKING AT THIS APP. Not "the process is
+      // running", which is what this used to mean and why a Reach made the
+      // recipient appear online without her touching the phone: a push resumes
+      // the app, resume started the heartbeat, and the first beat stamped
+      // is_online, app_last_active_at and last_seen — all three — while the
+      // disguise cover was still up and she had not authenticated.
+      //
+      // That is worse than a cosmetic bug. The sender is told his partner is
+      // there and reading, when she is asleep with the phone face down, and
+      // what he does with that belief is have an argument about being ignored.
+      //
+      // showRealApp is only true after the cover, the biometric gate and the
+      // splash are all behind us — which no push can fake.
+      if (!MilesApp.showRealApp.value) return;
       final c = ref.read(currentCoupleProvider);
       if (c != null) PresenceService.setOnline(c.id, online: true);
     }
@@ -543,6 +557,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // real app is the second chance to act on it.
     MilesApp.showRealApp.addListener(_routeToNewPassword);
     MilesApp.showRealApp.addListener(_dropPlaintextBehindCover);
+    MilesApp.showRealApp.addListener(_trackHumanPresence);
+    // Seed it: the real app is already showing on a channel with no disguise,
+    // where showRealApp is set true in main() before this listener exists and
+    // would therefore never fire.
+    _trackHumanPresence();
   }
 
   /// Every decrypted photograph leaves RAM the moment the cover goes up.
@@ -556,6 +575,23 @@ class _MilesAppState extends ConsumerState<MilesApp>
   /// backgrounding, which is exactly when Android kills the process, so
   /// `dispose` frequently never runs. Only the ciphertext on disk survives,
   /// which is the whole design.
+  /// Presence follows the person, not the process.
+  ///
+  /// The cover coming down is the only signal that survives every way this app
+  /// can be woken without her: a push, a widget, a system restart, the OS
+  /// pre-warming the process. None of those get past the biometric gate, so
+  /// none of them can claim she is online.
+  ///
+  /// Going true also beats immediately rather than waiting up to 30s for the
+  /// heartbeat's next tick — she opens the app and her partner sees it now.
+  void _trackHumanPresence() {
+    final present = MilesApp.showRealApp.value;
+    PresenceService.humanPresent = present;
+    if (!present) return;
+    final c = ref.read(currentCoupleProvider);
+    if (c != null) unawaited(PresenceService.setOnline(c.id, online: true));
+  }
+
   void _dropPlaintextBehindCover() {
     if (MilesApp.showRealApp.value) return;
     EncryptedMediaCache.clear();
@@ -623,6 +659,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
     passwordRecovery.removeListener(_routeToNewPassword);
     MilesApp.showRealApp.removeListener(_routeToNewPassword);
     MilesApp.showRealApp.removeListener(_dropPlaintextBehindCover);
+    MilesApp.showRealApp.removeListener(_trackHumanPresence);
     _volumeChannel.setMethodCallHandler(null);
     EmergencyLockService.dispose();
     _stopHeartbeat();

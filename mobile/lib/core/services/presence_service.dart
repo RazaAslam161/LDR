@@ -305,16 +305,43 @@ class PresenceService {
   /// would blink a partner offline while they were sitting in the app.
   /// last_seen stays advisory; the honest clocks are app_last_active_at and
   /// updated_at, both server-stamped.
-  static Future<void> setOnline(String coupleId, {required bool online}) =>
-      _upsert(
-        coupleId,
-        {
-          'is_online': online,
-          'last_seen': DateTime.now().toUtc().toIso8601String(),
-        },
-        op: 'set_online',
-        isAppActivity: online,
-      );
+  /// Whether a PERSON is actually looking at the real app right now.
+  ///
+  /// Set from `MilesApp.showRealApp`, which only goes true after the cover, the
+  /// biometric gate and the splash. Everything that claims presence is gated on
+  /// it, here rather than at each call site, because there are five callers and
+  /// the next one added will not remember this rule.
+  ///
+  /// What it prevents: a Reach push resumes the recipient's app, resume starts
+  /// the heartbeat, and the first beat stamps is_online, app_last_active_at and
+  /// last_seen — so the sender is shown a partner who is awake and reading,
+  /// while she is asleep and has touched nothing. A presence system that
+  /// reports the PROCESS rather than the PERSON does not just show a wrong dot;
+  /// it invents evidence of being ignored.
+  static bool humanPresent = false;
+
+  static Future<void> setOnline(String coupleId, {required bool online}) {
+    // Claiming presence requires a person. Going OFFLINE is always allowed —
+    // it is the honest direction, and a goodbye written as the app dies must
+    // never be gated on a flag the teardown may already have cleared.
+    if (online && !humanPresent) {
+      debugPrint('[presence] online claim refused: nobody is looking');
+      return Future<void>.value();
+    }
+    return _upsert(
+      coupleId,
+      {
+        'is_online': online,
+        // last_seen moves ONLY with a real online claim. It rode along on every
+        // write, so a push-woken process that wrote anything at all pushed
+        // "last seen" to now — the timestamp the partner reads as "she was just
+        // here".
+        'last_seen': DateTime.now().toUtc().toIso8601String(),
+      },
+      op: 'set_online',
+      isAppActivity: online,
+    );
+  }
 
   static Future<void> setTyping(String coupleId, {required bool typing}) =>
       _upsert(coupleId, {'is_typing': typing},
