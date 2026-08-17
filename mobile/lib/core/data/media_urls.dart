@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 
 /// Chat photos, voice notes, GIFs, avatars and check-in snaps. Private
 /// since the audit found 255 of them served without authentication.
@@ -90,8 +91,12 @@ class MediaUrls {
           .createSignedUrl(path, _ttl.inSeconds);
       _cache[_key(bucket, path)] = _Signed(url, DateTime.now().add(_ttl));
       return url;
-    } catch (e) {
-      debugPrint('[media] sign failed for $bucket/$path: ${e.runtimeType}');
+    } catch (e, st) {
+      // Null stays the contract (callers render an absence), but the failure
+      // now reaches client_errors instead of one handset's logcat: a signing
+      // outage used to look like users spontaneously sending less media.
+      // ErrorReporter dedups and never records the path.
+      ErrorReporter.report(e, st, kind: 'media-sign');
       return null;
     }
   }

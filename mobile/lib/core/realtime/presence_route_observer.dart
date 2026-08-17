@@ -333,6 +333,8 @@ String? screenNameForPath(String path) {
     // A failed profile load, not a room — publishing it would tell the
     // partner "Offline" as if it were a place being visited.
     '/offline',
+    '/terms', // a legal gate is not a place
+    '/rewrap', // a key ceremony is not a place
     // A call is not a room either, and publishing it was a presence oracle in
     // both directions. The CALLER pushes /call at CallState.calling, which is
     // set before the offer is sent and up to ~15s before it on a cold relay

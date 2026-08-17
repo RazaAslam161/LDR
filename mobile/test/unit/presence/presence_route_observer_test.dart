@@ -40,6 +40,10 @@ void main() {
         '/role-setup',
         '/app/rapid-camera',
         '/offline',
+        // A legal gate and a key ceremony are not places either — publishing
+        // them shows the partner "Terms" or "Rewrap" as a room.
+        '/terms',
+        '/rewrap',
       ]) {
         expect(screenNameForPath(p), isNull, reason: '$p should not report');
       }

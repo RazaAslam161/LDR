@@ -21,6 +21,7 @@ void main() {
   final signIn = read('lib/features/auth/sign_in_page.dart');
   final home = read('lib/features/home/home_screen.dart');
   final repo = read('lib/core/data/supabase_repository.dart');
+  final terms = read('lib/features/legal/terms_screen.dart');
 
   group('the invite code survives leaving the app', () {
     test('the couple page recovers a live invite from the server', () {
@@ -57,6 +58,16 @@ void main() {
           reason: '/couple is inescapable by design of the redirect',);
       // And wired to something tappable, not just present.
       expect(couplePage, contains('onPressed: _loading ? null : _signOut'));
+    });
+
+    test('the terms gate has a sign out', () {
+      // The router forces anyone who has not accepted to /terms from every
+      // path, so someone who signed into the WRONG account was trapped
+      // accepting terms for it or uninstalling. Same class as /couple.
+      expect(terms, contains('Future<void> _signOut'),
+          reason: '/terms is inescapable by design of the redirect',);
+      // And wired to something tappable, not just present.
+      expect(terms, contains('onPressed: _busy ? null : _signOut'));
     });
 
     test('waiting for a partner offers the code and a new one', () {

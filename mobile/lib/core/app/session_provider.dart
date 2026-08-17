@@ -325,12 +325,21 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // Unbinding the device is part of ending a session, not a courtesy the
     // caller can forget — and it must happen while the session is still valid,
     // because the token is cleared with an authenticated write.
-    await FcmService.forgetDevice();
-    await SupabaseRepository.signOut();
-    // The signedOut event does this too. Called here as well because a sign-out
-    // that threw on the way to the server must still not leave the previous
-    // couple's bytes on this handset; everything below is idempotent.
-    await _endSession();
+    // In a finally, not after: the comment below promises the wipe survives a
+    // throw, and sequential awaits kept that promise only when nothing threw
+    // — a signOut() that died on the way to the server skipped the wipe and
+    // left only the signedOut event (which a pre-event throw never fires) to
+    // keep the previous couple's bytes off this handset.
+    try {
+      await FcmService.forgetDevice();
+      await SupabaseRepository.signOut();
+    } finally {
+      // The signedOut event does this too. Called here as well because a
+      // sign-out that threw on the way to the server must still not leave the
+      // previous couple's bytes on this handset; everything below is
+      // idempotent.
+      await _endSession();
+    }
   }
 
   /// Everything that must not outlive a session, however it ended.

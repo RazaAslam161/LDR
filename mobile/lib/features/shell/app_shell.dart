@@ -308,8 +308,10 @@ class _AppShellState extends ConsumerState<AppShell>
   /// ever being read. The location one is last because it is the only one that
   /// leads to a system dialog we cannot draw over.
   Future<void> _firstRunPrompts(String coupleId) async {
-    // The cover question is NOT here any more — it runs from _onReady before
-    // the couple check, so an unpaired user still gets asked.
+    // The cover question is NOT here any more, and does not run from anywhere
+    // else either — the picker is Settings-only. Restoring a first-run offer
+    // is the play channel's account-strike scenario (build.gradle.kts,
+    // DISGUISE_ENABLED condition 1), so it stays out on every channel.
     final partnerName =
         ref.read(sessionProvider).partner?.displayName ?? 'your partner';
     // One-time, dismissible full-screen-alert prompt (Android 14+).

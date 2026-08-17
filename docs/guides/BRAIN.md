@@ -5001,3 +5001,259 @@ them.
 csae.html AND auth-callback.html fixes) + secure-email-change config check;
 then the play AAB device pass; then the deferred crypto-hardening session
 (TOFU pin + zero-MAC gating) and data export.
+
+## §51 — Chat plaintext: the columns and the codec test land; the write flip does NOT, and here is why (2026-08-18)
+
+Continues §50. Asked to "fix the plaintext chat". The honest finding is that
+encrypting the chat WRITE path today would break sending for every new couple,
+so this session shipped the two pieces that are safe and correct, and stopped at
+the wall rather than through it.
+
+**THE WALL — verified three ways, not inferred.** Encrypting `sendText` requires
+a derived couple key. There isn't one on the chat path:
+- `ensureSharedKey` / `deriveSharedKey` is called from Closer, the wish jar,
+  memory threads, the rewrap screen — and **never from chat**
+  (`grep -rn 'ensureSharedKey|deriveSharedKey' mobile/lib/`).
+- `_sharedKey` is in-memory and cleared by `bindAccount` on every cold start
+  (crypto_core.dart:261), and the disguise backgrounds the app so Android kills
+  the process routinely.
+- `publishMyPublicKey` runs only from Closer entry, the rewrap ceremony, and the
+  settings toggle at settings_screen.dart:418.
+- **`couples.modest_mode` DEFAULTS TO TRUE in production** (information_schema),
+  and closer_screen.dart:45 returns early — skipping key prep — while it is on.
+
+So a brand-new couple has no published key and no derived key, and
+`CryptoCore.encryptBytes` **throws** rather than writing cleartext
+(crypto_core.dart:655). Every text send would fail. `ChatSendQueue._runText`
+catches, marks the bubble failed and never auto-retries, and text bodies are
+deliberately never persisted (chat_send_queue.dart:236-240), so a process kill
+loses the message permanently. `location_map_screen.dart:427` calls sendText
+bare with no catch — it would become a silent no-op.
+
+**Why the two test handsets would not have shown this:** the one existing couple
+has `modest_mode = 0` and both real keys published (`partner_keys` = 2 real, 0
+`plaintext-v1`). It is the default-on path that breaks, i.e. everyone else.
+
+**DONE and verified on prod:**
+1. `20260818100000_messages_get_cipher_columns.sql` — `body_cipher bytea` +
+   `body_nonce bytea`, both nullable, plus a PAIR check
+   `((body_cipher is null) = (body_nonce is null))`.
+   Deliberately NOT a "cipher required" check: that would 23514 on every insert
+   from an already-installed client, and `_alreadyLanded` only forgives 23505,
+   so those sends would become permanent red bubbles — and media uploads the
+   file before the insert, so each rejection would orphan a storage object.
+   Verified on prod: both columns bytea+nullable, pair constraint present, no
+   required-cipher constraint, messages still has NO column-level ACLs (so old
+   clients are unaffected by the columns existing), 94 plaintext rows untouched,
+   0 cipher rows. Inert until a client writes it.
+2. `mobile/test/unit/chat/message_cipher_codec_test.dart` — 8 tests, all passing,
+   pinning the serialization boundary BEFORE anything writes through it. This
+   closes the single most dangerous gap: the bytea codec has **never produced a
+   production row** (memory_threads, fantasy_jar_entries, vault_items,
+   personal_vault_items are all empty), had **zero tests**, and the repo carries
+   **two incompatible MAC layouts** — `mac||ct` (packMacAndCiphertext, column
+   pairs) vs `nonce||mac||ct` (packFull) vs wish_jar's `ct||mac`. Chat would be
+   its first real user on 94 rows with no update channel to fix a wrong pick.
+   The tests assert the layout BY BYTE OFFSET, prove the hex round trip for
+   NUL/0xff/0x7f/0x80, and prove `byteaToBytes` accepts all four shapes a driver
+   returns (hex string, base64, Uint8List, raw List of int — the MCP's
+   node-postgres driver returns a Buffer, PostgREST returns the hex literal;
+   both work). They also record that the vault's `_refuseCleartext` 40-byte
+   guard is a NO-OP against the mac||ct layout — reusing it for messages would
+   ship the plaintext-v1 hole behind something that reads like protection.
+3. `supabase/schema_snapshot.json` — messages entry updated to 26 columns.
+   Verified I added exactly `body_cipher`/`body_nonce` and removed nothing; the
+   one unsorted pair (`voice_path`,`voice_duration_ms`) is pre-existing.
+
+**THE REST OF THE SEQUENCE — do not reorder these.**
+- **Step 0 (the real prerequisite, not yet done):** publish the public key at
+  PAIRING regardless of modest mode, and derive the shared key on the chat path.
+  Ship and verify on a FRESH account before any encryption. Until this exists,
+  every later step is unshippable.
+- **Step 1:** ship the READ side everywhere and write nothing new — cipher-aware
+  parse with permanent plaintext fallback, plus the broadcast receiver
+  (chat_broadcast_service.dart:73). Note `Message.fromJson` is SYNCHRONOUS and
+  `decryptString` is async, so decryption needs a hydrate pass, not a change to
+  fromJson. Also: `_parseRows` DROPS a row whose decode throws
+  (chat_repository.dart:358) — a key mismatch would delete messages from the
+  screen whose correct plaintext is sitting in `body` on the same row. Fix that
+  first or a bad key looks like data loss.
+- **Step 2:** dual-write the DB column AND the realtime broadcast together.
+  **The broadcast is a SECOND plaintext wire nobody had noticed:**
+  chat_screen.dart:155-161 sends `'body': body` over the private
+  `mood_burst:<coupleId>` channel before the insert is even enqueued, and it is
+  the FASTER path the partner actually renders from. Encrypting only the column
+  would leave every message crossing Supabase Realtime in cleartext. It is JSON,
+  so base64 there — NOT `bytesToBytea`.
+- **Step 3 blocker to settle FIRST:** `media_class` is a STORED generated column
+  computed from `body ilike '%http%'` (20260601005500:44) with a partial index at
+  :55. Cipher-only classifies it NULL forever and Postgres cannot recompute it;
+  converting it needs ALTER TABLE ... DROP EXPRESSION, a full table rewrite.
+  Cheap now (1 non-null row, the Links shelf has never returned a row), expensive
+  once cipher rows exist.
+- **Step 4:** flip sideload FIRST and hold `min_build_play` — prod has
+  min_build=42, min_build_play=0, and the Play build has no self-updater, so
+  raising the Play floor hard-locks Play users out until Google's rollout lands.
+  Documents (`kind='file'`, where body IS the filename, chat_repository.dart:595)
+  go LAST and separately, or every document renders and downloads as "File".
+- **Permanent, not transitional:** keep the `body` read fallback forever. The
+  release gate FAILS OPEN (release_gate.dart:160) and this project's free tier
+  auto-pauses, so a client below min_build can always still write plaintext.
+- **Guard the write:** refuse to store `body_cipher` when the nonce is all-zero
+  or the first 16 bytes are zero — that is the plaintext-v1 sentinel, and writing
+  it would put cleartext in a column named cipher. 0 couples are on plaintext-v1
+  today, so adding the guard is free; re-check that count before the flip.
+- **Do NOT backfill the 94 existing rows.** Impossible server-side (no key) and
+  racy client-side; `authenticated` holds table-level UPDATE on messages, so
+  either partner could rewrite the other's. Let them age out behind the fallback.
+- **Copy must move with step 3, not before:** safety_sheets.dart:132, the comment
+  in 20260816120000:142-147, and privacy-policy §2 all currently state chat is
+  not encrypted. During dual-write that stays TRUE. Change all three together.
+
+**Gates:** `flutter test test/unit/chat/message_cipher_codec_test.dart` → 8/8.
+Combined `schema_drift_test + test/unit/chat/ + test/unit/vault/` → **189/189
+passed**, including the drift gate after the snapshot edit. Repo-wide
+`flutter analyze` state is recorded in this session's report; the
+`gallery_screen.dart` `_PendingUpload` errors noted in §50 belong to another
+session's uncommitted edit, not to this work. Nothing staged, nothing committed.
+
+**Exact next step:** Step 0 — publish the key at pairing regardless of modest
+mode and derive it on the chat path, verified on a brand-new account. Nothing
+else in this sequence can ship before it.
+
+## §52 — The ToS gate gets a door; /terms and /rewrap stop leaking into presence (2026-08-18)
+
+Three of the §41/§43 LOW findings, closed as one small diff. Not committed;
+gates not run here (the orchestrating session runs them).
+
+**DONE:**
+1. `mobile/lib/features/legal/terms_screen.dart` — the gate variant now has the
+   same quiet sign-out /couple has: 48dp `TextButton` in the AppBar actions,
+   taupe, wording "Sign out", disabled while `_busy`. Widget became
+   `ConsumerStatefulWidget` for `sessionProvider`; `_signOut` mirrors
+   couple_page (`signOut()` then `context.go('/signin')`). Correct for the
+   next account too: `signOut()` → `_endSession()` → `TermsGate.reset()`
+   (session_provider.dart:395), so the gate re-arms per account. The readOnly
+   variant keeps its back button and no sign-out.
+2. `mobile/lib/core/realtime/presence_route_observer.dart` — `notAPlace` gains
+   `'/terms'` and `'/rewrap'` (one-line comments: a legal gate / a key
+   ceremony is not a place). Same class as `'/offline'` (2026-08-17): partner
+   was shown "Terms" / "Rewrap" as a room.
+3. Stale comments corrected, one each: `app_shell.dart` `_firstRunPrompts` no
+   longer claims the cover question "runs from _onReady" (it exists nowhere —
+   picker is Settings-only; a first-run offer is the play channel's
+   account-strike scenario per build.gradle.kts DISGUISE_ENABLED condition 1).
+   `disguise_picker_screen.dart` no longer asserts "on the play channel there
+   is not [a picker]" — build.gradle.kts:193 sets DISGUISE_ENABLED=true for
+   play; the runtime flag decides.
+
+**Tests extended, not yet run:**
+- `test/unit/core/onboarding_escape_test.dart` — new test "the terms gate has
+  a sign out" pins `_signOut` existing AND wired
+  (`onPressed: _busy ? null : _signOut`), same pattern as the /couple pin.
+- `test/unit/presence/presence_route_observer_test.dart` — `'/terms'` and
+  `'/rewrap'` added to the not-a-room list.
+
+**Exact next step:** run `flutter analyze` + `flutter test` from
+`E:\LDR\mobile` (orchestrator's gate); nothing else open from this piece.
+
+## §53 — About links become real links: a11y on the legal/safety front door (2026-08-18)
+
+**Scope (BRAIN §41 low):** `_AboutLink` in settings_screen.dart was a bare
+`GestureDetector` around 12px underlined text — no role, ~15dp target — and
+two of the four instances front the Privacy Policy and Child Safety pages.
+
+**DONE:**
+1. `mobile/lib/features/settings/settings_screen.dart` — `_AboutLink` rebuilt:
+   `Semantics(link: true, label: label, onTap: onTap, excludeSemantics: true)`
+   over a `GestureDetector(behavior: opaque)` over a
+   `ConstrainedBox(min 48×48)` with `Align(widthFactor: 1)` so the Wrap does
+   not give each link the whole card width. Visual style (12px gilt underline)
+   unchanged; the tap action must sit on the Semantics node because
+   excludeSemantics drops the detector's own.
+2. Same file — the avatar-change `GestureDetector` (Profile section): with a
+   photo set its child is an unlabeled image, so TalkBack walked past the only
+   way to change the photo. Now `Semantics(button: true, label: 'Change
+   profile photo', onTap, excludeSemantics: true)`; 92px visual, target fine.
+
+**Sweep result (settings + welcome/sign-in/sign-up/couple):** no other bare
+tappables. Auth funnel is already Material buttons throughout; AuthSwitchLink
+was converted to TextButton previously; couple_page/sign_in already carry
+48dp `minimumSize` TextButtons; welcome DOB field is an InkWell (has tap
+semantics) — left alone.
+
+**Test (not yet run):** `test/unit/legal/about_links_a11y_test.dart` — shape
+pin, NOT a pumped widget test: `_AboutLink` is private and `SettingsScreen`
+reads `SupabaseService.client` (`static late final`, no injection seam — the
+wall chat_signed_out_send_test.dart documents), so the semantics tree cannot
+be pumped. Pins link role + label + onTap on the Semantics node, 48dp
+constraints, opaque hit test, and the avatar label.
+
+**Found, not fixed:** `mobile/lib/features/auth/role_setup_screen.dart:129` —
+`_RoleCard` is a bare GestureDetector; announces its label text but no button
+role. Outside this task's named sweep.
+
+**Exact next step:** run `flutter analyze` + `flutter test` from
+`E:\LDR\mobile` (orchestrator's gate); nothing else open from this piece.
+
+## §54 — The my-side LOW findings closed, skeptic-hardened (2026-08-18)
+
+**Scope:** every §41/§43/§44 low fixable without owner input. Four agents
+(§52/§53 record two of them in their own words) + orchestrator batch + a
+skeptic pass whose caveats were all fixed before this entry. Gates were run
+by THIS session after every edit wave (agents are barred from flutter; their
+"not yet run" self-labels are answered here).
+
+**Fixed and verified:**
+1. **PIN storage hardened** (app_lock.dart, memory_pin_gate.dart): salted
+   sha256 in FlutterSecureStorage (16-byte Random.secure salt per write),
+   verify-then-upgrade migration — wrong PIN migrates nothing, hasPin checks
+   both homes, setPin writes-new-then-clears-legacy so a process death never
+   opens a lockout window. Skeptic M1 closed: the keystore can throw where
+   prefs never could, so hasPin/verifyPin degrade to the legacy branch
+   instead of throwing (a legacy-PIN user with a dead keystore keeps the PIN
+   pad), and the pin sheet surfaces a failed save instead of closing over it.
+   Behavioural migration tests (12 total across the batch) pass.
+2. **Notifications section** (settings, new notification_channel_settings.dart,
+   MainActivity 'notificationChannelSettings' method): every created channel
+   gets a row deep-linking to its OS sheet (ACTION_CHANNEL_NOTIFICATION_
+   SETTINGS, app-level and pre-O fallbacks); failures snackbar AND report
+   (kind 'channel-settings'). Hygiene test now pins BOTH directions
+   (created⇒row, mentioned⇒created) with comments stripped — skeptic M2.
+3. **/terms sign-out door** (§52's work): skeptic M3 closed — the sign-out
+   catches the offline revoke (local session already ended by the finally)
+   and still funnels to /signin; couple_page has the same gap — found, not
+   fixed, pre-existing.
+4. **A11y front door** (§53's work): skeptic L1/L2 closed — avatar Semantics
+   gains enabled:!_changingAvatar, and the test pins onTap+enabled on the
+   NODE (±300-char slice), not the file; the 48dp comment now admits rows
+   grow (that is the point).
+5. **Presence notAPlace** now covers /terms and /rewrap (+ test) — nothing
+   consumed rewrap presence (verified against kJoinableRoutes and the
+   ceremony's realtime flow).
+6. **Orchestrator batch:** signOut wipes in a finally (a throw on the way to
+   the server no longer skips _endSession); media_urls.sign failures reach
+   client_errors as 'media-sign' (and the path-printing debugPrint is GONE —
+   net privacy win); pick_for_us parsed-N-of-M with per-fetch kinds
+   ('pick-for-us-rolls'/'-consents' — skeptic M4, shared kind = dedup
+   collision); content_reports FK index applied staging+prod (verified
+   count=1 both).
+7. Stale comments corrected: app_shell cover-offer, picker per-channel
+   claim (play ships covers, disclosed; the runtime flag decides).
+
+**found, not fixed:** _RoleCard bare GestureDetector (role_setup_screen:129 —
+outside the sweep); couple_page sign-out same gap as /terms had;
+welcome DOB field + language row (InkWell-adequate, judged ambiguous);
+pg_net public grants still need Supabase support (tracked since 20260816090100).
+
+**Still owner:** Pro upgrade, CSAE/web redeploy (auth-callback + csae still
+tree-only), secure-email-change config check, HIBP toggle, keystore copy,
+custom domain for r2.dev, play AAB device pass, Console declarations.
+
+**Gates:** run after the last edit of this sprint — see the session report
+(analyze 0 errors/warnings; full flutter test green, 905+ and climbing as the
+cipher session lands its suites). Nothing here depends on installed clients.
+
+**Exact next step:** unchanged owner trio; then the deferred sessions (crypto
+hardening: TOFU pin + zero-MAC gating; data export; ledger re-baseline). The
+§41 audit's my-side ledger is now CLOSED through low severity.

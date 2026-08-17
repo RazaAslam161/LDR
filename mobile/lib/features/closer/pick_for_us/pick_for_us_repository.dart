@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/utils/json_utils.dart';
 
 /// Pre-approved category tiers for "Pick for us". Each tier carries a fixed
@@ -115,6 +116,8 @@ class PickForUsRepository {
         .limit(limit);
 
     final out = <DiceRoll>[];
+    Object? firstError;
+    StackTrace? firstStack;
     for (final r in rows as List) {
       try {
         out.add(DiceRoll(
@@ -125,9 +128,26 @@ class PickForUsRepository {
               .toList(growable: false),
           rolledAt: JsonUtils.parseDate(r['rolled_at']).toLocal(),
         ),);
-      } catch (_) {
-        // Skip a malformed row rather than blanking the whole list.
+      } catch (e, st) {
+        // Skip a malformed row rather than blanking the whole list — but
+        // counted, per the parsed-N-of-M rule: a shorter history must be
+        // distinguishable from dropped rows.
+        firstError ??= e;
+        firstStack ??= st;
       }
+    }
+    if (firstError != null) {
+      ErrorReporter.report(
+        ParseShortfall('dice rolls',
+            parsed: out.length,
+            of: (rows as List).length,
+            first: '${firstError.runtimeType}',),
+        firstStack,
+        // Its own kind, not a shared 'pick-for-us': dedup keys on kind
+        // precisely so two fetches failing at the same JsonUtils frame do
+        // not suppress each other.
+        kind: 'pick-for-us-rolls',
+      );
     }
     return out;
   }
@@ -143,15 +163,33 @@ class PickForUsRepository {
         .eq('couple_id', coupleId);
 
     final out = <String, Map<String, bool>>{};
+    var parsed = 0;
+    Object? firstError;
+    StackTrace? firstStack;
     for (final row in rows as List) {
       try {
         final tier = JsonUtils.parseString(row['tier']);
         final uid = JsonUtils.parseString(row['user_id']);
         final granted = JsonUtils.parseBool(row['granted']);
         (out[tier] ??= {})[uid] = granted;
-      } catch (_) {
-        // Skip a malformed row rather than blanking the whole map.
+        parsed++;
+      } catch (e, st) {
+        // Skip a malformed row rather than blanking the whole map — counted,
+        // because a consent map missing rows fails CLOSED for the couple and
+        // that must be visible somewhere.
+        firstError ??= e;
+        firstStack ??= st;
       }
+    }
+    if (firstError != null) {
+      ErrorReporter.report(
+        ParseShortfall('dice tier consents',
+            parsed: parsed,
+            of: (rows as List).length,
+            first: '${firstError.runtimeType}',),
+        firstStack,
+        kind: 'pick-for-us-consents',
+      );
     }
     return out;
   }

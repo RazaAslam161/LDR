@@ -151,9 +151,10 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
   @override
   Widget build(BuildContext context) {
     // Settings links here on every channel; only this screen knows whether
-    // there is anything behind the link. On the play channel there is not —
-    // the app ships one launcher entry under its own name, and a list of nine
-    // invented identities is the misrepresentation that channel avoids.
+    // there is anything behind the link. Which channels have one is
+    // build.gradle.kts's decision, not this file's — play ships the covers
+    // too now (DISGUISE_ENABLED=true, disclosed in the listing) — so only the
+    // runtime flag decides, and nothing here asserts a per-channel fact.
     if (!DisguiseService.enabled) {
       return Scaffold(
         backgroundColor: Colors.transparent,

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/legal/terms_gate.dart';
@@ -10,18 +13,41 @@ import 'package:miles/features/legal/terms_text.dart';
 /// the one that would end up out of date. [readOnly] drops the accept bar and
 /// gives the route a way back; the gate has neither on purpose — there is no
 /// "not now" here, since the alternative to accepting is not using the app.
-class TermsScreen extends StatefulWidget {
+/// What the gate DOES keep is a sign-out: acceptance is per account, and
+/// someone who signed into the wrong one must be able to leave it without
+/// accepting terms on its behalf.
+class TermsScreen extends ConsumerStatefulWidget {
   const TermsScreen({super.key, this.readOnly = false});
 
   final bool readOnly;
 
   @override
-  State<TermsScreen> createState() => _TermsScreenState();
+  ConsumerState<TermsScreen> createState() => _TermsScreenState();
 }
 
-class _TermsScreenState extends State<TermsScreen> {
+class _TermsScreenState extends ConsumerState<TermsScreen> {
   bool _busy = false;
   String? _error;
+
+  /// The way out.
+  ///
+  /// The router forces anyone who has not accepted to '/terms' from every
+  /// path, so a user who signed into the WRONG account was trapped accepting
+  /// terms for it — or uninstalling. Same door as /couple, for the same
+  /// reason.
+  Future<void> _signOut() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(sessionProvider.notifier).signOut();
+    } catch (e) {
+      // Expected on a bad connection: the server-side revoke needs the
+      // network, but the local session is already gone (signOut ends the
+      // session in a finally). Funnel to sign-in either way — the alternative
+      // is _busy latched true on a screen with no other exit.
+      debugPrint('[terms] sign-out revoke failed: ${e.runtimeType}');
+    }
+    if (mounted) context.go('/signin');
+  }
 
   Future<void> _accept() async {
     setState(() {
@@ -54,6 +80,20 @@ class _TermsScreenState extends State<TermsScreen> {
       appBar: AppBar(
         title: const Text('Terms of Service'),
         automaticallyImplyLeading: widget.readOnly,
+        actions: [
+          if (!widget.readOnly)
+            TextButton(
+              onPressed: _busy ? null : _signOut,
+              // The only exit from a screen the router will not let an
+              // unaccepted account leave, so it has to be a real target
+              // rather than 13px of text in a corner.
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 48),
+                foregroundColor: MilesColors.taupe,
+              ),
+              child: const Text('Sign out'),
+            ),
+        ],
       ),
       body: SafeArea(
         child: Column(
