@@ -495,6 +495,102 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (mounted) context.go('/signin');
   }
 
+  /// Both mailboxes have to agree — Supabase mails a confirmation link to the
+  /// current address AND the new one, and nothing changes until both links are
+  /// opened. The dialog says so up front, because "check your email" reads as
+  /// one link, and a change that stalls after the first tap looks broken when
+  /// it is actually waiting on the second mailbox.
+  Future<void> _changeEmail() async {
+    final current = SupabaseService.client.auth.currentUser?.email;
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change email?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "We'll send a confirmation link to "
+              '${current ?? 'your current address'} and to the new address. '
+              'Your email only changes once you open both.',
+              style: const TextStyle(color: MilesColors.taupe, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'New email'),
+              onChanged: (_) => (ctx as Element).markNeedsBuild(),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: controller.text.trim().contains('@')
+                ? () => Navigator.pop(ctx, true)
+                : null,
+            child: const Text('Send links'),
+          ),
+        ],
+      ),
+    );
+    final newEmail = controller.text.trim();
+    controller.dispose();
+    if (confirmed != true) return;
+    try {
+      await SupabaseRepository.changeEmail(newEmail);
+      _toast('Check both inboxes — the change finishes there.');
+    } catch (e) {
+      _toast(friendlyAuthError(e));
+    }
+  }
+
+  /// Worded for the ordinary reasons — a phone that was lost, sold or simply
+  /// replaced is the scenario, and the dialog names it without drama. The one
+  /// promise that matters is stated twice, here and on the row: THIS device
+  /// stays signed in. That is what SignOutScope.others means, and it is the
+  /// difference between a safety action and locking yourself out with it.
+  Future<void> _signOutOtherDevices() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sign out of other devices?'),
+        content: const Text(
+          'Any other phone still signed into this account — one you lost, '
+          'sold or replaced — will be signed out and will need your password '
+          'to get back in. This phone stays signed in.',
+          style: TextStyle(color: MilesColors.taupe, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sign them out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await SupabaseRepository.signOutOtherDevices();
+      _toast('Signed out everywhere else.');
+    } catch (e) {
+      _toast(friendlyAuthError(e));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
@@ -863,6 +959,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 ),
               ),
               onTap: _escrowMissing ? _fixEscrow : null,
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading:
+                  const Icon(Icons.alternate_email, color: MilesColors.taupe),
+              title: const Text('Change email',
+                  style: TextStyle(color: MilesColors.cream50),),
+              subtitle: Text(
+                SupabaseService.client.auth.currentUser?.email ?? '—',
+                style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+              trailing:
+                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              onTap: _changeEmail,
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.devices, color: MilesColors.taupe),
+              title: const Text('Sign out of other devices',
+                  style: TextStyle(color: MilesColors.cream50),),
+              subtitle: const Text('This phone stays signed in',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
+              onTap: _signOutOtherDevices,
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,

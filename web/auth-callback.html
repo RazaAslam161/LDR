@@ -163,6 +163,21 @@
     return;
   }
 
+  // 2a. The first half of a secure email change. GoTrue redirects the FIRST
+  // confirmation with neither a code nor a token — just a message — and the
+  // flow is working exactly as the app's dialog promised: one link down, one
+  // to go, in the other mailbox.
+  var message = param("message");
+  if (!code && !accessToken && message) {
+    hide("working");
+    text("failed-title", "One more step");
+    text("failed-body", "This address is confirmed.");
+    text("failed-note", "Now open the link in the email sent to your other "
+      + "address to finish the change.");
+    show("failed");
+    return;
+  }
+
   // 2. Nothing usable arrived. Someone opened the page directly.
   if (!code && !accessToken) {
     hide("working");

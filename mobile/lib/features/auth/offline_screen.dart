@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -63,37 +65,80 @@ class _OfflineScreenState extends ConsumerState<OfflineScreen>
     ref.read(sessionProvider.notifier).loadProfile();
   }
 
+  /// The exit for the failures retrying cannot fix.
+  ///
+  /// loadProfile does not only fail for network reasons — a revoked session
+  /// the gateway rejects, a paused project, an account in a broken state all
+  /// land here too, and the copy below blames the connection for every one of
+  /// them. Without this, that person is parked behind "try again" forever.
+  /// Same quiet corner as /couple's sign-out, for the same reason: an exit
+  /// that is findable without competing with the retry it sits above.
+  Future<void> _signOut() async {
+    try {
+      await ref.read(sessionProvider.notifier).signOut();
+    } catch (e) {
+      // Expected on this screen of all screens: the server-side revoke needs
+      // the network this screen exists for lacking. gotrue drops the local
+      // session BEFORE that call, so the sign-out has already happened on this
+      // device — log the revoke failure and let the funnel move on.
+      debugPrint('[offline] sign-out revoke failed: $e');
+    }
+    if (mounted) context.go('/signin');
+  }
+
   @override
   Widget build(BuildContext context) {
     final loading = ref.watch(sessionProvider.select((s) => s.loading));
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                "Can't reach the server",
-                style: Theme.of(context).textTheme.displaySmall,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      "Can't reach the server",
+                      style: Theme.of(context).textTheme.displaySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Everything you two have is still here and still safe. '
+                      'This phone just could not reach the server to open it. '
+                      'Check your connection and try again.',
+                      style: TextStyle(color: MilesColors.taupe, height: 1.5),
+                    ),
+                    const SizedBox(height: 24),
+                    GlowButton(
+                      label: 'Try again',
+                      color: MilesColors.blush,
+                      loading: loading,
+                      onPressed: loading ? null : _retry,
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'Everything you two have is still here and still safe. This '
-                'phone just could not reach the server to open it. Check your '
-                'connection and try again.',
-                style: TextStyle(color: MilesColors.taupe, height: 1.5),
+            ),
+            // Never greyed out while loading, unlike /couple's: the retry loop
+            // here owns `loading` and re-fires itself on every resume, so an
+            // exit that dims whenever a ten-second timeout is pending is an
+            // exit that is mostly not there.
+            Positioned(
+              top: 4,
+              right: 4,
+              child: TextButton(
+                onPressed: _signOut,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  foregroundColor: MilesColors.taupe,
+                ),
+                child: const Text('Sign out'),
               ),
-              const SizedBox(height: 24),
-              GlowButton(
-                label: 'Try again',
-                color: MilesColors.blush,
-                loading: loading,
-                onPressed: loading ? null : _retry,
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
