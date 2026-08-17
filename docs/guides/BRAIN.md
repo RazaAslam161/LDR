@@ -4824,3 +4824,180 @@ cheapest HIGH closures and need no code. Then the capsule seal: revoke
 `update (unlock_date, unlock_mode)` and add the unlock predicate to the
 `capsule_media_select` storage policy, in one migration with both halves.
 Then `set_vault_pin(p_old_pin)`. The chat-plaintext decision is its own session.
+
+## §50 — The remaining HIGH findings from §49: seven of ten closed (2026-08-18)
+
+Continues §49. Four more migrations, all applied staging→prod and verified by
+catalog query, plus one client change.
+
+**Closed this session:**
+1. **Capsule seal now covers its media.** `capsule_media_select` tested only the
+   couple folder, so a partner could list `coupleId/capsuleId/...`, read every
+   SEALED object's name and sign a 1-hour URL weeks before the unlock date —
+   `unlocked_at` stays null and `capsule_items` stays empty, so the other phone
+   still shows "sealed" and nothing is logged. Policy now requires a matching
+   `capsules` row with `unlocked_at is not null`.
+   Also revoked `update (unlock_date, unlock_mode)` — they were still in the
+   authenticated column grants, so `unlock_capsule()`'s date check could be made
+   to pass by moving the date first. 20260601003200 revoked `unlocked_at` for
+   this exact reason and stopped one column short.
+   `20260818091000_capsule_seal_covers_its_media.sql`.
+   Safe because `CapsuleRepository.signedUrl` is only ever called with a path
+   from `items()`, which RLS already gates to unlocked capsules — there is no
+   legitimate client read of a sealed object. Prod had **0** capsule-media
+   objects at apply time, so blast radius was nil.
+2. **Vault PIN reset can no longer clear a live lockout.** `set_vault_pin`'s
+   ON CONFLICT branch set `failed_attempts = 0, locked_until = null` with no
+   proof of the old PIN, so the 5-fail/15-min lockout in `verify_vault_pin` was
+   answerable by just setting a new PIN. Now refuses while `locked_until > now()`.
+   Signature deliberately unchanged — shipped clients call `set_vault_pin(p_pin)`
+   with one arg (vault_repository.dart:93) and there is no update channel, so
+   requiring the old PIN is a client-gated follow-up.
+   `20260818090100_vault_pin_reset_cannot_clear_a_lockout.sql`.
+3. **Memory proposals got the throttle every other push path already had.**
+   reach/care/calls/rewrap were all wired to `enforce_send_rate`;
+   `memory_threads` had no entry in `send_next_allowed_at` and no trigger, so
+   proposals could be looped and each fired a high-importance push. Added a
+   `memory_threads` branch (sender column `proposer`, 10s gap, 15/hour — gentler
+   than care's 30s/10 because batching memories after a trip is real), a third
+   `proposer` coalesce fallback in `enforce_send_rate`, and a BEFORE INSERT
+   trigger scoped `when (new.state = 'proposed')` to match the notify trigger so
+   only push-generating inserts are throttled.
+   `20260818090200_memory_proposals_get_the_throttle_reach_has.sql`.
+   Neither helper is callable by anon/authenticated (proacl is
+   postgres+service_role), so this added no REST surface.
+4. **The Private Vault now sets FLAG_SECURE.** `secure_screen.dart:6` has always
+   *documented* itself as "used inside Private Vault photo views and Memory
+   Threads"; Memory Threads, Touch Trace, Touch Map and chat media all call it
+   and the vault never did — it was the one intimate surface still landing in
+   screenshots and in the recent-apps thumbnail, which defeats the disguise.
+   Set in `_VaultScreenState.initState`, cleared in `dispose`. One call covers
+   VaultViewer too: it is a WINDOW flag and the viewer is pushed above this
+   route (vault_screen.dart:318) without disposing this State.
+   `mobile/lib/features/vault/vault_screen.dart`. Ships with the next build.
+
+**Verified closed on prod (single query, all true):** cycle consent gated;
+contact pause covers call and memory; memory push throttled; capsule media
+honours the seal; unlock_date not client-writable; vault PIN reset cannot clear
+a lockout; anon reconcile RPC still revoked; `storage_quota_ok` still granted to
+authenticated so uploads keep working.
+
+**NOT closed — and why:**
+- **Password floor + HIBP (2 HIGH).** GoTrue minimum is still the 6-char default
+  and leaked-password protection is OFF, and that password is the Argon2id wrap
+  for the server-held E2EE seed. There is **no Supabase auth-config tool in this
+  MCP** (searched) — this is an owner dashboard action and cannot be done from
+  a session. Auth → Policies → minimum length 12 + enable leaked-password
+  protection. Cheapest HIGH closure left, needs no code.
+- **Plaintext chat (1 HIGH).** Unchanged from §49. Architectural, touches
+  installed clients, needs the 3-step gate. Own session.
+
+**Multi-session notes.** Another session committed its Dart work mid-session and
+then began editing `mobile/lib/features/gallery/gallery_screen.dart`; it also
+created `20260818090000_db_hygiene_sweep.sql` colliding with my capsule
+migration's timestamp — I renamed MINE to `20260818091000` and left theirs
+alone. Their sweep (cron retention, tos initplan, storage_reap index, loud
+delete_my_account warnings) is fully disjoint from everything here; it is NOT
+yet applied to prod.
+
+**Gates — REPO-WIDE GATE IS RED, AND IT IS NOT MINE.** `flutter analyze` =
+**4 errors**, all in `lib/features/gallery/gallery_screen.dart` (`_PendingUpload`
+reported undefined at :47/:94/:109/:155 although it is defined at :431) — a
+transient broken parse from that session's uncommitted in-flight edit. My
+baseline run earlier had **0 errors**, so this appeared during their edit. I did
+not touch it and did not route around it.
+My own change is clean, proven independently:
+`flutter analyze lib/features/vault/vault_screen.dart` → **8 issues, all info,
+0 errors — identical to the 8 it had at baseline**; `flutter test test/unit/vault/`
+→ **14/14 passed**. Nothing staged, nothing committed.
+
+**Exact next step:** owner does the two auth-dashboard toggles. Then whoever owns
+gallery_screen.dart finishes it so the repo-wide gate goes green again. Then the
+chat-plaintext decision in its own session; then `set_vault_pin(p_old_pin)` and
+the author-binding gap on `memory_threads_insert_member` (proposer is not pinned
+to auth.uid(), so a memory can be forged as attributed to the partner — the push
+still routes away from the victim, so it is integrity, not push abuse).
+
+## §44 — The my-side MEDIUM findings: fixed, skeptic-hardened twice (2026-08-18)
+
+**Scope:** every §41/§43 medium fixable without owner money/hardware. Five
+implementation agents + orchestrator DB/edge/script batch, then a skeptic pass
+that FAILED the first cut (2 highs, 6 mediums) — all fixed before this entry.
+Already closed by ANOTHER session (verified, untouched): contact pause now
+covers calls+memories (20260817160100), anon-RPC + cycle-consent closures
+(20260817160000). Deferred to own sessions, stated: partner-key TOFU +
+zero-MAC legacy gating (crypto trust model), data export (feature),
+migration-ledger re-baseline. Owner-only: HIBP toggle, custom domain for
+r2.dev, Console declarations, SMTP.
+
+**Fixed and verified (client — ships with next build):**
+1. **Silent chat loss** — five sends + three profile setters throw
+   StateError('not signed in') instead of success-shaped no-ops (queue retains
+   as failed+retryable; every call site audited/caught, incl. the Send-ETA
+   button which now surfaces failure); GIF paths surface (keyboard path,
+   fling, GIPHY non-200, AND the upload-ok/sign-failed null branch); parsed-
+   N-of-M counters in chat/capsule/shared-media — via new `ParseShortfall`
+   exception + `_detail` case, because the first cut's StateError message was
+   discarded by ErrorReporter's redaction (skeptic M1: the count never reached
+   the server).
+2. **Media loss** — touch_map body photo rethrows (+retry snackbar + report;
+   signed-out now throws too — skeptic M4); gallery failed uploads persist as
+   retryable tiles with batch summary+Retry — and the static list is cleared
+   in _endSession (skeptic H1: it rendered the previous account's photograph
+   to the next account; registered beside MediaUrls/ChatSendQueue/caches);
+   video_init_failed reaches client_errors as kind 'video-init' (Diag.record
+   was compile-time dead), and _detail now carries PlatformException.code /
+   StorageException.statusCode (skeptic M2: reports were undiscriminated).
+3. **Account basics** — changeEmail (confirm-on-both, authCallbackUrl
+   redirect; web/auth-callback.html gained the token-less first-link branch —
+   skeptic M6: the page called a working flow a failure); signOutOtherDevices
+   (SignOutScope.others, verified against gotrue 2.22.0 source — local
+   session survives; refreshSession() first, because gotrue swallows
+   401/403/404 and Settings would toast success over a no-op revoke — skeptic
+   M5); offline_screen sign-out escape (works offline — local session drops
+   before the network call).
+4. **Crash-report persistence** — ErrorReporter buffers undeliverable rows
+   (bounded 20, redacted-before-persist, 3-strike poison drop, oldest-first
+   flush after init in main.dart); dedup key now includes kind. 8-case buffer
+   test.
+5. **Escrow kdf v2 write flip** — backup() seals kdfArgon2idV2 (gate
+   min_build 28 passed long ago; prod sits at 42+). Skeptic H2: the restore
+   re-wrap trigger was left keyed on v1 — inverted post-flip (skipped
+   upgrading v1, re-sealed v2 every restore) AND the new test pinned the bug.
+   Both fixed: trigger keys on the current write format; v1 fixture test
+   verified byte-faithful to old backup() (m=19456/t=2/p=1, XChaCha20).
+
+**Fixed and verified (server — no client dependency):**
+- `20260818090000_db_hygiene_sweep.sql` staging+prod: cron purge of
+  cron.job_run_details (7d, '41 4 * * *'); tos_acceptances policies initplan
+  form (verified live: `( SELECT auth.uid() AS uid)`); storage_reap
+  queued_at index; delete_my_account's two swallows → `raise warning` (body
+  otherwise byte-identical to live; deletion stays unblockable).
+- reap-storage **v4** deployed: queue-read error logged (was
+  indistinguishable from empty queue), dequeue-delete error no longer counted
+  as drained (was silencing the new shortfall log), drained-shortfall
+  summary. Probed: 403 no-secret; `200 {"ok":true,"drained":0}` via trigger
+  path (net._http_response 1594, 1595).
+- release.sh sideload stamp gate: every libapp.so (was so[0] only), and the
+  'Update available' assertion's failure text now names update_sheet.dart as
+  the load-bearing source (reword ⇒ update the gate).
+
+**found, not fixed (still):** media_urls.sign() swallows to debugPrint/null
+(GIF surface now covers the user-visible case); ErrorReporter startup window
+before handlers install; _endSession's own comment vs throw path
+(session_provider.dart:328-332, pre-existing); auth-callback.html fix is
+working-tree only until the owner redeploys web/ (same boat as csae.html);
+secure-email-change config (MAILER_SECURE_EMAIL_CHANGE + template) is
+dashboard-only — UNVERIFIED, owner must confirm before announcing email
+change works; the foreign build.gradle.kts arm64-only hunk + vault_screen
+SecureScreen hunk remain another session's, uncommitted.
+
+**Gates after the last edit:** see session report — analyze 0 errors/warnings;
+full flutter test green (884+ with the new suites). Escrow v2, sends-throw,
+gallery tiles all ship with the NEXT build; no installed client depends on
+them.
+
+**Exact next step:** owner trio + keystore copy + web/ redeploy (now carries
+csae.html AND auth-callback.html fixes) + secure-email-change config check;
+then the play AAB device pass; then the deferred crypto-hardening session
+(TOFU pin + zero-MAC gating) and data export.

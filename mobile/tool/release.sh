@@ -338,15 +338,23 @@ echo "size   $(( bytes / 1048576 )) MB"
 python -c "
 import sys, zipfile
 z = zipfile.ZipFile('$APK')
-so = [n for n in z.namelist() if n.endswith('libapp.so')]
-if not so:
+sos = [n for n in z.namelist() if n.endswith('libapp.so')]
+if not sos:
     print('no libapp.so in the APK'); sys.exit(1)
-blob = z.read(so[0])
 stamp = b'miles-build-' + b'$pubspec_build'
-if stamp not in blob:
-    print('STALE SNAPSHOT: libapp.so has no ' + stamp.decode())
-    sys.exit(1)
-sys.exit(0 if b'Update available' in blob else 1)
+# Every ABI, not sos[0]: the universal APK carries three snapshots and one
+# can be stale alone.
+for n in sos:
+    blob = z.read(n)
+    if stamp not in blob:
+        print('STALE SNAPSHOT: ' + n + ' has no ' + stamp.decode())
+        sys.exit(1)
+    if b'Update available' not in blob:
+        print('UPDATER MISSING from ' + n + '. The literal comes from')
+        print('update_sheet.dart; if that copy was reworded, update this')
+        print('gate in the same change - it is load-bearing, not decorative.')
+        sys.exit(1)
+print('checked %d libapp.so: stamped %s, updater present' % (len(sos), stamp.decode()))
 " || {
   echo "REFUSING TO SHIP THIS ARTIFACT." >&2
   echo "Either update_sheet.dart is missing from libapp.so, or the Dart in it" >&2

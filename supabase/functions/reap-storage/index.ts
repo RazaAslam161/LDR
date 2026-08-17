@@ -80,11 +80,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: queued } = await admin
+    const { data: queued, error: queueErr } = await admin
       .from("storage_reap")
       .select("bucket_id, name")
       .order("queued_at")
       .limit(MAX_PER_RUN);
+    if (queueErr) {
+      // A failed read used to fall into `!queued` and answer exactly like an
+      // empty queue — a dead drain indistinguishable from a finished one.
+      // Still 200 (the queue is durable and the hourly cron retries), but on
+      // the record.
+      console.error("queue read failed", queueErr.message);
+      return OK(0);
+    }
 
     if (!queued || queued.length === 0) return OK(0);
 
@@ -110,15 +118,29 @@ Deno.serve(async (req) => {
         }
         // Dequeue only what actually went. An object already gone returns no
         // error, which is the outcome we want for a retried batch.
-        await admin
+        const { error: dqErr } = await admin
           .from("storage_reap")
           .delete()
           .eq("bucket_id", bucket)
           .in("name", slice);
+        if (dqErr) {
+          // The objects are gone but the queue rows are not: the next run
+          // re-reaps them harmlessly (remove() of a missing object is not an
+          // error). Counting them as drained here would also silence the
+          // shortfall log below while the queue quietly stopped shrinking.
+          console.error("dequeue failed", bucket, dqErr.message);
+          continue;
+        }
         drained += slice.length;
       }
     }
 
+    if (drained < queued.length) {
+      // The per-batch errors above name the buckets; this names the size of
+      // the shortfall, so "the drain is limping" is one log line, not a diff
+      // of row counts across runs.
+      console.error(`drained ${drained} of ${queued.length}; remainder left queued`);
+    }
     return OK(drained);
   } catch (e) {
     console.error("reap-storage error", e);
