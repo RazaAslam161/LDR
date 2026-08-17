@@ -114,9 +114,12 @@ void main() {
 
   group('entry doors', () {
     test('every disguise documents a distinct way in', () {
-      // Two covers that describe the same gesture means one of them is wrong,
-      // and the user cannot tell which — the picker is the only place these are
-      // ever written down.
+      // Non-empty first: the apply confirmation interpolates this string as
+      // the way back (play contract item 2), so a cover without one ships a
+      // lockout behind a dialog that promises nothing. Distinct second: two
+      // covers that describe the same gesture means one of them is wrong, and
+      // the user cannot tell which — the picker and that dialog are the only
+      // places these are ever written down.
       final seen = <String, String>{};
       for (final d in kDisguises) {
         expect(d.entry.trim(), isNotEmpty,
@@ -167,6 +170,31 @@ void main() {
         expect(wired.any((name) => _reachesGate(name, code)), isTrue,
             reason: '${entry.key} calls the entry gate, but no gesture the '
                 'user can perform reaches it',);
+      }
+    });
+
+    test('every cover carries the visible way out', () {
+      // Item 3 of the play shipping contract (build.gradle.kts). The hidden
+      // gesture is for the moment someone else holds the phone; the ring is
+      // for the owner, whose memory of one dialog used to be the only way
+      // back. A tenth cover that ships without it ships a lockout.
+      for (final entry in _coverSources.entries) {
+        final code = _code(File(entry.value).readAsStringSync());
+        final uses = RegExp(r'CoverExitButton\(').allMatches(code).toList();
+        expect(uses, isNotEmpty,
+            reason: '${entry.key} draws no CoverExitButton — no visible way '
+                'out of the cover',);
+        // Drawing it is not enough: its onPressed has to reach the entry flow,
+        // or it is a ring that does nothing on the one screen it must not.
+        final wired = uses.any((m) {
+          final end = (m.end + 200).clamp(0, code.length);
+          final bound = RegExp(r'onPressed:\s*([A-Za-z_]\w*)')
+              .firstMatch(code.substring(m.start, end));
+          return bound != null && _reachesGate(bound.group(1)!, code);
+        });
+        expect(wired, isTrue,
+            reason: '${entry.key} draws the exit button but its onPressed '
+                'never reaches the entry gate',);
       }
     });
 

@@ -75,9 +75,14 @@ class DisguiseProfile {
 
   /// The hidden gesture that opens the real app from behind this cover.
   ///
-  /// Shown in the picker, and the source of the table in
-  /// docs/guides/disguises.md. Nothing else will remind the user which gesture
-  /// they chose, and a forgotten door is an app they cannot open.
+  /// Shown in the picker, interpolated into the apply confirmation — item 2 of
+  /// the play shipping contract (build.gradle.kts) says the way back is named
+  /// BEFORE the cover is applied, and it has to be THIS cover's way back: the
+  /// dialog used to print the News gesture under all nine covers, which handed
+  /// eight of them instructions that do not work — and the source of the table
+  /// in docs/guides/disguises.md. It must describe what the trigger code
+  /// actually checks, down to the label on the control, because the user
+  /// follows it verbatim on a screen that offers no second hint.
   final String entry;
 
   /// Picker-only preview glyph; the real launcher icon lives in res/.
@@ -105,7 +110,7 @@ const List<DisguiseProfile> kDisguises = [
     aliasId: 'News',
     label: 'News',
     blurb: 'A headlines reader. Blends in on any home screen.',
-    entry: 'Five taps on the masthead mark, top left.',
+    entry: 'Five quick taps on the masthead mark, top left.',
     icon: Icons.article_outlined,
     tint: Color(0xFFB3261E),
     cover: DisguiseCover.news,
@@ -160,7 +165,7 @@ const List<DisguiseProfile> kDisguises = [
     aliasId: 'Timer',
     label: 'Timer',
     blurb: 'A stopwatch and countdown. No content whatsoever.',
-    entry: 'Hold Lap with the stopwatch stopped at 00:00.00.',
+    entry: 'Hold Reset on the Stopwatch tab while it reads 00:00.00.',
     icon: Icons.timer_outlined,
     tint: Color(0xFF2E7D32),
     cover: DisguiseCover.timer,

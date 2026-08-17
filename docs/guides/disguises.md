@@ -22,13 +22,13 @@ those five.
 
 | Disguise | Icon | Cover | The way in |
 | --- | --- | --- | --- |
-| **News** *(default)* | Crimson tile, article card | A real RSS headlines reader | Five taps on the masthead mark, top left |
+| **News** *(default)* | Crimson tile, article card | A real RSS headlines reader | Five quick taps on the masthead mark, top left |
 | **Calculator** | Charcoal tile, four operators | A working calculator | Hold `=` while the display reads 0 and nothing is pending |
 | **Notes** | Orange tile, folded page | A notepad that really keeps notes | Hold the empty-state artwork, which only shows with no notes |
 | **Weather** | Blue tile, sun and cloud | A day-stable local forecast | Hold today's big temperature reading |
 | **Convert** | Teal tile, arrow cycle | Unit and currency converter | Hold the swap arrows with both sides on the same unit and the amount empty |
 | **Recorder** | Near-black tile, outlined mic | A voice recorder that records | Hold the 00:00 readout before recording anything |
-| **Timer** | Green circle, stopwatch | Stopwatch + countdown with a real alarm | Hold **Lap** with the stopwatch stopped at 00:00.00 |
+| **Timer** | Green circle, stopwatch | Stopwatch + countdown with a real alarm | Hold **Reset** on the Stopwatch tab while it reads 00:00.00 |
 | **Level** | Sand tile, spirit level | Live bubble level + compass | Hold the angle readout with the phone lying flat |
 | **Device Info** | Indigo tile, bar chart | Live device and storage statistics | Hold the battery ring |
 
@@ -42,16 +42,31 @@ something a person does on purpose. A plain long-press on the **Local** section
 tab opened it too, and long-pressing a tab to check for a menu is a reflex.
 Both put a biometric prompt in front of whoever was holding the phone.
 
+## The visible ring
+
+Every cover also draws one small ring near the top right (`CoverExitButton`).
+It is the same door: tapping it runs the entry flow, app lock included. The
+gestures above exist for the moment someone else is holding the phone; the
+ring exists for the owner, whose memory of one confirmation dialog used to be
+the only way back — a forgotten gesture was a lockout with no recovery short
+of a reinstall. It is quiet and unlabeled, and what a curious tap gets is the
+nameless system unlock prompt — which is only true because App Lock is a
+PRECONDITION of wearing a cover: the picker refuses to apply one without it,
+and the shell keeps asking any install whose cover predates that rule. A ring
+with no lock behind it would open the app for whoever is holding the phone.
+It is also Play's requirement: the shipping contract in `build.gradle.kts`
+demands a visible way out on every cover.
+
 ## Why every gesture has the same shape
 
 **Hold an inert control while the app is in its resting state.**
 
 A tap on that control is either the app's normal action or nothing at all. The
 hold only means something in a state a real user has no reason to be in —
-swapping metres for metres, lapping a stopwatch that reads zero, holding a
-number on a phone lying flat on a table. Three of those are two coincidences
-stacked, and none of them is a state the app disables or marks in any way, so
-there is nothing on screen to notice.
+swapping metres for metres, resetting a stopwatch that already reads zero,
+holding a number on a phone lying flat on a table. Three of those are two
+coincidences stacked, and none of them is a state the app disables or marks in
+any way, so there is nothing on screen to notice.
 
 One pattern, not nine, because a fifth distinct mechanism is a fifth thing to
 get wrong — and because the user has to remember these.
@@ -126,6 +141,8 @@ Five places, all checked by tests:
    Exactly one alias in the file may ship enabled, and it must be the catalog
    default.
 5. Dart — a `DisguiseCover` value, a `DisguiseProfile` in
-   `disguise_profile.dart` (including its `entry` line), a cover screen using
-   the `CoverGate` mixin, a branch in `disguise_cover_host.dart`, a style in
+   `disguise_profile.dart` (including its `entry` line, written against what
+   the trigger code actually checks — down to the label on the control), a
+   cover screen using the `CoverGate` mixin and carrying a `CoverExitButton`
+   wired to `runEntryGate`, a branch in `disguise_cover_host.dart`, a style in
    `disguise_notification.dart`, and a row in the table above.

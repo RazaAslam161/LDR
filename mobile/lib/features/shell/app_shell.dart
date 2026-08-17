@@ -22,8 +22,11 @@ import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
+import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/closer/closer_screen.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/home/home_screen.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
@@ -197,6 +200,13 @@ class _AppShellState extends ConsumerState<AppShell>
     // encrypted memory on their next reinstall. Asked once, here, because this
     // is the first point past login and pairing.
     unawaited(EscrowPrompt.maybeShow(context));
+    // Covers shipped before the visible ring existed. A phone that applied
+    // one back then and upgraded now shows a ring with no lock behind it —
+    // the picker refuses that combination today, so this is the standing
+    // repair for installs that predate the rule. Asked every session until
+    // the lock is on or the cover is off, because an unguarded ring is a
+    // disguise that opens for whoever is holding the phone.
+    unawaited(_nudgeLockForCover());
     // The other half is setting up a new phone and cannot open anything the two
     // of them wrote. This device still holds the key, so it is the only thing
     // that can give it back — and a request lives ten minutes, which is why it
@@ -221,6 +231,40 @@ class _AppShellState extends ConsumerState<AppShell>
     // tab — but that happens before this state exists on a cold start.
     presenceRouteObserver?.publishActiveTab();
     _firstRunPrompts(couple.id);
+  }
+
+  /// The repair half of the picker's App-Lock precondition: a cover applied
+  /// by an older build, still worn, with no lock enrolled.
+  Future<void> _nudgeLockForCover() async {
+    final profile = await DisguiseService.current();
+    if (profile.cover == DisguiseCover.none) return;
+    if (await AppLock.isEnabled()) return;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Your cover needs App Lock'),
+        content: const Text(
+          'Your cover now shows a small ring that opens this app — that is '
+          'your guaranteed way back in. App Lock is what makes the ring '
+          'safe: with it on, a tap lands on your lock, not the app.\n\n'
+          'Turn on App Lock in Settings, or switch the cover off.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Not now'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ctx.go('/app/settings');
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// A resume re-read the gate and the answer moved. Offer the update from the

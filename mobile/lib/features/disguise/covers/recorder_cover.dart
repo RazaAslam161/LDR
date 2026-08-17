@@ -270,7 +270,11 @@ class _RecorderCoverState extends State<RecorderCover>
     return Theme(
       data: theme,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Recorder')),
+        appBar: AppBar(
+          title: const Text('Recorder'),
+          // The visible door.
+          actions: [CoverExitButton(onPressed: runEntryGate)],
+        ),
         body: SafeArea(
           child: Column(
             children: [

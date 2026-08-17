@@ -155,7 +155,11 @@ class _ConvertCoverState extends State<ConvertCover>
     return Theme(
       data: theme,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Convert')),
+        appBar: AppBar(
+          title: const Text('Convert'),
+          // The visible door.
+          actions: [CoverExitButton(onPressed: runEntryGate)],
+        ),
         body: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

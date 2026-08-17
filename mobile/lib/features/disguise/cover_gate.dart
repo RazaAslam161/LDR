@@ -138,3 +138,47 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
     }
   }
 }
+
+/// The visible way out — item 3 of the play channel's shipping contract
+/// (android/app/build.gradle.kts): every cover screen carries one affordance
+/// that opens the entry gate without prior knowledge of the hidden gesture.
+///
+/// The gestures exist for the moment someone ELSE is holding the phone; this
+/// exists for the owner, who chose the cover in one dialog and may remember
+/// none of it a month later. A forgotten gesture used to be a lockout with no
+/// recovery short of a reinstall, and a lockout is the one failure a cover is
+/// never allowed to have.
+///
+/// It is quiet but real: a small ring near the top right of every cover, drawn
+/// in the cover's own muted foreground, with a full tap target. Tapping it runs
+/// the same [CoverGate.runEntryGate] as the gesture. The gate only stops a
+/// stranger when App Lock is enrolled, which is why the picker refuses to
+/// apply a cover without it and the shell keeps asking any install that
+/// predates that rule. What it must never do is name
+/// anything — no tooltip, and a semantic label of plain "Open", because a
+/// screen reader announcing what the ring unlocks would be the cover
+/// confessing.
+class CoverExitButton extends StatelessWidget {
+  const CoverExitButton({required this.onPressed, this.color, super.key});
+
+  /// Wire to the cover's [CoverGate.runEntryGate].
+  final VoidCallback onPressed;
+
+  /// Covers with a hand-rolled palette pass their muted foreground; covers on
+  /// `coverTheme` leave it null and take the scheme's quiet variant.
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onPressed,
+      iconSize: 18,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(
+        Icons.circle_outlined,
+        semanticLabel: 'Open',
+        color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}

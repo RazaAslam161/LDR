@@ -141,19 +141,33 @@ class _CalculatorCoverState extends State<CalculatorCover>
               flex: 2,
               child: Container(
                 width: double.infinity,
-                alignment: Alignment.bottomRight,
                 padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.bottomRight,
-                  child: Text(
-                    _display,
-                    style: const TextStyle(
-                      fontSize: 64,
-                      fontWeight: FontWeight.w300,
-                      color: Color(0xFF202124),
+                child: Stack(
+                  children: [
+                    // The visible door, in the corner the display never uses.
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: CoverExitButton(
+                        onPressed: runEntryGate,
+                        color: const Color(0xFF5F6368),
+                      ),
                     ),
-                  ),
+                    Align(
+                      alignment: Alignment.bottomRight,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.bottomRight,
+                        child: Text(
+                          _display,
+                          style: const TextStyle(
+                            fontSize: 64,
+                            fontWeight: FontWeight.w300,
+                            color: Color(0xFF202124),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

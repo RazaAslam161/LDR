@@ -45,7 +45,17 @@ class _WeatherCoverState extends State<WeatherCover>
         child: SafeArea(
           child: Column(
             children: [
-              const SizedBox(height: 20),
+              // The visible door, in the corner the sky leaves empty.
+              Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4, right: 8),
+                  child: CoverExitButton(
+                    onPressed: runEntryGate,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
               const Text(
                 'Current location',
                 style: TextStyle(color: Colors.white70, fontSize: 14),

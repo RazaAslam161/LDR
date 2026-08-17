@@ -249,6 +249,8 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
         ],
       ),
       actions: [
+        // The visible door.
+        CoverExitButton(onPressed: runEntryGate, color: _textMuted),
         IconButton(
           icon: Icon(_searchOpen ? Icons.close : Icons.search,
               color: _textMuted,),

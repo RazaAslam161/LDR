@@ -18,9 +18,12 @@ import 'package:miles/features/disguise/covers/cover_theme.dart';
 /// open" is itself a tell, whereas a timer that goes off is the entire point of
 /// a timer.
 ///
-/// **The way in: hold Lap with the stopwatch stopped at 00:00.00.** Lap is
-/// inert in that state in every real stopwatch; normal use is start, then tap
-/// Lap. A lap at zero is meaningless, so nobody arrives there by using the app.
+/// **The way in: hold Reset on the Stopwatch tab while it reads 00:00.00.**
+/// The button is Lap while running and Reset at rest, and resetting a stopwatch
+/// that already reads zero is a no-op in every real one — so nobody arrives
+/// there by using the app. The instruction the picker prints says Reset, not
+/// Lap, because Reset is the word on the button in the only state the door
+/// opens.
 class TimerCover extends StatefulWidget {
   const TimerCover({required this.onAuthenticated, super.key});
 
@@ -195,6 +198,8 @@ class _TimerCoverState extends State<TimerCover>
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Timer'),
+          // The visible door.
+          actions: [CoverExitButton(onPressed: runEntryGate)],
           bottom: TabBar(
             controller: _tabs,
             tabs: const [Tab(text: 'Timer'), Tab(text: 'Stopwatch')],

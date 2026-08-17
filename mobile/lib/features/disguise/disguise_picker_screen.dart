@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
@@ -41,11 +43,52 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
     final choice = _selected;
     if (choice == null || _applying) return;
 
+    // Every cover carries a visible ring that opens the entry gate, and the
+    // gate only stops a stranger when App Lock stands behind it. Without the
+    // lock a cover is one visible tap from the app for whoever holds the
+    // phone — so the lock is a precondition of applying one, not a
+    // suggestion beside it.
+    if (choice.cover != DisguiseCover.none && !await AppLock.isEnabled()) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Turn on App Lock first'),
+          content: Text(
+            'Every cover shows a small ring that opens this app — that is '
+            'your guaranteed way back in. App Lock is what makes the ring '
+            'safe: with it on, a tap lands on your lock, not the app.\n\n'
+            'Turn on App Lock in Settings, then apply the cover.'
+            '${widget.isOnboarding ? ' You can do both any time after '
+                'setup.' : ''}',
+            style: const TextStyle(color: MilesColors.taupe, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Not now'),
+            ),
+            if (!widget.isOnboarding)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  ctx.go('/app/settings');
+                },
+                child: const Text('Open Settings'),
+              ),
+          ],
+        ),
+      );
+      return;
+    }
+
     // Applying a cover changes the launcher icon and name, and the way back in
     // is a gesture nobody discovers by accident — that is the point of it, and
     // it is also how someone locks themselves out of their own app. Naming the
     // consequence and the exact way back BEFORE the change is what separates a
-    // feature the user chose from one that was done to them.
+    // feature the user chose from one that was done to them — and it must be
+    // THIS cover's way back: this dialog used to print the News gesture under
+    // all nine covers, so eight of them promised a door that does not exist.
     if (choice.cover != DisguiseCover.none) {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -54,8 +97,9 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
           content: Text(
             'Your launcher icon and name become "${choice.label}". Miles will '
             'not be findable by its own name until you change this back.\n\n'
-            'To get back in: open it, then tap the logo 5 times quickly or '
-            'press and hold the "Local" tab for about 3 seconds.',
+            'Way back in — ${choice.entry}\n\n'
+            'There is also a small ring near the top right of the cover; '
+            'tapping it opens the same door.',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [

@@ -90,6 +90,13 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
             fontSize: 20,
           ),
         ),
+        // The visible door.
+        actions: [
+          CoverExitButton(
+            onPressed: runEntryGate,
+            color: const Color(0xFF5F6368),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _edit,

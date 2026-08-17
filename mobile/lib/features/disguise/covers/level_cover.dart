@@ -114,6 +114,8 @@ class _LevelCoverState extends State<LevelCover>
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Level'),
+          // The visible door.
+          actions: [CoverExitButton(onPressed: runEntryGate)],
           bottom: TabBar(
             controller: _tabs,
             tabs: const [Tab(text: 'Level'), Tab(text: 'Compass')],

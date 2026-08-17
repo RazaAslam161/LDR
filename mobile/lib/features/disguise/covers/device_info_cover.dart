@@ -95,7 +95,11 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
     return Theme(
       data: theme,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Device Info')),
+        appBar: AppBar(
+          title: const Text('Device Info'),
+          // The visible door.
+          actions: [CoverExitButton(onPressed: runEntryGate)],
+        ),
         body: SafeArea(
           child: RefreshIndicator(
             onRefresh: _read,
