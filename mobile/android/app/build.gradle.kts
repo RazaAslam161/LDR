@@ -113,20 +113,36 @@ android {
             // inside a Play build during the window where that flag was true on
             // both channels.
             buildConfigField("boolean", "SELF_UPDATE", "true")
+            // ALWAYS the debug key, and never the release one — the opposite of
+            // what this used to do, for a reason that cost a shipped release.
+            //
+            // This was `if (hasReleaseKey) release else debug`. Creating
+            // android/key.properties to get a PLAY upload key therefore changed
+            // what the SIDELOAD channel was signed with, as a side effect, on
+            // the same afternoon. Android refuses to install an APK whose
+            // certificate differs from the installed one, so build 45 met every
+            // phone in the field with:
+            //
+            //     App not installed as package conflicts with an existing package
+            //
+            // and the only way past it is uninstalling — which destroys the
+            // device's X25519 seed and, for anyone without an escrow row, their
+            // ability to read the couple's history at all. A Play packaging
+            // decision must never be able to reach out and orphan the installed
+            // base; these are two channels precisely so they can differ.
+            //
             // The debug keystore's password is the literally-documented string
             // "android" on every machine on earth, and anything signed with it
-            // can be re-signed by anyone. Falling back is tolerable only
-            // because this channel never goes near Play and because the warning
-            // is impossible to miss.
-            signingConfig = if (hasReleaseKey) {
-                signingConfigs.getByName("release")
-            } else {
-                logger.warn("=========================================================")
-                logger.warn(" NO android/key.properties - signing sideload with DEBUG.")
-                logger.warn(" This APK CANNOT be uploaded to Google Play. Sideload only.")
-                logger.warn("=========================================================")
-                signingConfigs.getByName("debug")
-            }
+            // can be re-signed by anyone. That is tolerable here only because
+            // this channel never goes near Play — enforced by the taskGraph
+            // check below, not by convention — and it is the price of an
+            // installed base that can keep updating.
+            //
+            // The sideload-to-Play migration is a real, separate event: it needs
+            // every user to have an escrow row FIRST, then a deliberate
+            // uninstall/reinstall. It is not something a build config should
+            // trigger by accident.
+            signingConfig = signingConfigs.getByName("debug")
         }
         create("play") {
             dimension = "channel"

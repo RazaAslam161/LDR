@@ -4472,3 +4472,150 @@ no "Messages" channel.
 
 **Exact next step:** handset pass on the three checks above, then the in-app
 signal for silent covers.
+
+## §47 — Build 45 shipped and published; the release fix proved itself (2026-08-17)
+
+Commit `0fee6cf` (19 files, +1216/-70) carries §44 vault, §45 quota, §46
+notifications and the §43 release fix. Staged file-by-file, never `-A`; the
+other sessions' untracked work had already been committed by them.
+
+**The §43 release fix worked on its FIRST genuine run.** Build 44 was rebuilt on
+a tree cleaned by hand, so the bump path had never actually executed. Build 45
+ran it for real:
+
+```
+bumped 44 -> 45
+stopping the gradle daemon so build/ can actually be deleted
+build/ is gone — every Gradle output below is recomputed, not reused
+build 45 (version 0.1.0)
+self-updater present, and the snapshot really is build 45
+sideload copy: Miles.apk is build 45
+```
+
+That closes the failure mode that put build-31-era Dart under fresh version
+numbers for builds 39-44.
+
+**Build 45 — verified, shipped, published:**
+- stamps: `miles-build-45` ONLY (re-scanned outside the script; zero older stamps)
+- sha256 `df7b1a245a5b94eb407f5d8cb028dec9f905a906b664394577ab19cf806c21c9`
+- 219.5 MB, `versionCode='45' versionName='0.1.0'`, `com.miles.miles`
+- R2: `uploaded` then `verified: the hosted bytes are this build` — the hosted
+  file was re-downloaded and its SHA compared, so "uploaded" and "serving the
+  right bytes" are two separate confirmations rather than one assumption.
+- `app_release` now: `latest_build=45`, `latest_version_name='0.1.0'`,
+  `apk_sha256=df7b1a24...`, `apk_url` unchanged.
+
+**`min_build` deliberately LEFT AT 42.** It rises only after 45 is installed on
+both handsets; raising it now locks people out of a build they do not have.
+
+**Publish went through Supabase MCP, not the script.** `tool/.release-env` holds
+the R2 credentials and both URLs but NOT `MILES_SUPABASE_SERVICE_KEY`, which is
+correct — that key belongs in a shell, not on disk. `--upload --verify` ran from
+the script; the `app_release` UPDATE was applied directly. The script prints the
+exact SQL it would have run, and that is what was applied, unchanged. If the
+owner ever wants `--ship` to work end to end, the key goes in `.release-env`
+(gitignored) by his own hand.
+
+**STILL UNVERIFIED ON A HANDSET — this is the whole open risk.** Build 45 is the
+first build in which any of the following has ever run outside a test:
+1. the vault key change (every vault read AND write now uses a different key),
+2. the picker lifecycle fix,
+3. the PIN-gate `_hasPin` fix,
+4. the notification rework (budgets, one-per-conversation, channel rename).
+
+Nothing can be stranded — the vault is empty — and the notification path fails
+toward silence rather than noise. But no one has seen any of it work.
+
+**Exact next step, in order of value:**
+1. Cold start -> Vault -> Add -> pick a photo. It must save. This has never once
+   succeeded in production; if it fails, `client_errors` will now name why
+   (`kind='vault'`).
+2. Reach on the calculator cover -> must make NO sound.
+3. Ten rapid messages -> ONE notification counting to ten, not ten.
+4. Settings > Apps > <cover> > Notifications -> no "Messages" channel listed.
+Then, and only then, raise `min_build` to 45.
+
+## §48 — Build 45 could not be installed by anyone: a Play key change silently re-signed the SIDELOAD channel (2026-08-17)
+
+Owner hit `App not installed as package conflicts with an existing package` when
+build 45's update prompt tried to install.
+
+**Root cause, one sentence:** `android/app/build.gradle.kts` signed the SIDELOAD
+flavour with `if (hasReleaseKey) release else debug`, so creating
+`android/key.properties` for the PLAY upload key changed what sideload was signed
+with as a side effect, and Android refuses to install an APK whose certificate
+differs from the installed one.
+
+Evidence:
+- build 45 signer: `CN=Miles, O=R&D Dev, C=PK`, SHA-1 `52fcbb48...` (the upload
+  key, `android/miles-upload.jks`, created today 07:18)
+- build 43 (installed): debug key — `key.properties` did not exist when it was
+  built at ~06:49, so `hasReleaseKey` was false
+- `~/.android/debug.keystore` dated Aug 6, untouched, SHA-1 `a1057947...`
+
+**Why this was nearly a data-loss event.** The obvious answer — uninstall and
+reinstall — destroys the device's X25519 seed. Escrow coverage was checked FIRST
+and is incomplete:
+
+| user | escrow row |
+|---|---|
+| razaaslam5096 | yes (08-16 14:51) |
+| **zunairaaleem1202** | **NONE** |
+| kambohnawab8 | NONE |
+
+Uninstalling Zunaira's app would have destroyed her key permanently. The couple
+key derives from her seed, so the couple's encrypted history would have become
+unreadable on her side, recoverable only via the partner-rewrap ceremony and only
+while the other phone still held the old key. **This remains a live exposure
+independent of this bug — a lost or wiped phone costs her the same thing today.**
+
+**FIXED:** the sideload flavour is now pinned to `signingConfigs.getByName("debug")`
+unconditionally. Play keeps the release key; the taskGraph check still stops a
+debug-signed play upload. A Play packaging decision can no longer reach out and
+orphan the sideload installed base.
+
+The sideload-to-Play migration is still a real, separate event that WILL change
+the certificate and WILL require every user to uninstall. Its precondition is an
+escrow row for every account. It must be deliberate, never a side effect.
+
+**Build 46 — built, verified, NOT published:**
+- signer `C=US, O=Android, CN=Android Debug`, SHA-1 `a1057947...` — the same
+  certificate build 43 carries, so it installs over it with no uninstall
+- stamp `miles-build-46` only; sha256
+  `8c4227866977b283341e09e3859d25ef9de210a919ced230a5f25a3e8ed53e06`
+- 219.5 MB (230175632 bytes), `versionCode='46' versionName='0.1.0'`
+- uploaded to R2 and `verified: the hosted bytes are this build`
+- delivered to the owner as `E:\LDR\Miles.apk`
+
+Bumped 45 -> 46 rather than reusing 45: build 45 was already published and is
+uninstallable, and shipping different bytes under one number is how an update
+channel that keys on versionCode breaks.
+
+**The §43 clean-assert fired again, and was right to.** On the 46 build it
+reported `CLEAN FAILED: build/ still exists` — then the identical `flutter clean`
+run by hand seconds later succeeded. Stopping the gradle daemon and Windows
+releasing its handles are not the same instant. Fixed with a bounded retry (5
+attempts over 15s); the assert itself stays, because it is what caught the
+genuine stale-merge case and would catch an editor or antivirus really holding
+the directory. That guard has now caught three distinct defects: stale merged
+output (39-44), a clean that lied (44), and this race (46).
+
+**KNOWN-INCONSISTENT STATE, left deliberately at the owner's instruction.**
+`app_release` says `latest_build = 45` with build 45's `apk_sha256`
+(`df7b1a24...`), while R2 now serves build 46's bytes (`8c422786...`). A phone
+that taps update downloads 46 and REJECTS it on the hash check. It fails closed —
+nothing installs, nothing is corrupted — but the in-app update prompt is dead
+until the row is corrected. Owner said no more sideload distribution and no
+self-update, and explicitly said do not publish; the row was therefore left
+untouched rather than "helpfully" corrected.
+
+Two one-line options whenever wanted:
+- `update public.app_release set latest_build = 43 where id = true;` — offers
+  nothing, prompt goes away.
+- set `latest_build = 46, apk_sha256 = '8c422786...'` — prompt works again.
+
+**Exact next step:** install `Miles.apk` (46) by hand on both phones, then the
+three checks that have never been run: (1) cold start -> Vault -> Add -> pick a
+photo must SAVE; (2) a Reach on the calculator cover must make NO sound; (3) ten
+rapid messages must produce ONE notification counting to ten. After that, the
+escrow gap for zunairaaleem1202 is the highest-value open item in the project.

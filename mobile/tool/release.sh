@@ -213,11 +213,27 @@ if $bump; then
   # which this project has now done six times.
   echo "stopping the gradle daemon so build/ can actually be deleted"
   (cd android && ./gradlew --stop >/dev/null 2>&1) || true
-  flutter clean >/dev/null
+
+  # RETRIED, because stopping the daemon and Windows releasing its handles are
+  # not the same instant. The first version of this asserted after a single
+  # attempt and failed the 46 build outright — then the identical `flutter clean`
+  # run by hand seconds later succeeded. That is a race, not a stuck file, and
+  # failing the release over it just moves the manual step somewhere else.
+  #
+  # The assert itself stays and is the point: it is what caught this, and what
+  # catches the genuine case where an editor or an antivirus scanner really is
+  # holding the directory.
+  for attempt in 1 2 3 4 5; do
+    flutter clean >/dev/null 2>&1 || true
+    [ -e build ] || break
+    echo "  build/ still held, waiting for handles to close (attempt $attempt/5)"
+    sleep 3
+  done
+
   if [ -e build ]; then
-    echo "CLEAN FAILED: build/ still exists after flutter clean." >&2
-    echo "Something holds a handle under it — a gradle daemon, an open editor," >&2
-    echo "a running emulator, an antivirus scan. Close it and re-run." >&2
+    echo "CLEAN FAILED: build/ still exists after 5 attempts over 15s." >&2
+    echo "Something is genuinely holding a handle under it — an open editor, a" >&2
+    echo "running emulator, an antivirus scan. Close it and re-run." >&2
     echo "Do NOT build on this tree: Gradle will package a stale merged_jni_libs" >&2
     echo "under the new version number, which is exactly how builds 39-44 went" >&2
     echo "out carrying older Dart." >&2
