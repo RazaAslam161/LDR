@@ -22,11 +22,11 @@ import 'package:miles/features/closer/closer_crypto.dart';
 ///
 /// What is NOT true — and what this file and the migration both used to claim —
 /// is that the server never receives the password. GoTrue receives it in
-/// plaintext on every auth request, and the wrap is derived from that exact
-/// string, so one logged request is the escrowed seed. The wrap that fixes it
-/// has a label of its own ([KeyEscrow._wrapLabel]) and opens here already; it
-/// is not yet what gets WRITTEN, because a build still in the field cannot open
-/// it — see [KeyEscrow.backup]. Against somebody who has captured the password
+/// plaintext on every auth request, and the v1 wrap was derived from that exact
+/// string, so one logged request was the escrowed seed. The wrap that fixes it
+/// has a label of its own ([KeyEscrow._wrapLabel]) and, as of 2026-08-18, is
+/// also what gets WRITTEN — see [KeyEscrow.backup] for why the flip had to wait
+/// on the version gate. Against somebody who has captured the password
 /// neither form buys anything: escrow is only ever as strong as the password
 /// and the auth endpoint.
 ///
@@ -82,12 +82,14 @@ class KeyEscrow {
   static const _argonIterations = 2;
   static const _argonParallelism = 1;
 
-  /// Argon2id over the password itself, and still what [backup] writes.
+  /// Argon2id over the password itself. Nothing writes it since 2026-08-18;
+  /// kept so [restore] can open every row sealed before the flip.
   static const kdfArgon2id = 'argon2id';
 
   /// The same Argon2id over [_escrowSecret] instead of the string GoTrue is
-  /// sent. Read-only until every build that can still seal a row can also open
-  /// one — see [backup].
+  /// sent. Readable since build 27; what [backup] writes since 2026-08-18,
+  /// when the version gate guaranteed no permitted build could fail to open
+  /// it — see [backup].
   static const kdfArgon2idV2 = 'argon2id-v2';
 
   /// The column default, and what a row from before the Argon2id migration
@@ -218,14 +220,17 @@ class KeyEscrow {
       final rnd = Random.secure();
       final salt =
           Uint8List.fromList(List.generate(16, (_) => rnd.nextInt(256)));
-      // Sealed in the OLD format deliberately. Build 26 is still permitted and
-      // still out there, and it hands anything that is not exactly `argon2id`
-      // to the HKDF derivation — so a v2 row fails its MAC there, restore
-      // returns false, and the next sign-in seals the stand-in key minted on
-      // the first Closer screen over the only copy of the real one. [_wrapKey]
-      // goes on OPENING v2 for any row already written that way; the write
-      // flips to kdfArgon2idV2 once app_release.min_build is 28.
-      final key = await _wrapKey(password, salt, kdf: kdfArgon2id);
+      // Sealed as v2 since 2026-08-18. The write stayed on the old format for
+      // as long as build 26 was permitted: that build hands anything that is
+      // not exactly `argon2id` to the HKDF derivation, so a v2 row fails its
+      // MAC there, restore returns false, and the next sign-in seals the
+      // stand-in key minted on the first Closer screen over the only copy of
+      // the real one. The flip was gated on app_release.min_build reaching 28;
+      // production has sat at 42 — every build the gate admits opens v2 — so
+      // writing v1 kept the wrap and the sign-in password one secret for
+      // nobody's benefit. [_wrapKey] goes on opening v1 rows, and each one
+      // re-seals as v2 the next time its owner's sign-in lands here.
+      final key = await _wrapKey(password, salt, kdf: kdfArgon2idV2);
       final box = await _aead.encrypt(
         seed,
         secretKey: key,
@@ -239,7 +244,7 @@ class KeyEscrow {
         'wrapped_seed': bytesToBytea(sealed),
         'salt': bytesToBytea(salt),
         'nonce': bytesToBytea(Uint8List.fromList(box.nonce)),
-        'kdf': kdfArgon2id,
+        'kdf': kdfArgon2idV2,
         'kdf_params': _argonParams,
       });
       return true;
@@ -310,9 +315,14 @@ class KeyEscrow {
 
       // Opening the row proves the password, which is the only moment the
       // material needed to re-seal it exists. Re-wrap anything that is not the
-      // current write format: an HKDF row is a crackable blob, and a v2 row is
-      // one the builds still in the field cannot open at all.
-      if (kdf != kdfArgon2id) await backup(password);
+      // current write format: an HKDF row is a crackable blob, and a v1 row's
+      // wrap key is the exact string GoTrue receives in plaintext — the
+      // exposure the v2 flip exists to close. A v2 row is already current;
+      // re-sealing it would spend ~0.5s of Argon2id per restore for nothing.
+      // (The comparison flipped with the write format on 2026-08-18: keyed on
+      // v1 it skipped upgrading the one format that most needed it and
+      // re-sealed every already-current row.)
+      if (kdf != kdfArgon2idV2) await backup(password);
       return true;
     } catch (e) {
       // A wrong password lands here as a MAC failure, which is the expected
