@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// reach-notify — Tethered "Reach" push (Phase 5).
+// reach-notify — Miles "Reach" push (Phase 5).
 //
 // Invoked by a Database Webhook on INSERT to public.reach_events. Sends an FCM
 // HTTP v1 DATA message to the *recipient* partner's device so the app's own

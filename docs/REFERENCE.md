@@ -1,6 +1,6 @@
-# Tethered — Complete Project Documentation
+# Miles — Complete Project Documentation
 
-> **App:** *Tethered* — a private, invite-only **long-distance couples** app, built for ONE couple.
+> **App:** *Miles* — a private, invite-only **long-distance couples** app, built for ONE couple.
 > **Disguise:** ships on-device as **“System Services”** (Android label) under package **`com.miles.miles`**. Not on any store — sideloaded APK.
 > **Repo:** `E:\LDR`  ·  Flutter app: `E:\LDR\mobile`  ·  **145 Dart files**, **28 feature modules**.
 > **Backend:** Supabase project ref **`sopictusdonlvuezmfep`**.
@@ -47,7 +47,7 @@
 
 ## 1. Architecture & Core Foundation
 
-Tethered is a Flutter app for one private couple, disguised on-device as "System Services" (package `com.miles.miles`), backed by Supabase (project ref `sopictusdonlvuezmfep`). State is managed with Riverpod, navigation with `go_router`, and the visual language is the "Emberlight" design system (the code's internal name; the `MilesColors` palette). All source lives under `lib/`, with the foundation in `lib/core/`.
+Miles is a Flutter app for one private couple, disguised on-device as "System Services" (package `com.miles.miles`), backed by Supabase (project ref `sopictusdonlvuezmfep`). State is managed with Riverpod, navigation with `go_router`, and the visual language is the "Emberlight" design system (the code's internal name; the `MilesColors` palette). All source lives under `lib/`, with the foundation in `lib/core/`.
 
 ### App startup sequence
 
@@ -144,7 +144,7 @@ The realtime layer is built to survive Android doze, network drops, and backgrou
 - **Message types** (`m.data['type']`): `reach`, `call`, `care`. Foreground/opened handlers translate these into the `ValueNotifier`s `pendingReach` (`ReachTap`) and `pendingCall` (`CallTap`), which `AppShell` consumes. Local-notification taps are routed via a pipe-delimited `payload` (`reachId|fromName`, `call|callId|fromName|video`, `care|nudgeId`).
 - **Token lifecycle**: `registerToken()` requests permission and fetches the token with up to 4 retries (Google Play Services may not be ready), saves via `SupabaseRepository.setFcmToken` (writes `fcm_token` + `fcm_token_updated_at` on `profiles`), and subscribes to `onTokenRefresh`. It is re-called on **every app resume** in `MilesApp.didChangeAppLifecycleState` because the server-side notify functions null a recipient's token when FCM reports it `UNREGISTERED` — re-registering self-heals stale tokens. `clearToken()` nulls the token and deletes it on sign-out. `AppShell._onReady` also calls `registerToken()` once past login + pairing.
 - **Background isolate**: `firebaseMessagingBackgroundHandler` (top-level, `@pragma('vm:entry-point')`) re-inits Firebase + the local-notifications plugin in its own isolate, re-creates the relevant channel, and shows the notification. Since the isolate has no Activity it cannot query the full-screen-intent permission live — it reads the cached `fsi_can_use` bool from `SharedPreferences`.
-- **Full-screen-intent (Android 14+)**: `FsiPermission` uses a `MethodChannel('miles/fsi')` (`canUseFullScreenIntent`, `openSettings`). Tethered does not auto-qualify, so it *requests* the permission once (`promptIfNeeded`, called from `AppShell._onReady`) and otherwise **degrades gracefully** to a max-priority heads-up notification. `refreshCache()` mirrors the live value into `SharedPreferences` for the background isolate.
+- **Full-screen-intent (Android 14+)**: `FsiPermission` uses a `MethodChannel('miles/fsi')` (`canUseFullScreenIntent`, `openSettings`). Miles does not auto-qualify, so it *requests* the permission once (`promptIfNeeded`, called from `AppShell._onReady`) and otherwise **degrades gracefully** to a max-priority heads-up notification. `refreshCache()` mirrors the live value into `SharedPreferences` for the background isolate.
 
 ### Location & background location
 
@@ -180,7 +180,7 @@ The realtime layer is built to survive Android doze, network drops, and backgrou
 
 ## 2. Data Model & Backend (Supabase)
 
-Tethered's backend is a single Supabase project (ref `sopictusdonlvuezmfep`, base URL `https://sopictusdonlvuezmfep.supabase.co`) providing Postgres + Auth + Realtime + Storage + one Edge Function. The Postgres schema is version-controlled as a set of idempotent `.sql` migrations in `E:\LDR\supabase\*.sql` (the canonical data dictionary), applied in order starting with `schema.sql`. All client access flows through thin repository classes (`lib/core/supabase_repository.dart`, `lib/core/services/presence_service.dart`, `lib/features/*/.*_repository.dart`) that rely on RLS for authorization rather than enforcing it client-side.
+Miles's backend is a single Supabase project (ref `sopictusdonlvuezmfep`, base URL `https://sopictusdonlvuezmfep.supabase.co`) providing Postgres + Auth + Realtime + Storage + one Edge Function. The Postgres schema is version-controlled as a set of idempotent `.sql` migrations in `E:\LDR\supabase\*.sql` (the canonical data dictionary), applied in order starting with `schema.sql`. All client access flows through thin repository classes (`lib/core/supabase_repository.dart`, `lib/core/services/presence_service.dart`, `lib/features/*/.*_repository.dart`) that rely on RLS for authorization rather than enforcing it client-side.
 
 ### Core architectural principle: couple-scoping
 
@@ -329,7 +329,7 @@ Device tokens live on `profiles.fcm_token`/`fcm_token_updated_at`, written by `S
 
 ## 3. Chat
 
-The chat is the heart of Tethered: a private, two-person, real-time conversation between the linked partners. It is engineered for *instant* feel — every send shows on your own screen immediately, lands on your partner's screen in milliseconds over a broadcast fast-path, and is durably persisted to Postgres, with all three carrying the same client UUID so the slower DB echo de-dupes cleanly. It supports text, images/GIFs, voice notes, and private intimate video, plus playful "flings" (animated mood emoji and GIFs that rise on both phones), per-partner chat themes, typing indicators, read receipts, an "is here" presence avatar, and slide-to-reply.
+The chat is the heart of Miles: a private, two-person, real-time conversation between the linked partners. It is engineered for *instant* feel — every send shows on your own screen immediately, lands on your partner's screen in milliseconds over a broadcast fast-path, and is durably persisted to Postgres, with all three carrying the same client UUID so the slower DB echo de-dupes cleanly. It supports text, images/GIFs, voice notes, and private intimate video, plus playful "flings" (animated mood emoji and GIFs that rise on both phones), per-partner chat themes, typing indicators, read receipts, an "is here" presence avatar, and slide-to-reply.
 
 ### User flow
 
@@ -675,7 +675,7 @@ There are two distinct mechanisms in `lib/features/reach/`:
 
 ## 6. Social · Games · Keepsakes
 
-This section documents the couple-facing "things to do together" surface of Tethered: synced mini-games, the shared affection space, daily/relationship rituals, and the keepsake features (time capsules, private vault, reasons jar, visit timeline). Almost every feature is **couple-scoped** (rows carry a `couple_id`, fetched from `sessionProvider.couple`) and the synced/live ones ride Supabase Realtime **broadcast** channels (ephemeral pub/sub, nothing persisted) rather than Postgres-change streams.
+This section documents the couple-facing "things to do together" surface of Miles: synced mini-games, the shared affection space, daily/relationship rituals, and the keepsake features (time capsules, private vault, reasons jar, visit timeline). Almost every feature is **couple-scoped** (rows carry a `couple_id`, fetched from `sessionProvider.couple`) and the synced/live ones ride Supabase Realtime **broadcast** channels (ephemeral pub/sub, nothing persisted) rather than Postgres-change streams.
 
 ### Games (synced couple arcade)
 

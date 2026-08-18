@@ -92,12 +92,5 @@ void main() {
       // jitter around the boundary.
       expect(kZoomUpgradeScale, greaterThan(kZoomRevertScale));
     });
-
-    test('thumbnails are precached further than originals are fetched', () {
-      // A thumbnail is tens of kilobytes; an original is megabytes. Reversing
-      // these is how a pager left open on mobile data pulls the library.
-      expect(kThumbPrecacheRadius, greaterThan(kFileWarmRadius));
-      expect(kFileWarmRadiusMetered, lessThan(kFileWarmRadius));
-    });
   });
 }

@@ -5958,3 +5958,80 @@ friction not worth it at this stage. Reasonable; revisit at launch, not before.
 `weak_password` code with "That password is too easy to guess. Use at least 8
 characters," which now matches the configured floor exactly. If the floor ever
 moves, that string moves with it.
+
+## §66 — Hygiene sweep: dead code out, junk quarantined, Tethered classified (2026-08-18)
+
+A 6-finder audit workflow (dead files, dead symbols, Tethered occurrences,
+tree junk, backend, tests) with adversarial verification, then a hand-applied
+minimal diff. Baseline before touching anything: analyze 0 errors / 0
+warnings (533 infos), tests 966 passing + 1 failing (the 20260818130000
+migration-key collision between two concurrent sessions' files — resolved
+mid-sprint by the owning session renaming to 20260818150000, not by me).
+
+**DONE + verified (gates after: analyze 0 err/0 warn, `flutter test` → "All
+tests passed!" 975):**
+- Removed dead constants `kThumbPrecacheRadius`, `kFileWarmRadius`,
+  `kFileWarmRadiusMetered` from `media_decode.dart` + their only reference,
+  one assertion block in `decode_identity_test.dart`. The live pager uses its
+  own private `_warmRadius = 3` (media_viewer.dart:85); these were a
+  superseded design generation. Verified dead twice (workflow finder + my own
+  grep: only self + that test block referenced them).
+- `mobile/web/` (stock Flutter web scaffold, Android-only app, zero
+  references in tool/CI/docs) deleted from the tree.
+- `docs/guides/wip/schema_drift_test.dart.draft` deleted — byte-identical
+  (modulo CRLF) to the shipped `test/unit/hygiene/schema_drift_test.dart`;
+  the now-empty `wip/` went with it.
+- Quarantined, NOT deleted (all in `E:\LDR\_trash\2026-08-18\`, git-ignored;
+  empty it when satisfied): `mobile/build` (2.2 GB), 7 stale
+  `mobile/build-*.log`, plus the two deleted items above as copies.
+- Tethered→Miles where it was safe: root README (title + the stale "not on
+  any store" and "debug-signed" claims — now names the sideload/play
+  flavors), mobile/README.md (was the stock "A new Flutter project"
+  template — rewritten as a pointer), REFERENCE.md doc-voice prose (7
+  renames), reach-notify/index.ts header comment, and the dead
+  `Tethered*.apk` gitignore line (collapsed the redundant Miles* lines into
+  `*.apk` while there).
+
+**Tethered occurrences that MUST NOT be renamed (classified, left alone):**
+the `tethered://` scheme is wire protocol — AndroidManifest intent filters,
+main.dart:656 scheme check, couple_page.dart:19 link builder,
+supabase/config.toml site_url/redirects (guarded by
+migrations_hygiene_test.dart:61), web/auth-callback.html:195 forwarder, and
+the string is baked into every shipped APK (verified by grepping Miles.apk).
+Renaming is a deliberate dual-scheme migration (register `miles://`
+alongside, keep accepting `tethered://` forever, flip link GENERATION only
+behind a version gate) — play-readiness-findings.json:544 already proposes it
+as hardening. Also left: 12 applied-migration header comments (immutable
+history), docs/archive + audit findings (historical record), verbatim UI
+quotes in REFERENCE.md ('Unlock Tethered' etc. — quoting then-current code),
+and the 'tethered' entry in disguise_notification_test's tells list (it
+guards against the OLD name leaking — it belongs there).
+
+**Audited clean, no action needed:** all 248 lib files reachable from
+main.dart (BFS over 1185 import edges + per-file grep cross-check); all 101
+test files are real tests (no helpers, no skips, no broken imports, no
+duplicates); all 19 emoji Lottie assets used (dynamic path mood.dart:32);
+top-level layout already matches monorepo convention — no reorganization has
+positive expected value, so none was done.
+
+**found, not fixed:** supabase/schema_snapshot.json:14 — points at
+`scripts/dump_schema_snapshot.sql` which does not exist (BRAIN §-earlier
+already records this); docs/REFERENCE.md:594,670 — documents the deleted
+bg_location.dart / `tethered-bg-location` WorkManager task, and the doc is
+stale beyond the name (says "System Services" label, "one Edge Function",
+pre-move file paths); mobile/.gitignore:12 ignores pubspec.lock — for an app
+the lockfile should be committed (a transitive dep already hard-crashed the
+app once); root `.env.local` — orphaned Next.js-convention keys, no Next
+project exists (user decides, it holds a key); Diag retirement is half-done
+by design — record/span no-op with 71 call sites, diag.dart:303 earmarks
+removal for its own commit (DiagRedact stays: it is the documented runtime
+half of the privacy guard diag_privacy_test.dart enforces); three empty
+untracked dirs under android/app/src/play/res/ — possibly the play session's
+scaffolding, left alone; docs/architecture design/ vs revised/ hold 8
+same-named files (revised/ is the later generation); docs/legal markdown vs
+web/ HTML have no sync check.
+
+**Exact next step:** none for this thread — cleanup is complete and gated.
+The user empties `_trash/` after eyeballing it (2.2 GB back on the next
+build's clock either way).
+

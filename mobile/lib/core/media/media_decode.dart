@@ -19,21 +19,6 @@ library;
 /// against the ~48MB an unbounded 12MP decode costs.
 const int kTileDecodePx = 512;
 
-/// How far either side of the current page a THUMBNAIL is decoded and pinned.
-///
-/// Thumbnails only. Four each way is ~7.7MB and makes a fast swipe land on a
-/// frame that is already painted; the same radius of originals would be 66MB.
-const int kThumbPrecacheRadius = 4;
-
-/// How far either side the ORIGINAL's bytes are put on disk. Not decoded —
-/// decoding an original nobody has swiped to yet is what makes the pager
-/// expensive rather than fast.
-const int kFileWarmRadius = 2;
-
-/// The same on a metered connection. A pager left open on mobile data should
-/// not quietly pull six originals the user never looked at.
-const int kFileWarmRadiusMetered = 1;
-
 /// Pinch past this and the full-resolution layer is mounted over the bounded
 /// one, so a zoom is crisp without every page paying for it.
 const double kZoomUpgradeScale = 1.5;

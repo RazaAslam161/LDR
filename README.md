@@ -1,7 +1,7 @@
-# Tethered
+# Miles
 
-A private long-distance couples app. Flutter client, Supabase backend, sideloaded — it is not on any
-store and is not intended to be.
+A private long-distance couples app. Flutter client, Supabase backend. One app, two install channels:
+the `play` flavor ships on Google Play; the `sideload` flavor installs directly from an APK.
 
 The Android build ships **disguised**: the launcher shows "News" with a matching icon, and the real app
 is behind a cover screen plus a biometric gate. That is deliberate. Do not "fix" it.
@@ -38,8 +38,9 @@ flutter build apk --release
 
 `cd mobile` first — running `flutter` from the repo root fails with "No pubspec.yaml".
 
-The APK is debug-signed on purpose (private distribution). If a phone refuses to install, uninstall the
-old copy first: a different signing key will not upgrade in place.
+The `sideload` APK is debug-signed on purpose (private distribution); the `play` flavor is signed with
+the release upload keystore. If a phone refuses to install, uninstall the old copy first: a different
+signing key will not upgrade in place.
 
 ## Configuration
 
