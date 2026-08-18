@@ -5900,3 +5900,61 @@ Chat feature files untouched; called read-only.
 
 **Exact next step:** run `flutter analyze` + `flutter test` from /e/LDR/mobile;
 if green, the remaining deferred session is the migration-ledger re-baseline.
+
+## §60 — Password policy: owner set 8, not 12, and Pro is deferred (2026-08-18)
+
+Decision, not a finding. Recorded so nobody re-opens it.
+
+**What the owner set on prod auth (unverified by me — there is no auth-config
+tool in the Supabase MCP, so I can read the plan and the database but not this
+setting):** minimum password length **8**, AND the character-requirements dropdown was
+also raised (owner-confirmed 2026-08-18). Both remain unverified by tooling for
+the reason above — treat the owner's word as the source, and if it ever matters
+enough, the only way to check is to attempt a signup with a weak password.
+
+**Leaked-password protection (HaveIBeenPwned) stays OFF.** It is Pro-plan-only
+and `get_organization` reports the org plan as `free`. The owner will buy Pro
+when the app has users. That is a deliberate cost decision.
+
+**Why 8 is defensible here, so the next session does not panic:** the escrowed
+seed is wrapped with Argon2id at OWASP baseline — 19456 KB memory, 2
+iterations, parallelism 1, 32-byte output (key_escrow.dart:81-83), measured at
+~0.5s on the oldest handset. Memory-hardness is what actually blunts offline
+GPU cracking, and it is already correct. 8 characters with all four character
+classes is ~2^52 guesses by Supabase's own table; 8 digits-only is ~2^27, which
+is why the character-class dropdown matters more than the 8-vs-12 argument.
+
+**Net position, with the classes confirmed:** this is a reasonable place to
+stand. 8 characters across all four classes is ~2^52 guesses for a randomly
+chosen password, and Argon2id at 19 MiB is what makes those guesses expensive
+rather than free — memory-hardness, not length, is doing the heavy lifting
+against a GPU. The one thing still uncovered is HUMAN password CHOICE: nothing
+here stops `Password1!`, which satisfies every rule and is in every wordlist.
+That specific gap is exactly what HIBP closes, and it is the honest reason to
+buy Pro at launch — not the length setting.
+
+**The argument that was made and declined:** on free tier there is no HIBP
+check, so length is the only thing standing between the app and `Password1!`
+— which satisfies "8 chars, all four classes" and sits in every cracking
+wordlist. 12 pushes people toward passphrases. The owner judged the signup
+friction not worth it at this stage. Reasonable; revisit at launch, not before.
+
+**TWO THINGS THAT BITE LATER — read these before raising the floor:**
+1. HIBP is not retroactive. Turning it on later checks passwords at signup and
+   at change, NOT the ones already stored. Every weak password created between
+   now and then is grandfathered until its owner changes it.
+2. **A raised floor may block sign-in for existing users, and this is
+   unresolved.** Supabase's docs say an existing user "can still sign in" but
+   "will encounter a WeakPasswordError during signInWithPassword". In the Dart
+   SDK, `AuthWeakPasswordException` is thrown from the ERROR branch of
+   gotrue-2.22.0/lib/src/fetch.dart:97 and :104 — i.e. only on a non-2xx
+   response. Whether GoTrue returns 200-with-a-warning or an error on sign-in
+   for a below-policy password could not be settled from the client alone.
+   **Before raising the minimum, create a test account with a below-policy
+   password, raise the floor, and try to sign in.** If it throws, the app needs
+   a force-change flow first or the whole installed base is locked out.
+
+**No code change needed today:** auth_errors.dart already answers a
+`weak_password` code with "That password is too easy to guess. Use at least 8
+characters," which now matches the configured floor exactly. If the floor ever
+moves, that string moves with it.
