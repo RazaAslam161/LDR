@@ -19,6 +19,7 @@ import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
+import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
@@ -207,6 +208,19 @@ class _AppShellState extends ConsumerState<AppShell>
     // the lock is on or the cover is off, because an unguarded ring is a
     // disguise that opens for whoever is holding the phone.
     unawaited(_nudgeLockForCover());
+    // The pin catches every partner-key change after the first sight; the one
+    // thing it cannot catch is a directory that lied AT the first sight, and
+    // only the two people can — by reading the same twenty digits to each
+    // other. Last of the launch prompts, and it stands down when one of the
+    // others is already on screen: a key that was never compared is a smaller
+    // loss than a key that was never backed up, or a cover with no lock behind
+    // it. Asked once per key, then never again until the key changes.
+    unawaited(
+      SafetyCodePrompt.maybeShow(
+        context,
+        partnerId: ref.read(sessionProvider).partner?.id,
+      ),
+    );
     // The other half is setting up a new phone and cannot open anything the two
     // of them wrote. This device still holds the key, so it is the only thing
     // that can give it back — and a request lives ten minutes, which is why it

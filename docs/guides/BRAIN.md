@@ -5901,6 +5901,29 @@ Chat feature files untouched; called read-only.
 **Exact next step:** run `flutter analyze` + `flutter test` from /e/LDR/mobile;
 if green, the remaining deferred session is the migration-ledger re-baseline.
 
+## §59 — The 42 advisor warnings, read instead of feared (2026-08-18)
+
+The owner saw the security advisor count RISE to 42 and asked what happened.
+Pulled and classified every line (2026-08-18):
+- 39 WARN = lint 0029 firing once per RPC (`SECURITY DEFINER` callable by
+  authenticated). That is the app's API surface — every one derives identity
+  from auth.uid() inside (audited §41, probed). The count rises with every
+  FEATURE because each new RPC adds a line: ack_delivered/ack_read (receipts),
+  capsule_seal_summary, claim_thumb, storage_quota_ok… "Fixing" them per the
+  lint (revoke EXECUTE) would break the app; the number measures API size.
+- 7 INFO = deliberately policy-less service-role-only tables (fail-closed).
+- 1 WARN pg_net in public — Supabase-support-only, tracked.
+- 1 WARN HIBP — the owner's dashboard toggle, still pending.
+- 1 WARN was REAL and new: storage_quota_bytes() had a mutable search_path
+  (came in with 20260817140000's quota work, missed the pinning every other
+  function has). Fixed: `20260818120000_storage_quota_bytes_search_path.sql`,
+  applied staging AND prod, re-fetched advisors — the lint is gone. 42 → 41,
+  and 41 is the floor until Supabase moves pg_net and the owner flips HIBP.
+
+Lesson for the next session: the advisor panel is a linter, not a scorecard;
+diff the LIST, not the number, and only lints 0011/0014/auth are actionable
+here.
+
 ## §60 — Password policy: owner set 8, not 12, and Pro is deferred (2026-08-18)
 
 Decision, not a finding. Recorded so nobody re-opens it.
@@ -5958,6 +5981,399 @@ friction not worth it at this stage. Reasonable; revisit at launch, not before.
 `weak_password` code with "That password is too easy to guess. Use at least 8
 characters," which now matches the configured floor exactly. If the floor ever
 moves, that string moves with it.
+
+## §61 — The threat model exists now, and it is written to be checkable (2026-08-18)
+
+New file: `docs/guides/THREAT-MODEL.md`. Documentation only — **no code, config,
+migration or copy changed.** It closes the "missing entirely" gap from the
+top-1% critique: the app had a privacy policy and a child-safety page that were
+each honest about their own slice, and nothing that said in one place who this
+app defends against and who it does not.
+
+**Five sections, and the shape is deliberate:**
+1. **What the app holds, and who can read it TODAY** — one table, every data
+   class, exactly three verdicts: couple / couple + operator / owner + operator,
+   with E2EE marked where it is real. Built from the schema and the call sites,
+   not from the marketing.
+2. **Seven adversaries ranked by likelihood for THESE users** — unlocked phone
+   first (that is what the covers, App Lock and the vault PIN are for), then
+   stolen password, network, operator/compromised project, another app, lawful
+   request, stranger with the APK. Each gets what-they-can-do / what-stops-them /
+   **what does NOT stop them**.
+3. **Explicitly out of scope** — rooted device, the legitimate partner,
+   first-sight TOFU, screenshots, the user's own password choice, availability.
+4. **Defences mapped to the threat they actually address**, with file and
+   migration references.
+5. **Residual risks with a status each.**
+
+**Facts it pins that nothing else in the repo stated in one place:**
+- Chat is DUAL-WRITTEN and the plaintext is still going: `chat_cipher_only`
+  defaults false and `ChatRepository.omitPlaintext` needs the flag AND a
+  successful seal. So chat is operator-readable today and every document must
+  keep saying so — recorded with the §58 preconditions, not softened.
+- E2EE today is exactly: Memory Thread contents, Wish Jar entry TEXT, Private
+  Vault FILES. Vault NOTES and item labels are plaintext
+  (`VaultRepository.addNote`), which the word "vault" invites people to get
+  wrong.
+- Gallery and chat media are operator-readable by decision, and the reason
+  (thumbnail cost — the reason the vault has loading wheels and chat does not)
+  is written down rather than left as an accident.
+- Wish Jar `tag_hashes` is unkeyed FNV-1a over twelve fixed values, so the
+  CATEGORY is operator-computable while the words are not.
+- The escrow is only as strong as the password, and the password floor is 8
+  with HIBP off. Stated as the top residual, matching csae.html §4's own words.
+
+**Three corrections this pass found while checking claims, all now written into
+the doc:**
+- `FLAG_SECURE` in the chat media viewer follows the PAGE and is raised only for
+  VIDEO — a photo page explicitly CLEARS it
+  (`media_viewer.dart:200-205`). Earlier summaries that said "chat media viewer
+  is secure" were half right; chat photos are screenshotable.
+- The pairing brute-force limiter is still inert (§49's finding, unfixed): every
+  `insert into pairing_attempts` on a failure path is rolled back by the
+  `raise exception` after it, so the counter records successes only. Only the
+  32-bit code space plus single-use/TTL holds that door.
+- `vault_items`, `afterglow_entries` and `body_map_pins` carry cipher columns and
+  have NO Dart call site — dead tables. `safety_sheets.dart:128`'s comment still
+  calls "the Closer vault" a live encrypted surface. Comment only, no runtime
+  effect. **found, not fixed.**
+
+**found, not fixed (also):** the secure-email-change GoTrue setting is still
+unverified (§44's item), so §2(b) of the doc says not to rely on the
+old-address confirmation until someone checks it.
+
+**Gates:** none run — this change contains no Dart, no SQL and no manifest.
+`flutter analyze` / `flutter test` would report other sessions' state, not this
+one's. Nothing staged, nothing committed.
+
+**Exact next step:** unchanged owner items (Supabase Pro, web/ redeploy, HIBP,
+keystore copy, Console declarations, play AAB device pass). For this file
+specifically: it moves when §1's table moves — a row changing readability is a
+change to THREAT-MODEL.md in the same commit, and §6 of the doc says so.
+
+## §62 — Security POSTURE: disclosure route, enforced gates, dependency audit (2026-08-18)
+
+Owner asked for 90+/100 after the honest 61. Said plainly what I could not do:
+the four caps on that score (chat plaintext-at-rest, HIBP toggle, Pro plan,
+external pentest) are owned by the owner or the chat-cipher session, and
+faking them would be the one thing the score exists to prevent. What WAS
+mine — every "missing entirely" item — is done:
+
+**1. Vulnerability disclosure route (was: none — a researcher holding the APK
+had nowhere to report).**
+- `web/.well-known/security.txt` (RFC 9116: Contact/Expires 2027-08-18/
+  Preferred-Languages/Canonical/Policy; ASCII+LF on purpose — machine-parsed).
+- `web/security.html` — scope, out-of-scope, no-legal-action promise, 7-day
+  ack / 90-day fix commitment, "solo dev, human-speed" stated.
+- `vercel.json` gained a second `headers` block pinning `text/plain` on that
+  one path (site-wide `nosniff` would otherwise make it unreadable).
+- App pointer: `milesSecurityUrl` + a fifth `_AboutLink` row in Settings.
+- All SIX legal pages now footer-link it (skeptic caught that a researcher
+  landing on privacy-policy.html had no route).
+- **Contact email corrected mid-session:** my brief told the agent to use
+  razaaslam5096@ (the session's userEmail); the repo's legal identity is
+  Razaaslam3210@ (20 occurrences) and csae.html §6 promises "one inbox, not
+  several". Unified on 3210 everywhere; zero 5096 left in web/ or lib/.
+
+**2. Gates are no longer voluntary.** `.github/workflows/gates.yml` — analyze
+(release.sh's exact grep, including the blindness check) + full test suite on
+push/PR. Branch-filtered to main+fix-sprint: private repo, metered minutes, and
+a gate that bills for scratch branches is one that gets switched off. Flutter
+pinned 3.44.2 / revision c9a6c484 — verified against mobile/.metadata and the
+installed SDK, not guessed.
+
+**3. Dependency-CVE process (was: none — Dart has no `npm audit`).**
+`mobile/tool/dep_audit.dart`, pure dart:io+dart:convert (an auditor that adds
+dependencies is an odd thing to trust). Parses pubspec.lock, batches OSV
+querybatch, reports and NEVER bumps (a transitive package has hard-crashed
+this app before). Exit codes are three-valued: 0 clean, 1 advisory-or-bad-lock,
+75 inconclusive-but-green with a loud annotation.
+**Verified for real, twice:** ran clean here — `275 pub.dev packages … no
+advisories`, 4 SDK deps named as unaudited. The skeptic independently proved
+it CATCHES: live OSV returned GHSA-4rgh-jx4f-qfcq for http 0.13.0 and `{}`
+for a clean package, and cross-checked the lock parser 275/275 against a full
+YAML parse. It is not decorative.
+
+**4. Four Kotlin channel replies** (switch/stats/settings/install_failed) sent
+`e.message` across the boundary — a SecurityException's message embeds paths.
+Now `e.javaClass.simpleName`. Zero `e.message`/`localizedMessage`/`toString()`
+remain in any Kotlin channel reply; no Dart caller parses those codes.
+
+**Skeptic pass (pass-with-caveats), all closed this turn:**
+- THREAT-MODEL.md cited SUPERSEDED function definitions (004900) for the
+  inert-pairing-limiter claim — the live definition is 20260815071024:38 with
+  THREE rolled-back inserts, not two. Claim upheld, citation corrected. Same
+  for the pairing row in §4.
+- `exit 78` in my soft-pass was wrong — neutral exit codes were retired and
+  would FAIL the step. Replaced with a `RESOLVE_FAILED` env flag the dependent
+  steps honour.
+- dep_audit's truncation marker was being fetched as an advisory id (404 →
+  a link to a page that cannot exist). Now a typed marker: still counts as a
+  finding, never fetched, never linked.
+- README claimed only security.txt was unserved; security.html is 404 too.
+- Stale "three links" comment → five.
+
+**BLOCKING, owner:** the Settings row now points at `security.html`, which is
+**404 until `npx vercel --prod` runs**. That deploy also
+still carries the csae.html NCCIA fix and auth-callback.html. **Deploy must
+land BEFORE the next APK build** — this is the exact failure terms_text.dart
+already documents ("it was serving one page while the other four 404'd").
+
+**Score movement, honestly:** 61 → ~76. The remaining 14 points are the four
+owner/other-session items; no amount of my work reaches 90 without them.
+
+## §63 — Pre-launch audit: the honest rating the owner asked for (2026-08-18)
+
+Owner said "app is ready for market, one last audit + honest rating before Play."
+Ran both gates plus a 15-agent audit (9 dimensions, 6 top findings adversarially
+verified — 5 CONFIRMED, 1 REFUTED). Verdict: **NOT submission-ready today.**
+Code engineering is genuinely strong; what blocks is concentrated in Console
+work, one untested artifact, and four defects. No fixes applied — audit only,
+per the ask. Full finding detail lives in this session's workflow journal;
+everything that matters is below.
+
+**Gates (verified, this tree):**
+- `flutter test`: 967 tests, "All tests passed!", exit 0.
+- `flutter analyze`: 0 errors, 0 warnings, 533 info (corrected §57 grep used).
+
+**CONFIRMED LAUNCH BLOCKERS (each adversarially verified with file:line):**
+1. **App access package does not exist.** Reviewer on a fresh install hits
+   DOB gate → ToS → email-confirm deep link → invite-code pairing with no
+   directory (router.dart:87-131, welcome_page.dart:89, terms_text.dart:79-83).
+   Without two pre-paired test accounts + pairing + cover-gesture instructions
+   in Console → App access, rejection is guaranteed regardless of policy.
+2. **Disguise Console disclosures missing.** play flavour ships
+   DISGUISE_ENABLED=true (build.gradle.kts:193); in-repo items 1-3 of its own
+   5-item comment are done and verified (Settings-only entry, consequence
+   dialog, exit ring on all 9 covers) — items 4-5 (listing disclosure text +
+   picker screenshot) exist nowhere. This is the account-strike-class risk.
+3. **The Play AAB (the only R8-minified config) has never run on hardware.**
+   Sideload builds ship unminified (build.gradle.kts:215-216); play/release
+   turns minify+shrink ON (231-240). §42 built it once (exit 0) but the device
+   pass is still open — WebRTC/ML Kit/FCM strip failures are invisible to unit
+   tests. Refuted twin: "AAB never built" is FALSE (§42 has the SHA).
+4. **Partner deletion leaks history to the next pairing.** delete_my_account
+   (20260818090000:99-103) nulls only the deleter's couple_id; survivor's
+   _WaitingForPartner mints a new invite that reuses the LIVE couple
+   (20260601005900:40-52), so a stranger inherits the deleted user's messages
+   (plaintext dual-write rows readable), gallery, timeline. Fix class: retire
+   the couple on delete (leave_couple at 20260815071024:19-36 already does the
+   dissolve dance — deletion should match it).
+5. **CoupleKey memo survives sign-out** (couple_key.dart:47-48 `_ready ??=`;
+   _endSession clears everything BUT CoupleKey). Any re-sign-in or account
+   switch silently writes chat PLAINTEXT until process death and cannot decrypt
+   incoming cipher rows. Undercuts the §58 flip directly. Fix class: reset
+   CoupleKey in _endSession.
+
+**LIVE OUTAGE, verified by me against prod + R2 (not just the auditor):**
+- `app_release`: latest_build=45, sha df7b1a24… ; R2 HEAD on apk_url:
+  Content-Length 230,175,632 = byte-identical to local build-46 Miles.apk
+  (sha 8c422786…), Last-Modified Aug 17. R2 serves 46's bytes, the row
+  publishes 45's hash → every updating sideload phone downloads ~220MB and
+  gets a hash-mismatch refusal. Update channel is DEAD until the row and the
+  bytes agree; the §58 cipher-only runway is frozen behind it.
+
+**HIGHs found, not adversarially verified (report-only, next sessions):**
+- Chat shows only newest 300 messages — no load-older pagination exists.
+- Cipher-only flip gates the DB row only; realtime broadcast keeps cleartext.
+- FCM skip-cache wedge: server-side token change defeats re-register self-heal
+  (supabase_repository.dart:742) — pushes go permanently silent on a live phone.
+- Cover users now get NO message signal anywhere (uncommitted diff removed the
+  notification; the compensating in-cover unread indicator has zero callers).
+- care/memory/ritual notifications ignore the cover budget — buzz as 'Miles'.
+- Debug keystore = sideload signing identity, no recorded backup; loss orphans
+  every install.
+- Love-note recipient name survives sign-out (cross-couple PII on a shared
+  handset); app-lock + memory PINs also device-scoped.
+- Tests: E2EE seal→open round trip under a real key executed by NOTHING; 39%
+  of suite is source-string pins; 13/31 features have zero tests.
+
+**Notable MEDIUMs:** consent_state/dice_tier_consents forgeable by partner
+(couple-scoped, not user-scoped); couple_media bucket policies live only in
+the prod dashboard, not migrations; delete-for-everyone keeps the body at rest;
+message_preview_port puts decrypted text in the shade with no setting; wish-jar
+"HMAC" is an unkeyed FNV-1a; arm64-only ABI filter (uncommitted) strands 32-bit
+devices; X25519 all-zero output unchecked. Cross-ref: the "security.html 404"
+LOW is §62's known pending-deploy item.
+
+**Dimension scores (auditors', evidence-cited):** crypto 8, silent-failures 8,
+rls 7, chat 7, release 7, notifications 6, play-policy 6, fresh-install 6,
+tests 5.
+
+**Honest overall rating given to owner: 6.5/10 — strong engineering, not
+submission-ready.** Order of work before submitting: fix blockers 4+5 (small),
+repair the app_release row, device-test the play AAB, build the Console
+package (test accounts, disguise disclosure, listing assets, data-safety form
+that tells the truth about plaintext-at-rest mid-rollout), THEN submit.
+Estimate ~1-2 focused weeks (unverified).
+
+**Exact next step:** owner picks blocker order; nothing in this entry changed
+code — the working tree is exactly as the fix-sprint session left it.
+
+## §64 — The pairing limiter never fired; entropy replaced it (2026-08-18)
+
+**The defect, and it was a real one — not a doc note.** §61's threat model
+recorded "the brute-force limiter is inert" as a finding and nobody fixed it.
+It is an authentication control that reports itself as working.
+
+**Root cause, one sentence:** every failure path in `redeem_pairing_invite`
+inserts a row into `pairing_attempts` and then `raise exception`s, and Postgres
+rolls that insert back with the exception in the same transaction — so the
+"10 failures in 15 minutes" gate counts a number that is structurally always 0.
+
+**Proven on production before touching anything:**
+```
+failure_rows 0 | success_rows 1     -- months of use, incl. known failed redeems
+```
+And on staging, the pre-fix behaviour: `RED code_len=8 requested_ttl=999999min
+actual_ttl_min=999999` — an 8-hex (2^32) code AND a TTL with no ceiling, so a
+patched client could mint a code that outlives the couple.
+
+**Why it could not simply be repaired.** A PostgREST RPC is one transaction.
+plpgsql has no autonomous commit; an EXCEPTION handler's writes die with the
+re-raise; pg_net's queue insert is transactional too. The only escapes are a
+second connection (dblink — whose credential would then live in this database)
+or not raising at all — and the shipped clients read these errors BY MESSAGE
+(supabase_repository.dart:607-620), so a function that stops raising tells every
+installed phone that a failed pairing succeeded. Neither is worth it for a
+counter.
+
+**What shipped —
+`20260818130000_pairing_entropy_replaces_a_limiter_that_never_fired.sql`,
+staging + production:**
+- Codes 8 -> 12 hex characters: 2^32 -> 2^48, 65,536x the space. SERVER-ONLY:
+  `code` is `text` with no length cap, the client validates nothing but
+  non-empty (couple_page.dart:93), and redeem already strips whitespace and
+  uppercases — so every shipped APK keeps working and old codes keep working
+  until they expire.
+- TTL gains a ceiling of 1440 minutes (the value the client already asks for).
+- The dead counter and its three rolled-back inserts are REMOVED, with the
+  reasoning written into the function body so nobody re-adds one believing it
+  works. The SUCCESS insert stays — it commits, and it is the genuine audit
+  trail of pairings.
+
+**Green, on PRODUCTION, all rolled back:**
+```
+GREEN len=12 ttl_min=1440 redeem_spaces_lowercase=t paired=t
+      invalid_code=t couple_full=t
+```
+Residue check after: probe_users 0, invites 1, attempts 1, couples 1 — untouched.
+Live definitions confirmed: `live_is_12char=true`, `dead_limiter_gone=true`.
+
+**Staging caveat, stated honestly:** the redeem path could NOT be verified on
+staging — staging's `couples` table has no `dissolved_at` column (the known
+§43/§44 drift), and the production-derived body references it. Staging's
+`redeem_pairing_invite` is therefore broken until staging receives its missing
+migrations; the entropy and TTL halves DID verify there. This is one more
+argument for the deferred ledger re-baseline.
+
+**Also this turn:** THREAT-MODEL.md's pairing paragraph and its residual-risk
+row rewritten (they documented the inert limiter as live); safety_sheets.dart's
+comment corrected — it named "the Closer vault" as an E2EE surface, which is
+the dead `vault_items` table nothing has written since the vault moved to
+`personal_vault_items`.
+
+## §65 — Fix sprint on §63's confirmed faults (2026-08-18)
+
+Owner said "fix the faults." Everything code-fixable from §63 landed this
+session; the Console/hardware blockers cannot be fixed from a session and are
+listed at the end. Gates AFTER the last edit: `flutter analyze` 0 errors /
+0 warnings; `flutter test` **975 tests, "All tests passed!"** (was 967 — the
+new E2EE round-trip group is in). Nothing committed.
+
+**FIXED, each with its verification:**
+1. **CoupleKey survives sign-out (§63 blocker 5).** couple_key.dart gained a
+   production `reset()` (resetForTest delegates); _endSession calls it beside
+   CryptoCore.forgetAccount(). ALSO fixed the §63 MEDIUM in the same
+   mechanism: `prime()` now un-memoizes a completed FALSE (single-flight
+   preserved — cleared only after completion), so one transient derive
+   failure no longer latches plaintext for the process.
+2. **delete_my_account leaks history (§63 blocker 4).** New migration
+   `20260818150000_deletion_dissolves_the_couple.sql`: the v_others>0 branch
+   now `perform public.leave_couple()` — both couple_ids nulled, invites
+   consumed, dissolved_at stamped (30-day purge, which only fires once no
+   profile points at the couple — the reason the survivor must be unpaired).
+   Applied staging AND prod. Behavioral proof on prod inside a rolled-back
+   DO block (synthetic couple, jwt-claims impersonation, deliberate final
+   RAISE): `couple_active=f dissolved_at_set=t survivor_couple_id=NULL
+   deleter_profile_exists=f deleter_user_exists=f`; leftover rows after
+   rollback: 0. Prod's live leave_couple verified = 20260815071024's version
+   BEFORE replacing (md5 diff of delete_my_account also matched the repo).
+   Rollback: re-run 20260818090000 lines 57-122.
+3. **Update channel dead (§63 live outage).** Verified end-to-end first:
+   R2 bytes downloaded and hashed = 8c422786… = local Miles.apk (230,175,632
+   bytes); `aapt dump badging` on Miles.apk = versionCode 46 / 0.1.0. Then
+   `app_release` set latest_build=46, apk_sha256=8c42…, read back:
+   `latest_build:46, sha_prefix:8c4227866977b283`. min_build untouched (42).
+   Fleet update path live again; §58's flip runway is unblocked.
+   Rollback: latest_build=45, sha df7b1a245a5b94eb407f5d8cb028dec9f905a906
+   b664394577ab19cf806c21c9.
+4. **FCM skip-cache wedge.** supabase_repository.setFcmToken: the forever-
+   skip is now bounded to 24h (`fcm_token_written_at:$uid` stamp). A server
+   row changed underneath (second device, claim-trigger null) self-heals
+   within a day; presence-oracle mitigation retained (one write/day).
+5. **Cover leaks in care/ritual/memory notifications.** The uncommitted
+   diff's own doctrine ("the header always says Miles") applied to the three
+   functions it missed: showCare/showRitual/showMemoryNotification now
+   return under any cover, same guard as messages. (Chose to complete the
+   in-flight session's design consistently rather than redesign it —
+   multi-session rule, named here.)
+6. **Preview text bypassed the app lock + counted own sends.**
+   message_preview_port._enrich: returns when AppLock.isEnabled() (shade
+   shows through the lock); fetchSince filtered to partner's messages.
+7. **Love-note recipient PII crossed accounts.** LoveNoteRecipient.clear()
+   added; _endSession calls it (another couple's partner name was
+   auto-addressing the next account's notes).
+8. **consent_state forgeable by partner (§63 MEDIUM).** New migration
+   `20260818140000_consent_state_writes_are_your_own.sql`: INSERT/UPDATE/
+   DELETE now require `user_id = auth.uid()` (SELECT stays couple-wide —
+   "both consented" needs the partner's row). dice_tier_consents was ALREADY
+   user-scoped on prod (§63's auditor claim was half-stale). No client
+   writes consent_state at all (repo grep), so nothing breaks. Applied
+   staging AND prod; negative test on prod as `authenticated` role in a
+   rolled-back block: `partner_forgery_allowed=f own_write_allowed=t`.
+9. **X25519 contributory check.** deriveSharedKey and rewrapKey now refuse
+   an all-zero shared secret (low-order/poisoned directory key downgraded
+   from passive-decrypt to fail-closed). Flagged gap: NOT unit-testable —
+   both sit behind _keyPair() which needs the keystore; the guard is
+   fail-closed and 4 lines.
+10. **E2EE round trip finally executed by a test.** CryptoCore gained
+    @visibleForTesting setSharedKeyForTest (key + EMPTY ring cache — see
+    finding below); message_seal_test's new group runs the REAL sealBody →
+    REAL hydrate under a real 32-byte key: round trip renders, replay onto
+    another row-id refuses (AD), flipped ciphertext byte refuses.
+
+**Two multi-session events, recorded because the rules say to:**
+- Migration key COLLISION happened live: §64's session created
+  20260818130000_pairing_entropy… while this one created
+  20260818130000_deletion_dissolves… — caught by migrations_hygiene_test
+  ("ordering keys are unique"), mine renamed to 150000. The hygiene test is
+  the reason this was a 2-minute fix and not a replay-order incident.
+- STAGING IS DRIFTED, materially: staging couples has NO dissolved_at and
+  its leave_couple is the ANCIENT presence-nulling version. "Staging first"
+  verified nothing for fix 2 — prod's live definitions were the verification
+  target instead (checked before replace). The §56 migration-ledger
+  re-baseline should include staging, or staging keeps rubber-stamping.
+
+**Finding from the new test, not fixed:** the chat OPEN path loads the key
+ring (a keystore read) before trying the current key — a transiently failing
+keystore fails every decrypt even when the in-memory key would open the row.
+On-device impact low; noting the class: `found, not fixed:
+crypto_core.dart:750 — decrypt hard-depends on _loadRing()`.
+
+**NOT fixable from a session (owner actions, §63 blockers 1-3):** Console
+App-access package (two pre-paired test accounts + pairing + cover-gesture
+instructions), disguise disclosure items 4-5 (listing text + picker
+screenshot), listing assets, data-safety form, and the play-AAB
+R8-on-hardware device pass. Also still open from §63: 300-message chat cap
+(feature-sized), realtime broadcast cleartext (belongs to the cipher-flip
+runway), debug-keystore backup (owner, offline), in-cover unread indicator
+(the notification session's declared next step), app-lock/memory PIN
+account-scoping (entangled with the disguise session's in-flight work —
+deliberately not touched).
+
+**Exact next step:** owner does the Console package + device pass; next
+session takes the 300-message pagination or the in-cover unread signal.
 
 ## §66 — Hygiene sweep: dead code out, junk quarantined, Tethered classified (2026-08-18)
 
@@ -6035,3 +6451,75 @@ web/ HTML have no sync check.
 The user empties `_trash/` after eyeballing it (2.2 GB back on the next
 build's clock either way).
 
+## §65 — I broke pairing on production for twenty minutes, and what fixed it (2026-08-18)
+
+**Write this one down.** §64 shipped 12-character pairing codes to production
+justified as "server-only: the client validates nothing but non-empty
+(couple_page.dart:93)". That citation is real and it is the EMPTINESS check.
+The invite field is capped 181 lines further down:
+
+    couple_page.dart:274    maxLength: 8
+
+Flutter enforces that with a LengthLimitingTextInputFormatter against typed AND
+pasted input, so a 12-character code could not be entered on ANY build in the
+field — on an app that is sideloaded with no update channel. That is the "no
+fix may depend on clients upgrading" rule, violated by the fix meant to harden
+the thing.
+
+Caught by the skeptic pass, not by me. Nobody was affected — zero
+non-8-character codes ever existed on production (verified) — and only because
+the window was ~20 minutes.
+
+**Two lessons, both already written into the migrations:**
+1. "Server-only" is a claim about the CLIENT, and one grep of the client does
+   not prove it. Read the widget that owns the field, not the first line that
+   mentions the value.
+2. My own revert attempt silently failed: I ran `create or replace` and a
+   verification `select` in ONE statement batch, the select raised
+   `not_authenticated`, and the rollback took the DDL with it — the exact
+   transaction behaviour the migration beside it is about. The catalogue said
+   `still_12_bad=true` after I believed I had reverted. VERIFY THE CATALOGUE,
+   never the intent, and never mix DDL with a probe that can raise.
+
+**What is live now —
+`20260818180000_pairing_code_alphabet_within_eight_chars.sql`:**
+The lever was never length; it was the ALPHABET.
+- 8 characters drawn from 34 symbols (`[A-Z0-9]` — exactly what the field's own
+  `FilteringTextInputFormatter` allows — minus I and O so nothing reads as 1 or
+  0). 34^8 = 2^40.7 against hex's 2^32: **415x the space, same eight
+  characters, zero client change.**
+- Uniform: bytes 238..255 rejected before `% 34`, so the modulo cannot favour
+  the first eighteen symbols.
+- Randomness from `gen_random_uuid()` (pg_catalog, pg_strong_random) rather
+  than `gen_random_bytes` — pgcrypto lives in the `extensions` schema and this
+  function pins `search_path = public` deliberately. Widening a pinned
+  search_path to reach a convenience function trades a security control for a
+  shortcut. (Staging proved this the hard way: `gen_random_bytes does not
+  exist`.)
+- Redeem now maps typed `I`->1 and `O`->0. The generator emits neither, so a
+  user who typed one meant the digit; it is a no-op for older hex codes and
+  cannot widen the guessing space (it changes what is ACCEPTED, not what is
+  GENERATED).
+- The dead limiter's removal and the TTL ceiling from §64 both stand.
+
+**Green on production, all rolled back:**
+```
+len8=t alphabet=t distinct=300/300 typed_O_for_zero=t paired=t
+invalid_code=t couple_full=t couple_dissolved=t     sample=DD255ALE
+```
+Residue after: invites 1, wrong_length_codes 0, probe_users 0, couples 1.
+Live catalogue confirms the 34-symbol alphabet and the intact dissolved check.
+
+**Also this turn:** THREAT-MODEL.md corrected three ways (it cited two
+superseded functions as live, cited the dead-counter migration for the
+two-member cap, and parked a "Closed" row inside a table whose own rule says
+closed items move out — the closure is now a defence row with the RIGHT
+numbers); `supabase_repository.dart` gained the missing `couple_dissolved`
+error branch (that server error reached users as a raw exception string) and
+lost a "6-char invite code" doc comment that had been stale since codes were 8.
+
+**Still open from the skeptic pass, my side, NOT yet done:** the safety-code
+Settings dialog has only a Close button, so a couple who compares codes from
+Settings cannot record it — only the launch prompt can (B-3). And the TOFU
+prompt's headline property ("the ONLY writer of a verification") is proven by
+reading, not by a test (B-7). Both are recorded here rather than claimed done.

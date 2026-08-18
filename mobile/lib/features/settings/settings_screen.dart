@@ -25,6 +25,7 @@ import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
+import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
@@ -57,6 +58,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   LocationBlock _locationBlock = LocationBlock.none;
   bool _appLock = false;
   bool _escrowMissing = false;
+  /// Whether this couple has ever compared their security code. Null while
+  /// unknown — no partner, no published key, or the fetch did not land — and
+  /// the row then says what it has always said, because "never compared" is a
+  /// claim about the two of them and being offline is not evidence for it.
+  bool? _codeVerified;
   bool _changingAvatar = false;
   String? _localAvatarUrl;
 
@@ -94,6 +100,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       _loadLocationMode();
       _loadAppLock();
       _loadEscrow();
+      _loadCodeVerified();
     });
   }
 
@@ -115,6 +122,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _loadEscrow() async {
     final missing = await KeyEscrow.isMissing();
     if (mounted) setState(() => _escrowMissing = missing);
+  }
+
+  /// Reads the PUBLISHED partner key, not the pinned digest — the same fetch
+  /// the dialog makes — because the question the row answers is about the code
+  /// the two phones would show each other right now.
+  Future<void> _loadCodeVerified() async {
+    final verified = await SafetyCodePrompt.isVerified(
+      ref.read(sessionProvider).partner?.id,
+    );
+    if (mounted) setState(() => _codeVerified = verified);
   }
 
   /// The same dialog and re-authentication the launch prompt uses. That prompt
@@ -917,9 +934,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               leading: const Icon(Icons.pin_outlined, color: MilesColors.gilt),
               title: const Text('Security code',
                   style: TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text(
-                  'A code you both compare to verify your encryption',
-                  style: TextStyle(fontSize: 12, color: MilesColors.taupe),),
+              // The state, quietly, rather than a description of the feature —
+              // a screen that only ever says what the code IS cannot tell the
+              // couple whether they have ever used it, and the answer for most
+              // couples is no.
+              subtitle: Text(
+                  switch (_codeVerified) {
+                    true => 'Compared with your partner — this key is verified',
+                    false => 'Not compared yet — read it aloud together once',
+                    null => 'A code you both compare to verify your encryption',
+                  },
+                  style: const TextStyle(
+                      fontSize: 12, color: MilesColors.taupe,),),
               trailing:
                   const Icon(Icons.chevron_right, color: MilesColors.gilt),
               onTap: () =>
@@ -1228,7 +1254,7 @@ class _AboutCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                // Wrap, not Row: three links overflow a narrow phone.
+                // Wrap, not Row: five links overflow a narrow phone.
                 Wrap(
                   spacing: 20,
                   runSpacing: 10,
@@ -1269,6 +1295,16 @@ class _AboutCard extends StatelessWidget {
                     _AboutLink(
                       label: 'Child Safety',
                       onTap: () => _openLegalPage(context, milesCsaeUrl),
+                    ),
+                    // The disclosure route, and the reason it is here rather
+                    // than only in security.txt: a researcher holding a
+                    // sideloaded APK has no issue tracker and no store thread
+                    // to write into, so without this row the only way to reach
+                    // us is to guess an address. A URL for the same reason as
+                    // the row above.
+                    _AboutLink(
+                      label: 'Report a security issue',
+                      onTap: () => _openLegalPage(context, milesSecurityUrl),
                     ),
                   ],
                 ),
@@ -1319,7 +1355,7 @@ class _AboutLink extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // A bare GestureDetector around 12px text was ~15dp of target and reached
-    // TalkBack as plain words with no role — and two of these four front the
+    // TalkBack as plain words with no role — and two of these five front the
     // Privacy Policy and Child Safety pages, the documents this app is least
     // allowed to make unreachable. One node, announced as a link, named by its
     // own text. The tap lives on the Semantics itself: excludeSemantics drops

@@ -4,16 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// The About links' accessibility, pinned as shape.
 ///
-/// _AboutLink fronts the FAQ, Terms, Privacy Policy and Child Safety pages —
-/// for a TalkBack user those four underlined words are the only route to the
-/// app's legal and safety documents. The widget is private, and the one public
-/// widget in its file reads `SupabaseService.client`, a `static late final`
-/// with no injection seam (the wall chat_signed_out_send_test.dart documents),
-/// so the real semantics tree cannot be pumped here. What can be pinned is the
-/// shape that makes a screen reader work at all: the link role and label on
-/// the one node TalkBack gets, the tap action on that same node —
-/// excludeSemantics throws away the detector's — and the 48dp floor under
-/// 12px of text.
+/// _AboutLink fronts the FAQ, Terms, Privacy Policy, Child Safety and security
+/// disclosure pages — for a TalkBack user those five underlined links are the
+/// only route to the app's legal and safety documents. The widget is private,
+/// and the one public widget in its file reads `SupabaseService.client`, a
+/// `static late final` with no injection seam (the wall
+/// chat_signed_out_send_test.dart documents), so the real semantics tree
+/// cannot be pumped here. What can be pinned is the shape that makes a screen
+/// reader work at all: the link role and label on the one node TalkBack gets,
+/// the tap action on that same node — excludeSemantics throws away the
+/// detector's — and the 48dp floor under 12px of text.
 void main() {
   final src =
       File('lib/features/settings/settings_screen.dart').readAsStringSync();

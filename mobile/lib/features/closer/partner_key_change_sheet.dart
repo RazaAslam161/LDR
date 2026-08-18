@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/safety_code_prompt.dart';
 
 /// The human half of the key pin: the couple compares the safety code aloud
 /// before this device accepts a changed partner key.
@@ -118,6 +119,15 @@ class _KeyChangeDialog extends StatelessWidget {
               await PartnerKeyPin.repin(
                 myUid: myUid,
                 partnerId: exception.partnerId,
+                partnerPubB64: exception.newKeyB64,
+              );
+              // The launch prompt asks for exactly this comparison, about
+              // exactly these digits. Recorded here so the phone that was just
+              // walked through a key change is not asked to compare the same
+              // new key again on its next launch — which reads as the app
+              // having forgotten, and teaches people to dismiss it.
+              await SafetyCodePrompt.recordVerified(
+                myUid: myUid,
                 partnerPubB64: exception.newKeyB64,
               );
               if (context.mounted) Navigator.pop(context, true);
