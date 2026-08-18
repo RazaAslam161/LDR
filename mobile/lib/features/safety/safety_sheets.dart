@@ -125,9 +125,15 @@ class _ReportSheetState extends State<_ReportSheet> {
                 ),
               ),
               // The honest version. Saying "we can't read your messages" would
-              // be false — chat and media are NOT end-to-end encrypted (only
-              // Memory Threads, the Closer vault and the Wish Jar are), and the
-              // privacy policy says so two taps away.
+              // be false — chat text is dual-written (a plaintext body beside
+              // the ciphertext) until the cipher-only flip, and chat media is
+              // not encrypted at all. What IS end-to-end encrypted: Memory
+              // Threads, the text of Wish Jar entries, and the FILES in the
+              // Private Vault — not "the Closer vault", which is the dead
+              // vault_items table nothing has written to since the vault moved
+              // to personal_vault_items. THREAT-MODEL.md §1 is the list this
+              // comment must agree with, and the privacy policy says the same
+              // two taps away.
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 0, 20, 14),
                 child: Text(
