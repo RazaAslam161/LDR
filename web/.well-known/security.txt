@@ -1,0 +1,25 @@
+# Miles - vulnerability disclosure
+#
+# If you have found a security problem in the Miles app, in the backend it
+# talks to, or on this site, please tell us. One person builds and runs Miles,
+# so replies are human-speed rather than automatic, but every report is read.
+#
+# The full policy is the page named under Policy below: what is in scope, what
+# is not, the rules for testing, the promise of no legal action for good-faith
+# research, and the response times we commit to. Read it before testing.
+#
+# There is no PGP key and no bug bounty. Both are stated on the policy page
+# rather than implied by their absence here.
+#
+# Expires is a hard date, not a formality: RFC 9116 readers treat this file as
+# stale past it. Re-date it, and re-read the policy page, before 18 Aug 2027.
+#
+# Deliberately ASCII only. This file is parsed by machines rather than read by
+# people, and an encoding accident on the one path a researcher is told to look
+# for costs the whole route. The prose lives on the policy page.
+
+Contact: mailto:Razaaslam3210@gmail.com
+Expires: 2027-08-18T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://miles-legal.vercel.app/.well-known/security.txt
+Policy: https://miles-legal.vercel.app/security.html

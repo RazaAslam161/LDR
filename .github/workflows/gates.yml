@@ -1,0 +1,224 @@
+# Every gate in this repository was voluntary until this file existed.
+#
+# `mobile/tool/release.sh` refuses to cut an APK on a red tree, but only for
+# whoever remembers to release through it; nothing stopped a red tree from
+# being pushed, and the pre-market audit (docs/guides/BRAIN.md §41) listed "no
+# git remote, no CI" as a high finding for exactly that reason. The remote
+# landed in §43 — this is the other half. It runs the same two gates release.sh
+# runs, filtered the same way deliberately, on every push and every pull
+# request, plus the dependency-advisory check Dart ships no equivalent of.
+# Nothing here builds, signs, uploads or publishes: releases stay in release.sh.
+
+name: gates
+
+on:
+  # Branch-filtered on purpose. This repository is private, so Actions minutes
+  # are metered, and a gate that quietly bills for every scratch branch is one
+  # that gets switched off — the exact fate this file exists to prevent. The
+  # branches that can become a release are gated; the rest are gated when they
+  # ask to merge into one.
+  push:
+    branches: [main, fix-sprint]
+  pull_request:
+
+# Read-only. This workflow has no reason to write to the repository, and a
+# token that cannot write is a token that cannot be turned against it.
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The version this repo actually builds with, not "whatever stable is today".
+  # mobile/.metadata pins framework revision c9a6c484 and the installed SDK
+  # reports that same revision as 3.44.2 (Dart 3.12.2); mobile/pubspec.lock
+  # resolves to `flutter: ">=3.44.0"`. A gate on a different SDK than the one
+  # that produces the APK is a gate on a different program.
+  FLUTTER_VERSION: "3.44.2"
+
+jobs:
+  gates:
+    name: analyze + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      # Actions are pinned to commit SHAs, not tags. A tag is a mutable pointer,
+      # and this job runs with a token in an environment that reads the signing
+      # side of the project; "v4 moved" must never mean "different code ran".
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: set up flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          # The action's own pub cache is deliberately OFF. Its key ends in
+          # hashFiles('**/pubspec.lock'), and mobile/.gitignore ignores
+          # pubspec.lock — so at checkout that hash is the empty string, the key
+          # never changes, and a stale pub cache would be restored forever.
+          pub-cache: "false"
+
+      # Keyed on the manifest that IS committed. This is weaker than a lock
+      # hash — a transitive package moving inside an unchanged version range
+      # reuses the old cache directory — but `flutter pub get` still resolves
+      # against pub.dev on every run, so the cache only saves downloads, never
+      # decides versions. Honest and slower beats fast and wrong.
+      - name: cache pub packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('mobile/pubspec.yaml') }}
+          restore-keys: |
+            pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-
+
+      # First, and not optional. `--no-pub` below skips restoring packages, and
+      # on a tree with no .dart_tool every import resolves to nothing: release.sh
+      # once reported 24,991 errors against a tree that had analyzed clean a
+      # minute earlier. A fresh runner is that tree on every single run.
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter analyze
+        shell: bash
+        run: |
+          # WHY THIS IS GREP-BASED AND NOT `flutter analyze` ALONE.
+          #
+          # The analyzer exits 1 on `info` as well as on errors, and this tree
+          # carries 532 infos (BRAIN.md §58's last full run). Gating on the exit
+          # code would mean every push is red forever, which is how a gate gets
+          # deleted rather than obeyed. So: errors and warnings only, filtered
+          # exactly the way release.sh filters them. Two gates that disagree
+          # about what "green" means are worse than one gate.
+          #
+          # `^ *` is zero-or-more, and that is load-bearing. dart right-aligns
+          # the severity to width 7 — `warning - ` flush left, `  error - `,
+          # `   info - ` — so a one-or-more anchor matches errors and silently
+          # drops every warning it was written to catch. Several gate reports in
+          # BRAIN.md claimed "0 warnings" on that broken pattern before §58
+          # noticed; the error counts were fine, the warning counts were fiction.
+          #
+          # And the blindness check. A cold analysis server can answer with
+          # nothing at all, and nothing greps as clean. The analyzer always ends
+          # in "N issues found." or "No issues found!" — no summary means this
+          # gate did not run, which is not the same as the tree being fine.
+          # Retried once because a runner is cold on every run, which is the
+          # exact condition release.sh added its retry for.
+          alog="$(mktemp)"
+          analyzed=false
+          for attempt in 1 2; do
+            flutter analyze --no-pub >"$alog" 2>&1 || true
+            if grep -qE 'issues? found' "$alog"; then analyzed=true; break; fi
+            echo "attempt $attempt produced no analyzer summary — retrying"
+          done
+          if ! $analyzed; then
+            echo "::error title=Analyzer produced no output::this gate is blind, not green"
+            echo "captured $(wc -c <"$alog") bytes over 2 attempts:"
+            head -40 "$alog"
+            exit 1
+          fi
+          bad="$(grep -cE '^ *(error|warning) - ' "$alog" || true)"
+          if [ "$bad" -ne 0 ]; then
+            grep -E '^ *(error|warning) - ' "$alog"
+            echo "::error title=flutter analyze::$bad error(s)/warning(s)"
+            exit 1
+          fi
+          tail -1 "$alog"
+
+      - name: flutter test
+        run: flutter test
+
+  dependency-advisories:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: set up flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          pub-cache: "false"
+
+      - name: cache pub packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('mobile/pubspec.yaml') }}
+          restore-keys: |
+            pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-
+
+      # This step is what MAKES pubspec.lock. The lock is gitignored, so the
+      # audit below reads the graph this runner resolved, not one a developer
+      # committed — see the note at the bottom of this file.
+      # Soft-pass, unlike the gates job's identical step. There, a failed
+      # resolve means the gate could not run and the tree must go red; here it
+      # means one advisory sweep was skipped, and a job that reddens the tree
+      # because pub.dev had a bad minute is a job someone disables — which
+      # costs the advisory check permanently to save one flaky run.
+      # `exit 78` is NOT the way to do this: neutral exit codes were retired
+      # with the container-action runtime and now simply fail the step. The
+      # skip has to be carried in the environment and honoured by the steps
+      # that would otherwise run against a half-resolved package graph.
+      - name: flutter pub get
+        id: resolve
+        run: |
+          if ! flutter pub get; then
+            echo "::warning::pub get failed — dependency advisories NOT checked this run"
+            echo "RESOLVE_FAILED=1" >> "$GITHUB_ENV"
+          fi
+
+      # Informational, never a gate. `pub outdated` measures age, not risk, and
+      # this repo has already lost a release to a transitive package that moved;
+      # a job that reddens on "newer exists" would push exactly the blanket
+      # upgrade that caused it. The advisory check below is the one with teeth.
+      - name: flutter pub outdated (report only)
+        if: env.RESOLVE_FAILED != '1'
+        continue-on-error: true
+        run: flutter pub outdated --json
+
+      - name: known vulnerabilities (osv.dev)
+        if: env.RESOLVE_FAILED != '1'
+        shell: bash
+        run: |
+          # tool/dep_audit.dart queries OSV for every pub.dev package in the
+          # lock. Its exit codes are three-valued on purpose: 0 clean, 1 an
+          # advisory exists (or the lock could not be read, which is a local
+          # fault and must not pass), 75 the audit could not complete. 75 stays
+          # green — osv.dev is a third party, and reddening this repo over
+          # somebody else's outage teaches people to ignore the job — but it
+          # annotates the run so "inconclusive" is never mistaken for "clean".
+          set +e
+          dart run tool/dep_audit.dart
+          code=$?
+          set -e
+          if [ "$code" -eq 75 ]; then
+            echo "::warning title=Dependency audit inconclusive::osv.dev could not be reached or answered in an unexpected shape — no package was actually checked this run"
+            exit 0
+          fi
+          exit "$code"
+
+# KNOWN LIMIT, WRITTEN DOWN RATHER THAN LEFT TO BE DISCOVERED.
+#
+# mobile/.gitignore ignores pubspec.lock, so it is not in the repository. Both
+# jobs therefore resolve dependencies fresh on every run, and what CI analyzes,
+# tests and audits is the graph pub picked TODAY inside the manifest's ranges —
+# not the graph on the machine that builds the APK. A transitive package can
+# move under an unchanged commit and turn this workflow red (or green) with no
+# diff to point at. Committing the lock would fix it and is a deliberate repo
+# decision, not something this workflow should make on its own.

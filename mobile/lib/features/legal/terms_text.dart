@@ -17,7 +17,7 @@ const milesTermsUpdated = '16 August 2026';
 /// own docs say not to build on, and it was serving one page while the other
 /// four 404'd.
 ///
-/// All six pages sit in one directory and link to each other with relative
+/// All seven pages sit in one directory and link to each other with relative
 /// hrefs, so this base must not be split across hosts. Empty would mean "not
 /// published", and the About card says so rather than opening a dead page.
 const milesPrivacyPolicyUrl =
@@ -29,6 +29,19 @@ const milesPrivacyPolicyUrl =
 /// written and hosted before anything in the app pointed at it — so a reviewer
 /// handed the Console URL could read it and a user could not find it at all.
 const milesCsaeUrl = 'https://miles-legal.vercel.app/csae.html';
+
+/// The vulnerability disclosure policy, same host again.
+///
+/// A researcher who finds something in a sideloaded APK has no other way to
+/// reach us: there is no issue tracker, no store reply thread that carries a
+/// technical report, and nothing in the app said where to write. The page is
+/// the human half; `/.well-known/security.txt` on the same host is the
+/// machine-readable half that scanners and disclosure platforms look for.
+///
+/// A URL rather than a bundled screen, for the same reason [milesCsaeUrl] is:
+/// the audience is someone reading about the app, not necessarily someone
+/// holding a phone with it installed.
+const milesSecurityUrl = 'https://miles-legal.vercel.app/security.html';
 
 /// Whether the Terms are complete enough to put in front of a user.
 ///

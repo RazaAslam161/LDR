@@ -1,7 +1,9 @@
 # Miles — hosted legal & safety pages
 
 The five documents Google Play requires to be reachable at a public URL, plus a
-landing page so the site root does not 404 when a reviewer visits it.
+landing page so the site root does not 404 when a reviewer visits it, plus
+`security.html` and `.well-known/security.txt` — which Play does not ask for and
+which a researcher holding a sideloaded APK has no other way to reach.
 
 Deployed to Vercel as the project **miles-legal**, from this directory. Redeploy
 after any edit:
@@ -44,9 +46,38 @@ whoever tightens it next:
 JSON has no comments and Vercel's schema rejects unknown keys, which is why this
 reasoning is here rather than beside the config.
 
+## `.well-known/security.txt`, and the second headers block
+
+RFC 9116 fixes the path: a scanner or a disclosure platform looks for
+`/.well-known/security.txt` and nowhere else, so the file cannot be moved
+somewhere more convenient. It is the machine-readable half of `security.html`;
+the two must agree, and the `Policy:` field in the file points at the page.
+
+`vercel.json` gained a second `headers` block pinning
+`Content-Type: text/plain; charset=utf-8` on that one path. It is not
+decoration: the site-wide block sets `X-Content-Type-Options: nosniff`, so if
+the host ever answers that path with anything other than `text/plain` the
+browser will refuse to sniff its way to the right answer and the file becomes
+unreadable in the one place it is meant to be read. `headers` was extended
+rather than `routes` added, because Vercel rejects a config carrying both.
+
+**Verify it after the next deploy, do not assume it.** A dot-directory is the
+one thing in this folder whose upload has never been proven here:
+
+    curl -i https://miles-legal.vercel.app/.well-known/security.txt
+
+Expect `200` and `content-type: text/plain; charset=utf-8`. A `404` means the
+dot-directory did not survive the upload, and the fix is a `rewrites` entry to a
+non-dot path — not a second copy of the file, which is the drift this README
+warns about above.
+
 ## Outstanding
 
-Nothing. The last `[PLACEHOLDER]` in `csae.html` was filled 2026-08-17: the
+`security.html` AND `/.well-known/security.txt` have never been served — both
+are new in the working tree, both answer 404 today, and the curl above is
+unrun. The app already ships a Settings row pointing at `security.html`, so
+the deploy has to land BEFORE the next APK does. Everything else: the last `[PLACEHOLDER]` in
+`csae.html` was filled 2026-08-17: the
 National Cyber Crime Investigation Agency (NCCIA — absorbed the FIA Cybercrime
 Wing in 2025), complaint portal complaint.nccia.gov.pk, helpline 1799
 (sources: nccia.gov.pk; thenews.pk/print/1402642 — Senate told NCCIA received

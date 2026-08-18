@@ -323,7 +323,7 @@ class MainActivity : FlutterFragmentActivity() {
                         } catch (e: Exception) {
                             // Leave whatever was enabled enabled. A failed swap
                             // must not cost the user their launcher entry.
-                            result.error("switch_failed", e.message, null)
+                            result.error("switch_failed", e.javaClass.simpleName, null)
                         }
                     }
                     "currentAlias" -> {
@@ -374,7 +374,7 @@ class MainActivity : FlutterFragmentActivity() {
                         // The Dart side renders a full screen without us; a
                         // cover that shows an error dialog is a cover that
                         // gets looked at twice.
-                        result.error("stats_failed", e.message, null)
+                        result.error("stats_failed", e.javaClass.simpleName, null)
                     }
                     else -> result.notImplemented()
                 }
@@ -464,7 +464,7 @@ class MainActivity : FlutterFragmentActivity() {
                             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                             result.success(null)
                         } catch (e: Exception) {
-                            result.error("settings_failed", e.message, null)
+                            result.error("settings_failed", e.javaClass.simpleName, null)
                         }
                     }
                     "canInstall" -> {
@@ -511,7 +511,7 @@ class MainActivity : FlutterFragmentActivity() {
                             )
                             result.success(true)
                         } catch (e: Exception) {
-                            result.error("install_failed", e.message, null)
+                            result.error("install_failed", e.javaClass.simpleName, null)
                         }
                     }
                     else -> result.notImplemented()

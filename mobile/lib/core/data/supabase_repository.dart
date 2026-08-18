@@ -552,7 +552,7 @@ class SupabaseRepository {
     );
   }
 
-  /// Creates the caller's couple if needed and returns a fresh 6-char invite
+  /// Creates the caller's couple if needed and returns a fresh 8-char invite
   /// code with its expiry. Replaces the permanent invite code.
   static Future<({String code, DateTime expiresAt})> createPairingInvite({
     int ttlMinutes = 1440,
@@ -617,6 +617,14 @@ class SupabaseRepository {
       }
       if (m.contains('couple_full')) {
         throw StateError('That couple already has two people.');
+      }
+      // Raised when the code still points at a couple somebody has since left
+      // (20260815071024). It had no branch here, so the one error whose cause
+      // the user can actually act on â€” ask for a new code â€” reached them as a
+      // raw PostgrestException string.
+      if (m.contains('couple_dissolved')) {
+        throw StateError('That code belongs to a couple that no longer '
+            'exists â€” ask for a new one.');
       }
       if (m.contains('already_paired')) {
         throw StateError("You're already linked with someone.");

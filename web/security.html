@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index,follow">
+<title>Security &amp; Vulnerability Disclosure — Miles</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbf8f6;
+    --surface: #ffffff;
+    --ink: #1d1a19;
+    --ink-soft: #55504d;
+    --rule: #e6dfda;
+    --accent: #a8556b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141211;
+      --surface: #1c1917;
+      --ink: #ece7e3;
+      --ink-soft: #a49c97;
+      --rule: #322c29;
+      --accent: #e59db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 2rem 1.15rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .35rem; letter-spacing: -.015em; }
+  h2 {
+    font-size: 1.2rem; line-height: 1.3; margin: 2.75rem 0 .75rem;
+    padding-top: 1.5rem; border-top: 1px solid var(--rule); letter-spacing: -.01em;
+  }
+  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
+  p, li { color: var(--ink); }
+  .updated { color: var(--ink-soft); font-size: .95rem; margin: 0 0 1.75rem; }
+  .lede { font-size: 1.05rem; }
+  strong { font-weight: 650; }
+  a { color: var(--accent); }
+  ul { padding-left: 1.15rem; }
+  li { margin: .4rem 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .9em; background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 4px; padding: .05em .35em;
+  }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; min-width: 20rem; font-size: .95rem; }
+  th, td {
+    text-align: left; vertical-align: top; padding: .6rem .7rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  th { font-weight: 650; color: var(--ink-soft); font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+  td:first-child { font-weight: 600; }
+  .callout {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent); border-radius: 6px;
+    padding: .9rem 1rem; margin: 1.25rem 0;
+  }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  footer {
+    margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+    color: var(--ink-soft); font-size: .95rem;
+  }
+  nav.set { margin-bottom: .6rem; }
+  nav.set a { margin-right: 1rem; white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Miles — Security &amp; Vulnerability Disclosure</h1>
+<p class="updated">Last updated: 18 August 2026</p>
+
+<p class="lede">If you have found a way to reach data in Miles that should not
+be reachable, we want to hear about it, and this page is the route. It says what
+to send, what we consider in scope, what we do not, what we promise in return,
+and how long we take. Like the rest of our documents it is written to be
+accurate rather than reassuring: where we cannot promise something, it says so
+instead of implying it.</p>
+
+<div class="callout">
+<p><strong>One person builds and runs Miles.</strong> There is no security team,
+no ticketing system and no on-call rotation. A report reaches one inbox and one
+human reads it. That is why the times in section 6 are stated in days rather
+than hours, and why they are the times we can actually keep rather than the
+times that would look better on this page.</p>
+</div>
+
+<h2>1. How to report</h2>
+
+<p>Email <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a>
+and begin the subject line with <code>SECURITY</code>. That word is what
+separates a vulnerability report from ordinary mail, and mail carrying it is
+read first.</p>
+
+<p>A report is most useful when it contains:</p>
+<ul>
+  <li><strong>What you found</strong>, in one or two sentences, before the
+  detail;</li>
+  <li><strong>How to reproduce it</strong> — the exact steps, requests or code
+  that produce the result, and the accounts you used (your own; see section
+  5);</li>
+  <li><strong>What it lets someone do</strong> that they should not be able to
+  do. This matters more than a severity label: a finding described by its impact
+  gets fixed faster than one described by its category;</li>
+  <li><strong>Which build</strong> — the version and build number shown in
+  Settings &rarr; About — and whether you installed the app from Google Play or
+  sideloaded it, because the two builds differ;</li>
+  <li>anything that would help us confirm it: a request and response pair, a log
+  line, a short recording.</li>
+</ul>
+
+<p>Send it in plain email. <strong>There is no PGP key</strong>, and publishing
+one we do not use every day would be a worse promise than saying this. If a
+finding is sensitive enough that you would rather not put it in an email at all,
+send a first message that says only that — with none of the detail in it — and
+we will agree a channel before you write anything down.</p>
+
+<p>There is a machine-readable pointer to this page at
+<a href="/.well-known/security.txt">/.well-known/security.txt</a>, in the format
+described by RFC&nbsp;9116.</p>
+
+<h2>2. Before you start: what Miles already says about itself</h2>
+
+<p>Miles publishes what it protects and what it does not, and the two halves are
+not the same. Reading this first will save you writing up something we have
+already written down.</p>
+
+<div class="scroll">
+<table>
+  <tr>
+    <td>End-to-end encrypted</td>
+    <td>Memory Threads (titles, notes, partner notes, places and photographs),
+    the text of Wish&nbsp;Jar entries, and the files and thumbnails in the
+    Personal Vault. These are encrypted on the sending phone; the server stores
+    ciphertext it holds no key for.</td>
+  </tr>
+  <tr>
+    <td>Not end-to-end encrypted</td>
+    <td>Chat text and its photos, videos, voice notes and documents; the shared
+    gallery; time capsules; the text of vault notes and every item label;
+    location; cycle data; presence; profile. These are protected by per-row
+    access rules and private storage buckets — <strong>not</strong> from the
+    operator of the database.</td>
+  </tr>
+</table>
+</div>
+
+<p>Section 2 of the <a href="privacy-policy.html">Privacy Policy</a> is the
+authoritative version of that table, and section 3 explains the one structural
+trade underneath it: a sealed copy of each phone's private key is kept on the
+server, wrapped with a key derived from the account holder's own password. That
+means <strong>the password is the whole of that protection</strong>, and we say
+so rather than claiming the encryption is mathematically beyond our reach.</p>
+
+<p>Both of those are documented design, not defects. A report that the server
+can read chat, or that someone holding a user's password can open that user's
+encrypted history, is describing this page's own section 2 back to us.</p>
+
+<h2>3. What is in scope</h2>
+
+<ul>
+  <li><strong>The Miles Android app</strong> — both the Google Play build and
+  the sideloaded APK, including anything in the shipped package itself.</li>
+  <li><strong>The backend the app talks to</strong> — the database, its
+  row-level access rules, the storage buckets and signed links, the server
+  functions the app calls, and the authentication flows behind them.</li>
+  <li><strong>This site</strong>, <code>miles-legal.vercel.app</code>, including
+  the account-deletion page and the one-time code it sends.</li>
+</ul>
+
+<p>The findings we most want, stated concretely so you know what counts:</p>
+<ul>
+  <li><strong>One couple's data reaching a third account.</strong> Anything that
+  lets an account read, write or delete data belonging to a couple it is not
+  part of — a missed access rule, an identifier that can be swapped, a server
+  function that trusts a value the client sent instead of deriving it.</li>
+  <li><strong>Reaching a file you should not have.</strong> Storage objects are
+  meant to be reachable only through short-lived signed links issued to the
+  couple that owns them.</li>
+  <li><strong>Breaking the encryption we do claim.</strong> Anything that lets
+  the server, the network, or a third party read Memory Threads, Wish&nbsp;Jar
+  entry text or vault files. This includes substituting a partner's published
+  key: each phone remembers the key it has been talking to and refuses a change
+  until a human confirms it, so a way to make a phone accept a new key
+  <em>without</em> that confirmation is exactly the class we want. One limit
+  there is already known and conceded — the very first key a phone ever sees is
+  trusted on sight, which is why the app also offers a safety code the two of
+  you can read aloud to each other. "The first fetch could be a lie" is the
+  design, not a finding.</li>
+  <li><strong>Opening a sealed key without the password.</strong> The escrow
+  blob is meant to be worthless to anyone who does not have the account
+  password. Anything that weakens that is in scope; knowing the password is
+  not (section 4).</li>
+  <li><strong>Account takeover</strong> — sign-in, password reset, email
+  change, session handling, or the deletion page's one-time code being used
+  against an account that is not yours.</li>
+  <li><strong>Server functions that are reachable without a token.</strong> A
+  few are, deliberately, and each enforces its own authorisation instead. A way
+  past one of those checks is in scope.</li>
+  <li><strong>Anything in the app that leaks private content off the
+  device</strong> — into a log, a crash report, a notification payload, a URL, a
+  cache another app can read, or a third-party service.</li>
+</ul>
+
+<h2>4. What is out of scope</h2>
+
+<p>These are not bugs we can act on, and a report consisting only of one of them
+will get a short answer rather than a fix.</p>
+
+<ul>
+  <li><strong>Social engineering.</strong> Phishing, pretexting or otherwise
+  manipulating the developer, any Miles user, or any of the providers listed in
+  section 4 of the <a href="privacy-policy.html">Privacy Policy</a>. Do not
+  attempt it; it is out of scope and it is not covered by section 7.</li>
+  <li><strong>Denial of service.</strong> Volumetric attacks, load testing,
+  resource exhaustion, rate-limit flooding, or anything whose finding is "it
+  falls over under enough traffic". Please do not generate load against the
+  backend at all.</li>
+  <li><strong>Spam and bulk automation.</strong> Mass mail, mass account
+  creation, and raw scanner output submitted without a described impact.</li>
+  <li><strong>Anything that needs a rooted, jailbroken or malware-carrying
+  device, or physical access to an unlocked phone.</strong> This is already the
+  app's stated threat model rather than a gap in it: section 10 of the
+  <a href="privacy-policy.html">Privacy Policy</a> says plainly that a phone is
+  the weakest link, and that the app lock and the vault PIN do not survive
+  somebody who is holding the unlocked handset. Miles defends the data on its
+  way to our servers, while it sits there, and against a third party — it does
+  not defend against someone who already holds the unlocked device the data is
+  decrypted on.</li>
+  <li><strong>Anything that needs the account holder's password.</strong> The
+  password opens the escrowed key by design, and the Privacy Policy says so in
+  section 3.</li>
+  <li><strong>The partner seeing what you sent them.</strong> That is the
+  product. Miles cannot make a partner forget, and it cannot take back what has
+  been shown.</li>
+  <li><strong>The unencrypted half of section 2.</strong> That the operator of
+  the database could read chat is documented, not discovered.</li>
+  <li><strong>Third-party services.</strong> Issues in Supabase, Google
+  (Firebase Cloud Messaging, Maps, ML Kit), Cloudflare, Mapbox, Giphy or an
+  embedded video site belong to those companies and should be reported to them.
+  Tell us as well if the issue reaches Miles users through us, and we will
+  relay it.</li>
+  <li><strong>Best-practice findings with no path to impact</strong> — a missing
+  header, a permissive setting, a version number in a banner. These are read and
+  answered, and some of them get fixed, but they are not treated as
+  vulnerabilities and they do not get a 90-day clock.</li>
+</ul>
+
+<h2>5. Rules for testing</h2>
+
+<p>One rule matters more than the rest: <strong>do not touch anybody else's
+data.</strong> Miles exists to keep two people's private life between the two of
+them, and a piece of research that reads a stranger's messages has done the
+exact harm it was looking for.</p>
+
+<ul>
+  <li><strong>Test against accounts you own.</strong> Miles pairs by an invite
+  code one person hands the other, with no directory and no discovery — so
+  create two accounts of your own, pair them to each other, and you have a
+  complete couple to work against with nobody else's data anywhere in it.</li>
+  <li><strong>Stop at proof.</strong> Once you can show a thing is possible,
+  stop. Do not enumerate further, do not pivot, and do not pull more records to
+  make the report look heavier.</li>
+  <li><strong>Do not modify or destroy anything you did not create</strong>, and
+  do not degrade the service for anyone using it.</li>
+  <li><strong>If you reach somebody else's data by accident</strong> — it
+  happens; that is often what the bug is — stop immediately, do not read
+  further, tell us what you saw at the level of "a message body was returned"
+  rather than quoting it, and delete every copy you hold. Say in the report that
+  you did.</li>
+  <li><strong>Keep the finding between us until it is fixed</strong>, or until
+  the 90 days in section 6 have passed. If you plan to publish after that, tell
+  us in the first email so nobody is surprised.</li>
+</ul>
+
+<h2>6. What we do when a report arrives</h2>
+
+<div class="scroll">
+<table>
+  <tr>
+    <td>Acknowledge</td>
+    <td><strong>Within 7 days.</strong> A human reply saying we have it and
+    whether we have understood it. If you have not heard anything in 7 days,
+    assume the mail was lost and send it again.</td>
+  </tr>
+  <tr>
+    <td>Fix, or explain</td>
+    <td><strong>Within 90 days</strong> of that acknowledgement, for anything we
+    accept as in scope. One of the two: it is fixed, or you get a written
+    explanation of why it is not going to be — including "we cannot fix this
+    without breaking the app, and here is what we did instead". A finding we do
+    not intend to fix is told to you as that, not left silent.</td>
+  </tr>
+  <tr>
+    <td>Tell you when it ships</td>
+    <td>A fix in the app reaches users only when a new build does, and we will
+    say which build carries it. A fix on the server is usually immediate.</td>
+  </tr>
+  <tr>
+    <td>Credit</td>
+    <td>If you want it, and the finding is real, we will name you when the fix
+    is described. If you would rather not be named, say so and you will not
+    be.</td>
+  </tr>
+</table>
+</div>
+
+<p><strong>There is no bug bounty and no payment.</strong> Miles is a small
+independent app with no revenue behind a rewards programme, and offering money
+we could not reliably pay would be worse than saying this. Nothing on this page
+should be read as an offer of compensation.</p>
+
+<h2>7. No legal action for good-faith research</h2>
+
+<p>If you research Miles in good faith and within this page, <strong>we will not
+bring or support legal action against you for it</strong>, and we will not ask
+anyone else to. If a third party brings a claim about work that followed this
+policy, we will say publicly and in writing that the work was authorised.</p>
+
+<p>Good faith means what section 5 describes: your own accounts, no harm to
+users, no more access than the proof needed, and telling us before telling
+anyone else. This promise does not cover deliberately reading other people's
+data, destroying or holding data to ransom, demanding payment in exchange for
+withholding a finding, or anything that breaks a law independently of this
+policy. We also cannot waive obligations that are not ours — if what you do
+breaks a hosting provider's terms, that is between you and them.</p>
+
+<h2>8. Reporting something that is not a vulnerability</h2>
+
+<p>Two other routes exist and are better suited than this one:</p>
+<ul>
+  <li><strong>Abuse, harassment or a person misusing the app</strong> — report
+  it inside the app: Settings &rarr; Safety &rarr; Report a problem, or the
+  menus in Chat and the Gallery. The <a href="terms.html">Terms of Use</a>
+  describe what happens next.</li>
+  <li><strong>Child safety</strong> — the
+  <a href="csae.html">Child Safety Standards</a> page has its own contact and
+  its own subject line, and reports carrying it are handled ahead of everything
+  else.</li>
+</ul>
+
+<h2>9. Contact</h2>
+
+<div class="scroll">
+<table>
+  <tr><td>Role</td><td>Security contact, Miles</td></tr>
+  <tr><td>Name</td><td>Raza Aslam</td></tr>
+  <tr><td>Publisher</td><td>R&amp;D Dev</td></tr>
+  <tr><td>Email</td><td><a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a></td></tr>
+  <tr><td>Subject line</td><td>Begin the subject with <code>SECURITY</code>.</td></tr>
+  <tr><td>Languages</td><td>English</td></tr>
+  <tr><td>Encryption</td><td>None. There is no PGP key — see section 1 for what
+  to do with a report too sensitive to email.</td></tr>
+  <tr><td>Machine-readable</td><td><a href="/.well-known/security.txt">/.well-known/security.txt</a></td></tr>
+</table>
+</div>
+
+<p><strong>One inbox, as the other pages promise.</strong> This is the same
+address printed on the <a href="privacy-policy.html">Privacy Policy</a> and
+<a href="csae.html">Child Safety Standards</a> pages, and that is deliberate:
+a second address is a second thing to watch, and the one that goes unwatched
+is always the one that mattered. Put <em>security</em> in the subject line so
+a report is read as a report rather than as ordinary mail.</p>
+
+<p>This page is reviewed at least once a year, and whenever the app gains a
+feature that changes what is protected. The date at the top is the date of the
+last review.</p>
+
+<footer>
+<nav class="set">
+  <a href="privacy-policy.html">Privacy Policy</a>
+  <a href="terms.html">Terms</a>
+  <a href="csae.html">Child Safety Standards</a>
+  <a href="faq.html">FAQ</a>
+</nav>
+Miles — Security &amp; Vulnerability Disclosure · Last updated 18 August 2026
+</footer>
+
+</main>
+</body>
+</html>
