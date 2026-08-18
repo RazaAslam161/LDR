@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 
 /// The write half of chat encryption, and its one non-negotiable property:
@@ -13,13 +16,14 @@ import 'package:miles/features/chat/chat_repository.dart';
 /// message outright. And `location_map_screen.dart:427` calls sendText bare
 /// inside an async onTap with no catch, where a throw is a silent no-op.
 ///
-/// Coverage limit, stated rather than implied: these run with NO couple key,
-/// because a unit test has no platform keystore — crypto_core_test.dart
-/// documents the same limitation. So this pins the FAILURE path (the one that
-/// decides whether messages get lost) and the seal/open contract, but NOT a
-/// live seal→hydrate round trip under a real derived key. That round trip is
-/// only reachable on a device with a paired partner, and it is the thing to
-/// watch for on the first two-handset run.
+/// Coverage limit, stated rather than implied: the no-key tests run with NO
+/// couple key, because a unit test has no platform keystore —
+/// crypto_core_test.dart documents the same limitation. The LIVE derive is
+/// still untestable here, but the seal→hydrate round trip itself no longer
+/// is: `CryptoCore.setSharedKeyForTest` injects a real 32-byte key past the
+/// keystore, and the round-trip group below runs the actual seal and the
+/// actual hydrate under it. What remains device-only is the derive chain
+/// (keystore seed → X25519 → HKDF) — watch that on the two-handset run.
 void main() {
   setUp(CryptoCore.clearCache);
 
@@ -127,5 +131,84 @@ void main() {
     final out = await ChatRepository.hydrate([row]);
     expect(out.single.body, 'see you tonight');
     expect(out.single.bodyUndecryptable, isFalse);
+  });
+
+  group('the round trip under a real key', () {
+    // The flagship property, executed rather than pinned: the same sealBody
+    // the send path calls, the same hydrate the read path calls, a real
+    // 32-byte key between them. Injected past the keystore — the derive
+    // chain itself stays device-only.
+    setUp(() {
+      // hydrate reports decrypt shortfalls; the seam keeps that report from
+      // reaching for a Supabase client no unit test has.
+      ErrorReporter.insertRow = (_) async {};
+      CryptoCore.setSharedKeyForTest(
+        List<int>.generate(32, (i) => (i * 3 + 1) % 256),
+      );
+    });
+    tearDown(CryptoCore.clearCache);
+
+    Message rowWith(
+      String id, {
+      required Uint8List blob,
+      required Uint8List nonce,
+    }) =>
+        Message(
+          id: id,
+          senderId: 's',
+          createdAt: DateTime(2026),
+          bodyCipher: blob,
+          bodyNonce: nonce,
+        );
+
+    test('sealed by the send path, opened by the read path', () async {
+      final sealed = await ChatRepository.sealBody('sealed then opened', 'row-1');
+      expect(sealed, isNotNull, reason: 'a present key must seal');
+
+      final out = await ChatRepository.hydrate(
+        [rowWith('row-1', blob: sealed!.blob, nonce: sealed.nonce)],
+      );
+      expect(out.single.body, 'sealed then opened');
+      expect(out.single.bodyUndecryptable, isFalse);
+    });
+
+    test('the same blob replayed onto a different row refuses to open',
+        () async {
+      final sealed = await ChatRepository.sealBody('bound to row-1', 'row-1');
+      final out = await ChatRepository.hydrate(
+        [rowWith('row-2', blob: sealed!.blob, nonce: sealed.nonce)],
+      );
+      expect(out.single.bodyUndecryptable, isTrue,
+          reason: 'the AD binds a blob to its row — a replay must fail closed, '
+              'not render as the partner\'s message');
+    });
+
+    test('one flipped ciphertext byte refuses to open', () async {
+      final sealed = await ChatRepository.sealBody('tamper me', 'row-3');
+      final blob = Uint8List.fromList(sealed!.blob);
+      blob[blob.length - 1] ^= 0x01;
+      final out = await ChatRepository.hydrate(
+        [rowWith('row-3', blob: blob, nonce: sealed.nonce)],
+      );
+      expect(out.single.bodyUndecryptable, isTrue);
+    });
+
+    test('a failed ring read no longer fails a row the current key opens',
+        () async {
+      final sealed = await ChatRepository.sealBody('ring down, key up', 'row-9');
+      // Re-inject WITHOUT the cached ring. The open path then reads the
+      // keystore for the ring, and in a unit process that read throws —
+      // which is exactly the degrade branch under test: the keystore
+      // failing must not take down a row the in-memory key opens.
+      CryptoCore.setSharedKeyForTest(
+        List<int>.generate(32, (i) => (i * 3 + 1) % 256),
+        cacheEmptyRing: false,
+      );
+      final out = await ChatRepository.hydrate(
+        [rowWith('row-9', blob: sealed!.blob, nonce: sealed.nonce)],
+      );
+      expect(out.single.body, 'ring down, key up');
+      expect(out.single.bodyUndecryptable, isFalse);
+    });
   });
 }

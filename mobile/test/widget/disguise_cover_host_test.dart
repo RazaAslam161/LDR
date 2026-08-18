@@ -82,4 +82,52 @@ void main() {
     // surfaced as a blank screen.
     expectCoverMounted(tester, when: 'on the first frame');
   });
+
+  group('the in-cover unread dot', () {
+    // Covers post no notification at all (the shade header would say
+    // "Miles"), so this dot is the ONLY unread signal a disguised user gets.
+    const dot = ValueKey('coverUnreadDot');
+
+    testWidgets('shows when a background push left unread waiting',
+        (tester) async {
+      mockChannel((_) async => 'News');
+      SharedPreferences.setMockInitialValues({
+        'active_couple_id': 'c-1',
+        'miles_unread_c-1': 3,
+      });
+
+      await pumpHost(tester);
+      await tester.pump(const Duration(seconds: 5));
+
+      tester.takeException();
+      expect(find.byKey(dot), findsOneWidget,
+          reason: 'unread behind a cover must surface somewhere, and the '
+              'cover UI is the only place the OS cannot relabel',);
+    });
+
+    testWidgets('absent when nothing is unread', (tester) async {
+      mockChannel((_) async => 'News');
+      SharedPreferences.setMockInitialValues({'active_couple_id': 'c-1'});
+
+      await pumpHost(tester);
+      await tester.pump(const Duration(seconds: 5));
+
+      tester.takeException();
+      expect(find.byKey(dot), findsNothing);
+    });
+
+    testWidgets('absent when signed out, even over a stale tally',
+        (tester) async {
+      // No active_couple_id: the previous account's tally must not put a
+      // signal on the next person's cover.
+      mockChannel((_) async => 'News');
+      SharedPreferences.setMockInitialValues({'miles_unread_c-1': 3});
+
+      await pumpHost(tester);
+      await tester.pump(const Duration(seconds: 5));
+
+      tester.takeException();
+      expect(find.byKey(dot), findsNothing);
+    });
+  });
 }

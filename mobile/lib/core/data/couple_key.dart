@@ -25,8 +25,9 @@ class CoupleKey {
   CoupleKey._();
 
   /// Publishing is idempotent but costs a select plus an upsert, and the chat
-  /// re-runs this on every open. Once per process is enough: the only thing
-  /// that changes it is a reinstall, which is a new process.
+  /// re-runs this on every open. Once per session is enough: a reinstall is a
+  /// new process, and a sign-out resets it below — the next account must
+  /// publish its OWN key, not skip the upsert on the strength of this one's.
   static bool _publishedThisProcess = false;
 
   /// The one in-flight derive for this process.
@@ -37,15 +38,32 @@ class CoupleKey {
   /// first starts it; everyone after joins the same future.
   static Future<bool>? _ready;
 
-  @visibleForTesting
-  static void resetForTest() {
+  /// Session-scoped, not process-scoped. _endSession calls this: a memoized
+  /// derive that survived sign-out answered the NEXT account's chat with the
+  /// previous account's verdict — encryption silently off (and incoming
+  /// cipher rows unreadable) until process death.
+  static void reset() {
     _publishedThisProcess = false;
     _ready = null;
   }
 
+  @visibleForTesting
+  static void resetForTest() => reset();
+
   /// Start (or join) the derive. Safe to call on every session refresh.
-  static Future<bool> prime(SessionState session) =>
-      _ready ??= ensure(session);
+  ///
+  /// A completed FALSE un-memoizes itself: false is the ordinary mid-setup
+  /// answer, but it is also what a transient network failure returns — and a
+  /// false held for the life of the process turned one bad moment into a
+  /// whole session of plaintext. Retry is still single-flight: the future is
+  /// only cleared after it completes, so concurrent callers keep joining the
+  /// one in-flight derive.
+  static Future<bool> prime(SessionState session) {
+    return _ready ??= ensure(session).then((ok) {
+      if (!ok) _ready = null;
+      return ok;
+    });
+  }
 
   /// Await the derive already in flight, if there is one.
   ///

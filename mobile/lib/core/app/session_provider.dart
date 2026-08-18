@@ -19,6 +19,7 @@ import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/cycle/love_notes_pool.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
@@ -394,11 +395,20 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // A push that arrived for the couple that just left. Left standing it
     // opens their memory on the next account's first frame.
     pendingMemory.value = null;
+    // The partner's NAME, device-scoped: the next account's love notes were
+    // auto-addressed with it — another couple's relationship PII.
+    unawaited(LoveNoteRecipient.clear());
     // The keypair and the derived couple key are process-scoped too, and every
     // decrypted byte still held anywhere belongs to the account that just left.
     // The account's sealed seed stays in storage — signing back in must work
     // offline, and for anyone without an escrow row it is the only copy.
     CryptoCore.forgetAccount();
+    // And the memoized derive VERDICT beside the key itself. forgetAccount
+    // nulls the key, but CoupleKey held a completed future that kept
+    // answering for the account that left — so the next sign-in ran with
+    // encryption silently off (and cipher rows unreadable) until process
+    // death, and skipped publishing its own public key.
+    CoupleKey.reset();
     // Process-scoped answers about the account that just left. Left standing,
     // the next person to sign in on this handset walks past a terms gate they
     // never saw and inherits a pause they never set.

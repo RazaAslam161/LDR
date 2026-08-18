@@ -351,4 +351,10 @@ class LoveNoteRecipient {
 
   static Future<void> set(String name) async =>
       (await SharedPreferences.getInstance()).setString(_key, name.trim());
+
+  /// Sign-out calls this: the name is another couple's relationship PII, and
+  /// device-scoped it survived into the next account — which then sent love
+  /// notes auto-addressed to the previous partner's name.
+  static Future<void> clear() async =>
+      (await SharedPreferences.getInstance()).remove(_key);
 }

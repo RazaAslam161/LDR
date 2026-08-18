@@ -415,8 +415,20 @@ class CryptoCore {
       keyPair: await _keyPair(),
       remotePublicKey: SimplePublicKey(partnerPub, type: KeyPairType.x25519),
     );
+    // The contributory check the curve itself does not make: against a
+    // low-order (or all-zero) public key, X25519 agrees on the ALL-ZERO
+    // secret with ANY private key — a "shared" key the person who planted
+    // the directory entry can compute alone. Without this, a first-sight
+    // substitution costs an attacker passive reads instead of an active
+    // MITM. Fails closed like every other bad key above.
+    final sharedBytes = await shared.extractBytes();
+    if (sharedBytes.every((b) => b == 0)) {
+      _sharedKey = null;
+      throw StateError('X25519 agreed on the all-zero secret — refusing a '
+          'low-order partner key');
+    }
     _sharedKey = await _hkdf.deriveKey(
-      secretKey: shared,
+      secretKey: SecretKey(sharedBytes),
       info: utf8.encode('miles-closer-v1'),
     );
     // ensureSharedKey runs on every Closer entry, so bumping unconditionally
@@ -431,6 +443,25 @@ class CryptoCore {
   /// The partner public key [_sharedKey] was last derived from, so a repeat
   /// derivation of the same key is recognised as a no-op.
   static String? _derivedFrom;
+
+  /// Test-only injection. A unit test has no platform keystore, so the live
+  /// derive can never run there — and without this seam the chat round trip
+  /// (seal under a real key, open through hydrate) was untestable, which left
+  /// the app's flagship property covered by nothing. Never called from lib/.
+  ///
+  /// Also caches an EMPTY ring by default, which keeps the test's open path
+  /// off the keystore entirely. Pass [cacheEmptyRing] false to leave the
+  /// ring UNCACHED so the keystore read genuinely runs — in a unit process
+  /// it throws MissingPluginException, which is exactly how the
+  /// ring-unavailable degrade path gets exercised.
+  @visibleForTesting
+  static void setSharedKeyForTest(
+    List<int> bytes, {
+    bool cacheEmptyRing = true,
+  }) {
+    _sharedKey = SecretKey(bytes);
+    _ring = cacheEmptyRing ? [] : null;
+  }
 
   static void clearCache() {
     _sharedKey = null;
@@ -494,8 +525,15 @@ class CryptoCore {
       keyPair: await _keyPair(),
       remotePublicKey: SimplePublicKey(pub, type: KeyPairType.x25519),
     );
+    // Same contributory check as deriveSharedKey, same reason: a wrap key an
+    // attacker can compute alone is not a wrap.
+    final sharedBytes = await shared.extractBytes();
+    if (sharedBytes.every((b) => b == 0)) {
+      throw StateError('X25519 agreed on the all-zero secret — refusing a '
+          'low-order rewrap key');
+    }
     return _hkdf.deriveKey(
-      secretKey: shared,
+      secretKey: SecretKey(sharedBytes),
       info: utf8.encode('miles-rewrap-v1'),
     );
   }
@@ -681,18 +719,40 @@ class CryptoCore {
     // The ring is retired COUPLE keys. A vault blob was never written under
     // one, so trying them would be a keystore read per tile to attempt keys
     // that cannot match.
-    final ring = keyOverride != null || keyBytes == null
-        ? const <List<int>>[]
-        : await _ringBytes();
-    if (packed.length < 256 * 1024) {
-      return _decryptPacked(
-        _DecryptRequest(packed, associatedData, keyBytes, ring),
-      );
+    //
+    // Same degrade-and-disambiguate as decryptBytes, same reason: a failed
+    // keystore read must not fail a blob the current key opens, and a MAC
+    // failure with the ring unread must surface as the keystore's error.
+    List<List<int>> ring;
+    Object? ringError;
+    StackTrace? ringStack;
+    if (keyOverride != null || keyBytes == null) {
+      ring = const [];
+    } else {
+      try {
+        ring = await _ringBytes();
+      } catch (e, st) {
+        debugPrint(
+          '[crypto] key ring unavailable (${e.runtimeType}) — current key only',
+        );
+        ringError = e;
+        ringStack = st;
+        ring = const [];
+      }
     }
-    return compute(
-      _decryptPacked,
-      _DecryptRequest(packed, associatedData, keyBytes, ring),
-    );
+    final request = _DecryptRequest(packed, associatedData, keyBytes, ring);
+    try {
+      // Inline when degraded even for big blobs: compute() flattens a typed
+      // error into RemoteError on the way back, and the catch below needs
+      // the type.
+      if (ringError == null && packed.length >= 256 * 1024) {
+        return await compute(_decryptPacked, request);
+      }
+      return await _decryptPacked(request);
+    } on SecretBoxAuthenticationError {
+      if (ringError != null) Error.throwWithStackTrace(ringError, ringStack!);
+      rethrow;
+    }
   }
 
   static Future<String> decryptString(
@@ -719,15 +779,43 @@ class CryptoCore {
     if (key == null) {
       throw StateError('encrypted row but no couple key — partner key missing');
     }
-    final (clear, hit) = await openWithChain(
-      SecretBox(ct, nonce: nonce, mac: Mac(mac)),
-      key,
-      await _loadRing(),
-      associatedData == null ? const <int>[] : utf8.encode(associatedData),
-      _ringHit,
-    );
-    _ringHit = hit;
-    return clear;
+    // The ring is retired couple keys — useful for rows written before a
+    // rewrap, never load-bearing for a row the CURRENT key opens. A keystore
+    // read that throws here used to fail the whole decrypt, current key and
+    // all: one flaky keystore moment read as "every message undecryptable".
+    // Try the current key without it — but if the MAC then fails, the row
+    // may simply be ring-keyed, and that ambiguity must surface as the
+    // KEYSTORE's error, not as an authentication verdict: MemoryFailure
+    // reads an auth failure as the key being gone for good, and "try again"
+    // is the truth here. (The healed row still needs a fresh fetch — the
+    // chat drops ciphertext after one attempt.)
+    List<SecretKey> ring;
+    Object? ringError;
+    StackTrace? ringStack;
+    try {
+      ring = await _loadRing();
+    } catch (e, st) {
+      debugPrint(
+        '[crypto] key ring unavailable (${e.runtimeType}) — current key only',
+      );
+      ringError = e;
+      ringStack = st;
+      ring = const [];
+    }
+    try {
+      final (clear, hit) = await openWithChain(
+        SecretBox(ct, nonce: nonce, mac: Mac(mac)),
+        key,
+        ring,
+        associatedData == null ? const <int>[] : utf8.encode(associatedData),
+        _ringHit,
+      );
+      _ringHit = hit;
+      return clear;
+    } on SecretBoxAuthenticationError {
+      if (ringError != null) Error.throwWithStackTrace(ringError, ringStack!);
+      rethrow;
+    }
   }
 
   /// Deterministic, keyless tag hash so Fantasy-Jar tag matching still works

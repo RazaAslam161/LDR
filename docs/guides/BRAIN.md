@@ -6523,3 +6523,74 @@ Settings dialog has only a Close button, so a couple who compares codes from
 Settings cannot record it — only the launch prompt can (B-3). And the TOFU
 prompt's headline property ("the ONLY writer of a verification") is proven by
 reading, not by a test (B-7). Both are recorded here rather than claimed done.
+
+## §67 — Second fix round: the four remaining session-fixable faults (2026-08-18)
+
+(Numbered past the concurrent sessions' §66 hygiene sweep and their
+duplicate §65 above — their numbering is theirs to mend.)
+
+Owner said "fix the issue which you can do here." Everything from §63/§65's
+open list that a session can fix without colliding with the two other live
+work streams (pagination session owns chat_repository/chat_screen — untouched;
+staging re-baseline is its own project). Final gates AFTER the last edit:
+`flutter analyze` 0 errors / 0 warnings, zero NEW infos from this diff
+(the 8 infos in touched files all pre-exist, verified against the §63
+baseline output); `flutter test` **979 tests, "All tests passed!"** (+4 new).
+
+**FIXED:**
+1. **In-cover unread dot exists now** (the §65 open item). Host-level in
+   disguise_cover_host.dart: an opaque 8px mid-grey dot (key
+   'coverUnreadDot', bottom-right) over ANY cover when UnreadTally > 0 for
+   the stored SessionScope couple. Refreshed on mount and on app RESUME via
+   WidgetsBindingObserver — deliberately not polled (the only tally writer
+   is the background push isolate; a foreground timer observes nothing and
+   a background one burns prefs reloads forever, both proven by the skeptic
+   pass below). Tree shape is stable (always the Stack) so the dot's arrival
+   can never re-inflate the cover subtree. 3 widget tests: dot when tally>0,
+   absent when 0, absent signed-out over a stale tally. STATED LIMIT: a
+   message arriving while someone actively watches the cover surfaces on
+   next resume — the foreground FCM handler does not feed the tally
+   (fcm_service.dart is another session's dirty file; left alone).
+2. **Delete-for-everyone now scrubs the body**
+   (20260818160000_delete_for_everyone_scrubs_the_body.sql): the RPC's
+   UPDATE nulls body/body_cipher/body_nonce (pair CHECK satisfied), plus a
+   one-time backfill. Applied staging AND prod. Prod behavioral test in a
+   rolled-back block: `flag=t body_null=t cipher_null=t nonce_null=t`;
+   post-backfill count of still-readable deleted rows: 0. Verified the live
+   prod RPC matched 20260817130000 before replacing. Skeptic verdict: SOUND.
+3. **couple_media bucket is in the migrations**
+   (20260818170000_couple_media_bucket_is_in_the_migrations.sql): bucket row
+   (private, 25 MB, 8 mime types) + the three couple-scoped policies,
+   mirroring prod's live dashboard-only state verbatim. Applied staging AND
+   prod; prod read-back converged identical (public=false, limit 26214400,
+   mimes 8, policies 3). Skeptic verdict: SOUND.
+4. **Decrypt no longer dies on a failed keystore ring read** — BOTH paths
+   (decryptBytes AND decryptBytesOffThread; the first fix missed the media
+   path and the skeptic caught it). Degrade to current-key-only, and on a
+   subsequent MAC failure rethrow the ORIGINAL keystore error via
+   Error.throwWithStackTrace — so MemoryFailure keeps classifying it "try
+   again" (MemoryUnavailable) instead of "key gone forever", preserving
+   memory_failure.dart:19-21's invariant. compute() is skipped when
+   degraded (RemoteError would flatten the typed catch). New test drives
+   the degrade branch for real: setSharedKeyForTest(cacheEmptyRing: false)
+   makes the keystore read genuinely throw in the unit process, and the
+   row still opens under the current key.
+
+**Process note worth keeping:** the adversarial verify pass (4 agents) on my
+own diff returned 2 SOUND / 2 DEFECT_FOUND, and all 11 cover-dot/ring
+defects were real — tree-shape re-inflation, a false comment, an inverted
+poll, a misclassification that would have told users their memories were
+permanently gone on a keystore hiccup, a missed second call site, 4 fresh
+lints, 2 test gaps. Round-3 code shipped only after fixing all of them and
+re-running both gates. Self-review would have caught none; the skeptic pass
+earned its tokens.
+
+**Still open (unchanged from §65):** owner Console package + play-AAB device
+pass; 300-message pagination (running in its own session); realtime
+broadcast cleartext (flip runway); foreground tally feed +
+app-lock/memory-PIN scoping (both live in other sessions' dirty files);
+migration-ledger re-baseline incl. drifted staging; broad test debt.
+
+**Exact next step:** when the pagination session lands, re-run both gates on
+the merged tree before any build; then the owner's Console work is the whole
+critical path to submission.

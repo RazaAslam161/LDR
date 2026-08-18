@@ -742,12 +742,28 @@ class SupabaseRepository {
   ///
   /// The last-written value is kept on the device rather than read back, so the
   /// common path costs no round trip at all.
+  ///
+  /// The skip is BOUNDED to a day. It used to be forever, which asserted the
+  /// wrong thing: "I wrote this once" is not "the server still has it". The
+  /// row changes underneath this cache — sign into a second device and the
+  /// profile carries that device's token; the claim trigger nulls the row
+  /// when another profile claims this token — and a forever-skip meant the
+  /// actively used handset never re-registered: zero pushes, no recovery
+  /// short of reinstalling. One write a day is still too coarse to revive
+  /// the presence oracle the skip was built against.
   static Future<void> setFcmToken(String? token) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return;
     final prefs = await SharedPreferences.getInstance();
     final key = 'fcm_token_written:$uid';
-    if (token != null && prefs.getString(key) == token) return;
+    final atKey = 'fcm_token_written_at:$uid';
+    if (token != null && prefs.getString(key) == token) {
+      final at = DateTime.tryParse(prefs.getString(atKey) ?? '');
+      if (at != null &&
+          DateTime.now().toUtc().difference(at) < const Duration(hours: 24)) {
+        return;
+      }
+    }
     await _c.from('profiles').update({
       'fcm_token': token,
       'fcm_token_updated_at':
@@ -755,8 +771,10 @@ class SupabaseRepository {
     }).eq('id', uid);
     if (token == null) {
       await prefs.remove(key);
+      await prefs.remove(atKey);
     } else {
       await prefs.setString(key, token);
+      await prefs.setString(atKey, DateTime.now().toUtc().toIso8601String());
     }
   }
 
