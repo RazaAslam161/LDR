@@ -6594,3 +6594,13 @@ migration-ledger re-baseline incl. drifted staging; broad test debt.
 **Exact next step:** when the pagination session lands, re-run both gates on
 the merged tree before any build; then the owner's Console work is the whole
 critical path to submission.
+
+**§67 addendum — committed (2026-08-18):** the above landed as `c11a842`
+(13 files, staged by name). NOT in it, still floating in the working tree
+for the notification session that authored them: reach_notifications.dart
+(carries my three cover guards), message_preview_port.dart (carries my
+app-lock guard + own-send filter), fcm_service.dart,
+disguise_notification.dart, build.gradle.kts, MainActivity.kt,
+delivery_ack_test.dart, and supabase_repository.dart's mojibake-repair
+hunk. Whoever commits that set inherits my hunks inside it — they are
+described in §65/§67 and gate-green as part of the working tree.
