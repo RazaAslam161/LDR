@@ -6604,3 +6604,18 @@ disguise_notification.dart, build.gradle.kts, MainActivity.kt,
 delivery_ack_test.dart, and supabase_repository.dart's mojibake-repair
 hunk. Whoever commits that set inherits my hunks inside it — they are
 described in §65/§67 and gate-green as part of the working tree.
+
+**§67 addendum 2 — pushed, and what CI said (2026-08-18):** `c11a842` +
+`3d6c115` pushed: `4a1f555..3d6c115 fix-sprint -> origin/fix-sprint`
+(remote ref read back). There is NO main branch — origin/HEAD is
+fix-sprint; the push IS the mainline landing. CI run 32090938123 then
+FAILED — but read before reacting: the failure is `No file or variants
+found for asset: .env` during `flutter test`, byte-identical to the run
+BEFORE my commits (32089423532). pubspec.yaml:129 declares .env as an
+asset and .gitignore correctly keeps it out of the repo, so the gates
+workflow has never executed a single test since §62 created it — every
+red so far is the asset bundle refusing to build on a runner with no
+.env. The session that owns gates.yml already has the placeholder-.env
+fix sitting in its working-tree diff; when that lands, the next push is
+the first run whose color means anything. The 'dependency advisories'
+job passed on my push.
