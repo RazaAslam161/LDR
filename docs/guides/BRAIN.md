@@ -6841,6 +6841,44 @@ imported by any cover file, so nothing in the diff or the test suite pointed at
 it. Grepping the *copy* for the name of a deleted widget, not just the code, is
 what would have found it in one step.
 
+**§69 addendum 2 — committed as `85a6425`, and what it deliberately left behind
+(2026-08-19):** 21 files, +778/−169, staged BY NAME onto `fix-sprint` (which is
+`origin/HEAD` — §67 settled that the push IS the mainline landing; not pushed,
+only committed).
+
+Three files in the commit are shared with live sessions and were staged
+**surgically** — the blob was built as `HEAD + my hunk only` and written with
+`git hash-object` + `git update-index`, so the working tree was never mutated
+under another session:
+- `mobile/lib/features/shell/app_shell.dart` — the commit carries ONLY my two
+  copy hunks (the App Lock dialog and the `_nudgeLockForCover` comment, both of
+  which still argued that App Lock is what makes *the ring* safe). Another
+  session's in-flight `kLongAbsence` / `landsHome` / `resumeIsBusy`
+  return-to-Home feature (+195 lines) is still uncommitted in the tree and is
+  NOT in this commit. Asserted absent by the staging script before it ran.
+- `docs/guides/BRAIN.md` — §69 only. §68 (the pagination worktree's) is still
+  uncommitted and was explicitly excluded; §70 was already committed by the chat
+  session in `9dd60d9`, so the committed order reads §67 → §69 → §70 and §68
+  lands when that branch merges.
+- `mobile/android/app/build.gradle.kts` — the item-3 comment rewrite only. The
+  stray blank line at the sideload `signingConfig` is still someone else's and
+  still uncommitted.
+
+**Verified against the COMMIT, not the working tree** — the two differ, because
+the tree carries four other sessions' uncommitted work. `git worktree add
+--detach` at `85a6425`, `flutter pub get`, then: `flutter analyze` 0 errors / 0
+warnings, `flutter test` **1055 passed, "All tests passed!"**. Worktree removed.
+(The shared tree reports 1051; the difference is other sessions' in-flight test
+edits, not this commit.) A gate run on a shared tree is evidence about that
+tree, not about what you are committing — worth doing this way every time three
+sessions are live.
+
+**Left uncommitted for their owners:** `gates.yml`, `release_gate.dart`,
+`supabase_repository.dart`, `fcm_service.dart`, `reach_notifications.dart`,
+`chat_input_bar.dart`, `disguise_notification.dart`, `pubspec.yaml`,
+`delivery_ack_test.dart`, `release.sh`, `message_preview_port.dart` (untracked),
+`test/unit/shell/` (untracked), plus the three partial files above.
+
 ## §70 — Emoji reactions on chat messages (2026-08-19)
 
 Greenfield: no table, no client code, nothing to migrate. Long-press a bubble →
