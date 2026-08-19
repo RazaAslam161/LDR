@@ -204,16 +204,24 @@ DisguiseNotificationStyle notificationStyleFor(DisguiseProfile profile) {
   };
 }
 
-/// Resolves the style for whatever disguise this device is wearing.
+/// The disguise this device is wearing.
 ///
 /// Safe to call from the FCM background isolate: it reads SharedPreferences,
-/// which is backed by disk and available there. Falls back to the default
-/// profile if the read fails, so a notification is never shown with no identity
-/// at all.
-Future<DisguiseNotificationStyle> currentNotificationStyle() async {
+/// which is backed by disk and available there.
+///
+/// Falls back to [kDefaultDisguise] — a COVER — rather than to the undisguised
+/// profile, and that direction is deliberate. Callers use this to decide
+/// whether they may post at all; failing toward "covered" costs a notification,
+/// while failing toward "uncovered" posts one on a phone whose owner is relying
+/// on the app to stay quiet.
+Future<DisguiseProfile> currentDisguiseProfile() async {
   try {
-    return notificationStyleFor(await DisguiseService.current());
+    return await DisguiseService.current();
   } catch (_) {
-    return notificationStyleFor(kDefaultDisguise);
+    return kDefaultDisguise;
   }
 }
+
+/// Resolves the style for whatever disguise this device is wearing.
+Future<DisguiseNotificationStyle> currentNotificationStyle() async =>
+    notificationStyleFor(await currentDisguiseProfile());

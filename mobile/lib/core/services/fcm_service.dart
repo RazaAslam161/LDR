@@ -11,6 +11,7 @@ import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
+import 'package:miles/features/chat/message_preview_port.dart';
 import 'package:miles/main.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
@@ -93,6 +94,9 @@ class FcmService {
     // arrive the moment the process exists and the background isolate decides
     // whether the app is alive by whether this port answers.
     DeliveryAckPort.listen();
+    // Lets the background handler hand a push to this isolate, which has the
+    // couple key and can turn a count into the actual message text.
+    MessagePreviewPort.listen();
     await _fln.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),

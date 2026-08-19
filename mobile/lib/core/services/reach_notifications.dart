@@ -5,8 +5,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
+import 'package:miles/features/chat/message_preview_port.dart';
 import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/features/disguise/disguise_notification.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -271,24 +273,42 @@ Future<void> showMessageNotification({
   required String messageId,
   required String coupleId,
   required int unreadCount,
+  String? previewBody,
 }) async {
-  final style = await currentNotificationStyle();
-  // The cover never notifies in real life, so neither do we. Returning here is
-  // the feature, not a failure to handle a case.
-  if (style.isSilentCover) return;
+  final profile = await currentDisguiseProfile();
+  final style = notificationStyleFor(profile);
+  // A COVER MEANS NO MESSAGE NOTIFICATION. Not a quieter one, not a vaguer
+  // one — none.
+  //
+  // The budget model this replaces was built on an assumption Android does not
+  // allow. Every notification carries the APP's label in its header, taken from
+  // `application android:label` in the manifest, fixed at build time. The
+  // activity-alias labels that rename the launcher do not touch it. So a cover
+  // that says "Weather Forecast updated" arrives under the word **Miles**, and
+  // the shipped result was exactly that:
+  //
+  //     Miles - now
+  //     Weather  Forecast updated
+  //     Weather  Forecast updated
+  //
+  // No wording, channel, importance or grouping fixes that. A disguised build
+  // cannot post a notification that does not name the app, and a message
+  // notification is the one kind that arrives often enough to be noticed.
+  //
+  // So: covers get silence, and the unread signal belongs inside the cover's
+  // own UI where the OS cannot relabel it. Only the undisguised app — where the
+  // header saying "Miles" is the truth and not a leak — notifies at all.
+  if (profile.cover != DisguiseCover.none) return;
 
-  final persistent = style.budget == NotificationBudget.persistent;
   final android = AndroidNotificationDetails(
-    persistent ? kQuietChannelId : kMsgChannelId,
-    persistent ? kQuietChannelName : kMsgChannelName,
-    channelDescription: persistent ? kQuietChannelDesc : kMsgChannelDesc,
-    importance: persistent ? Importance.low : Importance.high,
-    priority: persistent ? Priority.low : Priority.high,
-    // Ongoing: it sits in the shade permanently and cannot be swiped away, which
-    // is exactly what a weather app's conditions entry does.
-    ongoing: persistent,
+    kMsgChannelId,
+    kMsgChannelName,
+    channelDescription: kMsgChannelDesc,
+    importance: Importance.high,
+    priority: Priority.high,
     // The rate limiter, and it is the platform's own: an update to an existing
     // notification never re-alerts. One sound per burst, however many arrive.
+    // Kept even undisguised — thirty messages over lunch is one sound.
     onlyAlertOnce: true,
     icon: style.smallIcon,
     ticker: style.ticker,
@@ -297,7 +317,10 @@ Future<void> showMessageNotification({
   await plugin.show(
     id: coupleId.hashCode & 0x7fffffff,
     title: style.title,
-    body: style.unreadBody(unreadCount),
+    // The real text when the running app could decrypt it, the count when it
+    // could not. Never both, and never a name — the header already says Miles,
+    // which on the undisguised app is the truth.
+    body: previewBody ?? style.unreadBody(unreadCount),
     notificationDetails: NotificationDetails(android: android),
     payload: 'message|$messageId|$coupleId',
   );
@@ -311,7 +334,12 @@ Future<void> showCareNotification({
 }) async {
   // The reported bug lived here: a care reminder sent to a partner running the
   // Calculator disguise arrived as a "News update".
-  final style = await currentNotificationStyle();
+  final profile = await currentDisguiseProfile();
+  // Same rule as messages, same reason: every notification arrives under the
+  // app's manifest label — "Miles" — which no cover can relabel. A covered
+  // handset gets silence here too; the app shows the nudge on open.
+  if (profile.cover != DisguiseCover.none) return;
+  final style = notificationStyleFor(profile);
   final android = AndroidNotificationDetails(
     kCareChannelId,
     kCareChannelName,
@@ -364,7 +392,10 @@ Future<void> showRitualNotification({
   required String ritualId,
   required String coupleId,
 }) async {
-  final style = await currentNotificationStyle();
+  final profile = await currentDisguiseProfile();
+  // Covers mean silence — the header would say "Miles" (see showCareNotification).
+  if (profile.cover != DisguiseCover.none) return;
+  final style = notificationStyleFor(profile);
   final android = AndroidNotificationDetails(
     kCareChannelId,
     kCareChannelName,
@@ -389,7 +420,10 @@ Future<void> showMemoryNotification({
   required String memoryId,
   required String coupleId,
 }) async {
-  final style = await currentNotificationStyle();
+  final profile = await currentDisguiseProfile();
+  // Covers mean silence — the header would say "Miles" (see showCareNotification).
+  if (profile.cover != DisguiseCover.none) return;
+  final style = notificationStyleFor(profile);
   final android = AndroidNotificationDetails(
     kCareChannelId,
     kCareChannelName,
@@ -511,6 +545,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       coupleId: coupleId ?? '',
       unreadCount: unread,
     );
+
+    // Then ask the running app, if there is one, to rewrite that notification
+    // with the actual text. It holds the couple key; this isolate does not.
+    // Posting the count FIRST and enriching after means the alert is never
+    // delayed by a decrypt, and never lost if one fails.
+    MessagePreviewPort.liveApp?.send(coupleId ?? '');
 
     await ack;
     return;

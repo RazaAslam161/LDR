@@ -152,13 +152,17 @@ void main() {
       final rn = _read('lib/core/services/reach_notifications.dart');
       final i = rn.indexOf('Future<void> showMessageNotification');
       expect(i, greaterThan(-1));
-      final fn = _codeOnly(rn.substring(i, i + 1800));
+      // Wide enough to reach past the comment explaining WHY covers are
+      // silent — _codeOnly strips comments, but only after this slice is taken.
+      final fn = _codeOnly(rn.substring(i, i + 4200));
       expect(fn, contains('coupleId.hashCode'),
           reason: 'one notification per conversation, not per message',);
       expect(fn, isNot(contains('messageId.hashCode')));
       expect(fn, contains('onlyAlertOnce'));
-      expect(fn, contains('isSilentCover'),
-          reason: 'covers that never notify must post nothing at all',);
+      expect(fn, contains('profile.cover != DisguiseCover.none'),
+          reason: 'a cover must post NOTHING: Android stamps the app label '
+              '("Miles") on every notification regardless of the body text, so '
+              'a disguised build cannot post one that does not name the app',);
     });
 
     test('a push with the app closed acks it', () {
