@@ -143,6 +143,7 @@ android {
             // uninstall/reinstall. It is not something a build config should
             // trigger by accident.
             signingConfig = signingConfigs.getByName("debug")
+
         }
         create("play") {
             dimension = "channel"

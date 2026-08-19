@@ -318,10 +318,26 @@ echo "building sideload release APK..."
 # releases, and Gradle's lint cache did the same to a third
 # ("The process cannot access the file because it is being used by another
 # process"). Both clear by stopping the daemon that holds them.
-if ! flutter build apk --release --flavor sideload; then
+# --target-platform android-arm64, and it is the ONLY lever that works.
+#
+# Measured on build 47: an `ndk { abiFilters }` block in the sideload flavour
+# changed nothing at all — the APK still carried all three architectures
+# (x86_64 75.4MB, arm64-v8a 67.3MB, armeabi-v7a 50.8MB). AGP's abiFilters
+# governs libraries IT builds via the NDK; Flutter's gradle plugin copies its
+# own .so files straight into jniLibs and never consults it. The filter looked
+# correct, compiled clean, and did nothing.
+#
+# lib/ was 192.8MB of a 243MB payload because every native library shipped three
+# times. x86_64 is emulators only — no phone on earth — and armeabi-v7a is
+# 32-bit hardware from roughly pre-2016. The .so files are STORED rather than
+# deflated, so those are real download bytes.
+#
+# The play channel deliberately does NOT do this: it ships an AAB and Play
+# splits per device, so filtering there would cost reach and save nobody a byte.
+if ! flutter build apk --release --flavor sideload --target-platform android-arm64; then
   echo "build failed — stopping gradle daemons and retrying once" >&2
   (cd android && ./gradlew --stop >/dev/null 2>&1) || true
-  flutter build apk --release --flavor sideload
+  flutter build apk --release --flavor sideload --target-platform android-arm64
 fi
 [ -f "$APK" ] || { echo "expected an APK at $APK and found none" >&2; exit 1; }
 

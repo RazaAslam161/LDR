@@ -86,6 +86,36 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
+      # pubspec.yaml:129 declares `.env` as an ASSET, and .gitignore:10 keeps it
+      # out of the repo because it holds secrets. Both are correct. Together
+      # they mean a fresh runner has no .env, and `flutter test` dies before a
+      # single test runs:
+      #
+      #     Error detected in pubspec.yaml:
+      #     No file or variants found for asset: .env.
+      #     Error: Failed to build asset bundle
+      #
+      # So this gate has been reporting failure without ever executing a test —
+      # which is worse than a red gate, because it looks like one.
+      #
+      # This is NOT weakening it. The placeholder carries no real credentials
+      # and grants no access; it exists so the asset bundle can be built and the
+      # suite can actually run. Unit tests read config through
+      # `dotenv.maybeGet`, which tolerates absent keys — what it cannot tolerate
+      # is the file itself being missing.
+      - name: placeholder .env so the asset bundle can build
+        run: |
+          set -euo pipefail
+          if [ -f .env ]; then
+            echo ".env already present, leaving it alone"
+          else
+            printf 'SUPABASE_URL=
+SUPABASE_ANON_KEY=
+' > .env
+            echo "wrote placeholder .env"
+          fi
+          test -f .env
+
       - name: flutter analyze
         shell: bash
         run: |
