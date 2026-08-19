@@ -60,7 +60,7 @@ Console form:**
 |---|---|---|---|
 | 1 | No unprompted cover offer on first run | `app_shell.dart` | **done** — `_offerCoverAtFirstOpen()` removed; grep for it returns nothing |
 | 2 | Confirmation naming the consequence *and* the way back, before any cover applies | `disguise_picker_screen.dart:40-74` | **done** — names the new label, says Miles will not be findable by name, gives the re-entry gesture |
-| 3 | A visible way out on every cover screen | `cover_gate.dart` | **done** |
+| 3 | A way back the owner can find on every cover screen | `cover_gate.dart` | **done** — `showCoverAbout`, an About sheet on an element each cover already draws, naming Miles and that cover's gesture. **Not a policy requirement** — no Play text demands an on-screen affordance; items 4-5 carry the disclosure. See `disguises.md`. |
 | 4 | The listing describes the feature, with the picker in ≥1 screenshot | store listing | **OPEN — phase 7** |
 | 5 | The unlock gesture + a working test account in Console → App access | Console | **OPEN — phase 5.6** |
 

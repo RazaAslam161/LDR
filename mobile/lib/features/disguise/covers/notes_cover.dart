@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
+import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A notepad that really keeps notes.
@@ -82,21 +84,23 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
         backgroundColor: const Color(0xFFFDFBF7),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
-          'Notes',
-          style: TextStyle(
-            color: Color(0xFF202124),
-            fontWeight: FontWeight.w500,
-            fontSize: 20,
+        title: CoverAboutTap(
+          onTap: () => showCoverAbout(context,
+              cover: DisguiseCover.notes,
+              onOpen: runEntryGate,
+              theme: coverTheme(
+                primary: const Color(0xFFF4B400),
+                surface: const Color(0xFFFDFBF7),
+              ),),
+          child: const Text(
+            'Notes',
+            style: TextStyle(
+              color: Color(0xFF202124),
+              fontWeight: FontWeight.w500,
+              fontSize: 20,
+            ),
           ),
         ),
-        // The visible door.
-        actions: [
-          CoverExitButton(
-            onPressed: runEntryGate,
-            color: const Color(0xFF5F6368),
-          ),
-        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _edit,

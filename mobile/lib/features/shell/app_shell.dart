@@ -201,12 +201,12 @@ class _AppShellState extends ConsumerState<AppShell>
     // encrypted memory on their next reinstall. Asked once, here, because this
     // is the first point past login and pairing.
     unawaited(EscrowPrompt.maybeShow(context));
-    // Covers shipped before the visible ring existed. A phone that applied
-    // one back then and upgraded now shows a ring with no lock behind it —
-    // the picker refuses that combination today, so this is the standing
-    // repair for installs that predate the rule. Asked every session until
-    // the lock is on or the cover is off, because an unguarded ring is a
-    // disguise that opens for whoever is holding the phone.
+    // Covers shipped before App Lock was a precondition of wearing one. A
+    // phone that applied one back then and upgraded now carries a way back
+    // with no lock behind it — the picker refuses that combination today, so
+    // this is the standing repair for installs that predate the rule. Asked
+    // every session until the lock is on or the cover is off, because an
+    // unguarded door is a disguise that opens for whoever holds the phone.
     unawaited(_nudgeLockForCover());
     // The pin catches every partner-key change after the first sight; the one
     // thing it cannot catch is a directory that lied AT the first sight, and
@@ -259,9 +259,9 @@ class _AppShellState extends ConsumerState<AppShell>
       builder: (ctx) => AlertDialog(
         title: const Text('Your cover needs App Lock'),
         content: const Text(
-          'Your cover now shows a small ring that opens this app — that is '
-          'your guaranteed way back in. App Lock is what makes the ring '
-          'safe: with it on, a tap lands on your lock, not the app.\n\n'
+          'Your cover keeps a way back into this app — that is your '
+          'guarantee against being locked out. App Lock is what makes that '
+          'way back safe: with it on, it lands on your lock, not the app.\n\n'
           'Turn on App Lock in Settings, or switch the cover off.',
         ),
         actions: [

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
+import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A local forecast panel.
 ///
@@ -45,25 +47,32 @@ class _WeatherCoverState extends State<WeatherCover>
         child: SafeArea(
           child: Column(
             children: [
-              // The visible door, in the corner the sky leaves empty.
-              Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4, right: 8),
-                  child: CoverExitButton(
-                    onPressed: runEntryGate,
-                    color: Colors.white70,
-                  ),
-                ),
-              ),
+              // Clearance the deleted exit button used to occupy — without it
+              // the location line sits against the status bar, which is a
+              // louder tell than the button was.
+              const SizedBox(height: 24),
               const Text(
                 'Current location',
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 4),
-              Text(
-                _dayLabel(now),
-                style: const TextStyle(color: Colors.white, fontSize: 13),
+              // The way back. NOT the location line above it: on a real
+              // weather app that line opens location selection, so a door
+              // behind it is a door behind ordinary use — the mistake the News
+              // search box already made once. The date is the inert reading.
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => showCoverAbout(context,
+                    cover: DisguiseCover.weather,
+                    onOpen: runEntryGate,
+                    theme: coverTheme(
+                      primary: const Color(0xFF4285F4),
+                      surface: Colors.white,
+                    ),),
+                child: Text(
+                  _dayLabel(now),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
               ),
               const SizedBox(height: 24),
               // The door.

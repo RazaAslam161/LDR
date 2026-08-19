@@ -160,7 +160,21 @@ android {
             //   1. no unprompted cover offer on first run (app_shell)
             //   2. a confirmation that names the consequence and the way back,
             //      before any cover is applied (disguise_picker_screen)
-            //   3. a visible way out on every cover screen
+            //   3. a way back the owner can FIND on every cover screen: an
+            //      About sheet, hung on an element the cover already draws,
+            //      naming Miles and that cover's own gesture. Note what this
+            //      is NOT — no Play policy text requires an on-screen
+            //      affordance. Deceptive Behavior asks that functionality not
+            //      be "hidden, dormant, or undocumented" and points at the
+            //      STORE LISTING for the remedy (item 4); the persistent-
+            //      notification-and-unique-icon rule belongs to Stalkerware
+            //      and Monitoring Applications, which is about monitoring
+            //      another person, not about a cover the owner chose. This
+            //      sentence used to read "a visible way out", was taken for
+            //      policy, and produced a bare unlabelled ring on all nine
+            //      covers — conspicuous to a stranger and mute to the owner.
+            //      The real requirement is a product one: a forgotten gesture
+            //      must never be a lockout.
             //   4. the feature described in the store listing, with the picker
             //      in at least one screenshot
             //   5. the unlock gesture + a test account in Console > App access

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
+import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A working calculator that is also the front door.
 ///
@@ -142,32 +144,33 @@ class _CalculatorCoverState extends State<CalculatorCover>
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                child: Stack(
-                  children: [
-                    // The visible door, in the corner the display never uses.
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: CoverExitButton(
-                        onPressed: runEntryGate,
-                        color: const Color(0xFF5F6368),
-                      ),
-                    ),
-                    Align(
+                // The way back. No name is drawn on a calculator, so the
+                // reading itself is the door — the only thing here that is not
+                // a key, and the one place a long-press already means nothing.
+                child: Align(
+                  alignment: Alignment.bottomRight,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => showCoverAbout(context,
+                        cover: DisguiseCover.calculator,
+                        onOpen: runEntryGate,
+                        theme: coverTheme(
+                          primary: const Color(0xFF1A73E8),
+                          surface: const Color(0xFFF1F3F4),
+                        ),),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
                       alignment: Alignment.bottomRight,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.bottomRight,
-                        child: Text(
-                          _display,
-                          style: const TextStyle(
-                            fontSize: 64,
-                            fontWeight: FontWeight.w300,
-                            color: Color(0xFF202124),
-                          ),
+                      child: Text(
+                        _display,
+                        style: const TextStyle(
+                          fontSize: 64,
+                          fontWeight: FontWeight.w300,
+                          color: Color(0xFF202124),
                         ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

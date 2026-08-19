@@ -6620,6 +6620,227 @@ fix sitting in its working-tree diff; when that lands, the next push is
 the first run whose color means anything. The 'dependency advisories'
 job passed on my push.
 
+## §69 — The cover "exit ring" is gone; each cover answers for itself (2026-08-19)
+
+The ring (`CoverExitButton`, added by `6e3aad0`) was a small unlabelled circle
+in every cover's app bar. On a weather app it was the one thing worth tapping
+and it told whoever tapped it nothing — conspicuous to a stranger, useless to
+the owner. Replaced by an About sheet hung on an element each cover **already
+draws**. Nothing was added to any screen.
+
+**THE POLICY FINDING, WHICH IS THE HEADLINE — the ring was never required.**
+Contract item 3 in `build.gradle.kts` read "a visible way out on every cover
+screen". That sentence is this repo's own wording, written by a session, and it
+was taken for Play policy. It is not. What Google actually says:
+
+- **Deceptive Behavior** — "Your app's functionality should be reasonably clear
+  to users; don't include any hidden, dormant, or undocumented features within
+  your app", and features "should be clear and documented in your store
+  listing". The remedy Google names is the LISTING (contract item 4), not an
+  on-screen control.
+- **Misleading Claims** — "Apps must not attempt to mimic functionality or
+  warnings from the operating system or other apps." Our covers are generic
+  ("Weather", "Calculator"), not clones of a named product. Compliant.
+- **Stalkerware and Monitoring Applications** is the ONLY policy that mandates
+  "a persistent notification at all times when the app is running and a unique
+  icon that clearly identifies the app" — and it governs apps that monitor
+  *another individual*, not a cover the owner chose for their own phone.
+
+So no Play text demands an on-screen affordance anywhere. Item 3 is now written
+down as a PRODUCT requirement (a forgotten gesture must never be a lockout),
+with the policy correction inline so the next session cannot re-derive a ring
+from it. Same on both channels — it needed no flavour split, because it was
+never policy-driven.
+
+**RISK FOUND WHILE READING THE POLICY, NOT FIXED, AND BIGGER THAN THIS TASK:**
+the app ships partner location sharing (`partner_location_card.dart`,
+`location_map_screen.dart`, `presence_service.locationSharingMode`). The
+Stalkerware policy's don'ts include "Track other adults, including spouses,
+even with their permission" and "Hide, cloak or mislead users about tracking
+behavior". Our sharing is per-person opt-in and defaults to `'off'`, which is
+the WhatsApp-Live-Location precedent and should be fine on its own — but
+**opt-in location sharing combined with a launcher disguise** is the pairing a
+reviewer could read as cloaked tracking, and no ring or About sheet touches
+that. It is answered by listing disclosure (items 4/5), or not at all. Whoever
+writes the listing must address it explicitly.
+
+**What shipped (mobile/):**
+- `disguise/cover_gate.dart` — `class CoverExitButton` deleted. New
+  `showCoverAbout(context, {cover, onOpen, theme})`: a modal sheet naming Miles
+  and printing THAT cover's gesture, read from the new
+  `profileForCover(DisguiseCover)` in `disguise_profile.dart` rather than
+  restated, so the picker's promise and the cover's reminder cannot drift. An
+  "Open Miles" button pops the sheet, then runs the gate.
+- `theme` is a required `ThemeData`, deliberately not defaulted from
+  `Theme.of(context)`: the five covers that build a `coverTheme` do it INSIDE
+  `build`, so the state's context sits above it and would hand back the host's
+  stock blue (main.dart's cover `MaterialApp`, ~line 856 — note it is LIGHT, not
+  the Miles dark theme; the old comment in `cover_theme.dart` predates that
+  split). Passing `ThemeData` also carries `brightness`, which is what keeps the
+  recorder's sheet dark.
+- Nine covers wired. **Eight of the nine elements named in the original brief
+  do not exist** — verified file by file, not assumed: no memory key on the
+  calculator (all 19 keys have real actions, and `_Key` sets
+  `onLongPress: onLongPress ?? onTap` as camouflage), no overflow menu in notes,
+  zero `Icon` widgets in timer, no storage row in recorder, no "Calibration
+  needed" screen in level (only a passive caption), no "About this device" row
+  in device_info, and convert's "rates refreshed" footnote renders for 1 of 7
+  categories so it is absent on open. What is really there:
+
+  | Cover | The door |
+  |---|---|
+  | news | the wordmark `Text('News')` — NOT the logo beside it, which is the five-tap entry |
+  | calculator | the display reading |
+  | notes, timer, recorder, level, convert, device_info | the AppBar title |
+  | weather | the `Current location` line |
+
+- **One rule: a single tap on the app's own name**, or the largest inert reading
+  where the cover shows no name. Never a long-press — that shape belongs to the
+  hidden doors, and a second long-press beside them is how a user finds the
+  first one by accident.
+- `weather_cover.dart` gained `SizedBox(height: 24)`: the deleted button was the
+  first child of the header Column, and without its box the location line sat
+  against the status bar — a louder tell than the button. The only layout change
+  in the diff; calculator's ring was a `Stack` overlay and the other seven were
+  `AppBar.actions`, so nothing else reflows.
+- `disguise_test.dart` — `every cover carries the visible way out` (which pinned
+  `CoverExitButton` on all nine and any tenth) became `every cover names the way
+  back, for its own identity`. Not deleted, and strictly stronger: it asserts a
+  way back exists, that `onOpen` reaches the gate, AND that each cover passes its
+  OWN `DisguiseCover` — which the ring test could not check, and which is the
+  exact bug the apply dialog shipped once when it printed the News gesture under
+  all nine covers.
+- `docs/guides/disguises.md` — "The visible ring" section rewritten as "The
+  About sheet" with the per-cover table and the policy correction; the
+  add-a-tenth-cover checklist now names `showCoverAbout`.
+- `docs/guides/PLAY-RELEASE-RUNBOOK.md` — contract item 3 row corrected.
+
+**Verified (pasted in-session):** `flutter analyze` 0 errors / 0 warnings.
+Baseline measured properly rather than assumed — HEAD versions of the 12 touched
+files analyzed at 537 issues, this diff at 535, so it REMOVES two infos and adds
+none. `flutter test` 979 tests, "All tests passed!", including the rewritten
+`entry doors every cover names the way back, for its own identity`.
+
+**Tree churn worth knowing about:** another session was building chat reactions
+(`reaction_bar.dart`, `reaction_chips.dart`) during this work. Two full-suite
+runs went red on `repo_hygiene_test` — 4 analyzer warnings in `chat_screen.dart`,
+then dead-code — and both cleared without any action from me once that session
+settled. Neither was in a file this diff touches. Do not attribute them here.
+
+**Files left for other sessions, untouched:** `chat_screen.dart`,
+`selectable_message.dart`, `reaction_*.dart`, `fcm_service.dart`,
+`reach_notifications.dart`, `message_preview_port.dart`,
+`disguise_notification.dart`, `supabase_repository.dart`, `release_gate.dart`,
+`app_shell.dart`, `gates.yml`, `pubspec.yaml`, `release.sh`. My only hunk in a
+shared file is `android/app/build.gradle.kts` — the item-3 comment rewrite; the
+stray blank line at the sideload `signingConfig` is someone else's.
+
+**found, not fixed (surfaced by the per-cover read, all pre-existing):**
+- `device_info_cover.dart:67` — `catch (_) { }` swallows every platform-channel
+  failure, so an erroring MethodChannel is indistinguishable from a non-Android
+  device.
+- `news_cover_screen.dart:126` and `:178` — `catch (_)` drops the RSS fetch
+  error and the `launchUrl` failure unlogged.
+- `news_cover_screen.dart` Entry 2 (a 2.5s hold on the **Local** nav item, lines
+  ~421-430) is a real door that is NOT in `kDisguises`, so neither the picker,
+  the guide, nor the new About sheet ever mentions it. Either document it or
+  delete it; an undocumented door is the thing item 5 has to declare.
+
+**Exact next step:** nothing in code. This closes contract items 1-3 honestly.
+Items 4 and 5 are Console-side and are the whole critical path to submission —
+and item 4's listing text must now also answer the location-sharing-plus-
+disguise pairing flagged above.
+
+**§69 addendum — the adversarial pass returned FAIL, and it was right (2026-08-19):**
+The skeptic ran against the §69 diff and found 8. Six were real and are now
+closed; each was re-verified with the check that found it.
+
+- **HIGH 1 — the apply confirmation still told every user to look for the ring
+  I had just deleted.** `disguise_picker_screen.dart:101` promised "a small ring
+  near the top right of the cover", and the App Lock dialogs in the same file
+  and in `app_shell.dart:279` argued that App Lock is what makes *the ring*
+  safe. That dialog is contract item 2 — the only place the way back is named
+  before a cover is applied — and twelve lines above the stale sentence the file
+  records this exact failure class from last time ("this dialog used to print
+  the News gesture under all nine covers"). I recreated it.
+  **Fixed at the root, not the sentence:** `DisguiseProfile` gained an `about`
+  field beside `entry` ("the word Timer at the top", "the date under the
+  location", …), the dialog interpolates it, and `disguise_test.dart` now
+  asserts every profile has one, non-empty, distinct, and without a trailing
+  full stop (it lands mid-sentence). A tenth cover cannot ship without one, and
+  the dialog can no longer describe a control that is not there. Stale comments
+  in `disguise_cover_host.dart` and `app_shell.dart` corrected too.
+- **HIGH 2 — two of the nine doors sat on ordinary-use controls, and the sheet
+  confessed more than it needed to.** Weather's door was the `Current location`
+  line; on any real weather app that line opens location selection, so the
+  payload behind an ordinary tap was the explanation. Moved to the **date**,
+  which is inert. (Calculator's display stays: a real calculator's display
+  answers to long-press, not tap, and every one of the 19 keys already has a
+  real action — there is nothing else on that screen.) The sheet also dropped
+  the sentence "It is showing a cover, which is why the launcher and this
+  screen say something else" — that named the *mechanism* to anyone who opened
+  it, and was my addition, not the brief's. It still names Miles and prints the
+  gesture, which is what was asked for.
+- **MEDIUM 3 — the sheet clipped its own recovery button off the bottom at
+  large font scales.** `Column` inside a default `showModalBottomSheet` is
+  capped at 9/16 of screen height with the primary action last; measured
+  overflow of 71px at 1.5× text scale, button at y 885 on an 868dp screen. Now
+  `isScrollControlled: true` + `SingleChildScrollView`. A widget test at 2×
+  scale asserts the button's bottom stays on screen.
+- **MEDIUM 4 — nothing in the suite ever executed `showCoverAbout`.** The
+  source scan could be satisfied by a call on a widget that never renders.
+  `test/widget/disguise_covers_test.dart` gained a real group (6 tests): tap the
+  actual element on Convert/Timer/Device Info/Recorder, assert the panel names
+  Miles and prints THAT cover's `entry` and not News's, assert Recorder's panel
+  resolves `Brightness.dark`, assert Open Miles reaches the gate while merely
+  reading it does not, plus the font-scale and tap-target tests above. Also
+  tightened the source scan's identity check — it was a whole-file substring and
+  is now read out of the `showCoverAbout` call itself.
+- **LOW 5 — a 20dp tap target for the only way back.** New `CoverAboutTap` in
+  `cover_gate.dart` gives a 48dp box (`Align(widthFactor: 1)` keeps the width
+  shrink-wrapped so an AppBar title does not swallow taps across the whole bar).
+  Free on the eight app-bar/wordmark doors — a toolbar is 56dp already.
+  **Accepted residual:** weather's date keeps its ~16dp glyph box, because a
+  48dp box there is inside a `Column` and would push the hero block down. It is
+  a full-width strip, and it is the one door where the height cannot be had for
+  nothing.
+- **LOW 6 — `profileForCover` fell through to `kDefaultDisguise`,** i.e. a cover
+  missing from `kDisguises` would print the News gesture on its own panel — the
+  exact bug the `about` field exists to stop. `orElse` removed; it throws now.
+  The catalog tests assert enum↔`kDisguises` is a bijection, so it is
+  unreachable in a tree that passes them and loud in one that does not.
+
+**Not fixed, deliberately:**
+- **LOW 7 — the panel can outlive its cover.** An incoming call flips
+  `showRealApp` under an open sheet, leaving it floating over the real app until
+  dismissed. Cosmetic, one path, and much reduced now the sheet no longer says
+  "this screen is a cover" — it reads "Miles / To open Miles: …" over Miles.
+- **NIT 8 is a misattribution.** The blank line in `build.gradle.kts` at the
+  sideload `signingConfig` predates this session — it was in the working tree at
+  session start and §67 records that file as the notification session's. My only
+  hunk there is the item-3 comment.
+
+**Re-verified after every fix:** `flutter analyze` 0 errors / 0 warnings, 535
+issues (unchanged from the §69 measurement, so the six fixes added no lints).
+`flutter test` **1051 tests, "All tests passed!"** — up from 979, the difference
+being the other session's new chat work plus my 7 new tests.
+
+**Second round of tree churn, logged so nobody re-diagnoses it:** three
+untracked probe files (`test/zz_reflow_probe_test.dart`,
+`zz_refute_probe_test.dart`, `zz_refute_toolbar_probe_test.dart`) appeared
+mid-run, importing `chat_reactions.dart`/`reaction_chips.dart`. They redded
+`flutter analyze` with syntax errors and failed to load under `flutter test`.
+They are the chat session's review debris, not mine — I left them alone, and
+they were gone twenty minutes later. Gate results above are from after they
+cleared. **If you see zz_*_probe_test.dart in a red gate, it is not yours
+either; do not delete another session's files to go green.**
+
+**Process note:** the skeptic pass cost real tokens and caught a user-facing lie
+that both my own review and two green gates missed — the picker dialog is not
+imported by any cover file, so nothing in the diff or the test suite pointed at
+it. Grepping the *copy* for the name of a deleted widget, not just the code, is
+what would have found it in one step.
+
 ## §70 — Emoji reactions on chat messages (2026-08-19)
 
 Greenfield: no table, no client code, nothing to migrate. Long-press a bubble →

@@ -153,8 +153,8 @@ class _DisguiseCoverHostState extends State<DisguiseCoverHost>
     // cover's own palette would never produce — an 8px mid-grey dot in the
     // bottom corner, readable only by someone who knows to look for it. The
     // owner learns it from the picker; a stranger sees screen furniture. The
-    // exit ring is already the one disclosed affordance every cover carries —
-    // this stays quieter than the ring.
+    // About panel is already the one disclosed affordance every cover
+    // carries — this stays quieter than that.
     return Stack(
       children: [
         cover,

@@ -173,28 +173,71 @@ void main() {
       }
     });
 
-    test('every cover carries the visible way out', () {
-      // Item 3 of the play shipping contract (build.gradle.kts). The hidden
-      // gesture is for the moment someone else holds the phone; the ring is
-      // for the owner, whose memory of one dialog used to be the only way
-      // back. A tenth cover that ships without it ships a lockout.
+    test('every cover names the way back, for its own identity', () {
+      // This used to pin a widget: every cover had to draw a CoverExitButton,
+      // a small unlabelled ring in the app bar. Conspicuous and mute is the
+      // worst pair on a screen pretending to be a weather app — it was the one
+      // thing worth tapping and it said nothing — so the ring is gone and an
+      // element each cover already draws opens an About sheet instead.
+      //
+      // The widget was never the property worth protecting. These three are:
+      // a way back exists on every cover; it names THIS cover's gesture, not
+      // another's; and its action reaches the same gate the hidden trigger
+      // does. A tenth cover that ships without one ships a lockout, and one
+      // that passes the wrong DisguiseCover hands the owner instructions that
+      // do not work — the exact bug the apply dialog shipped once, when it
+      // printed the News gesture under all nine covers.
       for (final entry in _coverSources.entries) {
         final code = _code(File(entry.value).readAsStringSync());
-        final uses = RegExp(r'CoverExitButton\(').allMatches(code).toList();
-        expect(uses, isNotEmpty,
-            reason: '${entry.key} draws no CoverExitButton — no visible way '
-                'out of the cover',);
-        // Drawing it is not enough: its onPressed has to reach the entry flow,
-        // or it is a ring that does nothing on the one screen it must not.
-        final wired = uses.any((m) {
-          final end = (m.end + 200).clamp(0, code.length);
-          final bound = RegExp(r'onPressed:\s*([A-Za-z_]\w*)')
+        final calls = RegExp(r'showCoverAbout\(').allMatches(code).toList();
+        expect(calls, isNotEmpty,
+            reason: '${entry.key} opens no About sheet — nothing on the screen '
+                'can tell the owner the way back',);
+        // Read out of the call itself, not the file: a cover that passed the
+        // wrong value while merely mentioning the right one somewhere else
+        // would satisfy a whole-file substring.
+        final identities = calls.map((m) {
+          final end = (m.end + 300).clamp(0, code.length);
+          return RegExp(r'cover:\s*DisguiseCover\.(\w+)')
+              .firstMatch(code.substring(m.start, end))
+              ?.group(1);
+        }).toSet();
+        expect(identities, {entry.key.name},
+            reason: '${entry.key} opens an About sheet for a different '
+                "identity — it would print another cover's gesture",);
+        // Opening the sheet is not enough: its Open action has to reach the
+        // entry flow, or the way out is a leaflet with no door behind it.
+        final wired = calls.any((m) {
+          final end = (m.end + 300).clamp(0, code.length);
+          final bound = RegExp(r'onOpen:\s*([A-Za-z_]\w*)')
               .firstMatch(code.substring(m.start, end));
           return bound != null && _reachesGate(bound.group(1)!, code);
         });
         expect(wired, isTrue,
-            reason: '${entry.key} draws the exit button but its onPressed '
-                'never reaches the entry gate',);
+            reason: '${entry.key} opens the About sheet but its onOpen never '
+                'reaches the entry gate',);
+      }
+    });
+
+    test('every disguise names what to tap for its About panel', () {
+      // The apply dialog interpolates this ("Tap ${d.about} to see this
+      // again"), which is the only place the About panel is ever advertised.
+      // It used to promise "a small ring near the top right" for all nine —
+      // true until the ring was deleted, and then a lie on all nine. Living
+      // beside `entry` is what stops that happening a third time.
+      final seen = <String, String>{};
+      for (final d in kDisguises) {
+        expect(d.about.trim(), isNotEmpty,
+            reason: '${d.label} names nothing to tap, so the apply dialog '
+                'advertises its About panel with a blank',);
+        expect(d.about.trim().endsWith('.'), isFalse,
+            reason: '${d.label}: `about` is interpolated mid-sentence, so a '
+                'trailing full stop lands in the middle of the dialog',);
+        final key = d.about.trim().toLowerCase();
+        expect(seen.containsKey(key), isFalse,
+            reason: '${d.label} and ${seen[key]} claim the same About '
+                'affordance: ${d.about}',);
+        seen[key] = d.label;
       }
     });
 

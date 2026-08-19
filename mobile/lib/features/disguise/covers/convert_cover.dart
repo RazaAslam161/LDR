@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A unit and currency converter.
@@ -156,9 +157,13 @@ class _ConvertCoverState extends State<ConvertCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Convert'),
-          // The visible door.
-          actions: [CoverExitButton(onPressed: runEntryGate)],
+          title: CoverAboutTap(
+            onTap: () => showCoverAbout(context,
+                cover: DisguiseCover.convert,
+                onOpen: runEntryGate,
+                theme: theme,),
+            child: const Text('Convert'),
+          ),
         ),
         body: SafeArea(
           child: Column(

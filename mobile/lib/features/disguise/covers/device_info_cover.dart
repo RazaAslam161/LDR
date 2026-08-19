@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A wall of read-only device statistics.
 ///
@@ -96,9 +97,13 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Device Info'),
-          // The visible door.
-          actions: [CoverExitButton(onPressed: runEntryGate)],
+          title: CoverAboutTap(
+            onTap: () => showCoverAbout(context,
+                cover: DisguiseCover.device,
+                onOpen: runEntryGate,
+                theme: theme,),
+            child: const Text('Device Info'),
+          ),
         ),
         body: SafeArea(
           child: RefreshIndicator(

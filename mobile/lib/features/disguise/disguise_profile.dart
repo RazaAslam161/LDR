@@ -58,6 +58,7 @@ class DisguiseProfile {
     required this.label,
     required this.blurb,
     required this.entry,
+    required this.about,
     required this.icon,
     required this.tint,
     required this.cover,
@@ -85,6 +86,19 @@ class DisguiseProfile {
   /// follows it verbatim on a screen that offers no second hint.
   final String entry;
 
+  /// What to tap on this cover to open the About panel.
+  ///
+  /// Lives here for the same reason [entry] does, and after the same bug: the
+  /// apply dialog used to promise "a small ring near the top right", which was
+  /// true until the ring was deleted and then was a lie on all nine covers —
+  /// the second time that dialog has described a door that is not there. A
+  /// per-cover string the dialog interpolates cannot drift out of step with one
+  /// cover, and a tenth cover cannot ship without one.
+  ///
+  /// Reads as the object of "tap ___", so it must name what the user sees, not
+  /// the widget: 'the word Timer at the top', never 'the AppBar title'.
+  final String about;
+
   /// Picker-only preview glyph; the real launcher icon lives in res/.
   final IconData icon;
   final Color tint;
@@ -111,6 +125,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'News',
     blurb: 'A headlines reader. Blends in on any home screen.',
     entry: 'Five quick taps on the masthead mark, top left.',
+    about: 'the word News beside the mark',
     icon: Icons.article_outlined,
     tint: Color(0xFFB3261E),
     cover: DisguiseCover.news,
@@ -120,6 +135,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Calculator',
     blurb: 'A working calculator. Nobody opens it twice.',
     entry: 'Hold = while the display reads 0 and nothing is pending.',
+    about: 'the number in the display',
     icon: Icons.calculate_outlined,
     tint: Color(0xFF3C4043),
     cover: DisguiseCover.calculator,
@@ -129,6 +145,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Notes',
     blurb: 'A notepad that really keeps notes.',
     entry: 'Hold the empty-state artwork, which only shows with no notes.',
+    about: 'the word Notes at the top',
     icon: Icons.sticky_note_2_outlined,
     tint: Color(0xFFE65100),
     cover: DisguiseCover.notes,
@@ -138,6 +155,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Weather',
     blurb: 'A local forecast, stable through the day.',
     entry: "Hold today's big temperature reading.",
+    about: 'the date under the location',
     icon: Icons.wb_sunny_outlined,
     tint: Color(0xFF1565C0),
     cover: DisguiseCover.weather,
@@ -148,6 +166,7 @@ const List<DisguiseProfile> kDisguises = [
     blurb: 'Units and currency. Output only — nothing to browse.',
     entry: 'Hold the swap arrows with both sides on the same unit and the '
         'amount empty.',
+    about: 'the word Convert at the top',
     icon: Icons.swap_horiz_rounded,
     tint: Color(0xFF0F766E),
     cover: DisguiseCover.convert,
@@ -157,6 +176,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Recorder',
     blurb: 'A voice recorder. An empty one raises no questions.',
     entry: 'Hold the 00:00 readout before recording anything.',
+    about: 'the word Recorder at the top',
     icon: Icons.mic_none_rounded,
     tint: Color(0xFF2A2830),
     cover: DisguiseCover.recorder,
@@ -166,6 +186,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Timer',
     blurb: 'A stopwatch and countdown. No content whatsoever.',
     entry: 'Hold Reset on the Stopwatch tab while it reads 00:00.00.',
+    about: 'the word Timer at the top',
     icon: Icons.timer_outlined,
     tint: Color(0xFF2E7D32),
     cover: DisguiseCover.timer,
@@ -175,6 +196,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Level',
     blurb: 'A spirit level and compass. Alive the moment you tilt it.',
     entry: 'Hold the angle readout with the phone lying flat.',
+    about: 'the word Level at the top',
     icon: Icons.straighten_rounded,
     tint: Color(0xFFB06A12),
     cover: DisguiseCover.level,
@@ -184,6 +206,7 @@ const List<DisguiseProfile> kDisguises = [
     label: 'Device Info',
     blurb: "The phone's own numbers. Boring is the product.",
     entry: 'Hold the battery ring.',
+    about: 'the words Device Info at the top',
     icon: Icons.bar_chart_rounded,
     tint: Color(0xFF3730A3),
     cover: DisguiseCover.device,
@@ -205,6 +228,7 @@ const DisguiseProfile kPlainProfile = DisguiseProfile(
   label: 'Miles',
   blurb: 'The app as itself. No cover, its own name and icon.',
   entry: 'Opens straight into Miles.',
+  about: 'nothing — there is no cover to look behind',
   icon: Icons.favorite_outline,
   tint: Color(0xFFE0785A),
   cover: DisguiseCover.none,
@@ -219,3 +243,23 @@ DisguiseProfile disguiseForAlias(String? aliasId) => aliasId ==
       (d) => d.aliasId == aliasId,
       orElse: () => kDefaultDisguise,
     );
+
+/// The profile that draws [cover].
+///
+/// How a cover screen finds its own [DisguiseProfile.entry] without being told
+/// which identity it is rendering. The picker interpolates that string before a
+/// cover is applied; this is how the cover itself can repeat it a month later,
+/// to an owner who read the dialog once.
+///
+/// [kPlainProfile] answers for [DisguiseCover.none] because it is the only
+/// profile that draws it — [kDisguises] holds the nine covers and nothing else.
+///
+/// No `orElse`: a cover missing from [kDisguises] throws here rather than
+/// quietly printing the News gesture on its own About panel — which is the
+/// exact bug this whole field exists to stop. The catalog tests assert the
+/// enum and [kDisguises] are a bijection, so the throw is unreachable in a
+/// tree that passes them, and loud in one that does not.
+DisguiseProfile profileForCover(DisguiseCover cover) => cover ==
+        DisguiseCover.none
+    ? kPlainProfile
+    : kDisguises.firstWhere((d) => d.cover == cover);

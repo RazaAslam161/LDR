@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 /// A bubble level and a compass.
@@ -113,9 +114,13 @@ class _LevelCoverState extends State<LevelCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Level'),
-          // The visible door.
-          actions: [CoverExitButton(onPressed: runEntryGate)],
+          title: CoverAboutTap(
+            onTap: () => showCoverAbout(context,
+                cover: DisguiseCover.level,
+                onOpen: runEntryGate,
+                theme: theme,),
+            child: const Text('Level'),
+          ),
           bottom: TabBar(
             controller: _tabs,
             tabs: const [Tab(text: 'Level'), Tab(text: 'Compass')],

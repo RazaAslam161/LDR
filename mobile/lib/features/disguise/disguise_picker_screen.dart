@@ -43,11 +43,11 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
     final choice = _selected;
     if (choice == null || _applying) return;
 
-    // Every cover carries a visible ring that opens the entry gate, and the
-    // gate only stops a stranger when App Lock stands behind it. Without the
-    // lock a cover is one visible tap from the app for whoever holds the
-    // phone — so the lock is a precondition of applying one, not a
-    // suggestion beside it.
+    // Every way back — the hidden gesture, and the Open button on the cover's
+    // About panel — runs the same entry gate, and that gate only stops a
+    // stranger when App Lock stands behind it. Without the lock a cover is one
+    // tap from the app for whoever holds the phone, so the lock is a
+    // precondition of applying one, not a suggestion beside it.
     if (choice.cover != DisguiseCover.none && !await AppLock.isEnabled()) {
       if (!mounted) return;
       await showDialog<void>(
@@ -55,9 +55,10 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Turn on App Lock first'),
           content: Text(
-            'Every cover shows a small ring that opens this app — that is '
-            'your guaranteed way back in. App Lock is what makes the ring '
-            'safe: with it on, a tap lands on your lock, not the app.\n\n'
+            'Every cover keeps a way back into this app — that is your '
+            'guarantee against being locked out. App Lock is what makes that '
+            'way back safe: with it on, it lands on your lock, not the app.'
+            '\n\n'
             'Turn on App Lock in Settings, then apply the cover.'
             '${widget.isOnboarding ? ' You can do both any time after '
                 'setup.' : ''}',
@@ -98,8 +99,7 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
             'Your launcher icon and name become "${choice.label}". Miles will '
             'not be findable by its own name until you change this back.\n\n'
             'Way back in — ${choice.entry}\n\n'
-            'There is also a small ring near the top right of the cover; '
-            'tapping it opens the same door.',
+            'Forgotten it later? Tap ${choice.about} to see this again.',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [

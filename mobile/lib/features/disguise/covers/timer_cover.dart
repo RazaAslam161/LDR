@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A stopwatch and a countdown timer.
 ///
@@ -190,16 +191,21 @@ class _TimerCoverState extends State<TimerCover>
 
   @override
   Widget build(BuildContext context) {
+    final theme = coverTheme(
+      primary: const Color(0xFF2E7D32),
+      surface: const Color(0xFFF6F8F6),
+    );
     return Theme(
-      data: coverTheme(
-        primary: const Color(0xFF2E7D32),
-        surface: const Color(0xFFF6F8F6),
-      ),
+      data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Timer'),
-          // The visible door.
-          actions: [CoverExitButton(onPressed: runEntryGate)],
+          title: CoverAboutTap(
+            onTap: () => showCoverAbout(context,
+                cover: DisguiseCover.timer,
+                onOpen: runEntryGate,
+                theme: theme,),
+            child: const Text('Timer'),
+          ),
           bottom: TabBar(
             controller: _tabs,
             tabs: const [Tab(text: 'Timer'), Tab(text: 'Stopwatch')],

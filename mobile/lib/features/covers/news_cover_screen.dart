@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/covers/rss_service.dart';
+import 'package:miles/features/disguise/cover_gate.dart';
+import 'package:miles/features/disguise/covers/cover_theme.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Clean Google-News-style light palette — intentionally NOTHING like Miles.
@@ -237,20 +239,27 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
             child: const _NewsLogo(),
           ),
           const SizedBox(width: 10),
-          const Text(
-            'News',
-            style: TextStyle(
-              color: _textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
-              letterSpacing: -0.2,
+          // The way back. The wordmark, not the mark beside it — that one is
+          // already the five-tap door, and two doors on one widget is how a
+          // user finds the hidden one by accident.
+          CoverAboutTap(
+            onTap: () => showCoverAbout(context,
+                cover: DisguiseCover.news,
+                onOpen: runEntryGate,
+                theme: coverTheme(primary: _accent, surface: _bg),),
+            child: const Text(
+              'News',
+              style: TextStyle(
+                color: _textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w500,
+                letterSpacing: -0.2,
+              ),
             ),
           ),
         ],
       ),
       actions: [
-        // The visible door.
-        CoverExitButton(onPressed: runEntryGate, color: _textMuted),
         IconButton(
           icon: Icon(_searchOpen ? Icons.close : Icons.search,
               color: _textMuted,),

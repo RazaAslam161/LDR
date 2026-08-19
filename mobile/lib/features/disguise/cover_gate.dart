@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
 
@@ -139,46 +140,120 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
   }
 }
 
-/// The visible way out — item 3 of the play channel's shipping contract
-/// (android/app/build.gradle.kts): every cover screen carries one affordance
-/// that opens the entry gate without prior knowledge of the hidden gesture.
+/// The way back, named — attached to something the cover already draws.
 ///
-/// The gestures exist for the moment someone ELSE is holding the phone; this
-/// exists for the owner, who chose the cover in one dialog and may remember
-/// none of it a month later. A forgotten gesture used to be a lockout with no
-/// recovery short of a reinstall, and a lockout is the one failure a cover is
-/// never allowed to have.
+/// This replaces a small unlabelled ring that used to sit on every cover. On a
+/// weather app a bare circle is the one thing worth tapping and it tells
+/// whoever taps it nothing: conspicuous to a stranger, useless to the owner.
+/// So nothing is drawn any more. An element the cover already renders — its own
+/// title, a masthead, a location line — gains an `onTap`, and there is no new
+/// pixel to notice.
 ///
-/// It is quiet but real: a small ring near the top right of every cover, drawn
-/// in the cover's own muted foreground, with a full tap target. Tapping it runs
-/// the same [CoverGate.runEntryGate] as the gesture. The gate only stops a
-/// stranger when App Lock is enrolled, which is why the picker refuses to
-/// apply a cover without it and the shell keeps asking any install that
-/// predates that rule. What it must never do is name
-/// anything — no tooltip, and a semantic label of plain "Open", because a
-/// screen reader announcing what the ring unlocks would be the cover
-/// confessing.
-class CoverExitButton extends StatelessWidget {
-  const CoverExitButton({required this.onPressed, this.color, super.key});
+/// One rule, nine covers: **a single tap on the app's own name.** Where the
+/// cover shows no name (weather, calculator) it is the largest inert reading on
+/// the screen instead. Never a long-press — that shape belongs to the hidden
+/// doors ([DisguiseProfile.entry]), and a second long-press beside them is how
+/// a user finds the first one by accident.
+///
+/// What opens is a plain About sheet: the app's real name, and THIS cover's
+/// return gesture read from [profileForCover] rather than restated here, so the
+/// picker's promise and the cover's reminder cannot drift apart. A forgotten
+/// gesture used to be a lockout with no recovery short of a reinstall, and a
+/// lockout is the one failure a cover is never allowed to have.
+///
+/// Printing the gesture costs nothing a stranger can spend: App Lock is a
+/// precondition for applying a cover at all (gate 2 below, enforced by the
+/// picker and re-asked by the shell), so knowing the gesture still ends at a
+/// biometric prompt. Knowledge is not the guard; the lock is.
+///
+/// The `theme` is the cover's own `coverTheme`, passed rather than read from
+/// `Theme.of(context)`: the covers that build one do it INSIDE `build`, so the
+/// state's context sits above it and would hand back the host's stock blue
+/// (main.dart's cover [MaterialApp]) instead. Covers that have no theme of
+/// their own build one here — a sheet in Miles's own colours on top of a stock
+/// utility is the tell `cover_theme.dart` exists to prevent.
+/// The door itself: [child] gains a tap without gaining a pixel.
+///
+/// The 48dp box is Material's minimum tap target. Every label these hang on is
+/// a single line of 13-20pt text, so its own glyph box is around 20dp tall —
+/// thin for the one control an owner locked out of their app has to find a
+/// month later, and free to widen because an AppBar's toolbar is 56dp already.
+/// [Align.widthFactor] keeps the width shrink-wrapped: an AppBar title that
+/// expanded would swallow taps across the whole bar.
+class CoverAboutTap extends StatelessWidget {
+  const CoverAboutTap({required this.onTap, required this.child, super.key});
 
-  /// Wire to the cover's [CoverGate.runEntryGate].
-  final VoidCallback onPressed;
-
-  /// Covers with a hand-rolled palette pass their muted foreground; covers on
-  /// `coverTheme` leave it null and take the scheme's quiet variant.
-  final Color? color;
+  final VoidCallback onTap;
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: onPressed,
-      iconSize: 18,
-      visualDensity: VisualDensity.compact,
-      icon: Icon(
-        Icons.circle_outlined,
-        semanticLabel: 'Open',
-        color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          height: 48,
+          child: Align(widthFactor: 1, child: child),
+        ),
+      );
+}
+
+Future<void> showCoverAbout(
+  BuildContext context, {
+  required DisguiseCover cover,
+  required VoidCallback onOpen,
+  required ThemeData theme,
+}) {
+  final entry = profileForCover(cover).entry;
+
+  return showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: theme.colorScheme.surface,
+    // The Open button is last, and the column is as tall as the gesture text
+    // makes it. Left at the default 9/16-of-screen cap this sheet clips its
+    // own button off the bottom at large font scales — the one control the
+    // panel exists to offer, gone for exactly the users most likely to need
+    // it. Scroll-controlled sizes to content; the scroll view catches the
+    // rest.
+    isScrollControlled: true,
+    builder: (sheetContext) => Theme(
+      // The cover's palette, not the host's — and coverTheme leaves textTheme
+      // alone, which is what keeps the sheet in the system font.
+      data: theme,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // The app's real name and this cover's gesture, and nothing
+                // else. An earlier draft also explained that the screen was a
+                // cover and why the launcher disagreed — which named the
+                // mechanism, not just the app, to anyone who opened this.
+                Text('Miles', style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 20),
+                Text('To open Miles', style: theme.textTheme.labelLarge),
+                const SizedBox(height: 4),
+                Text(entry, style: theme.textTheme.bodyMedium),
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    // Pop first: the gate pushes the intro splash onto this
+                    // navigator, and it must not land under a sheet.
+                    onPressed: () {
+                      Navigator.of(sheetContext).pop();
+                      onOpen();
+                    },
+                    child: const Text('Open Miles'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
-    );
-  }
+    ),
+  );
 }

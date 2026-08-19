@@ -42,20 +42,56 @@ something a person does on purpose. A plain long-press on the **Local** section
 tab opened it too, and long-pressing a tab to check for a menu is a reflex.
 Both put a biometric prompt in front of whoever was holding the phone.
 
-## The visible ring
+## The About sheet
 
-Every cover also draws one small ring near the top right (`CoverExitButton`).
-It is the same door: tapping it runs the entry flow, app lock included. The
-gestures above exist for the moment someone else is holding the phone; the
-ring exists for the owner, whose memory of one confirmation dialog used to be
-the only way back — a forgotten gesture was a lockout with no recovery short
-of a reinstall. It is quiet and unlabeled, and what a curious tap gets is the
-nameless system unlock prompt — which is only true because App Lock is a
-PRECONDITION of wearing a cover: the picker refuses to apply one without it,
-and the shell keeps asking any install whose cover predates that rule. A ring
-with no lock behind it would open the app for whoever is holding the phone.
-It is also Play's requirement: the shipping contract in `build.gradle.kts`
-demands a visible way out on every cover.
+Every cover also answers for itself. One element the cover **already draws**
+opens a plain About sheet naming Miles and repeating that cover's own gesture
+from the table above — read from `DisguiseProfile.entry`, never restated, so
+the picker's promise and the cover's reminder cannot drift apart.
+
+These strings live in `DisguiseProfile.about`, beside `entry`, and the apply
+dialog interpolates them — so the promise the picker makes and the element the
+cover actually wires cannot drift apart. `disguise_test.dart` pins them.
+
+| Cover | What you tap (`about`) |
+|---|---|
+| News | the word News beside the mark — *not* the mark itself, which is the five-tap door |
+| Calculator | the number in the display |
+| Notes | the word Notes at the top |
+| Weather | the date under the location |
+| Convert | the word Convert at the top |
+| Recorder | the word Recorder at the top |
+| Timer | the word Timer at the top |
+| Level | the word Level at the top |
+| Device Info | the words Device Info at the top |
+
+One rule: **a single tap on the app's own name**, or on the nearest inert
+reading where the cover shows no name. Never a long-press — that shape belongs
+to the hidden doors, and a second long-press beside them is how a user finds
+the first one by accident.
+
+And never on a control the fake app itself would act on. Weather's door is the
+**date**, not the **Current location** line above it: on a real weather app that
+line opens location selection, and a door behind ordinary use is the mistake the
+News search box already made once.
+
+Nothing is drawn for this. That is the point. It replaced a small unlabelled
+ring in every app bar, which was the worst of both: on a weather app it was the
+one thing worth tapping, and it told whoever tapped it nothing.
+
+Printing the gesture costs nothing a stranger can spend, because App Lock is a
+PRECONDITION of wearing a cover — the picker refuses to apply one without it,
+and the shell keeps asking any install whose cover predates that rule. Knowing
+the gesture still ends at a biometric prompt. Knowledge is not the guard; the
+lock is.
+
+**This is not a Play requirement, whatever `build.gradle.kts` used to say.** No
+Play policy text demands an on-screen affordance. Deceptive Behavior asks that
+functionality not be "hidden, dormant, or undocumented" and points at the store
+listing for the remedy; the persistent-notification-and-unique-icon rule belongs
+to Stalkerware and Monitoring Applications, which governs monitoring another
+person, not a cover the owner chose for their own phone. The sheet is here for a
+product reason: a forgotten gesture must never be a lockout.
 
 ## Why every gesture has the same shape
 
@@ -143,6 +179,8 @@ Five places, all checked by tests:
 5. Dart — a `DisguiseCover` value, a `DisguiseProfile` in
    `disguise_profile.dart` (including its `entry` line, written against what
    the trigger code actually checks — down to the label on the control), a
-   cover screen using the `CoverGate` mixin and carrying a `CoverExitButton`
-   wired to `runEntryGate`, a branch in `disguise_cover_host.dart`, a style in
+   cover screen using the `CoverGate` mixin, with one element it already draws
+   wired to `showCoverAbout(context, cover: …, onOpen: runEntryGate, theme: …)`
+   — pinned by `disguise_test.dart`, which also checks the cover passes its OWN
+   `DisguiseCover` — a branch in `disguise_cover_host.dart`, a style in
    `disguise_notification.dart`, and a row in the table above.
