@@ -7459,3 +7459,43 @@ unbacked-up and one `git add -A` away from committing a keystore.
 mobile/lib/features/chat/message_preview_port.dart` in the same commit. Then
 push fix-sprint (ahead 4). Then decide the Aug-11 stash and the
 affectionate-neumann branch — both are one prune away from gone.
+
+## §73 — Everything in the working tree is now committed (2026-08-19)
+
+Owner asked for it explicitly, knowing four other sessions were live in this
+tree. Four commits, grouped by cause rather than one blob, on top of `b6e3472`:
+
+- `4276b88` feat(notify) — covers post nothing at all (Android stamps the
+  manifest label "Miles" on every notification and no cover can relabel it),
+  plus MessagePreviewPort so the UI isolate decrypts and rewrites the push in
+  place. Carries `message_preview_port.dart`, which §72 flagged as untracked
+  while both its importers were already modified. This is the first commit in
+  which that tree compiles as a unit.
+- `e249d2d` fix(release,ci) — the placeholder `.env` step, so the test gate
+  executes a test for the first time; `--target-platform android-arm64`;
+  46 -> 48 in pubspec and ReleaseGate together.
+- `0896134` fix(pairing) — `â€”` mojibake in two pairing error strings.
+- `d986724` docs(brain) — §72 itself.
+
+**Gated before AND after.** Content fingerprint of the dirty set was
+`e65a4ad2…` immediately before the pre-commit gate and byte-identical
+immediately after, so the gate covered exactly what was committed. Post-commit
+re-run at HEAD `d986724` with a clean tree: `flutter analyze` 0 errors /
+0 warnings / 535 infos; `flutter test` 1074 tests, "All tests passed!".
+
+**Needs an owner decision — raised, not settled by me.**
+`--target-platform android-arm64` DROPS armeabi-v7a from the sideload APK. A
+32-bit handset already running a sideloaded build cannot install the next one
+and there is no update channel to tell it. x86_64 costs nothing (emulators),
+but the 32-bit drop is a fleet decision the flag makes by omission.
+
+**Deliberately NOT done.** `stash@{0}` (2026-08-11, 156 commits behind, its six
+files +2329/−280 since) was left alone: `stash pop` would have conflicted
+across a tree four sessions were writing. `claude/affectionate-neumann-2eba13`
+(`5eaae12`) is already committed, just unmerged and unpushed — nothing to
+commit there. `E:\us-app` (1 commit ever, no remote, 147 untracked incl.
+`android/app/debug.keystore`) is a different repo and was not touched.
+
+**Exact next step:** push `fix-sprint` — it is ahead 8, behind 0. Then decide
+the armeabi-v7a drop, the Aug-11 stash, and whether affectionate-neumann
+merges or dies.
