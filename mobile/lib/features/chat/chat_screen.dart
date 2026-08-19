@@ -35,6 +35,7 @@ import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_media_source.dart';
+import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/unread_tally.dart';
@@ -52,6 +53,8 @@ import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/link_card.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
+import 'package:miles/features/chat/widgets/reaction_bar.dart';
+import 'package:miles/features/chat/widgets/reaction_chips.dart';
 import 'package:miles/features/chat/widgets/selectable_message.dart';
 import 'package:miles/features/chat/widgets/typing_indicator.dart';
 import 'package:miles/features/chat/widgets/voice_note_bubble.dart';
@@ -110,6 +113,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   final _selection = ChatSelection();
   bool get _selecting => _selection.isActive;
+
+  /// What the bubbles read. Written OPTIMISTICALLY: a tap paints here before
+  /// anything touches the network, and nothing that comes back later can
+  /// overwrite a change this device has not landed yet.
+  final _reactions = ChatReactionStore();
+
+  /// The durable live wire for reactions, beside the broadcast fast path.
+  ///
+  /// Its own channel rather than a listener bolted onto `receipts:<id>`:
+  /// delivery receipts are the one path in this screen that must not be
+  /// disturbed, and a second postgres_changes handler on their channel puts
+  /// this feature inside their blast radius for no gain.
+  RealtimeChannel? _reactionChannel;
+
+  /// One reaction fetch at a time, and one more if anything asked while it ran.
+  bool _reactionFetchBusy = false;
+  bool _reactionFetchAgain = false;
   bool _subscribing = false; // re-entrancy guard for _subscribe
   bool _reloadScheduled = false; // debounce flag for bulk-DELETE realtime events
 
@@ -445,6 +465,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // Sends can start anywhere — the shell's camera tab opens with this screen
     // unmounted — so the chat follows the queue rather than owning it.
     ChatSendQueue.instance.addListener(_adoptPending);
+    // Same reason as the send queue: a reaction outlives the screen that made
+    // it, so the screen follows the outbox rather than owning it.
+    ChatReactionOutbox.instance.addListener(_onReactionOutbox);
     _scroll.addListener(_onScroll);
     _init();
   }
@@ -608,20 +631,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _catchUp({required String trigger}) async {
     final couple = _coupleId;
     if (couple == null) return;
+    // Reactions have exactly the gap messages have, and fetchSince does not
+    // carry them: both reaction wires are live-only — the broadcast is
+    // at-most-once, and a rejoined postgres_changes channel starts its cursor
+    // at the join and replays nothing. Without this, a reaction the partner
+    // added or took back while the socket was down never appeared for the rest
+    // of the screen's life.
+    //
+    // AFTER the messages have merged, and outside the early return below: the
+    // id list is built from _messages, so running it first would miss every
+    // reaction on a message this same pass is about to recover — and running
+    // it inside the try would skip the commonest case of all, a partner who
+    // reacted without sending anything. Not awaited; the rejoin does not wait
+    // on a repaint.
     try {
       final missed = await ChatRepository.fetchSince(couple, _maxSeq);
-      if (!mounted || missed.isEmpty) return;
-      for (final m in missed) {
-        _onIncoming(m, fromDb: true, source: 'catchup');
+      if (mounted && missed.isNotEmpty) {
+        for (final m in missed) {
+          _onIncoming(m, fromDb: true, source: 'catchup');
+        }
+        // We have now genuinely received them; say so, and if the chat is open
+        // they are also read.
+        unawaited(
+            ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger),);
+        _ackRead(trigger, flush: true);
       }
-      // We have now genuinely received them; say so, and if the chat is open
-      // they are also read.
-      unawaited(
-          ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger),);
-      _ackRead(trigger, flush: true);
     } catch (e) {
       debugPrint('[chat] catch-up failed: $e');
     }
+    if (trigger != 'chat_open' && mounted) unawaited(_loadReactions(couple));
   }
 
   Future<void> _subscribe({String trigger = 'rt_resume'}) async {
@@ -652,6 +690,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           await client.removeChannel(old3);
         } catch (_) {}
       }
+      final old4 = _reactionChannel;
+      _reactionChannel = null;
+      if (old4 != null) {
+        try {
+          await client.removeChannel(old4);
+        } catch (_) {}
+      }
       if (!mounted) return;
       _channel = ChatRepository.subscribe(
         id,
@@ -664,6 +709,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
           .onBroadcast(event: 'read', callback: _onReadBroadcast)
+          .onBroadcast(event: 'react', callback: _onReactionBroadcast)
           .onBroadcast(event: 'cleared', callback: _onClearedBroadcast)
           // subscribe() took no status callback, so a CHANNEL_ERROR here was
           // silent: the whole broadcast fast path — typing, the instant msg,
@@ -679,6 +725,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // Let other screens (e.g. the rapid camera) push the fast-path on THIS
       // live channel instead of creating a duplicate-topic one.
       ChatBroadcastService.active = _moodChannel;
+
+      // The durable half of reactions. Its own channel, deliberately not a
+      // second handler on `receipts:<id>` — the tick path is the one thing in
+      // this screen that must not be disturbed.
+      _reactionChannel = client
+          .channel('reactions:$id',
+              opts: const RealtimeChannelConfig(private: true),)
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'message_reactions',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'couple_id',
+              value: id,
+            ),
+            callback: _onReactionRow,
+          )
+          .subscribe((status, err) {
+        Diag.record(DiagArea.receipt, 'rt_channel_join', corr: id, fields: {
+          'topic_kind': 'reactions',
+          'status': status.name,
+          'error_class': err?.runtimeType.toString(),
+          'attempt_n': attempt,
+        },);
+      });
 
       // The partner's receipt row, live. Without this the sender's tick only
       // moved when something else happened to rebuild the screen.
@@ -802,6 +874,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     unawaited(ChatRepository.warmMedia(List.of(_messages)).then((_) {
       if (mounted) setState(() {});
     }));
+    unawaited(_loadReactions(couple.id));
     // single, idempotent channel-subscribe path
     await _subscribe(trigger: 'chat_open');
     // Photos taken from the shell's camera tab were already uploading before
@@ -1175,6 +1248,259 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   void _clearSelection() => setState(_selection.clear);
 
+  /// The bar a long press opens. [anchor] is the row's rectangle on screen,
+  /// measured at the press so it survives a list that is still settling.
+  Future<void> _openReactionBar(ChatRow row, Rect anchor,
+      {required bool mine,}) async {
+    final m = row.newest;
+    // The same predicate the selection uses: a message still uploading has no
+    // row for the reaction's foreign key to point at, and one already deleted
+    // for everyone has nothing left to react to.
+    if (!ChatSelection.canSelect(m)) return;
+    final uid = SupabaseService.currentUserId;
+    var choice = await ReactionBar.show(
+      context,
+      anchor: anchor,
+      mine: mine,
+      current: _reactions.emojiOf(m.id, uid ?? ''),
+    );
+    if (!mounted) return;
+    if (choice == kReactionMore) {
+      choice = await showReactionPicker(context);
+      if (!mounted) return;
+    }
+    // A dismiss LEAVES the selection the long press made. It is the only way
+    // into selection mode, and the bar's own barrier swallows the tap that
+    // would add a second message — so cancelling here made bulk delete
+    // unreachable: every long press ended with the selection gone. The close
+    // button and back are still the way out.
+    if (choice == null) return;
+    // Checked AGAIN, not only before the bar opened. The partner can delete
+    // the message for everyone while the bar — or the picker behind it — is
+    // up, and the row captured in this closure would not know: the reaction
+    // would seal, broadcast and land durably on a message whose body has just
+    // been scrubbed, where neither screen can show it to be taken back.
+    final live = _byId(m.id);
+    if (live == null || !ChatSelection.canSelect(live)) return;
+    // Choosing an emoji does consume the gesture — but only the selection that
+    // gesture created, never one the user has since built on top of it.
+    // Compared against the SELECTABLE items: an album whose middle photo is
+    // still uploading selects fewer rows than it holds, and against
+    // row.items.length that equality could never be true.
+    final selectable = row.items.where(ChatSelection.canSelect).toList();
+    final onlyThisRow = selectable.isNotEmpty &&
+        _selection.length == selectable.length &&
+        selectable.every((i) => _selection.contains(i.id));
+    if (onlyThisRow) _clearSelection();
+    await _react(m, choice);
+  }
+
+  /// Apply [emoji] to [m], or take it back when it is already this user's.
+  ///
+  /// Paints FIRST and talks after: nothing is awaited before the setState, so
+  /// the chip is on screen in the same frame as the tap, on any connection.
+  Future<void> _react(Message m, String emoji) async {
+    final uid = SupabaseService.currentUserId;
+    final coupleId = _coupleId;
+    if (uid == null || coupleId == null) return;
+    final now = DateTime.now();
+    final previous = _reactions.emojiOf(m.id, uid);
+    final next = _reactions.tap(m.id, uid, emoji);
+    // Painted here, synchronously, before a single await below. On a dead
+    // connection this is still the whole of what the user sees happen.
+    if (_reactions.apply(m.id, uid, next, now)) setState(() {});
+    unawaited(HapticFeedback.selectionClick());
+
+    final sealed = next == null
+        ? null
+        : await ChatReactionRepository.seal(
+            emoji: next, messageId: m.id, userId: uid, at: now,);
+    if (next != null && sealed == null) {
+      // No couple key on this device. The emoji cannot be written anywhere it
+      // could later be read, and writing it in the clear is not on the table —
+      // so the paint comes back off and the user is told, rather than a
+      // reaction sitting on screen that the partner will never see.
+      if (!mounted) return;
+      if (_reactions.apply(
+        m.id,
+        uid,
+        previous,
+        now.add(const Duration(milliseconds: 1)),
+      )) {
+        setState(() {});
+      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Couldn't send that reaction yet — still setting up "
+            'this device.',),
+      ),);
+      return;
+    }
+    // The faster of the two wires and the one the partner renders from, sent
+    // beside the durable write and never instead of it.
+    unawaited(_moodChannel?.sendBroadcastMessage(
+      event: 'react',
+      payload: ChatReactionRepository.broadcastPayload(
+        from: uid,
+        messageId: m.id,
+        at: now,
+        sealed: sealed,
+      ),
+    ),);
+    await ChatReactionOutbox.instance.enqueue(
+      coupleId: coupleId,
+      messageId: m.id,
+      userId: uid,
+      sealed: sealed,
+      at: now,
+    );
+  }
+
+  /// A reaction the partner just made, over the broadcast fast path.
+  void _onReactionBroadcast(Map<String, dynamic> payload) {
+    final r = ChatReactionRepository.fromBroadcast(payload);
+    if (r == null || !mounted) return;
+    unawaited(
+      _reactions
+          .applyIncoming(r, myUid: SupabaseService.currentUserId)
+          .then((changed) {
+        if (changed && mounted) setState(() {});
+      }),
+    );
+  }
+
+  /// The durable half of the same event. Broadcast is at-most-once, so this is
+  /// what still moves the screen when one is dropped — no reopen, no refresh.
+  void _onReactionRow(PostgresChangePayload payload) {
+    final removal = payload.eventType == PostgresChangeEvent.delete;
+    final row = removal ? payload.oldRecord : payload.newRecord;
+    if (row.isEmpty || !mounted) return;
+    final messageId = row['message_id']?.toString();
+    final userId = row['user_id']?.toString();
+    if (messageId == null || userId == null) return;
+    // Our own row is the one thing this device knows better than the server:
+    // an unsent change is still in the outbox, and echoing the old value back
+    // over it is exactly the flicker this must not have.
+    if (userId == SupabaseService.currentUserId) return;
+    if (removal) {
+      // Under RLS the DELETE payload is the primary key and NOTHING else, so
+      // this event cannot be ordered against anything: no updated_at, and the
+      // value the row held was written by the ADD anyway. Deriving a timestamp
+      // for it killed a re-add that had already arrived over the faster wire.
+      // So drop what this device believed and ask the server, which is the
+      // only party that knows. The broadcast still makes the ordinary removal
+      // instant; this is the backstop for when that broadcast was dropped.
+      final coupleId = _coupleId;
+      setState(() => _reactions.forget(messageId, userId));
+      if (coupleId != null) unawaited(_loadReactions(coupleId));
+      return;
+    }
+    final at = DateTime.tryParse(row['updated_at']?.toString() ?? '')?.toLocal();
+    if (at == null) return;
+    unawaited(() async {
+      final emoji = await ChatReactionRepository.openRow(
+        row,
+        messageId: messageId,
+        userId: userId,
+      );
+      if (emoji == null || !mounted) return;
+      if (_reactions.apply(messageId, userId, emoji, at)) setState(() {});
+    }(),);
+  }
+
+  /// Everything already on the conversation, once the messages are on screen.
+  ///
+  /// Deliberately after the paint and never awaited by it: a reaction is worth
+  /// nothing if the price is the conversation arriving later.
+  Future<void> _loadReactions(String coupleId) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    // Single-flight. A resume produces TWO triggers — this screen's own
+    // lifecycle callback and the shell's forced socket reconnect — and a
+    // durable DELETE asks for one as well; without this, every resume ran two
+    // full request fan-outs and two decrypt passes over the whole
+    // conversation, and each was an independent chance to snapshot the server
+    // mid-write.
+    if (_reactionFetchBusy) {
+      _reactionFetchAgain = true;
+      return;
+    }
+    _reactionFetchBusy = true;
+    try {
+      // Per-account, and this is also what restores whatever a process kill
+      // left unsent.
+      await ChatReactionOutbox.instance.bindUser(uid);
+      do {
+        _reactionFetchAgain = false;
+        if (!mounted) return;
+        try {
+          // Read BEFORE the fetch: both live wires are already delivering, and
+          // on a cold open the decrypt inside fetchFor waits on the couple-key
+          // derive.
+          final asOfWrites = _reactions.writes;
+          final fetched = await ChatReactionRepository.fetchFor(
+            coupleId,
+            _messages.map((m) => m.id),
+          );
+          if (!mounted) return;
+          setState(() {
+            _reactions.mergeFetched(fetched, asOfWrites: asOfWrites);
+            _applyPendingReactions();
+          });
+        } catch (e) {
+          // Counted, never silent: reactions that never arrive look exactly
+          // like a conversation nobody reacted to.
+          Diag.record(DiagArea.receipt, 'reaction_fetch_failed', corr: coupleId,
+              fields: {'error_class': e.runtimeType.toString()},);
+          debugPrint('[reactions] fetch failed: ${e.runtimeType}');
+          return;
+        }
+      } while (_reactionFetchAgain);
+    } finally {
+      _reactionFetchBusy = false;
+    }
+  }
+
+  /// What this device has decided but not yet landed outranks the page it just
+  /// fetched — otherwise a reaction made offline is painted and then quietly
+  /// erased by the server's older answer.
+  void _applyPendingReactions() {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    for (final intent in ChatReactionOutbox.instance.pending.values) {
+      if (intent.userId != uid) continue;
+      final emoji = intent.isRemoval ? null : intent.emoji;
+      // A restored intent whose emoji would not decrypt: the write still
+      // carries the right ciphertext, but this device cannot paint it.
+      if (!intent.isRemoval && emoji == null) continue;
+      _reactions.apply(intent.messageId, uid, emoji, intent.at);
+    }
+  }
+
+  /// Reactions the server refused for good.
+  void _onReactionOutbox() {
+    final refused = ChatReactionOutbox.instance.takeRefusals();
+    if (refused.isEmpty || !mounted) return;
+    final uid = SupabaseService.currentUserId;
+    final coupleId = _coupleId;
+    if (uid != null) {
+      for (final intent in refused) {
+        // Not "roll back to nothing" — that is only right when the refused
+        // write was the FIRST reaction on this message. Refuse a change of
+        // mind and the server still holds the previous emoji, which the
+        // partner can still see. This device's opinion is simply void now, so
+        // it forgets the key (its ordering included) and re-reads.
+        _reactions.forget(intent.messageId, uid);
+      }
+      if (coupleId != null) unawaited(_loadReactions(coupleId));
+    }
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(refused.length == 1
+          ? 'A reaction could not be saved.'
+          : '${refused.length} reactions could not be saved.',),
+    ),);
+  }
+
   /// Open the pager on [tapped], inside every photo and video the conversation
   /// has — not just the one that was touched.
   ///
@@ -1366,6 +1692,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final rc = _receiptChannel;
     if (rc != null) SupabaseService.client.removeChannel(rc);
     ChatSendQueue.instance.removeListener(_adoptPending);
+    ChatReactionOutbox.instance.removeListener(_onReactionOutbox);
+    final xc = _reactionChannel;
+    if (xc != null) SupabaseService.client.removeChannel(xc);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
     _tickTimer?.cancel();
@@ -1672,8 +2001,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                       _selection.contains(m.id),
                                                   onToggle: () =>
                                                       _toggleSelectedRow(row),
+                                                  onLongPressAt: (anchor) =>
+                                                      _openReactionBar(row,
+                                                          anchor,
+                                                          mine: m.isMine(uid),),
                                                   child: _Bubble(
                                                     message: m,
+                                                    reactions: _reactions
+                                                        .forMessage(m.id),
+                                                    myUid: uid,
+                                                    onReact: (emoji) =>
+                                                        _react(m, emoji),
                                                     album:
                                                         row.isAlbum ? row : null,
                                                     onOpenMedia: (t) =>
@@ -1831,14 +2169,26 @@ class _Bubble extends StatelessWidget {
     required this.senderName,
     required this.tick,
     required this.onOpenMedia,
+    required this.onReact,
     this.album,
     this.repliedTo,
     this.status,
     this.onRetry,
+    this.reactions,
+    this.myUid,
   });
 
   final Message message;
   final bool mine;
+
+  /// userId → that person's reaction to THIS message, or null when nobody has
+  /// reacted. Null and empty draw the same nothing; both are ordinary.
+  final Map<String, ChatReaction>? reactions;
+  final String? myUid;
+
+  /// Tapping a chip toggles this user's own reaction to that emoji — the same
+  /// call the bar makes, so there is one way to react and one to take it back.
+  final void Function(String emoji) onReact;
   final bool showDateHeader;
   final VoiceNotePlayer voice;
   final ChatTheme theme;
@@ -1935,6 +2285,22 @@ class _Bubble extends StatelessWidget {
               ],
             ),
           ),
+        ),
+        // Under the bubble rather than overlapping its corner. An overlap needs
+        // a Stack and a negative offset, and the chip arriving is the one
+        // moment this feature can move the conversation — a row that grows
+        // inside the flow is the version that cannot land on top of the
+        // timestamp when a font scales.
+        ReactionChips(
+          // A message deleted for everyone keeps no body; it keeps no
+          // reactions either. The RPC scrubs the rows server-side, but the
+          // device that owns a reaction ignores its own DELETE echo, so
+          // without this the sender would keep seeing — and could keep
+          // tapping — a chip on a message that says it was deleted.
+          byUser: message.deletedForEveryone ? const {} : (reactions ?? const {}),
+          myUid: myUid,
+          mine: mine,
+          onTap: onReact,
         ),
         Padding(
           padding: EdgeInsets.only(

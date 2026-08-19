@@ -6619,3 +6619,323 @@ red so far is the asset bundle refusing to build on a runner with no
 fix sitting in its working-tree diff; when that lands, the next push is
 the first run whose color means anything. The 'dependency advisories'
 job passed on my push.
+
+## §70 — Emoji reactions on chat messages (2026-08-19)
+
+Greenfield: no table, no client code, nothing to migrate. Long-press a bubble →
+an emoji bar → tap to react; tap the same emoji again to take it back.
+
+**Gates, after the last edit:** `flutter analyze` **0 errors, 0 warnings**, and
+**zero new infos** — chat_screen.dart's lint profile is byte-identical to
+HEAD's (checked by analysing a copy of `git show HEAD:...` beside it), and the
+new files carry none. `flutter test` **1068 tests, "All tests passed!"**, of
+which **62** are the two new reaction files.
+
+### What ships
+
+- `mobile/lib/features/chat/chat_reactions.dart` — `ChatReactionStore` (all the
+  reaction rules, outside the screen for the reason `ChatSelection` is: nothing
+  inside a 2800-line ConsumerStatefulWidget is testable), `ChatReactionRepository`
+  (seal / open / fetch / put / remove, and both halves of the broadcast payload),
+  and `ChatReactionOutbox` (persisted queue, exponential backoff, per-user key).
+- `widgets/reaction_bar.dart` — the bar (6 quick + "+"), the 72-glyph picker,
+  and `reactionBarOffset`, a pure function so the edge cases are testable
+  without laying anything out.
+- `widgets/reaction_chips.dart` — the chips under a bubble, `tallyReactions`.
+- `chat_screen.dart` + `widgets/selectable_message.dart` — the wiring.
+- `supabase/migrations/20260819090000_message_reactions.sql`
+- `supabase/migrations/20260819100000_delete_for_everyone_takes_the_reactions.sql`
+
+### Decisions worth keeping
+
+**Long press was already taken, and the collision is resolved the way WhatsApp
+resolves it.** `SelectableMessage.onLongPress` starts the bulk-delete selection
+— the only way into it. So the first long press now does BOTH: it selects the
+message and opens the bar. A long press with a selection already open only
+extends the selection. Dismissing the bar **leaves the selection alone** — that
+is not a taste call, it is forced: the bar is a full-screen modal route and its
+barrier swallows the tap that would add a second message, so clearing on
+dismiss made bulk delete unreachable entirely. Choosing an emoji does consume
+the gesture, but only the selection that gesture created.
+
+**The emoji is encrypted, and there is no plaintext column beside it.** Bodies
+need one only because every client in the field reads `messages.body`; nothing
+has ever read this table, so cipher-only is free. Sealed with the same
+`CryptoCore` + `packMacAndCiphertext` pair the body uses; AD is
+`"<messageId>:<userId>"`, so a blob cannot be replayed onto another message or
+attributed to the other partner. The broadcast carries the same ciphertext —
+encrypting only the column would still put every reaction across Supabase
+Realtime in the clear. **No key means no write:** the optimistic paint is taken
+back and the user is told, never a fallback to cleartext.
+
+**Ciphertext length is padded.** XChaCha20 is a stream cipher and nothing on
+this path pads, so an unpadded column was exactly `16 + utf8len(emoji)` — three
+buckets across the 72-glyph palette, and ❤️ (6 bytes, where the other five on
+the bar are 4) sat alone in its own. `octet_length(emoji_cipher)` would have
+named the value to anyone holding the database. Plaintext is NUL-padded to a
+fixed 32 bytes before sealing and stripped on open; the test walks the whole
+palette and asserts one distinct cipher length.
+
+**Two wires.** Broadcast `react` on the existing `mood_burst:<coupleId>` channel
+(the fast one, ~80–250ms), plus a new `reactions:<coupleId>` postgres_changes
+channel for durability. Its OWN channel deliberately, not a second handler on
+`receipts:<id>` — the delivery-tick path is the one thing in this screen that
+must not be disturbed, and it is untouched.
+
+**No notification is possible.** The only push trigger in the schema is
+`message_notify_on_insert AFTER INSERT ON public.messages`. Reactions never
+touch `messages`; probe 16 on production returned 0 triggers on
+`message_reactions`.
+
+### Database — applied to staging, then production
+
+Rollback written and PROVEN before the forward change: `drop table if exists
+public.message_reactions;` was executed for real on staging (table, 4 policies,
+3 indexes and the publication membership all gone, `messages` untouched) and
+then re-applied. A second run of the identical body is a no-op — re-run on
+staging, same counts, no error.
+
+RLS negative test, run on **both** projects in a rolled-back block, as a third
+account that is in neither person's couple:
+
+```
+01_member_insert_own            ok      09_stranger_forges_couple_id     42501
+02_partner_sees_rows            1       10_stranger_impersonates_A       42501
+03_partner_deletes_hers_rows    0       11_member_reacts_to_foreign_msg  42501
+04_partner_insert_own           ok      12_second_reaction_same_user     23505
+05_stranger_select_rows         0       13_member_changes_own_rows       1
+06_stranger_delete_rows         0       14_member_removes_own_rows       1
+07_stranger_update_rows         0       15_final_row_count               1
+08_stranger_reacts_to_our_msg   42501   16_no_trigger_on_reactions       0
+```
+
+Residue after, on production: `probe_users 0, probe_couples 0, messages 1,
+reactions 0`. A second block proved the REAL client call (a PostgREST upsert is
+`insert … on conflict do update`) passes both policies, that bytea round-trips
+byte-for-byte, that an unpaired brand-new account sees 0 rows and gets 42501,
+and that deleting a message cascades its reactions away:
+
+```
+A1_upsert_first ok   A2_upsert_changes_mind ok   A3_cipher_now 33
+A5_bytea_roundtrip_exact true   B1_unpaired_select_rows 0
+B2_unpaired_insert 42501   C1_cascade_on_message_delete 0
+```
+
+### The adversarial round earned its tokens again
+
+34 agents, six lenses, every finding put to a refuter. **16 survived.** Most of
+them were things two green gates and my own review had no way to see. All 16
+are fixed; the eleven fixes are recorded because each is a rule worth not
+re-learning.
+
+1. **`anon` held TRUNCATE on the new table (staging).** A table takes whatever
+   `pg_default_acl` mints, and the two projects do not agree — production's
+   default was narrowed by 20260601007010, staging's was not. TRUNCATE consults
+   no policy, and the anon key ships inside the APK. The migration now states
+   `revoke all … from anon`, `revoke truncate, references, trigger`, and `grant
+   select, insert, update, delete … to authenticated`. Both projects now read
+   `anon: (none)`, `authenticated: DELETE,INSERT,SELECT,UPDATE`.
+   **Rule: a grant a migration does not state is a grant nobody owns.**
+2. **A partner's removal never arrived over the durable wire.** Read back from
+   the live `realtime.apply_rls` on production: `and (not is_rls_enabled or
+   (c).is_pkey) -- if RLS enabled, we can't secure deletes`. RLS is on, so a
+   DELETE's old record is the primary key and nothing else — no `updated_at`,
+   so the handler returned early every time. `replica identity full` still
+   earns its place (the couple_id FILTER is matched from `wal->'identity'`), it
+   just does not survive into the payload. Removals are now clocked one tick
+   past the last known write from that person — their timeline, never the
+   server's, so a partner with a fast clock cannot have their own removal
+   rejected against their own add.
+3. **A removal had to win a timestamp tie.** A row's `updated_at` is written by
+   the ADD, so anything derived from that row carries the add's instant; the
+   add's branch parks on a decrypt while the removal's does not, so the two
+   arrive either way round. `apply` now takes a removal on equality and
+   requires an add to be strictly newer.
+4. **The fetch clobbered live state.** `replaceAll` bypassed the store's own
+   clock, and the window is built by the code: `_loadReactions` is fired
+   unawaited, `_subscribe` joins both wires immediately after, and the decrypt
+   inside `fetchFor` waits on the couple-key derive. Replaced by `mergeFetched`,
+   which folds the page in under a writes-counter snapshot — it still prunes
+   what the server no longer has, but cannot overwrite anything learned while
+   its own SELECT was in flight.
+5. **Nothing re-read reactions after a socket gap.** Both wires are live-only:
+   broadcast is at-most-once, and a rejoined postgres_changes channel starts its
+   cursor at the join. `_catchUp` now reloads them on every trigger except
+   `chat_open`, ABOVE the try — the common case is a partner who reacted
+   without sending anything, which the `missed.isEmpty` return would skip.
+6. **Multi-select had become unreachable** — see the decision above.
+7. **Opening the bar dismissed the keyboard.** `showGeneralDialog` moves first
+   focus to its modal scope, which unfocused the composer; with `adjustResize`
+   the Scaffold then grew ~300dp and the whole reversed list slid down out from
+   under a bar already pinned to where the message used to be.
+   `requestFocus: false` — nothing in the bar needs focus.
+8. **A refused write rolled back with `DateTime.now()`**, which by construction
+   beats the paint it is undoing — so a tap made while the failed write was in
+   flight was silently deleted. It now rolls back on `intent.at`, and the
+   store's own guard rejects it when superseded.
+9. **The chip that did not change popped every time its sibling left.** The
+   `ValueKey` was on `_Chip`, one level below the Row's direct child; unkeyed
+   Paddings match slot-for-slot first, so the survivor inherited the departed
+   chip's element, then failed the key check and remounted. Key moved up. The
+   entrance now also plays only for a reaction younger than 3s — a reversed
+   `ListView.builder` collects rows 250px out and re-inflates them, so mounting
+   is not the same event as arriving.
+10. **Reactions outlived a message deleted for everyone.** That RPC flags the
+    message rather than deleting it, so `on delete cascade` never fires — the
+    ciphertext of what somebody felt about a deleted message survived it. A new
+    migration adds `delete from public.message_reactions` behind `if found`
+    (the function is SECURITY DEFINER; unguarded it would erase reactions on any
+    guessable message id), plus a reporting backfill. Client half too, because
+    the device that owns a reaction ignores its own DELETE echo.
+    Verified on staging in a rolled-back block:
+    `D1_non_sender_left_reaction 1, D2_non_sender_left_message true,
+    D3_sender_scrubbed_reaction 0, D4_other_message_untouched 1,
+    D5_body_still_scrubbed true`. Production read-back: the RPC contains the
+    guarded delete, residue 0.
+11. **The outbox had no session teardown.** It kept the signed-out account's
+    uid and an armed backoff timer (up to 3 minutes) and fired the retry under
+    whatever session came next — RLS refuses that, the outbox reads it as
+    permanent, and the reaction was lost rather than resumed. `endSession()` now
+    runs beside `ChatSendQueue.instance.clear()` in `SessionNotifier`. The DISK
+    copy stays on purpose: ciphertext under a per-user key, restored by
+    `bindUser` at the next sign-in.
+
+### found, not fixed
+
+- `chat_screen.dart` — the selection toolbar is a Column sibling ABOVE the list,
+  so opening a selection shrinks the list viewport by ~60dp from the top. On a
+  reversed list the content does not move, it gets CLIPPED: long-press the
+  top-most visible message and the bar ends up anchored to a row that is no
+  longer painted. Pre-dates this diff (it is how the toolbar has always
+  worked); what is new is a bar pointing at it. The fix is to move the toolbar
+  into the Scaffold's `appBar` slot so both states occupy the same 56dp — a
+  restructure of the hard-won multi-select UI, deliberately not done inside a
+  reactions change.
+- `supabase/migrations` — **no migration in the repo creates
+  `messages.voice_path` or `messages.video_path`**, yet
+  `20260818160000_delete_for_everyone_scrubs_the_body.sql` (already in the repo,
+  already on production) references both. So that file has never been replayable
+  from the repo alone, and staging — which is built from the migrations — did
+  not have the columns. I hit this by `create or replace`-ing that function on
+  staging from production's live definition without reading staging's own
+  first, which broke it there for a few minutes. Repaired by adding the two
+  nullable text columns to staging (additive, zero rows, matching production),
+  which also moves staging toward the re-baseline §65/§67 already list as open.
+  The repo still needs a migration that creates them; that belongs to the
+  re-baseline work stream, not here.
+  **Rule, learned the hard way: read the LIVE definition on the project you are
+  about to replace it on — not on the one that happens to be newest.**
+- `_loadReactions` fetches only for the messages currently loaded. When §68's
+  scroll-back branch merges, `_loadOlder` must fetch reactions for each older
+  page it prepends, or scrolled-back history will show none.
+
+### Not verified
+
+No device pass. Everything above is gates plus live database probes; the
+long-press feel, the haptic, the bar's animation against a real keyboard and the
+two-handset broadcast latency are unproven until someone installs a build. No
+APK was built — the owner asks first.
+
+### Exact next step
+
+Owner installs a build and runs the two-handset pass: long-press near the very
+first and the very last message, react while the keyboard is up, react offline
+and watch it land on reconnect, and have one partner remove a reaction while the
+other has the chat open. Then the §68 scroll-back merge, which needs the
+reaction fetch hooked into `_loadOlder`.
+
+### §70 addendum — round 2, and the defect I introduced fixing round 1 (2026-08-19)
+
+A second adversarial pass over the ELEVEN FIXES above (4 agents, one lens each)
+returned 20 findings. Ten were real. Gates re-run after the last edit:
+`flutter analyze` **0 errors / 0 warnings**, chat_screen.dart's lint profile
+still byte-identical to HEAD's; `flutter test` **1073 green**, 67 of them in the
+two reaction files.
+
+**The big one was mine, and it was made by fix 4.** Two independent lenses found
+it. `mergeFetched`'s prune kept `_clock[key]` on purpose — and fix 3 had just
+made an ADD require a *strictly* newer timestamp. Together those turn every
+prune into a permanent tombstone against the reaction's own return: the durable
+INSERT carries the pruned instant as its `updated_at`, the pending overlay
+re-applies at `intent.at` which IS that instant, and every later page carries it
+too. All three refused on the tie. A reaction the user could still see on their
+partner's phone was gone from theirs for the life of the screen — and the
+commonest way in was the ordinary one: react on a flaky link, lock the phone,
+unlock it, and the chip is gone for good.
+
+Root cause in one sentence: **I made the clock do two incompatible jobs —
+ordering events, and recording that something had been pruned — and a prune is
+not a removal.** The prune now forgets the clock as well as the value.
+
+The other nine:
+
+12. **`applyRemoval` is deleted.** It clocked a durable DELETE one tick past the
+    LATEST known write, which is not the write the DELETE removes: un-tap then
+    re-tap inside half a second and the DELETE lands after the re-add's
+    broadcast, kills it, and then outranks the re-add's own INSERT forever. A
+    clockless event cannot be ordered, so the screen now `forget`s the key and
+    re-reads. The broadcast still makes the ordinary removal instant; this is
+    only the backstop for a dropped one.
+13. **A refused write no longer "rolls back to nothing".** That is right only
+    when the refused write was the FIRST reaction on a message; refuse a change
+    of mind and the server still holds the previous emoji, which the partner can
+    still see. It now forgets the key and re-reads.
+14. **The reaction fetch is single-flight.** A resume fires two triggers — this
+    screen's lifecycle callback and the shell's forced socket reconnect — and a
+    durable DELETE now asks for a third. Each concurrent pass was another
+    request fan-out, another full decrypt pass, and another chance to snapshot
+    the server mid-write.
+15. **The catch-up refetch moved AFTER `fetchSince`.** Its id list comes from
+    `_messages`, so running it first missed every reaction on a message the same
+    pass was about to recover. Still outside the try, because the commonest case
+    of all is a partner who reacted without sending anything.
+16. **The bar re-checks the message after its own awaits.** The partner can
+    delete it for everyone while the bar — or the picker behind it — is open;
+    without the re-check the reaction sealed, broadcast and landed durably on a
+    message whose body had just been scrubbed, where fix 9 then hid it from both
+    screens so nobody could take it back.
+17. **…and the INSERT policy now refuses it too**, `and not
+    m.deleted_for_everyone`. The client guard closes the window; the policy
+    closes the one an offline outbox retrying minutes later would still walk
+    through. Refusal is 42501, which the outbox already classifies as permanent.
+    Proven on staging in a rolled-back block:
+    `E1_live_message_accepts ok, E2_scrubbed_rows 0,
+    E3_late_retry_on_deleted 42501, E4_final_rows 0`. Production read-back:
+    `insert_blocks_deleted true, policies 4`.
+18. **`onlyThisRow` is compared against the SELECTABLE items of a row.**
+    `ChatSelection.toggle` silently refuses an item still uploading, so a
+    partially-sent album selects fewer rows than it holds and the old equality
+    could never be true — reacting to such an album left the user stranded in
+    selection mode.
+19. **The outbox keeps the NEWER intent, not the last to arrive.** Sealing waits
+    on the couple-key derive; a removal has nothing to seal and no await at all,
+    so a "take it back" could be queued — and sent — before the earlier add
+    finished sealing, and the stale add then overwrote it. Both phones showed
+    nothing until a restart, when the reaction came back.
+20. **`endSession` fences a flush already running.** `flush` snapshots what it
+    is about to attempt, so clearing the map did not stop it; a session counter
+    now stops the loop at the next await instead of letting it write under the
+    next account's JWT.
+21. **The bar's geometry counts the keyboard.** Fix 7 keeps the IME up, and
+    `padding.bottom` is 0 while it is showing — so a bar placed below a tall
+    message near the top of the viewport landed behind the keyboard, invisible
+    and untappable. It now clamps against `max(padding.bottom,
+    viewInsets.bottom)`.
+22. **The entrance gate rejects a future-dated reaction.** `tally.at` is the
+    OTHER device's clock, and `now - at < 3s` is satisfied by any negative
+    difference — so a partner whose handset runs ten minutes fast replayed the
+    pop on every scroll-past for ten minutes, which is exactly the jump fix 8
+    was added to stop.
+23. **The stated rollback had become wrong.** 20260819100000 made
+    `delete_message_for_everyone` reference the reactions table, and a PL/pgSQL
+    body is not a tracked dependency — so the documented `drop table` would
+    succeed silently and leave every "delete for everyone" raising 42P01,
+    taking the body scrub down with it in the same transaction. Both migration
+    headers now state the order: restore the function first, then drop.
+
+**Process note worth keeping.** Round 1 found 16 real defects in code that was
+already gate-green; round 2 found 10 more, and the worst of them was created by
+round 1's own fixes. A fix is a change, and a change is unreviewed until
+something adversarial has read it — **re-running the gates is not re-running the
+review.** Every one of the ten is now pinned by a test, including four source
+pins for the ordering the store cannot enforce on its own.

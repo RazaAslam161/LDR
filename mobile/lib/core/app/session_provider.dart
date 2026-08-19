@@ -18,6 +18,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
+import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
@@ -368,6 +369,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
     MediaUrls.clear();
     MapToken.clear();
     ChatSendQueue.instance.clear();
+    // Same reason, and one more: the reaction outbox keeps an armed backoff
+    // timer, so a reaction left unsent would have retried minutes later under
+    // whichever session came next. Its disk copy survives on purpose — it is
+    // ciphertext under this account's own key, and signing back in restores it.
+    ChatReactionOutbox.instance.endSession();
     // The gallery's failed-upload tiles render the picked file straight from
     // disk — the previous account's photograph, shown to the next account,
     // if this is skipped.
