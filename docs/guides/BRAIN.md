@@ -7499,3 +7499,76 @@ commit there. `E:\us-app` (1 commit ever, no remote, 147 untracked incl.
 **Exact next step:** push `fix-sprint` — it is ahead 8, behind 0. Then decide
 the armeabi-v7a drop, the Aug-11 stash, and whether affectionate-neumann
 merges or dies.
+
+## §74 — Cost and quota abuse: the caps that were missing (2026-08-18)
+
+Prompted by the owner asking whether hammering the login page could cost him
+thousands. It cannot — but three other surfaces had no cap at all, and one of
+them is the only path in this app to a real Cloudflare invoice.
+
+**The damage model, stated once because it changes every judgement below:** this
+project is on the Supabase FREE plan. Free never bills overage; it throttles,
+and past 500 MB of database it puts the project into READ-ONLY. So everywhere
+except Cloudflare TURN the worst case is an OUTAGE, not a bill. TURN is billed
+for real: $0.05/GB after 1,000 GB/month free (verified in Cloudflare's docs).
+
+**FIXED, staging then prod, every postcondition asserted**
+(`20260818130000_cost_abuse_caps.sql`):
+1. **TURN concurrency.** `claim_turn_mint` allowed 10 mints/hour and
+   turn-credentials issues each with `ttl = 86400`, so up to ~240 credentials
+   could be simultaneously valid per account, each an uncapped relay key. Added
+   a 25/day ceiling beside the hourly one, taking the worst case to 25 live
+   credentials. The TTL is the better lever and CANNOT move yet: shipped clients
+   cache a credential up to 20h (call_controller.dart:438, :469), so lowering it
+   strands calls on a fleet with no update channel — the function's own comment
+   says to lower it only once min_build enforces a build that caches for less.
+2. **messages.** Every insert fires notify_message -> net.http_post ->
+   reach-notify -> FCM, and it was the one table wired to two metered surfaces
+   with no limiter. Added to `send_next_allowed_at` as sender_id / no gap /
+   600 per hour, and `enforce_send_rate` gained `sender_id` as a fourth coalesce
+   fallback. No per-message gap on purpose — a delay would punish the fast
+   back-and-forth the app exists for; the hourly ceiling is the bound.
+3. **diag_events.** Any signed-in account could insert unlimited rows with a
+   bare jsonb column against the 500 MB read-only ceiling. Its neighbour
+   client_errors has had a 10/hour trigger since 20260601007800; this table was
+   simply missed. Same trigger, same silent drop.
+
+Prod now carries 8 rate-limit triggers: enforce_send_rate on reach_events,
+care_nudges, call_invites, partner_rewrap_requests, memory_threads and messages,
+plus diag_events_rate_limit and client_errors_rate_limit.
+
+**REFUTED — do not re-report.** `reap-storage` runs with verify_jwt=false but IS
+guarded by the same constant-time `x-notify-secret` check reach-notify uses. An
+audit agent flagged it as naked; it is not.
+
+**NOT FIXED, and only the owner can:**
+- **The email bucket is the cheapest total outage in the product.** No custom
+  SMTP is configured, so auth email rides Supabase's shared sender at a
+  documented **2 messages per hour, project-wide**. Two anonymous requests to
+  /auth/v1/signup or /auth/v1/recover drain the hour for everyone: no signups,
+  no password recovery. Fix is a real SMTP provider (Resend/Postmark/SES with a
+  verified domain), which also makes the limit tunable.
+- **No CAPTCHA anywhere** — zero hits for captcha/turnstile/attestation across
+  mobile/lib, supabase and the Android sources. It is what turns every ceiling
+  above from "an attacker drives into it" into "an attacker cannot reach it".
+  Enabling Turnstile needs a client build that sends the token AND a min_build
+  bump first, or every shipped APK breaks at sign-in.
+- **account-delete edge-function invocations.** Deliberately NOT limited in
+  isolation, and this is a judgement not an omission: a DB-side limiter would
+  still let the isolate spin (the invocation is billed either way), and the same
+  email bucket is drainable directly via /auth/v1/recover with no function
+  involved. Both close together under custom SMTP + Turnstile; fixing one
+  endpoint alone buys nothing.
+
+**Honest note on the audit itself:** the workflow that produced these findings
+lost 2 of its 4 agents to connection errors, including the paid-third-party
+lens. The TURN numbers here were therefore verified by hand, not inherited from
+an agent.
+
+**Gates:** SQL only, no Dart touched, so the Flutter gates are unchanged and
+were not re-run — running them would prove something about another session's
+in-flight code, not this change.
+
+**Exact next step:** owner configures custom SMTP, then Turnstile behind a
+min_build bump. After that, drop the TURN ttl from 86400 once a build that
+caches for less is enforced.
