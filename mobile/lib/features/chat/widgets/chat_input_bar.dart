@@ -58,6 +58,15 @@ class ChatInputBar extends StatefulWidget {
   /// partner's chat is untouched. When null, the clear button is hidden.
   final Future<void> Function()? onClearConversation;
 
+  /// True while a voice note is being recorded here.
+  ///
+  /// On the widget, not in the State, because the thing that needs the
+  /// answer is the shell - and the State is exactly what the shell's own
+  /// tab change destroys. Asking the bar after the fact is asking an
+  /// object that no longer exists. Same shape as PipMode.active and
+  /// AppLock.locked, which the shell already reads for the same reason.
+  static final ValueNotifier<bool> recording = ValueNotifier<bool>(false);
+
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
 }
@@ -156,6 +165,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _saveDraft();
     _text.removeListener(_onTextChanged);
     _text.dispose();
+    // Lowered here too: _stopRecording is a setState and cannot run from
+    // dispose, so a bar torn down mid-hold would leave the flag raised
+    // for the life of the process - and the shell would never move
+    // anyone home again.
+    ChatInputBar.recording.value = false;
     _recorder.dispose();
     super.dispose();
   }
@@ -401,6 +415,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         _recording = true;
         _currentRecordingPath = path;
       });
+      ChatInputBar.recording.value = true;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -422,6 +437,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _recording = false;
       _currentRecordingPath = null;
     });
+    ChatInputBar.recording.value = false;
     if (cancel || path == null) return;
     final file = File(path);
     if (!await file.exists()) return;

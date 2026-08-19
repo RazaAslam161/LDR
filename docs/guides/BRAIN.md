@@ -6620,6 +6620,66 @@ fix sitting in its working-tree diff; when that lands, the next push is
 the first run whose color means anything. The 'dependency advisories'
 job passed on my push.
 
+## §68 — Chat history: infinite scroll-back replaces the 300-message cap (2026-08-18)
+
+Worktree session (branch claude/affectionate-neumann-2eba13, worktree
+dreamy-joliot-bb81a9) — took the §63/§65 open item "Chat shows only newest
+300 messages". COMMITTED on that branch at the owner's request as 5eaae12
+(4 files, +427/−21); not merged.
+
+**What shipped (mobile/lib/features/chat/):**
+- chat_repository.dart: `fetchBefore(coupleId, beforeSeq)` — seq-keyed
+  backward pages (seq desc, `olderPageSize` 100), hydrated through the same
+  hydrate() path, media warmed AFTER prepend. `fetch` now returns
+  `({messages, hasMore})` with hasMore from the RAW row count via the new
+  `shapePage` (a parse-dropped row must not read as end-of-history — and a
+  sub-300 chat proves itself complete with no probe). `backPageCursor` =
+  lowest positive seq (seq-0 optimistic rows skipped). `copyWith` gained
+  deletedForEveryone/deletedBy for local tombstones.
+- chat_screen.dart: `_loadOlder` + two triggers (scroll edge extentAfter<600
+  under reverse:true, and the loader row's own build for unscrollable/
+  filtered-out cases). Prepend is jump-free structurally: reverse list, older
+  pages append at the far end. `_olderFetchFailed` parks failures AND
+  no-progress pages as a tap-to-retry row (without it the loader row's build
+  re-triggered a zero-backoff retry storm offline — found by adversarial
+  review, round 2). `_reload({keepPages})` keeps scroll-back pages on own
+  deletes (extent preserved, no teleport) but wipes on the DELETE backstop
+  (keepPages:false — kept pages could resurrect a partner's cleared
+  conversation if a message landed inside the refetch window). Reload arming
+  is monotonic (`_hasMoreHistory && page.hasMore`) so an exhausted
+  exactly-300-row chat cannot re-arm per delete. `_deleteSelected` gates on
+  `_selection.busy` (deleteAll's busy `const []` read as all-succeeded and
+  falsely tombstoned) and tombstones its rows locally before reload. Clear
+  paths disarm the pager. Oldest loaded row's date header only when history
+  is exhausted (stops the page-boundary flicker).
+
+**Verified:** flutter analyze 0 errors / 0 warnings (533 pre-existing infos);
+flutter test 975 green ("All tests passed!") including new
+test/unit/chat/back_pagination_test.dart (shapePage raw-count rule,
+backPageCursor, tombstone copyWith — all executing production code).
+Three adversarial review rounds (17 + 7 + 3 agents): 12 confirmed findings
+fixed across rounds, round 3 = 3/3 resolved, 0 new. chat_multi_select_test's
+source pin updated to the new `_reload({bool keepPages = true})` signature
+(assertion unchanged).
+
+**Known residual (accepted):** loader-row removal on the final EMPTY page
+clamps ~46px if parked exactly at the top when history is an exact multiple
+of 100 — rare timing, one frame.
+
+**found, not fixed (pre-existing, out of scope):**
+- chat_repository.subscribe listens INSERT/DELETE only — a partner's
+  delete-for-everyone (an UPDATE) never live-updates an open screen.
+- chat_screen `_reload` `catch (_) {}` and `_init`'s fetch `catch (_)` swallow
+  errors silently.
+- `_reload` has no generation guard: a pre-clear fetch response applying
+  after a wipe can reinstall the stale window until remount (predates this
+  diff — old code wholesale-replaced too).
+- fetchSince asc/limit-500: a >500-message gap catches up the OLDEST 500.
+
+**Exact next step:** owner merges the branch when ready; on-device pass of
+scroll-back (deep history, airplane-mode retry row, delete-while-deep) is
+the remaining unverified surface — no widget test drives the screen.
+
 ## §69 — The cover "exit ring" is gone; each cover answers for itself (2026-08-19)
 
 The ring (`CoverExitButton`, added by `6e3aad0`) was a small unlabelled circle
@@ -7198,3 +7258,144 @@ round 1's own fixes. A fix is a change, and a change is unreviewed until
 something adversarial has read it — **re-running the gates is not re-running the
 review.** Every one of the ten is now pinned by a test, including four source
 pins for the ordering the store cannot enforce on its own.
+
+## §71 — Coming back to the app: a fresh Home after a long absence, and the doze reconnect that had never run (2026-08-19)
+
+Owner: "reopening the app lands deep inside whatever screen the user left
+(e.g. Touch), with stale data — make it instant, smooth, responsive."
+
+**Root cause, and it is not route persistence.** There is no route
+persistence anywhere in this app — no `initialLocation`, no `restorationId`,
+no saved route. Two separate things produce the symptom:
+
+1. `shellTabProvider` (core/app/providers.dart:31) is an app-scope
+   `StateProvider<int>` living in the root `ProviderScope`. It outlives the
+   shell. So the tab index survives.
+2. `MilesApp.raiseCover()` swaps `MaterialApp.router` — AppShell and all four
+   tabs included — for the disguise cover on EVERY real background, and both
+   flavours ship `DISGUISE_ENABLED=true` (build.gradle.kts:102 and :183). So
+   `_AppShellState` is DISPOSED while the user is away and a brand-new one
+   mounts on return, straight onto the surviving index.
+
+**The consequence nobody had noticed, and the real "stale data".**
+`_leftForegroundAt` was an INSTANCE field and the doze reconnect
+(`app_shell.dart`, `away >= _dozeRisk` → `_reconnectRealtime()`) lived in the
+shell's own `didChangeAppLifecycleState`. The instance that watched the app
+leave is never the instance that watches it come back, and `resumed` is
+delivered to a tree the new shell is not yet part of. So that reconnect —
+**the only force-reconnect of the realtime socket on resume anywhere in the
+app** (`grep realtime.disconnect` returns exactly one call site) — has never
+once fired on the path it was written for. It could only ever time a picker
+or a PiP call. Every feature riding that socket (chat live-render, receipts,
+presence, call signalling) came back joined-but-dead after a long absence,
+which is exactly what "stale" looked like.
+
+**What shipped (mobile/lib/features/shell/app_shell.dart):**
+- `_leftForegroundAt` is now `static`, so the clock survives the shell being
+  swapped out behind the cover. It dies with the process, which is correct —
+  a cold start already lands on Home with a fresh tab provider.
+- `_returned({required bool fromMount})` is called from BOTH
+  `didChangeAppLifecycleState(resumed)` (cover down: picker, PiP, shade peek)
+  and from `initState` (cover up: the ordinary background). Same event, two
+  shapes, one answer. The mount call is placed BEFORE the first build, not in
+  the post-frame callback — deciding after the frame paints the old tab and
+  then swaps it, which is the jump being removed.
+- Two pure top-level functions carry the decision so it is testable without a
+  clock seam or pumping AppShell (which is not pumpable — `sessionProvider`
+  reaches `SupabaseService.client`, a `static late final`):
+  - `landsHome({away, overlayActive})` — `kLongAbsence` is **20 minutes**.
+    Deliberately high: the common absence here is a reply gap, and a short
+    threshold would keep pulling people out of a conversation they are still
+    having.
+  - `resumeIsBusy({callLive, onChatTab, recording, draftPending, sending})`.
+- `_landHome` writes the LITERAL `0` and pops nothing. 0 is the only index
+  that names the same room for every account (3 is Closer for a modest adult
+  and Touch for a non-modest one; index 2 is Camera and has no body at all).
+  A pushed route the user opened — /call, the vault, an awaited camera result
+  — is left exactly where it is; they find Home underneath it on the way out
+  and the observer republishes the tab itself on that pop.
+- Presence is published ONLY when `GoRouter.of(context).state.uri.path` is
+  `/app`. Announcing 'Home' from under a pushed route is a lie the observer's
+  dedupe then latches past the pop.
+
+**A defect found in my own diff before it landed, and the rule it teaches.**
+The overlay exclusion was first written as
+`MilesApp.systemOverlayActive || MilesApp.authInProgress` read on the way
+back. That is always false: `main.dart` clears `systemOverlayActive` on every
+`resumed`, and `_MilesAppState`'s observer is registered BEFORE the shell's
+(it builds the tree the shell lives in), so it wipes the flag first. A
+twenty-minute photo pick would have dumped the user on Home — the exact trap
+the file already warns about. It is now latched at DEPARTURE
+(`_leftViaOverlay`, set beside the timestamp) and never read on return.
+General form: **a flag another observer clears on the same event cannot be
+read after that event — capture it when it still means something.**
+
+**Guards (what stands the reset down):** a live call, always and everywhere —
+`PipMode.active` or CallState calling/ringing/connected. A PiP call reports
+the app backgrounded for its whole length, so a 30-minute call is a
+30-minute "absence" that never happened, and CallPip is drawn OVER the shell
+so moving the tab under it is visible. The other three are scoped to the Chat
+tab, because that is the only State a tab change destroys: an active
+recording, a composer with text, and a send still `sending`. Honest note —
+only the recording actually loses data (the AudioRecorder belongs to the
+input bar's State); ChatDraftStore encrypts the draft to disk and
+ChatSendQueue exists precisely so a send outlives its screen. Those two are
+guarded for the user's place, not their bytes. `SendStatus.failed` is
+deliberately NOT busy: a permanently failed send would pin someone to the
+Chat tab for the life of the install.
+
+**mobile/lib/features/chat/widgets/chat_input_bar.dart:** one static
+`ValueNotifier<bool> recording` on the widget (not the State — the State is
+what the tab change destroys). Lowered in `_stopRecording` AND in `dispose`;
+the dispose half is load-bearing, since `_stopRecording` is a `setState` and
+cannot run from there, so a bar torn down mid-hold would otherwise leave the
+flag raised for the life of the process.
+
+**found, not fixed:**
+- `chat_input_bar.dart` `dispose()` calls `_recorder.dispose()` without
+  stopping an in-progress recording, so a tab change mid-hold orphans the
+  `.m4a` in temp with no send and no word to the user. Pre-existing and
+  unconditional (any tab tap during a hold).
+- `screen_presence.dart` `visibleTabScreens` has no `showCloser` and
+  `app_shell.dart` sets only `showTouch`, so for a non-adult the observer
+  over-counts tabs by one and can publish 'Closer' to a user who has none.
+- `closer_screen.dart:40` runs `_prepareKey()` from `didChangeDependencies`,
+  so the Closer grid flashes back to a spinner on any keyboard open or
+  rotation, not just on mount.
+- TouchMapScreen and CloserScreen have no resume refresh at all; Chat's
+  `_catchUp(trigger:'resume')` is the only delta-shaped resume fetch in the
+  app. Not addressed here: no model in `lib/` implements value equality
+  (`grep 'operator =='` over lib/ returns nothing), so "repaint only when the
+  data changed" is not reachable for them without an equality pass over
+  Profile/Couple/Presence/SessionState first. That is its own piece of work.
+
+**Verified (gates re-run AFTER the last edit):**
+- `flutter analyze` — **0 errors, 0 warnings**, 535 issues (all info). The 6
+  infos on the two touched files are byte-identical to the pre-change
+  baseline, only line-shifted (app_shell 3→3, 27→28, 58→110, 107→212;
+  chat_input_bar 158→167, 427→443). Zero new issues from this diff.
+- `flutter test` — **1074 tests, "All tests passed!", exit 0**, including all
+  19 new ones in `test/unit/shell/shell_resume_test.dart`, confirmed by
+  reading the JSON reporter's own records for that suite (19 tests, every
+  result `success`).
+
+**A capture trap worth recording for the next session.** `flutter test`'s
+console reporters (compact AND expanded) redirected to a file drop most test
+names — a full run named only 61 of 110 suites, and `shell_resume_test`
+appeared zero times in both, which looked exactly like the file not being
+discovered. It was running the whole time. **Do not conclude anything from a
+grep over redirected `flutter test` console output; use
+`--file-reporter json:<path>` and read the records.** I nearly reported a
+non-existent discovery bug off the back of it.
+
+**Still open / not done here:** no on-device pass — every claim above is the
+gate and static reading, nothing was installed or run on a handset, and no
+APK was built. An adversarial review pass over this diff was launched and had
+not returned when this was committed; anything it finds is the next session's
+first item. The four "found, not fixed" items above are untouched.
+
+**Exact next step:** on-device check of the three paths that only a phone can
+show — (1) background 30+ min on the Touch tab, return, confirm Home and a
+live socket; (2) attach a photo after a long gallery browse, confirm you come
+back to Chat and not Home; (3) a PiP call longer than 20 minutes, confirm
+hanging up leaves you where you were.

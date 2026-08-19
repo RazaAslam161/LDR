@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,8 +24,13 @@ import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
+import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/core/services/app_lock.dart';
+import 'package:miles/features/chat/chat_draft_store.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_screen.dart';
+import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/closer/closer_screen.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
@@ -33,8 +39,55 @@ import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
+import 'package:miles/main.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+
+/// How long away makes the screen you left the wrong one to come back to.
+///
+/// Tuned high on purpose. The common absence in this app is a reply gap - the
+/// phone goes down mid-conversation and comes back to the same thread - and a
+/// short threshold would keep taking people out of a chat they are still
+/// having. Past twenty minutes the tab is no longer context, it is only where
+/// they happened to be standing, and returning to Touch or Closer is a worse
+/// answer than returning to Home.
+const kLongAbsence = Duration(minutes: 20);
+
+/// Whether a return after [away] should land on the default tab instead of the
+/// one the user left.
+///
+/// [overlayActive] is the app handing focus out ON PURPOSE - a picker, the
+/// biometric prompt, the in-app camera, a permission dialog. None of those is
+/// the user leaving, and counting them is how attaching one photo would end on
+/// the Home tab. It is the same exclusion the cover and the app lock already
+/// honour (MilesApp.systemOverlayActive / MilesApp.authInProgress).
+bool landsHome({required Duration away, required bool overlayActive}) =>
+    !overlayActive && away >= kLongAbsence;
+
+/// Work that landing on Home would destroy or orphan, so the landing stands
+/// down and the user keeps the screen they were on.
+///
+/// [callLive] is global: a call survives a tab change, but the return-to-call
+/// window and the PiP window are drawn OVER the shell, so moving the tab
+/// underneath them is visible, pointless, and drops the user somewhere else
+/// the moment they hang up.
+///
+/// The other three live in the Chat tab's own State, which is exactly what a
+/// tab change disposes - so they only count while Chat is the tab being left.
+/// Two of them are safe by construction and are honoured anyway: a draft is
+/// encrypted to disk by ChatDraftStore and comes back, and ChatSendQueue
+/// exists precisely so a send outlives the screen that started it. Neither
+/// loses data; both would lose the user's place. [recording] is the one that
+/// loses the recording itself - the AudioRecorder belongs to the input bar's
+/// State and goes down with it.
+bool resumeIsBusy({
+  required bool callLive,
+  required bool onChatTab,
+  required bool recording,
+  required bool draftPending,
+  required bool sending,
+}) =>
+    callLive || (onChatTab && (recording || draftPending || sending));
 
 /// Bottom-nav shell. Tab 0 is Home (the landing screen). The Closer tab is only
 /// shown to verified adults. An app-wide listener pops the full-screen Reach
@@ -67,12 +120,37 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingMemory.addListener(_onPendingMemory);
     realtimeResumed.addListener(_rearmAlwaysOn);
     ReleaseGate.revision.addListener(_onReleaseChanged);
+    // Before the first build, not after it: deciding this in a
+    // post-frame callback paints the tab they left for one frame and
+    // then swaps it, which is the jump this change exists to avoid.
+    _returned(fromMount: true);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onReady());
   }
 
   /// When the app last left the foreground, so a resume can tell a cover flip
   /// from a real absence.
-  DateTime? _leftForegroundAt;
+  ///
+  /// STATIC, and that is the whole of the repair below it. [MilesApp.raiseCover]
+  /// swaps the router - this shell included - for the disguise cover on every
+  /// real background, and both flavours ship with the disguise on. So the
+  /// instance that watched the app leave is never the instance that watches it
+  /// come back: as a plain field this could only ever time a picker or a PiP
+  /// call, which is why the doze reconnect underneath it has never once run on
+  /// the absence it was written for. It dies with the process, which is right -
+  /// a cold start already lands on Home with a fresh tab provider.
+  static DateTime? _leftForegroundAt;
+
+  /// Whether that departure was the app handing focus out on purpose.
+  ///
+  /// Latched with the timestamp above and NOT read on the way back, which
+  /// is the only way it can be true. MilesApp clears systemOverlayActive
+  /// on every `resumed` (main.dart), and its observer is registered
+  /// before this one because it builds the tree this lives in - so by the
+  /// time a resume reaches here the flag has already been wiped and asking
+  /// it would always answer 'the user left'. Asked at the moment of
+  /// leaving, it answers what it is for: a picker, a permission dialog or
+  /// the biometric prompt is what took the foreground, not the user.
+  static bool _leftViaOverlay = false;
 
   /// Below this, a socket cannot have been killed by doze — Android does not
   /// freeze a process that was away for two seconds.
@@ -81,13 +159,38 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      _leftForegroundAt ??= DateTime.now();
+      if (_leftForegroundAt == null) {
+        _leftForegroundAt = DateTime.now();
+        _leftViaOverlay =
+            MilesApp.systemOverlayActive || MilesApp.authInProgress;
+      }
       return;
     }
-    final away = _leftForegroundAt == null
-        ? Duration.zero
-        : DateTime.now().difference(_leftForegroundAt!);
+    _returned(fromMount: false);
+  }
+
+  /// The app is in front of the user again.
+  ///
+  /// Called from two places, because a return arrives in two shapes and only
+  /// one of them was ever handled. With the cover DOWN - a picker, PiP, a
+  /// shade peek - this shell is alive and receives `resumed`. With the cover
+  /// UP, which is the ordinary background, `resumed` is delivered to a tree
+  /// this shell is not part of, and the first thing it learns is its own
+  /// mount. Same event, same answer, so one method serves both.
+  void _returned({required bool fromMount}) {
+    final left = _leftForegroundAt;
+    final viaOverlay = _leftViaOverlay;
     _leftForegroundAt = null;
+    _leftViaOverlay = false;
+    // A cold start, or a resume with no recorded absence. Nothing to decide.
+    if (left == null) return;
+    final away = DateTime.now().difference(left);
+
+    // Short-circuited on purpose: [_resumeIsBusy] reads four providers and
+    // singletons, and a brief absence - the common case by a wide margin -
+    // must not pay for a question it is never going to ask.
+    final home =
+        landsHome(away: away, overlayActive: viaOverlay) && !_resumeIsBusy;
 
     // Resetting the socket closes EVERY channel on it. A trace showed all five
     // going down together on a resume — messages, receipts, mood_burst,
@@ -97,14 +200,68 @@ class _AppShellState extends ConsumerState<AppShell>
     //   signal_subscribe           status:closed
     //
     // An offer arriving inside that window is missed outright, and this app
-    // resumes constantly because the disguise cover flips it. So the reset now
+    // resumes constantly because the disguise cover flips it. So the reset
     // happens only when the app was away long enough for doze to have actually
     // killed the socket. A cover flip, a picker or a shade peek leaves it alone.
     Diag.record(DiagArea.app, 'rt_resume_decision', fields: {
       'away_ms': away.inMilliseconds,
       'reconnected': away >= _dozeRisk,
+      'overlay': viaOverlay,
+      'home': home,
+      'mount': fromMount,
     });
     if (away >= _dozeRisk) _reconnectRealtime();
+    if (home) _landHome(publish: !fromMount);
+  }
+
+  /// Reads the live state behind [resumeIsBusy]. See it for why each of these
+  /// counts, and why three of them are scoped to the Chat tab.
+  bool get _resumeIsBusy {
+    final call = ref.read(callControllerProvider).state;
+    final couple = ref.read(sessionProvider).couple;
+    return resumeIsBusy(
+      callLive: PipMode.active.value ||
+          call == CallState.calling ||
+          call == CallState.ringing ||
+          call == CallState.connected,
+      onChatTab: ref.read(shellTabProvider) == _chatTab,
+      recording: ChatInputBar.recording.value,
+      draftPending:
+          couple != null && (ChatDraftStore.peek(couple.id) ?? '').isNotEmpty,
+      // Only what is actually moving. A send that has already FAILED sits in
+      // the queue with a retry affordance until the user deals with it, and
+      // reading that as busy would pin someone to the Chat tab for good.
+      sending: ChatSendQueue.instance.pending
+              .any((s) => s.status == SendStatus.sending) ||
+          ChatSendQueue.instance.pendingText
+              .any((s) => s.status == SendStatus.sending),
+    );
+  }
+
+  /// Select Home, without lying about where the user is standing.
+  ///
+  /// The literal 0 is deliberate: it is the only index that names the same
+  /// room for every account. Touch and Closer are conditional destinations, so
+  /// 3 is Closer for one user and Touch for another, and index 2 (Camera) has
+  /// no body at all.
+  ///
+  /// Nothing is popped. A route the user pushed - the call screen, the vault,
+  /// a capsule - stays exactly where it is; they simply find Home underneath
+  /// it on the way out, and the observer republishes the tab itself on that
+  /// pop.
+  void _landHome({required bool publish}) {
+    final tabs = ref.read(shellTabProvider.notifier);
+    if (tabs.state == 0) return;
+    tabs.state = 0;
+    // Published only when the shell is genuinely what the user is looking at.
+    // Announcing 'Home' from underneath a pushed route tells the partner the
+    // wrong room, and the observer's dedupe then keeps that lie past the pop.
+    // On the mount path there is nothing to publish from - an InheritedWidget
+    // cannot be read during initState - and _onReady's own publishActiveTab
+    // covers it a frame later, from the tab this has already corrected.
+    if (publish && GoRouter.of(context).state.uri.path == '/app') {
+      presenceRouteObserver?.publishActiveTab();
+    }
   }
 
   /// Realtime sockets die silently during Android doze (no close event), so the
@@ -249,10 +406,26 @@ class _AppShellState extends ConsumerState<AppShell>
 
   /// The repair half of the picker's App-Lock precondition: a cover applied
   /// by an older build, still worn, with no lock enrolled.
+  /// Asked ONCE, and never again if the answer was no.
+  ///
+  /// "Not now" used to just pop the dialog and persist nothing, so this fired
+  /// on every shell mount — and the disguise backgrounds the app, so Android
+  /// kills the process routinely and the shell mounts constantly. The result
+  /// was a prompt that reappeared for the rest of the install's life, which
+  /// reads as a bug rather than advice.
+  ///
+  /// App Lock is the user's call. A recommendation that cannot be declined is
+  /// not a recommendation, and one that re-asks forever teaches people to
+  /// dismiss dialogs without reading them — which is the opposite of what a
+  /// security prompt is for.
+  static const _lockNudgeDeclinedKey = 'miles_lock_nudge_declined_v1';
+
   Future<void> _nudgeLockForCover() async {
     final profile = await DisguiseService.current();
     if (profile.cover == DisguiseCover.none) return;
     if (await AppLock.isEnabled()) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_lockNudgeDeclinedKey) ?? false) return;
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -266,7 +439,13 @@ class _AppShellState extends ConsumerState<AppShell>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () {
+              // Remembered, so this is genuinely "not now" and not "ask me
+              // again in ninety seconds". Turning App Lock on later clears
+              // nothing — the enabled check above short-circuits first.
+              unawaited(prefs.setBool(_lockNudgeDeclinedKey, true));
+              Navigator.pop(ctx);
+            },
             child: const Text('Not now'),
           ),
           TextButton(
