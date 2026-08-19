@@ -7399,3 +7399,63 @@ show — (1) background 30+ min on the Touch tab, return, confirm Home and a
 live socket; (2) attach a photo after a long gallery browse, confirm you come
 back to Chat and not Home; (3) a PiP call longer than 20 minutes, confirm
 hanging up leaves you where you were.
+
+## §72 — Commit-hygiene audit across every session and worktree (2026-08-19)
+
+Read-only audit, no files fixed, nothing committed. Answer to "did every
+session commit its work": no — four things are unrecorded, and one of them
+is eight days old.
+
+**Live while auditing.** Five session transcripts under
+`~/.claude/projects/E--LDR/` were written within five minutes of 10:32
+(580e227a, d8bacd4d, e8cf7a52, 2f0b36d5, 269a06cc), all `gitBranch:
+fix-sprint`, all cwd `E:\LDR` or `E:\LDR\mobile`. `b6e3472` landed at
+10:35:11 in the middle of this audit and swept up §68 — an entry written by
+the worktree session, not by the committer. It was rescued, not lost, but it
+is the lost-update shape Instruction 7 warns about, observed live.
+
+**1. `message_preview_port.dart` is untracked and load-bearing.**
+`mobile/lib/features/chat/message_preview_port.dart` is imported by
+`fcm_service.dart:14` and `reach_notifications.dart:8` — both TRACKED and
+both currently modified. Any session that commits those two without
+`git add`ing the port ships a tree that does not compile. Highest-risk item
+in the repo right now.
+
+**2. Stash from 2026-08-11 19:43, 156 commits behind.** `stash@{0}: WIP on
+fix-sprint: 2a80192` — location_service.dart +222, home_screen.dart +95,
+settings_screen.dart +57, call_controller.dart, permissions_bootstrap.dart,
+app_shell.dart +37 (391 insertions). Those same six files have taken
++2329/−280 since that base. It will not apply cleanly. No BRAIN section has
+ever mentioned it; grep for "stash" in this file returns nothing before this
+line. Someone must decide: rebase it, or drop it and say so.
+
+**3. `claude/affectionate-neumann-2eba13` is committed but reachable from
+nowhere else.** `5eaae12 feat(chat): history no longer ends at message 300`
+(4 files, +427/−21), the §68 work. Not merged into fix-sprint, no upstream,
+not on origin — it lives only in the worktree
+`.claude/worktrees/dreamy-joliot-bb81a9`. It branched from `b8eff83`, 10
+commits behind fix-sprint tip. Prune that worktree and delete the branch and
+the commit survives only in reflog.
+
+**4. Uncommitted version bump 46 → 48.** `release_gate.dart` and
+`pubspec.yaml` are bumped together (correct), but uncommitted.
+`tool/release.sh`'s new comment cites measurements from build 47, and
+`Miles.apk` at the repo root is dated 2026-08-18 08:32 — I did not unpack it,
+so which build that APK actually is remains UNVERIFIED.
+
+**Clean, for the record:** both worktrees have empty status;
+`claude/dreamy-joliot-bb81a9` and `claude/compassionate-tereshkova-b4509f`
+are both `880ef6f`, already an ancestor of fix-sprint and already on origin —
+fully merged, safe to delete along with the tereshkova worktree.
+
+**Outside this repo:** `E:\us-app` has exactly one commit ever
+(`eed765f Initial commit`, 2026-06-25), no remote configured at all, 6
+modified/deleted tracked files and 147 untracked — the entire Expo prebuild
+`android/` tree, including `android/app/debug.keystore`. That app is
+unbacked-up and one `git add -A` away from committing a keystore.
+
+**Exact next step:** whoever next commits `fcm_service.dart` or
+`reach_notifications.dart` must `git add
+mobile/lib/features/chat/message_preview_port.dart` in the same commit. Then
+push fix-sprint (ahead 4). Then decide the Aug-11 stash and the
+affectionate-neumann branch — both are one prune away from gone.
