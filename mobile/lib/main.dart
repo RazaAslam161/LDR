@@ -35,6 +35,7 @@ import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_pip.dart';
 import 'package:miles/features/call/pip_mode.dart';
+import 'package:miles/features/call/screen_share_banner.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/legal/terms_gate.dart';
@@ -910,6 +911,13 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // whole overlay layer down, which greys out the entire app and
               // swallows every touch. The boundary lives inside CallPip.
               const CallPip(),
+              // Same rule as CallPip — returns a Positioned, so it must stay a
+              // direct child of this Stack. Root-level because the moments it
+              // exists for are precisely the ones where the call screen is not
+              // the thing on top: a share that has walked into a FLAG_SECURE
+              // screen is sending the partner a black rectangle, and neither of
+              // them could previously tell that from a broken share.
+              const ScreenShareBanner(),
               // Presence used to float here, top-centre over every screen. It
               // covered titles and buttons, interrupted whatever was being
               // read, and looked like a system alert instead of a person. It

@@ -53,8 +53,10 @@ class CallForegroundService {
 
   static bool _inited = false;
 
-  /// Latched for the rest of the call once a share has started. Sharing twice
-  /// in one call then costs no second restart, and `stop()` clears it.
+  /// Whether the live service currently carries `mediaProjection`. Tracks the
+  /// projection rather than the call, so the type goes away with the share; a
+  /// second share in the same call pays the restart again, which is correct —
+  /// Android 15+ issues a fresh projection token every time anyway.
   static bool _screenSharing = false;
 
   static void _ensureInit() {
@@ -81,10 +83,12 @@ class CallForegroundService {
     );
   }
 
-  static Future<void> start() async {
+  /// [force] restarts a service that is already running, which is the only way
+  /// to change its `serviceTypes` — see [_swapServiceTypes].
+  static Future<void> start({bool force = false}) async {
     try {
       _ensureInit();
-      if (await FlutterForegroundTask.isRunningService) return;
+      if (!force && await FlutterForegroundTask.isRunningService) return;
       final style = await currentNotificationStyle();
       await FlutterForegroundTask.startService(
         serviceId: 512,
@@ -111,16 +115,49 @@ class CallForegroundService {
   /// them. The keepalive is unheld for that restart, which happens while the
   /// app is foreground (the user has just cleared the system consent dialog),
   /// where it is doing nothing anyway.
-  static Future<void> addScreenShare() async {
-    if (_screenSharing) return;
-    _screenSharing = true;
+  static Future<void> addScreenShare() => _swapServiceTypes(sharing: true);
+
+  /// Drop `mediaProjection` again once the projection is gone.
+  ///
+  /// The flag used to be latched for the rest of the call, so a call that had
+  /// shared once kept a mediaProjection-typed foreground service running long
+  /// after there was any projection to justify it — and, on a share that failed
+  /// to start at all, without there ever having been one.
+  static Future<void> dropScreenShare() => _swapServiceTypes(sharing: false);
+
+  static Future<void> _swapServiceTypes({required bool sharing}) async {
+    if (_screenSharing == sharing) return;
+    _screenSharing = sharing;
     try {
       _ensureInit();
-      if (await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.stopService();
+      if (!await FlutterForegroundTask.isRunningService) {
+        await start();
+        return;
       }
-    } catch (_) {}
-    await start();
+      await FlutterForegroundTask.stopService();
+      // Wait for the stop to actually land.
+      //
+      // `start()` returns early when the service is still running, and
+      // `stopService()` resolving does not mean Android has finished tearing
+      // the service down — so the old sequence could stop the service and then
+      // skip the restart, leaving a share with no mediaProjection type at all.
+      // On Android 14+ that is not a degraded share, it is a refused one: the
+      // platform declines to create the virtual display.
+      await _awaitStopped();
+      await start(force: true);
+    } catch (_) {
+      // Background-keepalive is best-effort; never break the call over it.
+    }
+  }
+
+  /// Bounded, because someone is holding the phone and a share must not hang
+  /// on a service that will not admit it has stopped. `start(force: true)`
+  /// runs either way.
+  static Future<void> _awaitStopped() async {
+    for (var i = 0; i < 20; i++) {
+      if (!await FlutterForegroundTask.isRunningService) return;
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
   }
 
   static Future<void> stop() async {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Sets/clears Android's `FLAG_SECURE` on the current activity window.
@@ -17,13 +18,25 @@ class SecureScreen {
 
   static const _channel = MethodChannel('miles/secure_screen');
 
+  /// Whether FLAG_SECURE is currently applied. Last-call-wins, exactly like the
+  /// native flag it mirrors.
+  ///
+  /// Read by the screen-share banner. Android blanks a FLAG_SECURE window in
+  /// MediaProjection output, so walking into the Vault or Memory Threads while
+  /// sharing sends the partner a black rectangle. That is the correct privacy
+  /// behaviour and is not changed here — but it used to happen in total
+  /// silence, with neither person able to tell it from a broken share.
+  static final ValueNotifier<bool> active = ValueNotifier<bool>(false);
+
   /// Applies FLAG_SECURE. Idempotent. (Native `setSecure` reads `enable`.)
   static Future<void> setSecure() async {
+    active.value = true;
     await _invoke('setSecure', {'enable': true});
   }
 
   /// Clears FLAG_SECURE. Idempotent.
   static Future<void> clearSecure() async {
+    active.value = false;
     await _invoke('setSecure', {'enable': false});
   }
 

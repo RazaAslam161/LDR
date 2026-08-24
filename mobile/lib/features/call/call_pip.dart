@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/call/call_controller.dart';
+import 'package:miles/features/call/call_video.dart';
 
 /// The call, minimised to a draggable window that floats over the whole app.
 ///
@@ -12,7 +13,7 @@ import 'package:miles/features/call/call_controller.dart';
 /// each other, and the call was a thing you left rather than a thing you were
 /// still in.
 ///
-/// It renders the controller's OWN [RTCVideoRenderer], not a copy. The
+/// It renders the controller's OWN RTCVideoRenderer, not a copy. The
 /// renderers live on the controller and outlive every screen, so moving the
 /// call into this window touches no track, renegotiates nothing, and drops no
 /// frame — the peer connection never learns the UI changed. That is the whole
@@ -33,12 +34,41 @@ class _CallPipState extends ConsumerState<CallPip> {
   static const _h = 148.0;
   static const _margin = 12.0;
 
+  /// Watched so this window disappears the moment the call screen is on top.
+  /// [CallController.minimized] alone was not enough: the call screen's
+  /// PopScope sets it true as the route pops, so during that transition — and
+  /// permanently, if a duplicate /call had been stacked and then popped — both
+  /// this window and a fully visible call screen drew the SAME `textureId`.
+  GoRouter? _router;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = ref.read(routerProvider);
+    if (identical(r, _router)) return;
+    _router?.routerDelegate.removeListener(_onRouteChanged);
+    _router = r..routerDelegate.addListener(_onRouteChanged);
+  }
+
+  void _onRouteChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _router?.routerDelegate.removeListener(_onRouteChanged);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final call = ref.watch(callControllerProvider);
     final active =
         call.state == CallState.connected || call.state == CallState.calling;
+    final router = _router;
     if (!active || !call.minimized) return const SizedBox.shrink();
+    // Never two views on one texture.
+    if (router != null && isOnCallRoute(router)) return const SizedBox.shrink();
 
     final size = MediaQuery.sizeOf(context);
     final insets = MediaQuery.paddingOf(context);
@@ -66,7 +96,7 @@ class _CallPipState extends ConsumerState<CallPip> {
         }),
         onTap: () {
           call.setMinimized(false);
-          ref.read(routerProvider).push('/call');
+          pushCallRoute(ref.read(routerProvider));
         },
         // The boundary belongs HERE, inside the Positioned — a dragged window
         // repainting must not repaint the page under it, but it also must not
@@ -84,11 +114,16 @@ class _CallPipState extends ConsumerState<CallPip> {
                 fit: StackFit.expand,
                 children: [
                   if (call.isVideo && call.remoteRenderer.srcObject != null)
-                    RTCVideoView(
-                      call.remoteRenderer,
-                      objectFit: call.remoteScreen
-                          ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
-                          : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    // Their screen when there is one, their face otherwise —
+                    // the same choice the full screen makes. A window this
+                    // small has room for one of them, and the shared screen is
+                    // the thing being pointed at.
+                    CallVideo(
+                      key: const ValueKey('pip-remote'),
+                      renderer: call.remoteScreen
+                          ? call.screenRenderer
+                          : call.remoteRenderer,
+                      portraitHint: call.remoteScreen,
                     )
                   else
                     Center(

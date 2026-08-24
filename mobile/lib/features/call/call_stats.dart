@@ -28,6 +28,9 @@ class CallStats {
     this.relayed = false,
     this.codec = '',
     this.noRelay = false,
+    this.recvFreezes = 0,
+    this.recvFreezeMs = 0,
+    this.availKbps = 0,
   });
 
   final int sendWidth;
@@ -58,9 +61,23 @@ class CallStats {
   /// thing to check when a call works at home and fails between two people.
   final bool noRelay;
 
+  /// How many times the picture this handset is RECEIVING has stalled, and for
+  /// how long in total.
+  ///
+  /// [limitation] says what the local encoder is giving up; these say what the
+  /// person on the other end actually experienced, which is not the same thing
+  /// and is the number the screen-share complaint was really about. A share can
+  /// report a healthy send rate while the viewer sits on a frozen frame.
+  final int recvFreezes;
+  final int recvFreezeMs;
+
+  /// libwebrtc's own estimate of the outgoing bandwidth on the selected path,
+  /// in kbps. The ceiling every other number here is competing for.
+  final int availKbps;
+
   /// One line, short enough for logcat and for an on-screen overlay.
   String get line =>
-      '${noRelay ? 'NO-RELAY! ' : ''}tx ${sendWidth}x$sendHeight@${sendFps.toStringAsFixed(0)} ${sendKbps}kbps | rx ${recvWidth}x$recvHeight@${recvFps.toStringAsFixed(0)} ${recvKbps}kbps | limit=${limitation.isEmpty ? '?' : limitation} rtt=${rttMs}ms lost=$packetsLost ${relayed ? 'RELAY' : 'p2p'} $codec';
+      '${noRelay ? 'NO-RELAY! ' : ''}tx ${sendWidth}x$sendHeight@${sendFps.toStringAsFixed(0)} ${sendKbps}kbps | rx ${recvWidth}x$recvHeight@${recvFps.toStringAsFixed(0)} ${recvKbps}kbps | limit=${limitation.isEmpty ? '?' : limitation} bwe=${availKbps}kbps frz=$recvFreezes/${recvFreezeMs}ms rtt=${rttMs}ms lost=$packetsLost ${relayed ? 'RELAY' : 'p2p'} $codec';
 }
 
 /// Polls a peer connection and reports what it finds.
@@ -178,6 +195,14 @@ class CallStatsMonitor {
         relayed: relayed,
         codec: mime == null ? '' : mime.split('/').last,
         noRelay: noRelay,
+        // Cumulative for the life of the call, not per-sample: a rising count
+        // is the signal, and a total that stops rising is the recovery.
+        recvFreezes: _int(inVideo?.values['freezeCount']),
+        recvFreezeMs:
+            (_double(inVideo?.values['totalFreezesDuration']) * 1000).round(),
+        availKbps:
+            (_double(selectedPair?.values['availableOutgoingBitrate']) / 1000)
+                .round(),
       );
 
       _lastSentBytes = sentBytes;

@@ -607,6 +607,15 @@ class _AppShellState extends ConsumerState<AppShell>
     // Pop the call screen up on an incoming ring or an outgoing call. (For a
     // ChangeNotifierProvider, prev==next is the same instance, so we track the
     // last state ourselves to detect the inactive -> active transition.)
+    //
+    // [_lastCallState] is per-State-instance, so it CANNOT be the only guard:
+    // the disguise cover swaps the whole MaterialApp, and the rebuilt shell
+    // starts again at `idle` while the GoRouter — a plain Provider that is
+    // never invalidated — still has /call on its stack. Every cover cycle then
+    // read as a fresh inactive -> active transition and pushed another copy,
+    // which is why a screen share that outlived a trip to another app ended up
+    // drawing itself several times over. [pushCallRoute] asks the router what
+    // is actually on top, which no remount can lie about.
     ref.listen(callControllerProvider, (_, c) {
       final now = c.state;
       bool active(CallState s) =>
@@ -615,7 +624,7 @@ class _AppShellState extends ConsumerState<AppShell>
           s == CallState.connected;
       final fire = active(now) && !active(_lastCallState);
       _lastCallState = now;
-      if (fire && context.mounted) GoRouter.of(context).push('/call');
+      if (fire && context.mounted) pushCallRoute(GoRouter.of(context));
     });
 
     // Only rebuild the shell when these specific flags flip — NOT on every

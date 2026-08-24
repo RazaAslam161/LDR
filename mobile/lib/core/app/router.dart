@@ -315,7 +315,7 @@ GoRouter buildRouter(Ref ref) {
             const SyncedCardGameScreen(deck: CardDeck.neverHaveIEver),
       ),
       GoRoute(
-        path: '/call',
+        path: kCallRoute,
         builder: (context, state) => const CallScreen(),
       ),
       GoRoute(
@@ -406,3 +406,55 @@ class _SessionListenable extends ChangeNotifier {
 
 /// Provider for the router.
 final routerProvider = Provider<GoRouter>(buildRouter);
+
+/// The one route the call lives at. Named so the two places that push it and
+/// the one that suppresses the floating window cannot drift apart.
+const String kCallRoute = '/call';
+
+/// The matched location of every route on the stack, bottom first.
+///
+/// Both predicates below read the router's own stack rather than any widget's
+/// state, because the whole class of bug they exist for IS state that resets.
+/// `_AppShellState._lastCallState` is per-State-instance, and the disguise
+/// cover swaps the entire `MaterialApp`, so the rebuilt shell starts again at
+/// `idle` while the GoRouter — a plain Provider, never invalidated — still has
+/// `/call` on its stack. The router is the one thing a remount cannot lie
+/// about.
+///
+/// `currentConfiguration.uri` is NOT the answer, which is worth stating because
+/// it looks like it: an imperative `push` appends an `ImperativeRouteMatch` and
+/// leaves `uri` at the BASE location, so a pushed `/call` still reports
+/// `uri == '/app'`. The matches are what carry it.
+List<String> _routeStack(GoRouter router) => router
+    .routerDelegate.currentConfiguration.matches
+    .map((m) => m.matchedLocation)
+    .toList(growable: false);
+
+/// True when the call screen is the top route — the one actually being looked
+/// at. Used to hide the floating call window, which must never draw the same
+/// `textureId` as a call screen already on screen.
+bool isOnCallRoute(GoRouter router) {
+  final stack = _routeStack(router);
+  return stack.isNotEmpty && stack.last == kCallRoute;
+}
+
+/// True when a call screen is mounted ANYWHERE on the stack, visible or not.
+///
+/// Deliberately broader than [isOnCallRoute]: a `/call` buried under another
+/// pushed route is not being painted, but its widgets are still mounted, so
+/// pushing another would still leave two of them.
+bool hasCallRoute(GoRouter router) => _routeStack(router).contains(kCallRoute);
+
+/// Push the call screen, unless one is already mounted.
+///
+/// Both push sites — the shell's call-state listener and the floating window's
+/// tap — must go through this. A second `/call` mounts a second [CallScreen],
+/// and both copies then draw the SAME two `textureId`s, because the renderers
+/// live on the controller and outlive every screen. That is what the
+/// duplicated, overlapping video was: not one view drawing badly, but N views
+/// drawing one texture — with another added on every disguise-cover cycle,
+/// which is to say every time the sharer left the app and came back.
+void pushCallRoute(GoRouter router) {
+  if (hasCallRoute(router)) return;
+  router.push(kCallRoute);
+}

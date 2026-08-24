@@ -7,6 +7,7 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/call/call_controller.dart';
+import 'package:miles/features/call/call_video.dart';
 
 /// Whether the diagnostic readout is showing. Outside the widget so it survives
 /// the call screen being minimised to the pill and reopened.
@@ -54,29 +55,46 @@ class CallScreen extends ConsumerWidget {
             // Hidden by default: this is a diagnostic, not something a partner
             // should ever see mid-call.
             Positioned.fill(
+              key: const ValueKey('call-longpress'),
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onLongPress: () => _showStats.value = !_showStats.value,
               ),
             ),
             // Remote video (full screen) — video calls only, once connected.
+            //
+            // Keyed, like every other conditional child of this Stack. The
+            // child count here varies with connected/ringing/video/relayKnown
+            // while 14 notifyListeners() sites — including a 2-second stats
+            // tick — rebuild the whole tree, so unkeyed children reconcile by
+            // INDEX and a video view can be handed a slot that belonged to
+            // something else.
             if (connected && video)
               Positioned.fill(
-                // A shared display is portrait-tall and full of small text;
-                // cropping it to fill would shave the edges off the thing they
-                // are both looking at.
-                child: RTCVideoView(call.remoteRenderer,
-                    objectFit: call.remoteScreen
-                        ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
-                        : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
+                key: const ValueKey('call-remote'),
+                // Their shared display takes the big view when there is one,
+                // and their face moves to a tile beside mine rather than being
+                // displaced by it — the second m-line means we no longer have
+                // to choose between the screen and the person.
+                //
+                // The crop follows the frame, not the `screen` broadcast —
+                // see CallVideo for why the broadcast was the wrong input.
+                child: CallVideo(
+                  renderer:
+                      call.remoteScreen ? call.screenRenderer : call.remoteRenderer,
+                  portraitHint: call.remoteScreen,
+                ),
               )
             else
               const Positioned.fill(
-                  child: ColoredBox(color: MilesColors.night),),
+                key: ValueKey('call-remote-placeholder'),
+                child: ColoredBox(color: MilesColors.night),
+              ),
 
             // The numbers that tell a capture problem from an encoder problem
             // from a network problem — they look identical on screen otherwise.
             ValueListenableBuilder<bool>(
+              key: const ValueKey('call-stats'),
               valueListenable: _showStats,
               builder: (context, show, _) {
                 final st = call.stats;
@@ -119,6 +137,7 @@ class CallScreen extends ConsumerWidget {
             // is not the same as "no relay" and must not accuse the network.
             if (CallController.relayKnown == false && (calling || ringing))
               Positioned(
+                key: const ValueKey('call-no-relay'),
                 top: MediaQuery.paddingOf(context).top + 44,
                 left: 16,
                 right: 16,
@@ -151,6 +170,7 @@ class CallScreen extends ConsumerWidget {
             // Voice centerpiece (or pre-connect state): avatar + name + status.
             if (!video || !connected)
               Align(
+                key: const ValueKey('call-centrepiece'),
                 alignment: const Alignment(0, -0.35),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -182,39 +202,73 @@ class CallScreen extends ConsumerWidget {
                 ),
               ),
 
-            // Local preview — PIP when connected, full while calling (video only).
+            // The faces. One tile while nobody is sharing (mine); two while
+            // somebody is (theirs, then mine), because the big view is then
+            // the shared display and neither person should have to give up
+            // seeing the other to look at it.
             if (video && (calling || connected))
               Align(
+                key: const ValueKey('call-local'),
                 alignment: connected ? Alignment.topRight : Alignment.center,
-                child: Container(
-                  margin: const EdgeInsets.all(16),
-                  width: connected ? 110 : 220,
-                  height: connected ? 160 : 320,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: MilesColors.gilt.withValues(alpha: 0.3),),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // Their face, only when their screen has taken the big
+                      // view. Otherwise their face IS the big view and a
+                      // duplicate tile would be two draws of one texture —
+                      // the thing §77 spent its whole diff removing.
+                      if (connected && call.remoteScreen) ...[
+                        _FaceTile(
+                          key: const ValueKey('call-face-remote'),
+                          child: CallVideo(
+                            renderer: call.remoteRenderer,
+                            filterQuality: FilterQuality.medium,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      _FaceTile(
+                        key: const ValueKey('call-face-local'),
+                        big: !connected,
+                        // A live self-view is right again — with the share on
+                        // its own m-line the camera never leaves the wire, so
+                        // this mirror is finally showing what the partner is
+                        // actually receiving.
+                        //
+                        // Except on the old-peer fallback, where the display
+                        // DID take the camera's sender. Then it would be a
+                        // mirror of a camera nobody is receiving, drawn inside
+                        // the very pixels being captured — a tunnel. The card
+                        // says what is happening instead.
+                        child: call.cameraLive
+                            ? RTCVideoView(call.localRenderer,
+                                // Follows the actual camera. Pinned to true,
+                                // the back camera showed the world reversed.
+                                mirror: call.frontCamera,
+                                // The preview is a thumbnail, so this is a big
+                                // DOWNscale — 720p into ~120dp. medium adds
+                                // mipmapping, which is what stops a downscale
+                                // shimmering and looking cheap. Deliberately
+                                // not applied to the remote view: that one
+                                // UPscales, where mipmaps do nothing and would
+                                // only soften it further.
+                                filterQuality: FilterQuality.medium,
+                                objectFit: RTCVideoViewObjectFit
+                                    .RTCVideoViewObjectFitCover,)
+                            : const _SharingCard(),
+                      ),
+                    ],
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: RTCVideoView(call.localRenderer,
-                      // Follows the actual camera. Pinned to true, the back
-                      // camera showed the world reversed.
-                      mirror: call.frontCamera,
-                      // The preview is a thumbnail, so this is a big DOWNscale
-                      // — 720p into ~120dp. medium adds mipmapping, which is
-                      // what stops a downscale shimmering and looking cheap.
-                      // Deliberately not applied to the remote view: that one
-                      // UPscales, where mipmaps do nothing and would only
-                      // soften it further.
-                      filterQuality: FilterQuality.medium,
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
                 ),
               ),
 
             // Minimize (keep call running, use the app).
             if (!ringing)
               SafeArea(
+                key: const ValueKey('call-minimize'),
                 child: Align(
                   alignment: Alignment.topLeft,
                   child: IconButton(
@@ -231,6 +285,7 @@ class CallScreen extends ConsumerWidget {
 
             // Controls
             Align(
+              key: const ValueKey('call-controls'),
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 44),
@@ -277,18 +332,25 @@ class CallScreen extends ConsumerWidget {
                               label: 'Speaker',
                               onTap: () => call.setSpeaker(!call.speakerOn),),
                           if (video) ...[
-                            _RoundBtn(
-                                icon: call.camOn
-                                    ? Icons.videocam
-                                    : Icons.videocam_off,
-                                bg: MilesColors.surface2,
-                                label: 'Camera',
-                                onTap: call.toggleCam,),
-                            _RoundBtn(
-                                icon: Icons.cameraswitch,
-                                bg: MilesColors.surface2,
-                                label: 'Flip',
-                                onTap: call.switchCamera,),
+                            // Live again during a share, because the camera is
+                            // now on its own m-line and stays on the wire. They
+                            // are hidden only on the old-peer fallback, where
+                            // the display did take the camera's sender and
+                            // these would silently do nothing.
+                            if (call.cameraLive) ...[
+                              _RoundBtn(
+                                  icon: call.camOn
+                                      ? Icons.videocam
+                                      : Icons.videocam_off,
+                                  bg: MilesColors.surface2,
+                                  label: 'Camera',
+                                  onTap: call.toggleCam,),
+                              _RoundBtn(
+                                  icon: Icons.cameraswitch,
+                                  bg: MilesColors.surface2,
+                                  label: 'Flip',
+                                  onTap: call.switchCamera,),
+                            ],
                             // Connected-only: the swap needs a negotiated
                             // video sender to swap onto.
                             if (connected)
@@ -299,9 +361,19 @@ class CallScreen extends ConsumerWidget {
                                   bg: call.sharingScreen
                                       ? MilesColors.ember
                                       : MilesColors.surface2,
+                                  // Two whole-display captures at once is a
+                                  // real feedback loop, not just a busy screen:
+                                  // each display contains a live picture of the
+                                  // other, so the image nests inside itself
+                                  // until both encoders give up. The controller
+                                  // refuses it; this says so before the tap.
+                                  disabled:
+                                      call.remoteScreen && !call.sharingScreen,
                                   label: call.sharingScreen
                                       ? 'Stop'
-                                      : 'Screen',
+                                      : call.remoteScreen
+                                          ? 'Sharing'
+                                          : 'Screen',
                                   onTap: () => call.sharingScreen
                                       ? call.stopScreenShare()
                                       : call.startScreenShare(),),
@@ -368,30 +440,97 @@ class _RoundBtn extends StatelessWidget {
       {required this.icon,
       required this.bg,
       required this.label,
-      required this.onTap,});
+      required this.onTap,
+      this.disabled = false,});
   final IconData icon;
   final Color bg;
   final String label;
   final VoidCallback onTap;
 
+  /// Dimmed and inert. Kept in the layout rather than removed so the control
+  /// row does not reflow under the user's thumb mid-call.
+  final bool disabled;
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
-            child: Icon(icon, color: Colors.white, size: 26),
+    return Opacity(
+      opacity: disabled ? 0.4 : 1,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: disabled ? null : onTap,
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
+              child: Icon(icon, color: Colors.white, size: 26),
+            ),
           ),
+          const SizedBox(height: 6),
+          Text(label,
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 11),),
+        ],
+      ),
+    );
+  }
+}
+
+/// One face, at the size the call is currently using.
+///
+/// [big] is the pre-connect state, where the self-view is the centrepiece
+/// rather than a corner tile. Everything else about the two sizes was already
+/// duplicated inline; it is one widget now because there can be two of them.
+class _FaceTile extends StatelessWidget {
+  const _FaceTile({required this.child, this.big = false, super.key});
+
+  final Widget child;
+  final bool big;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: big ? 220 : 110,
+        height: big ? 320 : 160,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border:
+              Border.all(color: MilesColors.gilt.withValues(alpha: 0.3)),
         ),
-        const SizedBox(height: 6),
-        Text(label,
-            style: const TextStyle(color: MilesColors.taupe, fontSize: 11),),
-      ],
+        clipBehavior: Clip.antiAlias,
+        child: child,
+      );
+}
+
+/// Stands in for the self-preview while this handset is sharing its display.
+///
+/// Not a live view of the capture — that would be a mirror inside the very
+/// pixels being captured, which recurses. See the comment at its use site.
+class _SharingCard extends StatelessWidget {
+  const _SharingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: MilesColors.surface2,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.screen_share, color: MilesColors.gilt, size: 26),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              'Sharing your screen',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: MilesColors.cream50.withValues(alpha: 0.85),
+                fontSize: 11,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

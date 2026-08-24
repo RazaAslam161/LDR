@@ -7703,3 +7703,267 @@ Rollback: `cp ~/.claude/backups/CLAUDE.md.pre-generalisation-2026-08-23 ~/.claud
 
 **Exact next step:** rule on the two contradicted rules above, then the chat-decrypt
 regression from §75.
+
+## §77 — Screen share: the video that stacked on itself, and the viewer that froze (2026-08-24)
+
+Reported as one bug ("overlays itself multiple times and glitches, and the other person
+gets laggy, freezy, stuck, low quality"). It was two, sharing no code and no cause.
+
+### The duplicated video was a routing bug, not a rendering one
+
+`startScreenShare` was **the only system-dialog call site in the app that did not set
+`MilesApp.systemOverlayActive`.** Fourteen others do — photo picker, document picker,
+vault, export, touch map, capsule, propose-memory, update service, rapid camera. This one
+did not, and Android's MediaProjection consent dialog is a system Activity.
+
+The chain, all of it verified in source rather than inferred:
+
+```
+consent Activity -> lifecycle inactive/paused
+  -> main.dart:327 raiseCover()            (guard was false)
+  -> MaterialApp.router unmounted, cover MaterialApp swapped in (main.dart:855-888)
+  -> re-auth -> MaterialApp.router remounted
+  -> routerProvider is a plain Provider (router.dart), never invalidated
+     => the GoRouter and its stack SURVIVE; /call is still on it
+  -> but _AppShellState is FRESH => _lastCallState back to CallState.idle
+  -> next notifyListeners() (immediate: sharingScreen=true; or the 2s stats tick)
+  -> app_shell.dart  fire = active(connected) && !active(idle) == true
+  -> push('/call')  => a SECOND CallScreen mounted
+```
+
+Two `CallScreen`s draw the **same two `textureId`s**, because the renderers live on the
+controller and outlive every screen. And it repeats on every cover cycle — which is every
+time the sharer leaves Miles to show something and comes back. That is why the report
+tied the multiplying overlay to navigating the phone: they are the same event.
+
+Fixed in four places, deliberately more than the one that would have been enough:
+
+- `MilesApp.systemOverlayActive` now wraps the whole start sequence in a `try/finally`,
+  matching `photo_picker_service.dart:60-64`.
+- `pushCallRoute` / `hasCallRoute` / `isOnCallRoute` in `router.dart`, asking the router's
+  own stack instead of any widget's state. Both push sites go through it. **Note for the
+  next person: `currentConfiguration.uri` is NOT the answer** — an imperative `push`
+  appends an `ImperativeRouteMatch` and leaves `uri` at the base location, so a pushed
+  `/call` still reports `uri == '/app'`. Read `matches`, and their `matchedLocation`. This
+  was measured with a throwaway probe test, not assumed.
+- `CallPip` now hides while `/call` is the top route. It and `CallScreen` were both
+  drawing `remoteRenderer` during every minimise transition, and permanently once a
+  duplicate had been popped (`PopScope` sets `minimized = true` as the top copy pops).
+- Every conditional child of the call `Stack` is keyed. The child count varies with
+  connected/ringing/video/relayKnown while 14 `notifyListeners()` sites rebuild the tree;
+  unkeyed children reconcile by index.
+
+Also: **both peers could share at once**, which is a real feedback loop — each display
+contains a live picture of the other, nesting until both encoders give up. Nothing
+guarded it. `startScreenShare` now refuses when `remoteScreen`, and the button renders
+disabled and reads "Sharing".
+
+### The frozen viewer was the capture size
+
+`GetUserMediaImpl.getDisplayMedia`'s public overload takes `constraints`; **the private
+one that does the work is never handed them** (`GetUserMediaImpl.java:531`). It reads
+`display.getRealSize()` and starts there, at `DEFAULT_FPS` 30. So the capture is the whole
+panel — 1080x2400 commonly, 1440x3200 on a flagship — pushed through a sender whose m-line
+was negotiated for a 1280x720 camera. Three to five times the pixel rate. There is also
+**no `applyConstraints` and no `changeCaptureFormat` on the method channel**, so capture
+size cannot be changed from Dart at all. The encoder is the only lever.
+
+And nothing had ever been set on it: a repo-wide search for `setParameters`,
+`maxBitrate`, `scaleResolutionDownBy`, `degradationPreference` returned one hit and it was
+a comment.
+
+Worse than "unset": libwebrtc *knows* the source is a screencast
+(`createVideoSource(true)`, and `OrientationAwareScreenCapturer.isScreencast()` returns
+true), and these propagate through `VideoRtpSender::SetSend` on every `replaceTrack`. With
+no explicit preference its screencast default is **MAINTAIN_RESOLUTION** — it holds all
+2.6 megapixels and throws *framerate* away. That is the reported symptom exactly, and it
+is worst while scrolling, because scrolling is full-frame motion.
+
+Now: a single monotone ladder of five rungs, `scaleResolutionDownBy` computed from
+`PlatformDispatcher.views.first.physicalSize` so the long edge lands near 1280
+(1080x2400 -> 1.875, 1440x3200 -> 2.5, 720x1280 -> 1.0), `maxFramerate` 24 down to 10, and
+`BALANCED`. Driven from `qualityLimitationReason` in the `CallStatsMonitor` that has
+polled every 2s since §b and been read by nothing: down on the first bad sample, up only
+after five clean ones.
+
+**On the §26cae00 rule** ("anything set here again comes from getStats on a real call, not
+from a plan"): that revert was the CAMERA sender, and its finding was that
+MAINTAIN_FRAMERATE trades resolution away. Untouched here. The screen sender's default is
+the mirror image, and the loop above is what reads getStats rather than guessing.
+
+### The trap that cost the most time, and will again
+
+**A sender parameter cannot be un-set through this plugin.** `RTCRtpEncoding.toMap()`
+omits null fields, and `PeerConnectionObserver.updateRtpParameters` only assigns when the
+map value is non-null — so writing nulls to "clear" a profile is a silent no-op and the
+screen profile would have leaked onto the camera. `_restoreCameraProfile` therefore writes
+explicit values, each one the documented default rather than a choice: scale 1.0
+(libwebrtc's default), fps 30 (the camera is captured at an explicit 30, so the cap cannot
+bind), and MAINTAIN_FRAMERATE (libwebrtc's camera default, as §26cae00 itself established
+when it called setting it "almost certainly a NO-OP").
+
+The relay bitrate clamp from `research/calling.md:269` is still **not** implemented — it
+was dropped from this change precisely because of the above: `maxBitrate` has no provably
+inert restore value, and it is a cost concern on the camera path, not this bug.
+
+### Also fixed, all found while in here
+
+- `CallForegroundService.addScreenShare()` stopped the service then called `start()`,
+  which **early-returns when the service is still running** — so the restart could be
+  skipped and the share left with no `mediaProjection` type. On Android 14+ that is a
+  refused capture, not a degraded one. Now waits for a real stop (bounded, 500ms) and
+  passes `force: true`. New `dropScreenShare()` puts the type back; it used to be latched
+  for the rest of the call, and latched *before* the capture succeeded.
+- **The system cast notification's "Stop sharing" was dead.** `track.onEnded` can never
+  fire: the plugin's `MediaProjection.Callback.onStop()` body is a comment
+  (`GetUserMediaImpl.java:538-545`). The partner sat on a frozen last frame until hangup.
+  A watchdog in the stats loop now catches it — gated on having seen frames first, because
+  `framesPerSecond` is absent from getStats until libwebrtc can compute it and a slow
+  start reports the same zero as a death.
+- The remote view's crop followed the `screen` **broadcast**, which lands before the first
+  screen frame decodes and is fire-and-forget. Now `CallVideo` follows the frame, holding
+  the last good fit through the window where `RTCVideoValue.aspectRatio` returns 1.0 for a
+  zero-dimension frame (indistinguishable from a real square — this is what snapped the
+  view square mid-swap). The broadcast is demoted to a pre-first-frame hint, and is now
+  re-sent on channel resubscribe so a dropped one self-heals.
+- The sharer's self-preview showed a **mirrored camera that was off the wire** for the
+  whole share. Replaced with a card. Camera/Flip buttons hidden while sharing — they were
+  live and silently did nothing.
+- FLAG_SECURE screens (Vault, Memory Threads, Touch Trace, Touch Map, media viewer) blank
+  in MediaProjection output, so walking into one mid-share sent the partner a black
+  rectangle with no explanation on either side. Capture behaviour is unchanged — that is
+  correct and stays; only the silence is fixed, with a root-level banner driven by a new
+  `SecureScreen.active` notifier.
+
+### Not verified
+
+**No on-device test was possible: the Android SDK is not installed on this machine** (per
+CLAUDE.md, "State of the machine"), so there is no `adb` and no way to run two handsets.
+Everything below is unrun and is the real acceptance test:
+
+1. Start a share, then leave Miles and return five times. Today that stacks five
+   `CallScreen`s; it must stay at one. This is the direct repro for the screenshot.
+2. Scroll / switch apps while sharing and watch the far side: no freeze beyond ~1s.
+3. `[callstats]` on both handsets — `tx` should settle near 1280 on the long edge and
+   `limit=` should resolve to `none` in steady state. The line now also carries `bwe=`,
+   and `frz=` (receiver-side `freezeCount` / `totalFreezesDuration`), added for exactly
+   this measurement: `limitation` says what the local encoder gave up, `frz` says what the
+   other person actually saw, and they are not the same thing.
+4. Stop from Android's cast notification: partner back on camera within ~6s.
+5. Both tap Share at once: the second must be refused.
+
+Analyzer clean (0 errors, 0 warnings). 1098 tests pass. The one failing test is
+`repo_hygiene`'s "the repository root holds nothing but the entry point", which fails on
+`CLAUDE.md` — that file postdates the rule and predates this work; not ruled on here.
+
+**Exact next step:** run the five checks above on two handsets once the Android SDK is
+back. Rung 0 and the BALANCED preference are the two values most likely to want moving,
+and step 3 is what should decide them.
+
+## §78 — The screen gets its own m-line, so a share no longer costs you their face (2026-08-24)
+
+Owner ruled on §77's open question: do the second track. §77 kept the single-sender
+`replaceTrack` swap, so for the length of every share the sharer's camera was off the wire
+and their face disappeared. Now camera and screen flow at once.
+
+### What changed
+
+A **second video m-line, negotiated empty at call setup**, in `_createPc`:
+
+```dart
+_screenTransceiver = await pc.addTransceiver(
+  kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+  init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv),
+);
+```
+
+`startScreenShare` now does `replaceTrack` onto **that** sender; `_videoSender` carries the
+camera and only the camera, for the whole call. **This class still has no renegotiation
+path and still does not need one** — pre-negotiating the m-line is what buys both faces
+without an offer/answer round trip. `_createPc` runs before `setRemoteDescription` on all
+three callee paths (`:1016`, `:2011`, and the glare adopt), so the sections align by kind
+and order on both ends.
+
+### The `streams:` omission is load-bearing — do not "fix" it
+
+`RTCRtpTransceiverInit` is built with **no `streams`**. That is not an oversight. It is the
+compatibility mechanism and the identification mechanism, and they are the same mechanism:
+
+- No streams -> empty `streamIds` (`mapToRtpTransceiverInit` explicitly substitutes an
+  empty list for null) -> **no msid on the section** -> the far side's
+  `PeerConnectionObserver.onAddTrack` builds its `streams` array from `mediaStreams[]`,
+  which is msid-derived, so the Dart `RTCTrackEvent.streams` arrives **empty**.
+- A build predating this change guards with `if (event.streams.isNotEmpty)` and therefore
+  **skips** the track instead of pointing its single remote renderer at one carrying no
+  frames. Production is ahead of this repo — 49, 51, 52 are on handsets — so a
+  cross-version call had to degrade, not break. It degrades to exactly the old behaviour.
+- And on this side, msid-lessness is precisely how `onTrack` tells the screen from the
+  camera. Nothing else in the connection is msid-less, so it is exact, not a heuristic.
+
+Add a `streams:` and both properties die at once: old peers go black and this side can no
+longer identify the track.
+
+### Rendering a track that belongs to no stream
+
+The remote screen track cannot be handed over as `srcObject`, which takes a `MediaStream`.
+The path that works is `setSrcObject(stream:, trackId:)`: natively that calls
+`getTrackForId`, which falls through `getRemoteTrack` to **`getTransceiversTrack`** — the
+lookup that finds a track sitting on a transceiver with no stream behind it
+(`MethodCallHandlerImpl.java:1673-1694`). The stream is passed only for its `ownerTag`,
+which scopes the search to this peer connection. New `screenRenderer` on the controller,
+third alongside local and remote; initialised, cleared and disposed with the other two.
+
+### Cross-version fallback, and the one thing that got hardened by testing it
+
+`_peerTakesSecondVideo()` reads the **negotiated remote SDP** rather than a flag we set
+ourselves — this is a question about the other app's version, which is exactly where a
+self-set flag would be the thing that is wrong. Two or more `m=video` sections means both
+ends built one. False falls back to the old camera-sender swap, and `cameraLive` then
+drives the UI back to the §77 behaviour (self-view becomes the "Sharing" card, Camera and
+Flip hide) so the sharer is never shown a mirror of a camera nobody is receiving.
+
+Extracted as pure `CallController.sdpHasSecondVideoLine` and tested against real SDP
+shapes. Writing that test found a real hardening: counting `'m=video'.allMatches(sdp)`
+over the whole blob would let an **attribute value** vote, and `a=msid:` values are
+remote-controlled strings. It matches at line start now, and there is a test that feeds it
+`a=msid:m=video m=video` and asserts false.
+
+### UI
+
+- Big view: their **screen** when they are sharing, their **face** otherwise.
+- Tiles, top-right: their face (only while their screen holds the big view — otherwise
+  their face IS the big view, and a second tile would be two draws of one texture, the
+  thing §77 spent its whole diff removing), then mine. New `_FaceTile`.
+- Camera and Flip are live again during a share, because the camera never leaves the wire.
+- `_writeSenderProfile` now targets whichever sender the display went out on. On the
+  second m-line — the normal case — **the camera's sender is never touched at all**, which
+  settles the 26cae00 question outright instead of restoring a default afterwards.
+
+### Verified
+
+- `flutter analyze --no-pub` over every touched file: **0 errors, 0 warnings** (23 issues,
+  all pre-existing `info` style lints).
+- **87/87** call unit tests pass, including 8 new `sdpHasSecondVideoLine` cases.
+- Full suite **1124 pass, 2 fail** — both in other people's work in this shared tree:
+  `chat_screen.dart:2505` (glassmorphism) and `CLAUDE.md` at the repo root. Neither is
+  touched by this change.
+
+### Not verified — and this is the headline, not a footnote
+
+**Nothing here has been on a device.** The Android SDK is not installed on this machine,
+so there is no `adb` and no second handset. Everything above is source-verified against
+the plugin's Java and Dart, and unit-tested where it could be made pure — but the three
+claims that matter most are all runtime claims and all unrun:
+
+1. That `addTransceiver` without `streams` really produces a section with no `msid` in
+   the offer this app generates. Read the offer SDP and confirm section 3 has no
+   `a=msid`. **If it does, old peers go black — this is the one to check first.**
+2. That the far side's `setSrcObject(trackId:)` actually paints the screen track.
+3. That an old build (49/51/52) in a call with a new one still shows the camera, and that
+   the new side falls back to the swap when the old build is the caller.
+
+Plus the five §77 checks, which still stand and are still unrun.
+
+**Exact next step:** on two handsets, dump the offer SDP first and confirm claim 1 before
+anything else — the whole backward-compatibility design rests on it, and it is a single
+`grep msid` on a logged SDP.
