@@ -7572,3 +7572,134 @@ in-flight code, not this change.
 **Exact next step:** owner configures custom SMTP, then Turnstile behind a
 min_build bump. After that, drop the TURN ttl from 86400 once a build that
 caches for less is enforced.
+
+## §75 — The eleven migrations production had and this repo did not (2026-08-23)
+
+The disk died on 2026-08-23 and the tree was re-cloned from
+`github.com/RazaAslam161/LDR`. The clone is clean and its reflog has exactly one
+entry, so everything that was ever local-only is gone. What no earlier note
+caught: **the clone is not the whole project.** Production kept moving for four
+days after the last commit.
+
+**Production ran builds this repo has never contained.** `client_errors` holds
+82 reports from **build 52**, 31 from 51, 1 from 49 — the most recent at
+2026-08-23 15:09 UTC. `git log --all -S'buildNumber = 49'` through `= 52`
+returns zero commits, and the highest `version:` ever written to
+`pubspec.yaml` in 392 commits is `0.1.0+48`. Four `release.sh --bump` cycles
+were built, signed and installed on real handsets, and that Dart is gone. Do
+not try to reconstruct it: treat 48 as the baseline, pull an APK off a phone to
+learn what the users are actually running, and cut 53 from committed code.
+
+**Eleven migrations were live on prod with no file here.** Recovered from
+`supabase_migrations.schema_migrations.statements` and written to
+`supabase/migrations/`. Every body md5-verified byte-identical to prod, one at
+a time. 134 files -> 145, no duplicate ordering keys,
+`migrations_hygiene_test` green on all 19 checks including the dollar-quote
+nesting checks the `$fn$`/`$do$` bodies could have tripped.
+
+They renumber rather than reuse the ledger version, deliberately. The ledger
+has `message_reactions_state_their_own_grants` at `20260819040256`, which would
+sort it BEFORE `20260819090000_message_reactions.sql` — the migration creating
+the table it alters. This directory numbers by its own round-hour scheme that
+already diverges from the ledger wholesale, so the slots preserve prod's true
+apply order and each file's header records the real version for later
+reconciliation.
+
+The prose this repo's style asks for is absent from all eleven, and each says
+so. These were applied as bare SQL via `apply_migration`, so the ledger holds
+statements only; whatever the author wrote above them died with the disk. Better
+an admitted gap than eleven plausible rationales for decisions nobody here made.
+
+**Do NOT recover these from `D:\LDR\Miles-recovery\`.** That folder was rebuilt
+from STAGING, which carries `_v2` re-applies prod does not. Its
+`closeness_reveal_is_enforced_not_painted` is the superseded first attempt
+(1704 B); prod matches the `_v2` sibling instead, and its
+`closeness_day_and_write_belong_to_the_server` matches neither. Prod is the only
+authority.
+
+**Three features are half-recovered — server yes, client no.** 30-minute message
+editing (`messages.edited_at`, `edit_message()` RPC), a server-enforced
+Closeness reveal on the existing `desire_temps` table with a check-in push, and
+voice-note waveforms (`messages.voice_peaks`, base64, 56 bars). `voice_peaks`,
+`edit_message`, `closeness_revealed` and `notify_closeness` appear nowhere under
+`mobile/lib`. Also visible in the recovered SQL: an earlier
+`closeness_revealed(uuid, date)` was a cross-couple oracle, and
+`20260820010000` raises if it is still installed. That earlier version is in
+neither the repo nor the ledger — part of the same lost day.
+
+**LIVE DEFECT, not fixed here.** Chat decryption is failing on both handsets:
+61 `chat-decrypt` ParseShortfall reports since 08-19, still arriving today —
+`0/1`, `0/2`, `1/2` succeeded-over-total, `cipher column unreadable` and
+`SecretBoxAuthenticationError`, plus 7 `couple-key-pin_mismatch`. Both
+`partner_keys` rows were last written 08-16, three days before the failures, so
+the published keys did not rotate; a device's local X25519 seed diverged from
+its own published half, which is what an uninstall/reinstall does. Nobody has
+noticed because the plaintext dual-write is still on. **`chat_cipher_only` must
+stay false until this is closed** — throwing it today blanks live messages.
+
+**Gates.** `flutter analyze --no-pub`: 0 errors, 0 warnings, 535 infos.
+`flutter test`: 1074 passed on the pre-recovery tree. A later full run went red
+on `repo_hygiene_test: the analyzer reports no errors and no warnings`; that
+test passes in isolation in 17 s, and the change under test was SQL-only, so it
+is the analyzer subprocess being starved under parallel load, not a defect. It
+is recorded red rather than dismissed.
+
+**Left for whoever else is in this tree.** At 23:29 another session was
+actively editing `call_controller.dart`, `call_screen.dart`, `call_pip.dart`,
+`router.dart`, `app_shell.dart` and a new `call_video.dart` (+497/-78). None of
+that is mine, none of it is staged, and no full-suite result in this section
+covers it. `mobile/analysis_options.yaml` was already dirty on arrival — seven
+platform excludes added by `pub get`'s auto-migration; it touches zero Dart
+files and does not weaken the gate.
+
+**Exact next step:** diagnose the chat-decrypt regression starting from
+`couple-key-pin_mismatch` and whether `rewrap_screen.dart` recovers a diverged
+seed. Before any build: the Android SDK is not installed on this machine
+(`flutter doctor` — "Unable to locate Android SDK"), so no APK can be produced
+or pulled from a handset yet.
+
+## §76 — The standing rules are global again, and Miles gets its own file (2026-08-23)
+
+`~/.claude/CLAUDE.md` claimed to govern "every project, every message" while naming one
+repo in 25 lines: `E:\LDR` paths, Flutter and Supabase commands, sideload and APK
+assumptions, and two whole `# Project rules` sections. A file that names a project cannot
+be global, and the paths in it were dead anyway — the E: drive does not exist on this
+machine.
+
+Split into three, nothing dropped:
+
+- **`~/.claude/CLAUDE.md`** — the global working agreement, now project-agnostic and
+  stack-agnostic. All 24 rule sections kept, all four verbatim owner quotes kept, all
+  three "this is the rule that gets dropped" markers kept. Concrete cases stay as evidence
+  but are phrased as failure classes: `flutter analyze`/`flutter test` became "the gates",
+  BRAIN.md became "the handoff doc", the APK became "the shipped artifact", and
+  "sideloaded, no update channel" became "pinned clients — any consumer you cannot force
+  to upgrade". A glossary at the top defines those four terms so no rule has to name a
+  tool. Verified: zero path-like strings, zero project or stack tokens remain.
+- **`D:\Miles\CLAUDE.md`** (NEW, untracked) — everything actually specific to this repo,
+  paths corrected to `D:\Miles`, plus what the disk loss changed: Flutter at
+  `C:\src\flutter` and not on PATH, Android SDK absent, `maps.properties` missing, prod
+  ahead of the repo by four builds, `chat_cipher_only` must stay false.
+- **`~/.claude/project-rules-archive/us-app.md`** — the Us app rules, preserved. That repo
+  is not on this machine and may have died with the disk.
+
+**Two project rules are carried forward but marked CONTRADICTED BY CODE, not silently
+kept and not deleted.** Both are the owner's to rule on:
+- "ONE universal APK, no `--split-per-abi`" vs `tool/release.sh:337`, which passes
+  `--target-platform android-arm64` and produces an arm64-only APK.
+- "Launcher disguise is intentional — 'News' label ... never revert" vs both manifests,
+  which set `android:label="Miles"` with `.AliasMiles` the only `enabled="true"` alias and
+  all nine covers `false`. That reversal was §32/§34 on 2026-08-16, a deliberate decision;
+  the rule was never updated to match and would have had the next session revert it.
+
+Enforcement, so the rules stop being dropped: a `UserPromptSubmit` + `SessionStart` hook in
+`~/.claude/settings.json` prints `~/.claude/rules-reminder.txt` into context on every
+message — a 21-line digest of the six rules the file itself records as silently skipped,
+deliberately not the whole file. Kept pure ASCII after the first attempt returned em-dashes
+as mojibake through the shell. `~/.codex/AGENTS.md` is a HARD LINK to the same inode as
+`~/.claude/CLAUDE.md`, so the two can never drift.
+
+Rollback: `cp ~/.claude/backups/CLAUDE.md.pre-generalisation-2026-08-23 ~/.claude/CLAUDE.md`.
+
+**Exact next step:** rule on the two contradicted rules above, then the chat-decrypt
+regression from §75.
