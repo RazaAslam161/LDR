@@ -20,6 +20,7 @@ import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:miles/features/chat/voice_note_cache.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
@@ -395,6 +396,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // readable at the filesystem level by whoever signs in next, and in the
     // image cache until something evicts them.
     unawaited(DefaultCacheManager().emptyCache());
+    // And the third store beside those two. Voice notes are audio of the two of
+    // them talking, kept on disk so the waveform can be scrubbed without a
+    // range request per drag; a handset that changes hands must not carry them
+    // into the next account.
+    unawaited(VoiceNoteCache.clearAll());
     imageCache
       ..clear()
       ..clearLiveImages();

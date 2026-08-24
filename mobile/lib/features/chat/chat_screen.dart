@@ -43,16 +43,20 @@ import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/media_album.dart';
+import 'package:miles/features/chat/message_reveal.dart';
 import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
+import 'package:miles/features/chat/voice_peaks.dart';
 import 'package:miles/features/chat/widgets/album_bubble.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/link_card.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
+import 'package:miles/features/chat/widgets/measured_row.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
+import 'package:miles/features/chat/widgets/original_message_sheet.dart';
 import 'package:miles/features/chat/widgets/reaction_bar.dart';
 import 'package:miles/features/chat/widgets/reaction_chips.dart';
 import 'package:miles/features/chat/widgets/selectable_message.dart';
@@ -439,9 +443,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// retry of that id.
   final _voiceReplies = <String, String?>{};
 
-  Future<void> _sendVoiceOnce(String coupleId, File file, String id) {
+  Future<void> _sendVoiceOnce(
+      String coupleId, File file, String id, String? peaks,) {
     final replyId = _voiceReplies.putIfAbsent(id, _takeReplyId);
-    return ChatRepository.sendVoice(coupleId, file, id: id, replyToId: replyId);
+    return ChatRepository.sendVoice(coupleId, file,
+        id: id, replyToId: replyId, peaks: peaks,);
   }
 
   /// Find a loaded message by id (for rendering a quoted reply preview).
@@ -451,6 +457,193 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       if (m.id == id) return m;
     }
     return null;
+  }
+
+  /// Who wrote the message this one is answering.
+  ///
+  /// The quote card showed only the preview text, which is most of why nobody
+  /// could tell WHICH message a reply belonged to — "yes, exactly" under an
+  /// unattributed line is not an answer to anything you can point at.
+  String? _replyAuthorFor(Message m, String? uid, String? partnerName) {
+    final quoted = _byId(m.replyToId);
+    if (quoted == null) return null;
+    return quoted.isMine(uid) ? 'You' : (partnerName ?? 'Your partner');
+  }
+
+  /// The rows the list is actually showing, by exactly the filters build uses.
+  ///
+  /// One definition rather than two, and that is the point. A jump has to
+  /// resolve a message against what is ON SCREEN: `_messages` still holds rows
+  /// this user hid and rows cleared before a local cutoff, so searching it
+  /// would send the conversation to a row the list never draws.
+  List<ChatRow> _visibleRows(String? uid) {
+    final cleared = _clearedBefore;
+    return MediaAlbums.rows(
+      _messages
+          .where((m) => !m.isHiddenFor(uid))
+          .where((m) => cleared == null || m.createdAt.isAfter(cleared))
+          .toList(),
+    );
+  }
+
+  /// Which ROW holds this message, or -1.
+  ///
+  /// Searched across a row's items, not just its newest: media sent together
+  /// collapses into one row, so a reply can quote a single photo inside a grid.
+  int _rowIndexOf(List<ChatRow> rows, String messageId) {
+    for (var i = 0; i < rows.length; i++) {
+      for (final m in rows[i].items) {
+        if (m.id == messageId) return i;
+      }
+    }
+    return -1;
+  }
+
+  /// Row heights, measured as the list lays them out. See [RowOffsets] for why
+  /// this exists and why the first attempt (asking the itemBuilder which rows
+  /// it built) could not work.
+  final RowOffsets _rowOffsets = RowOffsets();
+
+  /// The row being walked to, and the key that lets the last step centre it.
+  /// Only ever set on one row at a time, so no GlobalKey is minted for the
+  /// other 299.
+  String? _revealId;
+  final GlobalKey _revealKey = GlobalKey();
+
+  /// The message wearing the landing flash.
+  String? _highlightedId;
+  Timer? _highlightTimer;
+
+  /// Bumped by anything that invalidates a jump in flight — a finger on the
+  /// list, a reload, a clear. A jump that started before the bump is answering
+  /// a question about a conversation that no longer exists.
+  int _jumpGeneration = 0;
+  bool _jumping = false;
+
+  /// Walk the conversation to the message a reply is quoting.
+  ///
+  /// Each pass measures more of the list than the last, because a sliver lays
+  /// its children out in order: one jump towards the target measures every row
+  /// in front of it, and the pass after that is exact. Two passes is the normal
+  /// case and four is the ceiling.
+  ///
+  /// Bounded in every direction. `mounted`, the generation counter, and the
+  /// target going missing all end it, and the worst case is that nothing moves
+  /// and the sheet opens instead — never a spin, and never a fight with the
+  /// user's thumb.
+  Future<void> _jumpToMessage(String targetId, String? uid) async {
+    if (_jumping) return;
+    final generation = _jumpGeneration;
+    if (_rowIndexOf(_visibleRows(uid), targetId) < 0) {
+      await _showOriginal(targetId, uid);
+      return;
+    }
+
+    _jumping = true;
+    setState(() => _revealId = targetId);
+    try {
+      // The key needs a frame to attach to the row before anything can look
+      // for it.
+      await WidgetsBinding.instance.endOfFrame;
+      for (var pass = 0; pass < 4; pass++) {
+        if (!mounted || generation != _jumpGeneration) return;
+
+        // Re-resolved every pass rather than captured once: a message arriving
+        // mid-jump inserts at the newest end and pushes every older row's
+        // index up by one.
+        final rows = _visibleRows(uid);
+        final index = _rowIndexOf(rows, targetId);
+        if (index < 0) return;
+        final ids = [for (final r in rows) r.newest.id];
+
+        if (_revealKey.currentContext != null) break;
+
+        final position = _scroll.position;
+        final target = _rowOffsets.centredOffsetFor(
+          ids,
+          index,
+          viewport: position.viewportDimension,
+          maxExtent: position.maxScrollExtent,
+        );
+        final exactAlready = _rowOffsets.isExactFor(ids, index);
+        _scroll.jumpTo(target);
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted || generation != _jumpGeneration) return;
+        if (_revealKey.currentContext != null) break;
+        // Nothing left to learn and it still is not on screen. Another pass
+        // would jump to the same place for the same reason.
+        if (exactAlready) break;
+      }
+
+      if (!mounted || generation != _jumpGeneration) return;
+      if (_revealKey.currentContext != null) {
+        await _landOn(targetId, generation);
+      } else {
+        await _showOriginal(targetId, uid);
+      }
+    } finally {
+      _jumping = false;
+      if (mounted) setState(() => _revealId = null);
+    }
+  }
+
+  /// The last step: centre the row now that it is built, then flash it.
+  Future<void> _landOn(String targetId, int generation) async {
+    final ctx = _revealKey.currentContext;
+    if (ctx != null) {
+      await Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    }
+    if (!mounted || generation != _jumpGeneration) return;
+    unawaited(HapticFeedback.lightImpact());
+    _highlightTimer?.cancel();
+    setState(() => _highlightedId = targetId);
+    // Long enough to find with your eyes after the scroll settles, short
+    // enough that it is gone before it becomes part of the bubble.
+    _highlightTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (!mounted) return;
+      setState(() => _highlightedId = null);
+    });
+  }
+
+  /// The quoted message is not in the loaded window. Fetch the one row and
+  /// show it, because doing nothing here is the bug being fixed.
+  Future<void> _showOriginal(String id, String? uid) async {
+    final couple = _coupleId;
+    if (couple == null) return;
+    Message? original;
+    try {
+      original = await ChatRepository.fetchById(couple, id);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load that message.')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (original == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('That message is no longer in this conversation.'),
+        ),
+      );
+      return;
+    }
+    final theme = ref.read(chatThemeProvider).theme;
+    await showOriginalMessageSheet(
+      context,
+      message: original,
+      authorName: original.isMine(uid)
+          ? 'You'
+          : (ref.read(sessionProvider).partner?.displayName ?? 'Your partner'),
+      voice: _voice,
+      bubble: original.isMine(uid) ? theme.myBubble : theme.partnerBubble,
+    );
   }
 
   // Voice recorder
@@ -1094,6 +1287,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // one for everyone while it is picked. A stale id would inflate the
         // count and make _allSelectedAreMine vacuously true.
         _selection.prune(_ids);
+        // Rows that are gone stop paying for a measured height; without this
+        // the map is a leak the length of the conversation.
+        _rowOffsets.forgetAllExcept(_ids);
       });
     } catch (_) {}
   }
@@ -1697,6 +1893,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (xc != null) SupabaseService.client.removeChannel(xc);
     _typingTimer?.cancel();
     _partnerTypingTimer?.cancel();
+    _highlightTimer?.cancel();
     _tickTimer?.cancel();
     _flushReadAck('chat_close');
     final id = _coupleId;
@@ -1936,23 +2133,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             : _messages.isEmpty
                                 ? const _EmptyChat()
                                 : Builder(builder: (_) {
-                                    final cleared = _clearedBefore;
-                                    final visible = _messages
-                                        .where((m) => !m.isHiddenFor(uid))
-                                        .where((m) =>
-                                            cleared == null ||
-                                            m.createdAt.isAfter(cleared),)
-                                        .toList();
-                                    if (visible.isEmpty) {
-                                      return const _EmptyChat();
-                                    }
                                     // Media sent together collapses into one
                                     // row here, so the list builds grids rather
                                     // than one full-width bubble per photo.
-                                    final rows = MediaAlbums.rows(visible);
+                                    final rows = _visibleRows(uid);
+                                    if (rows.isEmpty) {
+                                      return const _EmptyChat();
+                                    }
                                     return Stack(
                                       children: [
-                                        ListView.builder(
+                                        Listener(
+                                          // A jump in flight always loses to
+                                          // the user's own thumb. Without this
+                                          // the search keeps jumping the list
+                                          // out from under a finger that is
+                                          // already scrolling it.
+                                          onPointerDown: (_) =>
+                                              _jumpGeneration++,
+                                          child: ListView.builder(
                                           controller: _scroll,
                                           reverse: true,
                                           padding: const EdgeInsets.fromLTRB(
@@ -1973,10 +2171,43 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                             .newest
                                                             .createdAt,
                                                         row.oldest.createdAt,);
-                                            return Dismissible(
+                                            // Rebuilt only when a finger lands
+                                            // on or leaves a waveform, which is
+                                            // twice per scrub and only for the
+                                            // rows on screen.
+                                            return MeasuredRow(
+                                              // Layout is the only honest
+                                              // source for a row height: a
+                                              // bubble is one line or ten, a
+                                              // photo grid or a voice note.
+                                              onHeight: (h) => _rowOffsets
+                                                  .record(m.id, h),
+                                              child: KeyedSubtree(
+                                              // Only the row being walked to
+                                              // wears the key, so 299 others do
+                                              // not mint a GlobalKey each.
+                                              key: _revealId == m.id
+                                                  ? _revealKey
+                                                  : null,
+                                              child: ValueListenableBuilder<
+                                                String?>(
+                                              valueListenable: _voice.scrubbing,
+                                              builder: (context, scrubbing, _) =>
+                                                  Dismissible(
                                                 key: ValueKey('rpl-${m.id}'),
-                                                direction:
-                                                    DismissDirection.startToEnd,
+                                                // Stood down while this note is
+                                                // being scrubbed. Both this and
+                                                // the waveform want horizontal
+                                                // drags, and leaving both live
+                                                // lets the gesture arena decide
+                                                // on pointer-event ordering —
+                                                // which goes the wrong way on a
+                                                // flick, sliding the message
+                                                // into a reply mid-scrub.
+                                                direction: scrubbing == m.id
+                                                    ? DismissDirection.none
+                                                    : DismissDirection
+                                                        .startToEnd,
                                                 dismissThresholds: const {
                                                   DismissDirection.startToEnd:
                                                       0.22,
@@ -2022,6 +2253,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                     mine: m.isMine(uid),
                                                     showDateHeader: showTime,
                                                     repliedTo: _byId(m.replyToId),
+                                                    replyAuthor:
+                                                        _replyAuthorFor(
+                                                            m, uid,
+                                                            partnerName,),
+                                                    onTapReply: m.replyToId ==
+                                                            null
+                                                        ? null
+                                                        : () => unawaited(
+                                                            _jumpToMessage(
+                                                                m.replyToId!,
+                                                                uid,),),
+                                                    highlighted:
+                                                        _highlightedId == m.id,
                                                     voice: _voice,
                                                     theme: chatTheme,
                                                     senderName: m.isMine(uid)
@@ -2039,9 +2283,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                             .retryText(m.id)
                                                         : null,
                                                   ),
-                                                ),);
+                                                ),),
+                                            ),),);
                                           },
-                                        ),
+                                        ),),
                                         if (_hasNewMessage)
                                           Positioned(
                                             bottom: 12,
@@ -2084,7 +2329,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             _sendMediaBatch(couple.id, items),
                         onSendFiles: (docs) =>
                             _sendDocuments(couple.id, docs),
-                        onSendVoice: (f, id) => _sendVoiceOnce(couple.id, f, id),
+                        onSendVoice: (f, id, peaks) =>
+                            _sendVoiceOnce(couple.id, f, id, peaks),
                         onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
                             replyToId: _takeReplyId(),),
                         onFlingGif: _flingGifFile,
@@ -2172,6 +2418,9 @@ class _Bubble extends StatelessWidget {
     required this.onReact,
     this.album,
     this.repliedTo,
+    this.replyAuthor,
+    this.onTapReply,
+    this.highlighted = false,
     this.status,
     this.onRetry,
     this.reactions,
@@ -2194,6 +2443,15 @@ class _Bubble extends StatelessWidget {
   final ChatTheme theme;
   final String senderName;
   final Message? repliedTo;
+
+  /// The quoted message's author, shown on the quote card.
+  final String? replyAuthor;
+
+  /// Walk the conversation to the quoted message.
+  final VoidCallback? onTapReply;
+
+  /// Wearing the landing flash after a jump.
+  final bool highlighted;
 
   /// Set when this bubble stands for a whole send rather than one photo. The
   /// grid replaces the single-photo body; everything around it — the reply
@@ -2221,6 +2479,38 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = _body(context);
+    if (!highlighted) return content;
+    // Painted BEHIND the row rather than wrapped around it. A translucent fill
+    // holding content is the thing repo_hygiene's glass rule bans, and rightly:
+    // the bubble is what you read, and it stays opaque. This is a wash on the
+    // background, sized to the row and taking no touches.
+    //
+    // Fades out on its own rather than waiting to be told: the flash is a
+    // pointer, and one that stays becomes part of the bubble.
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 1, end: 0),
+              duration: const Duration(milliseconds: 1500),
+              curve: Curves.easeOut,
+              builder: (context, t, _) => DecoratedBox(
+                decoration: BoxDecoration(
+                  color: MilesColors.gilt.withValues(alpha: 0.18 * t),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ),
+        content,
+      ],
+    );
+  }
+
+  Widget _body(BuildContext context) {
     return Column(
       crossAxisAlignment:
           mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
@@ -2265,6 +2555,8 @@ class _Bubble extends StatelessWidget {
                   _ReplyPreview(
                     message: repliedTo!,
                     on: mine ? theme.myBubble : theme.partnerBubble,
+                    author: replyAuthor,
+                    onTap: onTapReply,
                   ),
                 if (message.deletedForEveryone) Text(
                         'This message was deleted',
@@ -2281,7 +2573,8 @@ class _Bubble extends StatelessWidget {
                         textColor: theme.text,
                         bubble: mine ? theme.myBubble : theme.partnerBubble,
                         senderName: senderName,
-                        onOpenMedia: onOpenMedia,),
+                        onOpenMedia: onOpenMedia,
+                        mine: mine,),
               ],
             ),
           ),
@@ -2601,8 +2894,19 @@ final DateFormat _dayHeaderFormat = DateFormat('EEEE, MMM d');
 final DateFormat _bubbleTimeFormat = DateFormat('h:mm a');
 
 /// Small quoted preview shown at the top of a bubble that's replying.
+///
+/// It used to be a bare Container holding one line of preview text: no author,
+/// no tap. Between two people sending five voice notes each, "yes, exactly"
+/// under an unattributed line answers nothing anyone can point at — so the card
+/// now says WHO, and tapping it walks the conversation back to the message
+/// itself.
 class _ReplyPreview extends StatelessWidget {
-  const _ReplyPreview({required this.message, required this.on});
+  const _ReplyPreview({
+    required this.message,
+    required this.on,
+    this.author,
+    this.onTap,
+  });
   final Message message;
 
   /// The bubble this sits inside. The quote is a shade of its host, and the
@@ -2610,24 +2914,48 @@ class _ReplyPreview extends StatelessWidget {
   /// the shade here is the only way to darken it without going see-through.
   final Color on;
 
+  /// 'You' or the partner's name. Null only when the quoted message is not
+  /// loaded, which is also when there is nobody to name.
+  final String? author;
+
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: MilesColors.tint(Colors.black, 0.18, over: on),
-        borderRadius: BorderRadius.circular(8),
-        border: const Border(
-          left: BorderSide(color: MilesColors.gilt, width: 3),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: MilesColors.tint(Colors.black, 0.18, over: on),
+          borderRadius: BorderRadius.circular(8),
+          border: const Border(
+            left: BorderSide(color: MilesColors.gilt, width: 3),
+          ),
         ),
-      ),
-      child: Text(
-        message.previewText(),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-            color: MilesColors.cream50, fontSize: 12, height: 1.2,),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (author != null)
+              Text(
+                author!,
+                style: const TextStyle(
+                  color: MilesColors.gilt,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            Text(
+              message.previewText(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: MilesColors.cream50, fontSize: 12, height: 1.2,),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2641,6 +2969,7 @@ class _Content extends StatelessWidget {
     required this.senderName,
     required this.bubble,
     required this.onOpenMedia,
+    required this.mine,
     this.textColor = MilesColors.cream50,
   });
   final Message message;
@@ -2650,6 +2979,9 @@ class _Content extends StatelessWidget {
   /// Opens the pager on this message, inside the conversation's whole media
   /// set. Replaces the single-path open that gave a photo no neighbours.
   final void Function(Message) onOpenMedia;
+
+  /// Whose note this is. Only the partner's can be unplayed.
+  final bool mine;
 
   /// The fill of the bubble this is rendering inside — a dozen chat themes
   /// pick it, and controls drawn on top have to resolve against it rather
@@ -2837,6 +3169,20 @@ class _Content extends StatelessWidget {
             senderName: senderName,
             bubble: bubble,
             durationMs: m.voiceDurationMs,
+            positionStream: voice.positionStream,
+            peaks: VoicePeaks.decode(m.voicePeaks),
+            messageId: m.id,
+            speed: voice.speed,
+            onCycleSpeed: () => unawaited(voice.cycleSpeed()),
+            playerTotal: voice.totalOf(m.id),
+            onSeek: (at) => unawaited(voice.seek(m.id, url, at)),
+            // Held only while a finger is on the waveform, and read by the
+            // list to stand that row's swipe-to-reply down for the duration.
+            onScrub: ({required active}) =>
+                voice.scrubbing.value = active ? m.id : null,
+            // Only the partner's. A dot on your own note would be telling you
+            // that you have not listened to yourself.
+            unplayed: !mine && !voice.wasPlayed(m.id),
           ),
         );
       case 'video':

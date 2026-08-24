@@ -13,6 +13,7 @@ import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/media/thumbnails.dart';
 import 'package:miles/core/utils/json_utils.dart';
+import 'package:miles/features/chat/voice_peaks.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -43,6 +44,7 @@ class Message {
     this.imagePath,
     this.voicePath,
     this.voiceDurationMs,
+    this.voicePeaks,
     this.videoPath,
     this.filePath,
     this.fileSize,
@@ -76,6 +78,7 @@ class Message {
         voiceDurationMs: j['voice_duration_ms'] == null
             ? null
             : JsonUtils.parseInt(j['voice_duration_ms']),
+        voicePeaks: JsonUtils.parseStringOrNull(j['voice_peaks']),
         videoPath: JsonUtils.parseStringOrNull(j['video_path']),
         filePath: JsonUtils.parseStringOrNull(j['file_path']),
         fileSize: j['file_size'] == null ? null : JsonUtils.parseInt(j['file_size']),
@@ -154,6 +157,7 @@ class Message {
         imagePath: imagePath,
         voicePath: voicePath,
         voiceDurationMs: voiceDurationMs,
+        voicePeaks: voicePeaks,
         videoPath: videoPath,
         filePath: filePath,
         fileSize: fileSize,
@@ -183,6 +187,7 @@ class Message {
         imagePath: imagePath,
         voicePath: voicePath,
         voiceDurationMs: voiceDurationMs,
+        voicePeaks: voicePeaks,
         videoPath: videoPath,
         filePath: filePath,
         fileSize: fileSize,
@@ -217,6 +222,7 @@ class Message {
         imagePath: server.imagePath,
         voicePath: server.voicePath,
         voiceDurationMs: server.voiceDurationMs,
+        voicePeaks: server.voicePeaks,
         videoPath: server.videoPath,
         filePath: server.filePath,
         fileSize: server.fileSize,
@@ -261,6 +267,25 @@ class Message {
   /// than this build — the fleet is sideloaded and has no update channel. The
   /// bubble draws no label at all for those rather than inventing one.
   final int? voiceDurationMs;
+
+  /// The recording's own loudness, one byte per bar, base64 — the shape the
+  /// bubble draws instead of a decorative pattern.
+  ///
+  /// Null is permanent rather than transitional, for the same reason
+  /// [voiceDurationMs] is: every note sent before the column existed, and
+  /// everything from a client older than this build, on a fleet that is
+  /// sideloaded with no update channel. Those bubbles draw a pattern derived
+  /// from the message id, which is at least stable per note.
+  ///
+  /// **Deliberately plaintext, and it is the one exception in this file.**
+  /// `body` is ciphered because it IS the message, and message_reactions has no
+  /// plaintext emoji column at all. Two rules point opposite ways here — "E2EE
+  /// stays, no plaintext at rest" against "minimal footprint" — and the tie is
+  /// broken by the audio itself already sitting unencrypted in couple_media:
+  /// enciphering a rendering hint whose subject is stored in the clear beside
+  /// it buys nothing. That reasoning does not extend to the next piece of voice
+  /// metadata without being asked again.
+  final String? voicePeaks;
   final String? videoPath;
 
   /// couple_files object name. [body] carries the file's display name, so a
@@ -423,6 +448,29 @@ class ChatRepository {
     final out = await hydrate(_parseRows(res as List, 'chat catch-up'));
     await warmMedia(out);
     return out;
+  }
+
+  /// One message by id, for a quoted reply whose original is not on screen.
+  ///
+  /// The conversation loads the newest 300 and nothing older, so a reply to
+  /// something further back than that has a quote card pointing at a message
+  /// this device has never held. Tapping it has to reach the row directly or
+  /// the feature dead-ends on exactly the case that motivated it.
+  ///
+  /// Hydrated through the same path as every other read, so a ciphered body
+  /// opens here too rather than arriving as "can't open this".
+  static Future<Message?> fetchById(String coupleId, String id) async {
+    final res = await _c
+        .from('messages')
+        .select()
+        .eq('couple_id', coupleId)
+        .eq('id', id)
+        .limit(1);
+    final rows = _parseRows(res as List, 'quoted message');
+    if (rows.isEmpty) return null;
+    final out = await hydrate(rows);
+    await warmMedia(out);
+    return out.isEmpty ? null : out.first;
   }
 
   /// Messages newest-first (descending by server `created_at`). Pairs with a
@@ -913,7 +961,7 @@ class ChatRepository {
   /// only its response was lost — wrote a second row the id dedupe could not
   /// see, and the note arrived twice on both phones.
   static Future<void> sendVoice(String coupleId, File file,
-      {String? replyToId, String? id,}) async {
+      {String? replyToId, String? id, String? peaks,}) async {
     final uid = SupabaseService.currentUserId;
     // Thrown, not returned — a return reads as sent to the input bar's retry
     // snackbar too, and the recording is the only copy of the note (sendText).
@@ -935,6 +983,14 @@ class ChatRepository {
         // Omitted rather than sent as null when it could not be read, so a
         // recording this cannot measure writes the exact row it always did.
         if (durationMs != null) 'voice_duration_ms': durationMs,
+        // Same omit-rather-than-null rule, plus a length the column will
+        // actually accept. messages_voice_peaks_len refuses anything over 256
+        // characters, and that refusal is a 23514 — which _alreadyLanded does
+        // NOT treat as landed, so it rethrows, the audio is already uploaded,
+        // and every retry orphans another object while failing identically.
+        // A note is worth more than its waveform: drop the shape, keep the note.
+        if (peaks != null && peaks.length <= VoicePeaks.maxEncodedLength)
+          'voice_peaks': peaks,
         if (replyToId != null) 'reply_to_id': replyToId,
       });
     } catch (e) {

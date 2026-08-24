@@ -11,6 +11,7 @@ import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/voice_peaks.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
@@ -38,7 +39,7 @@ class ChatInputBar extends StatefulWidget {
   final void Function(List<PickedDocument> docs) onSendFiles;
   /// The id is minted by the bar, not the send path, so a retry of the SAME
   /// recording reuses it and the second insert conflicts instead of duplicating.
-  final Future<void> Function(File voice, String id) onSendVoice;
+  final Future<void> Function(File voice, String id, String? peaks) onSendVoice;
   final Future<void> Function(File video) onSendVideo;
 
   /// A GIF/sticker picked from the phone keyboard — flung (rises on both phones).
@@ -170,6 +171,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // for the life of the process - and the shell would never move
     // anyone home again.
     ChatInputBar.recording.value = false;
+    // Same reason as the flag above: dispose cannot await, but an uncancelled
+    // subscription outlives this State and would pour the next recording's
+    // samples into a buffer belonging to a bar that no longer exists.
+    unawaited(_cancelAmplitude());
     _recorder.dispose();
     super.dispose();
   }
@@ -392,6 +397,37 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  /// Levels for the waveform, one per amplitude tick, in 0..1.
+  ///
+  /// Plain field with no setState: nothing on screen draws these while the note
+  /// is being held. Notifying at the sampling rate would rebuild the whole
+  /// input bar ten times a second to change nothing a user can see — the same
+  /// reasoning already written over positionStream in voice_note_bubble.dart.
+  final List<double> _levels = [];
+  StreamSubscription<Amplitude>? _amplitude;
+
+  /// dBFS in, 0..1 out, against a -45 floor rather than the theoretical -160.
+  ///
+  /// Lifted from recorder_cover.dart, which explains why: everything below -45
+  /// is room noise, and a waveform that reacts to room noise looks like a toy.
+  /// Kept absolute rather than normalised per note, because the column this
+  /// feeds documents 255 as "full scale" — the painter is where a quiet note
+  /// gets scaled up to fill its bubble.
+  static const double _dbFloor = 45;
+
+  /// Cancelled from every exit path, and that is not belt-and-braces.
+  ///
+  /// record's onAmplitudeChanged hands back ONE broadcast stream per recorder
+  /// and keeps it open across stop(); only the polling timer stops. A
+  /// subscription left over from one note therefore goes on appending the NEXT
+  /// note's samples to a buffer that already holds the first one, and both
+  /// notes end up drawn with the wrong shape.
+  Future<void> _cancelAmplitude() async {
+    final sub = _amplitude;
+    _amplitude = null;
+    await sub?.cancel();
+  }
+
   Future<void> _startRecording() async {
     try {
       if (!await _recorder.hasPermission()) {
@@ -405,6 +441,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
       final dir = await getTemporaryDirectory();
       final path =
           '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      // Subscribed BEFORE start(), and the order is the point. The stream is
+      // inert until the recorder is actually running, so nothing is lost by
+      // being early — whereas subscribing after start() puts a throwing call
+      // between a live recorder and the flag the shell reads, and the catch
+      // below would then report "could not start" over a microphone that is
+      // still hot.
+      _levels.clear();
+      _amplitude = _recorder
+          .onAmplitudeChanged(const Duration(milliseconds: 100))
+          .listen(_onAmplitude);
+
       await _recorder.start(
         const RecordConfig(
           bitRate: 96000,
@@ -417,6 +465,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
       });
       ChatInputBar.recording.value = true;
     } catch (_) {
+      // Leave nothing running. A recorder that started and then threw on the
+      // way out keeps the microphone open, and a raised `recording` flag makes
+      // the shell refuse to move anyone home for the life of the process.
+      await _cancelAmplitude();
+      try {
+        await _recorder.stop();
+      } on Exception {
+        // Already stopped, or never started. Either way the next line is what
+        // matters, and there is nothing a user could act on here.
+      }
+      ChatInputBar.recording.value = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not start recording.')),
@@ -425,14 +484,23 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  void _onAmplitude(Amplitude a) {
+    _levels.add(((a.current + _dbFloor) / _dbFloor).clamp(0.0, 1.0));
+  }
+
   Future<void> _stopRecording({bool cancel = false}) async {
     if (!_recording) return;
     final path = _currentRecordingPath;
+    await _cancelAmplitude();
     try {
       await _recorder.stop();
     } catch (_) {
       // ignore — already stopped
     }
+    // Read before the clear, so a note that is about to be sent keeps the
+    // shape that was actually recorded for it.
+    final peaks = VoicePeaks.encode(_levels);
+    _levels.clear();
     setState(() {
       _recording = false;
       _currentRecordingPath = null;
@@ -441,7 +509,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (cancel || path == null) return;
     final file = File(path);
     if (!await file.exists()) return;
-    await _sendVoice(file);
+    await _sendVoice(file, peaks);
   }
 
   /// Hand a finished recording to the chat.
@@ -457,11 +525,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// when the retry gets tapped — was written a second time and appeared twice
   /// on both phones. `sendVoice` now treats a primary-key conflict as success,
   /// but only if both attempts carry the SAME id, which is what this threads.
-  Future<void> _sendVoice(File file, {String? id}) async {
+  ///
+  /// [peaks] is a parameter for the same reason and not a field. The retry is
+  /// tapped from a snackbar that outlives the recording, so a field would have
+  /// been overwritten by whatever was recorded in between — and note A would be
+  /// re-sent carrying note B's waveform, permanently and silently.
+  Future<void> _sendVoice(File file, String? peaks, {String? id}) async {
     final sendId = id ?? _uuid.v4();
     setState(() => _sending = true);
     try {
-      await widget.onSendVoice(file, sendId);
+      await widget.onSendVoice(file, sendId, peaks);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -471,7 +544,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           // rather than an apology for having lost it.
           action: SnackBarAction(
             label: 'Retry',
-            onPressed: () => _sendVoice(file, id: sendId),
+            onPressed: () => _sendVoice(file, peaks, id: sendId),
           ),
         ),
       );

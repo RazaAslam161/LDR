@@ -349,7 +349,9 @@
       "seq",
       "video_path",
       "voice_path",
-      "voice_duration_ms"
+      "voice_duration_ms",
+      "voice_peaks",
+      "edited_at"
     ],
     "mood_lamp": [
       "color_rgb",
