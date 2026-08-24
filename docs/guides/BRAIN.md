@@ -7968,6 +7968,44 @@ Plus the five §77 checks, which still stand and are still unrun.
 anything else — the whole backward-compatibility design rests on it, and it is a single
 `grep msid` on a logged SDP.
 
+### §78 addendum — git identity, and a commit that was pushed out from under this session (2026-08-24)
+
+**`user.name` was unset on this machine.** Not just in this repo — globally. `user.email`
+was set (`razaaslam5096@gmail.com`), the name was not, so every commit from here was
+authored `unknown <razaaslam5096@gmail.com>`. Three carried it before anyone noticed:
+`4b3e757` (§77+§78), `ff07d96` (rules file + BRAIN 75-76) and `72bfb2c` (the eleven
+migrations). Now set globally to `Raza Aslam`; commits from here on are correct.
+
+**The three `unknown` commits were not rewritten, and that was not a choice made freely.**
+Between staging the amend and running it, `origin/fix-sprint` moved to `4b3e757` — checked
+against GitHub with `git ls-remote`, not against the local ref, and `git reflog show
+refs/remotes/origin/fix-sprint` reads `update by push`. **A concurrent session in this same
+working tree pushed, and took this session's commit up with it.** Fixing the authorship now
+means rewriting published history on the branch that session is actively using, which is a
+different and destructive act from the one that was authorised while it was still local.
+Left alone deliberately. If the owner wants it, it is:
+
+```
+git rebase --exec 'git commit --amend --no-edit --author="Raza Aslam <razaaslam5096@gmail.com>"' 72bfb2c~1
+git push --force-with-lease
+```
+
+`--force-with-lease`, never plain `--force`, and not while another session is mid-flight.
+
+**Two things this turn established that are worth carrying forward:**
+
+- **The leaked Google Maps API key is confirmed live on the remote.** §75 flagged it as a
+  risk; `git branch -r --contains 5403769` returns `origin/fix-sprint`, so it is not
+  theoretical — the commit is on GitHub. Rotation is overdue, and no push made it worse.
+- **This working tree is genuinely shared and concurrently written.** During §78 alone,
+  another session added five chat source files and five test files, fixed an undefined
+  method in `chat_screen.dart` mid-run, committed twice and pushed once. Anything that
+  reads `git status`, stages by pattern, or rewrites history has to assume that.
+
+**Exact next step:** unchanged from §78 — the offer-SDP `grep msid` on two handsets. The
+authorship rewrite above is optional and independent; do it only when no other session is
+running.
+
 ## §79 — Voice notes get speed, a real waveform and a scrubber; a reply learns to point (2026-08-24)
 
 Owner asked for three things in chat: a speed control per voice note, a waveform that shows the
