@@ -8096,3 +8096,48 @@ whoever wrote it, and it hides nothing under `lib/`.
 Note for whoever is next: at least two sessions were committing into THIS checkout at the same time
 (`02cccbe` landed on top of `03caf66` between a push and its verification). Re-read `git status`
 before staging anything — the working tree is shared.
+
+## §80 — Every commit in the repo now has an author, and the SHAs in §78/§79 are stale (2026-08-24)
+
+**Every SHA written in §78, its addendum, §79 and its addendum is dead.** They were recorded
+before this rewrite and none of them resolve any more. The mapping:
+
+| was | is | commit |
+|---|---|---|
+| `72bfb2c` | `8dc8ae0` | the eleven migrations |
+| `ff07d96` | `f007fdd` | rules file + BRAIN 75-76 |
+| `4b3e757` | `92283f0` | §77+§78, the screen-share work |
+| `da377bd` | `1dec212` | voice-note waveform client |
+| `03caf66` | `5856233` | §79 |
+| `02cccbe` | `4eeb5a9` | §78 addendum |
+| `56a59d9` | `2f46d3b` | §79 addendum |
+
+**Why.** `user.name` was unset globally on this machine, so three commits — the first three
+above — were authored `unknown <razaaslam5096@gmail.com>`. The name is set now
+(`Raza Aslam`), and the three were rewritten rather than left, at the owner's explicit
+instruction, after they had already reached GitHub.
+
+**How, and what was checked before publishing.** A rebase over `72bfb2c~1..HEAD` applying
+`git commit --amend --no-edit --author=…` to each. `--author` rather than `--reset-author`,
+deliberately: it changes the name and leaves the **author date** alone, which is why the two
+2026-08-23 commits still read 2026-08-23. Committer dates moved to now; that is unavoidable
+in any rewrite. Proven metadata-only before the push, not after:
+
+- `git diff <old-tip> <new-tip> --stat` — **empty**.
+- tree hash `1e705d7d10bfff244550b3686ad439db3b9eb1f6` on **both** sides.
+- 7 commits before, 7 after.
+- working tree still exactly `M mobile/analysis_options.yaml`; autostash popped, no stash orphaned.
+
+**The push used `--force-with-lease=fix-sprint:56a59d9`, pinned to a literal SHA, and that
+detail is the point.** A bare `--force-with-lease` compares against the remote-TRACKING ref,
+so fetching immediately beforehand — the instinct — silently re-arms the lease at whatever
+the other session just pushed and lets you clobber it. Pinning the expected value to the SHA
+the rewrite was actually based on is the only form that protects a shared branch. Use that
+spelling here; three concurrent pushes landed during the session that wrote this.
+
+**Still open, unchanged by any of this:** the §78 on-device checks, all unrun — no Android
+SDK on this machine. And the Google Maps key from the old `5403769` is on the remote and
+still needs rotating.
+
+**Exact next step:** unchanged from §78 — dump the offer SDP on two handsets and confirm the
+third `m=video` section carries no `a=msid`. Everything in the second-track design rests on it.
