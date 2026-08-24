@@ -8141,3 +8141,372 @@ still needs rotating.
 
 **Exact next step:** unchanged from §78 — dump the offer SDP on two handsets and confirm the
 third `m=video` section carries no `a=msid`. Everything in the second-track design rests on it.
+
+---
+
+## §81 — AdSense cannot serve an app, so this is AdMob; the Touch banner is built and switched off (2026-08-24)
+
+Owner asked to "connect my AdSense account in my app, in touch section only and only banners
+add". Four things had to be said before any of it could be built, and all four are verified
+against primary sources rather than recalled:
+
+**1. AdSense has no app inventory.** Google's own product comparison puts AdSense at web-only;
+app inventory is AdMob or Ad Manager. The AdSense account is not wasted — it is the *payments*
+identity underneath AdMob, auto-linked when you sign up for AdMob with the same Google address,
+and AdMob pays out through the AdSense payments profile. So the ask is met by AdMob, and the
+account named in the ask is still the one that gets paid. Nothing in `mobile/` has a web target,
+so there was never a surface AdSense could have served.
+
+**2. Touch is the worst screen in the app to put an ad on, and the codebase says so itself.**
+`touch_map_screen.dart:692` — `SecureScreen.setSecure(); // intimate photos — block screenshots`.
+The photo is user-chosen and sits in an encrypted bucket the app cannot inspect, so the app can
+never know which side of Google's sexual-content line a given couple's upload falls on. Google
+Publisher *Restrictions* (the soft tier) means near-zero fill — a permanently empty band.
+Publisher *Policies* (the hard tier) names account suspension. AdMob and AdSense are one
+publisher identity, so the downside reaches earnings unrelated to Miles. This was not overridden
+and not silently narrowed: it is built, and it is off.
+
+**3. The published privacy policy was about to become false.** `web/privacy-policy.html:191` and
+its in-repo mirror `docs/legal/privacy-policy.md:104` both said Miles "contains no advertising
+SDK, no analytics SDK, and no third-party tracking"; both also said data is not shared for
+advertising. Rewritten in both files, plus a Google AdMob row added to the third-party table in
+each. The two files were already drifting in shape; they now say the same thing.
+
+**4. Payout is unreachable.** AdMob's threshold is US$100 against a two-person audience, one of
+whom is the publisher — and a publisher viewing their own live ads is invalid traffic by
+definition. This is the reason to expect ~$0, independent of every policy question above.
+
+### What changed
+
+- `pubspec.yaml` — `google_mobile_ads: 9.1.0` (exact pin, no caret; published 2026-08-11,
+  confirmed from the pub.dev API, not a summary). Environment floors raised to Dart `>=3.10.0`
+  and Flutter `>=3.38.1` because 9.1.0 declares exactly those.
+- `lib/core/ads/ads_service.dart` (new) — UMP consent → `canRequestAds()` → `MobileAds.initialize()`
+  → `maxAdContentRating: g`. Lazy: nothing in `main.dart` calls it, so a user who never opens
+  Touch never loads the SDK and cold start is untouched.
+- `lib/core/ads/anchored_banner.dart` (new) — `AnchoredBannerBand`. Fixed `AdSize.banner` (320×50)
+  deliberately, not adaptive: an adaptive height is only known after a platform round trip, which
+  means a reflow when the answer lands, and on this screen the thing that moves is a photograph
+  someone has a finger on. The band owns its own 12dp gap and hairline rule so a later edit
+  cannot leave an ad flush against the type chips.
+- `release_gate.dart` — new fail-closed `adsEnabled`, parsed from `app_release.ads_enabled` with
+  `== true` (never a cast), added to the PRIMARY select only so the pre-existing legacy-column
+  fallback leaves it false. `revision` now bumps when it changes.
+- `touch_map_screen.dart` — the band is the FIRST child of the body `Column`. Everything else on
+  that screen is something you touch; the only non-interactive neighbour in the whole layout is
+  the instruction text directly below it.
+- `settings_screen.dart` — `_AdPrivacyOptionsLink`, drawn only where UMP reports a privacy-options
+  entry point is required. Stateful, not a `FutureBuilder`, because that screen setStates often
+  and the question crosses a platform channel.
+- `supabase/migrations/20260824020000_ads_are_a_row_not_a_release.sql` (new) — **written, NOT
+  applied to staging or production.** `add column if not exists`, so a second run is a no-op;
+  rollback is a one-line `drop column` and is written into the file.
+- `web/app-ads.txt` (new, placeholder), `web/vercel.json` (text/plain for it). **Not deployed.**
+- Tests: `test/unit/core/ads_gate_test.dart`, `test/widget/anchored_banner_band_test.dart` — 13 new.
+
+### Verified
+
+- `flutter analyze` → **451 issues, 0 errors, 0 warnings.** Baseline before this work was 541
+  issues, 0 errors, 0 warnings.
+- `flutter test` → **1142 tests, 1 failure**, and the failure is `repo_hygiene_test` →
+  "the repository root holds nothing but the entry point", `Actual: Set:['CLAUDE.md']`.
+  Pre-existing: `CLAUDE.md` was committed by `f007fdd` and this diff adds no root file.
+  *Found, not fixed* — a hygiene gate is not an agent's to change.
+
+### The analyzer count dropped, and that is a finding, not a win
+
+541 → 451 is **−90 `require_trailing_commas` and +2 of mine (since fixed)**. Cause proven by
+flipping one line and re-running: with `sdk: ">=3.4.0"` the lint fires 90 times, with
+`">=3.10.0"` it fires 0 — the lint no longer exists at the newer language version. So raising the
+floor, which `google_mobile_ads` genuinely requires, **silently switched off a rule
+`analysis_options.yaml` still asks for on line 18.** `analysis_options.yaml` was NOT edited here
+(it also carries another session's uncommitted change). The owner decides whether to drop the
+now-dead rule or pin the floor lower.
+
+### Still open
+
+- **Nothing has been proven on a device.** No Android SDK on this machine, so the Gradle merge of
+  the AdMob `APPLICATION_ID` meta-data, the UMP form, and the banner actually rendering are all
+  unrun. This is the riskiest path in the whole change, not a footnote.
+- The manifest carries **Google's sample AdMob App ID** (`ca-app-pub-3940256099942544~3347511713`)
+  and `AdsService.liveBannerUnitId` is **empty**. `available` is false while it is empty, so a
+  release built today cannot serve — by design, so that test ads never masquerade as revenue.
+- `app-ads.txt` verification, the AdMob app-readiness review, the Play Data Safety update for the
+  merged `AD_ID` permission, and the CMP message for EEA/UK/CH are all console work.
+
+**Exact next step:** owner decision only — either (a) accept the account exposure on the Touch
+screen, create the AdMob app, paste the App ID into `AndroidManifest.xml` and the unit ID into
+`AdsService.liveBannerUnitId`, apply the migration to **staging first**, and leave `ads_enabled`
+false until a device has shown the band rendering; or (b) move the band to the Home tab, which
+clears the content and placement objections and needs one changed import.
+
+### §81 addendum — the adversarial round, and the three blockers it found in the fix itself (2026-08-24)
+
+Written before replying, because the round that follows a green gate is the one that matters. The
+code above passed `flutter analyze` clean and passed 13 new tests, and was still wrong in three
+load-bearing ways. Twenty findings were raised across three lenses; each was handed to a separate
+skeptic told to refute it. **17 confirmed, 3 refuted.** The refuted ones are recorded here too, so
+nobody re-raises them:
+
+- *"The banner is a platform view on a FLAG_SECURE window and will render unpredictably"* — refuted,
+  unverifiable without a device and asserted as if it were known.
+- *"BRAIN.md changed mid-review, so a concurrent session is writing it"* — refuted; the diff was
+  §81 itself.
+- *"The privacy-options row is hidden from users who declined consent"* — refuted on the premise.
+  Declining under TCF does not make `canRequestAds()` false; limited ads still serve.
+
+**Blocker 1 — the kill switch was OFF-only.** `ensureReady()` was `_ready ??= _prepare()`, and
+`_prepare` returns false immediately when the switch is off. Off is the shipping default, and merely
+opening Settings › About reaches it, so the first call cached a completed `Future(false)` for the
+life of the process. Flipping `ads_enabled = true` then reserved 63dp — pushing the instruction text,
+the chips, the warmth meter and BOTH BODY PHOTOS down while someone had a finger on one — and
+requested nothing, until the process died. On a phone Android keeps alive for days that is never,
+which is the exact fleet `release_gate.dart` exists for. Fixed: `available` is read OUTSIDE the memo,
+and only a SUCCEEDED consent is remembered. A regression test drives the whole OFF→ON flip and counts
+the SDK lookups: 0 while off, 1 after the flip.
+
+**Blocker 2 — the kill switch did not stop requests already in flight.** `_load()` awaited a
+multi-second consent form and SDK init, then built a `BannerAd` from state it had checked before the
+await. Fixed: mounted / suppressed / `available` / generation are all re-asked afterwards.
+
+**Blocker 3 — `ads_enabled` in the primary select 400s on production TODAY.** PostgREST fails the
+whole select when one column is missing, and the old fallback ladder had exactly two rungs: newest,
+then pre-`min_build_play` legacy. So on every launch, on every handset, until the migration lands,
+the fleet would have dropped to the legacy rung and lost `min_build_play` (the play floor turns off)
+and `chat_cipher_only` (re-decided from an absent column). Fixed: three rungs, one per column
+generation, each giving up only what the environment below it cannot answer, and each fallback is
+logged rather than silent.
+
+Also fixed from the same round: listener callbacks now check ad identity, so a failing request no
+longer nulls a healthy sibling and strands it undisposed (`_generation`); overlapping loads can no
+longer leak a `BannerAd`; the switch turning off now DISPOSES a loaded ad instead of hiding one that
+would keep accruing invisible impressions; `_gatherConsent` has a 15s timeout, because both UMP
+callbacks come from native and a Completer that never completes would hang every later caller
+forever; a 30s floor between requests, since the shell rebuilds this screen on every tab change and a
+two-person audience firing a request per visit is the traffic shape AdMob assesses accounts for; and
+`DELAY_APP_MEASUREMENT_INIT` in the manifest, because the ads SDK is started by a ContentProvider at
+process start where no Dart flag can reach it.
+
+**Two more false "no ads" claims, both of which SHIP:** `lib/features/legal/faq_text.dart:40` told
+users in-app "No subscriptions, no ads, no in-app purchases" — that string is inside the APK, not on
+a web page. And `docs/guides/PLAY-READINESS-AUDIT.md:70` certified "no ads, no analytics SDK, no
+AD_ID" under a heading reading "Already done — do not spend time here". AD_ID is a Data Safety
+declaration, not a doc detail. Both corrected.
+
+**A test that would have punished the fix.** `ads_gate_test.dart` asserted `liveBannerUnitId` is
+empty — so the suite would have gone red on the day the owner correctly pasted a real unit id.
+Replaced with an assertion on the conjunction the code actually promises.
+
+### Gates, re-run after the last edit
+
+```
+flutter analyze  -> 451 issues, 0 errors, 0 warnings
+                    delta vs the 541-issue baseline is EXACTLY -90 require_trailing_commas
+                    and nothing else; zero new issues in any file this work touched
+flutter test     -> +1143 -1
+                    the one failure is repo_hygiene_test "the repository root holds nothing but
+                    the entry point", Actual: Set:['CLAUDE.md'] — pre-existing, CLAUDE.md was
+                    committed by f007fdd and this diff adds no root file
+```
+
+### Found, not fixed
+
+- `mobile/test/unit/hygiene/repo_hygiene_test.dart` — red on `CLAUDE.md` at the repo root. A hygiene
+  gate is not an agent's to change; either the file moves or the allowlist gains it.
+- `mobile/analysis_options.yaml:20` — `require_trailing_commas: true` is now dead, because
+  `google_mobile_ads` forced the SDK floor to a language version where the rule no longer exists.
+  90 lints stopped enforcing. The file also carries another session's uncommitted edit and was not
+  touched here.
+
+**Exact next step is unchanged from §81**, with one addition: nothing in this addendum has run on a
+device either. The consent form, the AdMob meta-data merge, and the banner rendering inside a
+FLAG_SECURE window are all still unproven, and the FLAG_SECURE interaction in particular has no
+answer in this repo — a device is the only place it can get one.
+
+## §82 — I broke the root-cleanliness gate, and the APK cannot be built on this machine (2026-08-24)
+
+Asked to find any uncommitted work that is not the ads work, commit it, and cut a
+fresh APK. Two of those three are done; the third cannot be done here at all.
+
+**The answer to the question: almost nothing.** Every uncommitted change in the
+tree is the AdMob work from §81 except one file. Classified by reading each
+diff, not by grepping filenames:
+
+- ADS, left untouched — `pubspec.yaml` (google_mobile_ads 9.1.0 pinned exact,
+  which is what forced the Dart/Flutter floors up), `release_gate.dart`
+  (`adsEnabled` plus the three-generation column-set fallback so a missing
+  `ads_enabled` column cannot take `min_build_play` and `chat_cipher_only` down
+  with it), `settings_screen.dart` (`_AdPrivacyOptionsLink`),
+  `touch_map_screen.dart` (`AnchoredBannerBand`), `AndroidManifest.xml` (AdMob
+  app id), `faq_text.dart`, `privacy-policy.md`, `privacy-policy.html`,
+  `vercel.json`, `PLAY-READINESS-AUDIT.md`, BRAIN §81, and the five untracked
+  ads files.
+- NOT ads, committed — `mobile/analysis_options.yaml`. Seven platform-directory
+  excludes written by `pub get`'s auto-migration on 2026-08-23, dirty and
+  orphaned ever since. Verified it is not gate-weakening before committing:
+  every one of those directories holds **zero** Dart files, so the analyzer's
+  input set is unchanged.
+
+**MY DEFECT, found by the gate and fixed here.** `f007fdd` (mine, 2026-08-23)
+added `CLAUDE.md` at the repository root. `repo_hygiene_test`'s first assertion
+allows exactly `README.md` and `.gitignore` there. The full suite has been red
+since that commit — 1143 tests, 1 failing — and it was pushed.
+
+Root cause, one sentence: I gated that commit with `migrations_hygiene_test`
+alone, on the argument that another session's Dart was mid-flight and the full
+suite would describe their code rather than mine, and that argument was wrong
+because the gate I skipped polices the repo root, which is exactly what I had
+changed.
+
+Fixed by `git mv CLAUDE.md .claude/CLAUDE.md`. `.claude/` is already tracked
+(`launch.json`), is not ignored, and no hygiene test polices it. The gate's own
+failure message says "put it in mobile/, supabase/, scripts/ or docs/", so the
+root was never a legitimate home for it.
+
+**Checked, not assumed:** `.claude/CLAUDE.md` is a first-class project-memory
+location, not a fallback. Claude Code's own documentation lists project
+instructions as "`./CLAUDE.md` or `./.claude/CLAUDE.md`" and states a project
+CLAUDE.md "can be stored in either". So the file still loads at session start
+and the gate stays green — no rule change needed, and nobody should add
+`CLAUDE.md` to the `allowed` set to get it back to the root. Confirm in any new
+session with `/context`, which lists what actually loaded under **Memory files**.
+
+**THE APK CANNOT BE BUILT ON THIS MACHINE.** Not "was not built" — cannot be.
+`flutter doctor` reports "Unable to locate Android SDK"; `adb`, `java` and
+`keytool` are all absent; `ANDROID_HOME` and `ANDROID_SDK_ROOT` are both empty
+and no SDK directory exists at any standard path. Flutter itself is fine at
+`C:\src\flutter`.
+
+Three more things would block it even after Android Studio is installed, and
+they are worth knowing before anyone tries:
+
+1. **A build from this tree would ship the ads work.** `flutter build` reads the
+   working tree, not HEAD, and the tree carries the whole uncommitted AdMob
+   integration — including `ca-app-pub-3940256099942544~3347511713`, which is
+   Google's own SAMPLE app id. That is the opposite of a clean release build.
+2. **`mobile/android/maps.properties` is still missing,** so the build would bake
+   in the literal `MISSING_MAPS_API_KEY` and Touch Map would fail to authorise.
+3. **The version is still 0.1.0+48 / buildNumber 48**, while production's fleet
+   is on 52 and `app_release.latest_build` says 46. Cutting another 48 puts a
+   third meaning on one build number.
+
+**Gates.** Full suite re-run after the move: see the commit for the count. The
+suite was red before this section and is green after it, and the failing test is
+the one that flipped.
+
+**Exact next step:** install Android Studio and the Android SDK — no APK can be
+cut on this machine until that exists, and two of the three blockers above
+(`maps.properties`, the build number) have to be settled in the same pass. The
+chat-decrypt regression from §75 is still open and still unfixed.
+
+## §83 — This machine can build an APK now (2026-08-24)
+
+Pushed `3af553b` and `4eabe55`, which took the root-cleanliness gate green on
+origin — it had been red there since `f007fdd`, which was mine. Then installed
+the Android toolchain that has been missing since the disk was replaced.
+
+**Installed, all from vendor-official sources:**
+
+- **JDK 17.0.20.101** — Microsoft Build of OpenJDK, via `winget install
+  Microsoft.OpenJDK.17`. winget reported "Successfully verified installer hash".
+  The project needs exactly 17: `build.gradle.kts` sets
+  `sourceCompatibility`/`targetCompatibility` to `VERSION_17` and Kotlin
+  `jvmTarget` to `JVM_17`, against Gradle 8.13 and AGP 8.13.0.
+- **Android cmdline-tools rev 23.0.0** — `commandlinetools-win-16111833_latest.zip`,
+  147.8 MB from `dl.google.com`. SHA-1 verified against Google's own
+  `repository2-3.xml` manifest before extracting:
+  `57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d`, matched.
+- **platform-tools 37.0.1** (adb 1.0.41), **platforms;android-36** (android.jar
+  26.5 MB), **build-tools;36.0.0** (aapt2 present). compileSdk is 36, so 36 is
+  what was installed — not "whatever is latest".
+- **NDK 28.2.13676358** — NOT installed by hand. Gradle pulled it down itself on
+  the first build and accepted its licence automatically. Worth knowing because
+  it settles a question this session got wrong on the first pass: there is no
+  `externalNativeBuild` and no `CMakeLists.txt` anywhere in `android/`, so
+  nothing compiles native code from source and I assumed the NDK might not be
+  needed. It is — AGP wants it to strip the plugins' prebuilt `.so` files, and
+  `ndkVersion = flutter.ndkVersion` is enough to require it. Grepping for a
+  native build system was necessary and not sufficient; the build was the only
+  thing that could answer it.
+
+SDK root is the conventional `%LOCALAPPDATA%\Android\Sdk`.
+
+**Persistent user environment set** (user scope, no admin, append-only so the
+existing PATH survived): `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `JAVA_HOME`, and
+four PATH entries — the JDK bin, platform-tools, cmdline-tools/latest/bin, and
+**`C:\src\flutter\bin`**. That last one retires the "each shell needs
+`export PATH=...`" note in this repo's CLAUDE.md; Flutter is on the permanent
+PATH now.
+
+**A trap worth writing down: the new `android` CLI exits with
+`-1073740791` (0xC0000409, STACK_BUFFER_OVERRUN) after installing
+successfully.** cmdline-tools rev 23 deprecates `sdkmanager` in favour of an
+`android` binary, and that binary crashes on its exit path. Worse, the first run
+went the other way: `sdkmanager.bat platform-tools "platforms;android-36"
+"build-tools;36.0.0"` exited **0** having installed only `platform-tools`. So on
+this toolchain the exit code is wrong in BOTH directions — 0 on a partial
+install, crash on a complete one. Assert the artefact on disk (`android.jar`,
+`aapt2.exe`), never the return code. This is the "exit 0 is not proof the effect
+happened" rule with a second failure mode attached: a nonzero exit is not proof
+it did NOT happen either.
+
+**`flutter doctor` after the install:** Android SDK 36.0.0 detected at the right
+path, "Platform android-36, build-tools 36.0.0", `JAVA_HOME` picked up, JDK 17
+reported. The one remaining complaint is "Android license status unknown". The
+installer already recorded `android-sdk-license`; Flutter wants its own set of
+hashes. I did NOT run `flutter doctor --android-licenses` — accepting further
+legal agreements on the owner's behalf is not something to do speculatively, and
+`flutter build` does not gate on it. If a build ever demands one, that specific
+demand is the thing to bring back.
+
+**A RELEASE APK STILL SHOULD NOT BE CUT FROM THIS TREE**, and the toolchain
+being ready does not change any of it:
+
+1. **The tree carries the whole uncommitted AdMob integration**, including
+   `ca-app-pub-3940256099942544~3347511713` — Google's own SAMPLE app id.
+   `flutter build` reads the working tree, not HEAD, so any APK built now
+   contains it.
+2. **`mobile/android/maps.properties` is still missing.** The build does not
+   fail; `build.gradle.kts:28-35` warns and substitutes the literal
+   `MISSING_MAPS_API_KEY`, deliberately, because an unparseable key logs an
+   explicit authorisation failure where an empty one silently draws a grey
+   rectangle. Touch Map ships blank.
+3. **Version is still `0.1.0+48` / `buildNumber = 48`** while the field runs 52
+   and `app_release.latest_build` says 46. Cutting another 48 puts a third
+   meaning on one build number, and the update channel keys on it.
+
+**The toolchain proof build SUCCEEDED.** `flutter build apk --release --flavor
+sideload --target-platform android-arm64`, exit 0 after 3428s (first build: NDK,
+CMake and Gradle deps all cold). Output
+`build/app/outputs/flutter-apk/app-sideload-release.apk`, 181,078,288 bytes
+(172.7 MiB), sha256 `ef7da37c78659a1f0fe4112fcc10ab1f3ab20b1438ce213132e6726ab050d5f0`.
+Valid zip, 1000 entries. Debug-signed (`CN=Android Debug`), correct for the
+sideload channel. versionCode 48, targetSdk 36. So the machine can build; that
+was the question and the answer is yes.
+
+**But this artifact is not shippable, on two counts beyond the three above.**
+
+- **It is DEBUG-BUILT AGAINST THE UNCOMMITTED TREE.** It carries the whole ads
+  integration and Google's SAMPLE AdMob id, and the literal
+  `MISSING_MAPS_API_KEY`. Toolchain proof only — NOT copied to `Miles.apk`, NOT
+  uploaded to R2, `app_release` untouched.
+- **It crashes on two of its three ABIs.** `--target-platform android-arm64`
+  restricts Flutter's own libs (`libapp.so`, `libflutter.so`) to arm64-v8a, but
+  the plugin AARs (webrtc, mapbox, camera, datastore) ship prebuilt `.so` for
+  arm64-v8a, armeabi-v7a AND x86_64, and nothing strips the other two. Result:
+  `lib/armeabi-v7a/` and `lib/x86_64/` exist and hold plugin libs but NO Flutter
+  engine and NO Dart. A 32-bit or x86_64 device reads those dirs, installs
+  happily, then dies at launch with UnsatisfiedLinkError — which is worse than
+  BRAIN §73's assumption that such a device simply "cannot install the next one".
+  This is a property of release.sh's own recipe (line 337, identical command),
+  so every sideload build 46-52 has the same shape. It has not bitten only
+  because both test handsets are arm64. It sharpens the open armeabi-v7a
+  decision: the choice is not "arm64-only vs universal", it is "arm64-only that
+  cleanly refuses to install elsewhere (needs an abiFilters to drop the stray
+  plugin dirs) vs a real universal build (libapp.so in all three)". Today's
+  artifact is neither — it is the broken middle.
+
+**Exact next step:** decide the three release blockers (ads, maps key, version)
+AND the abiFilters question before any real build — a `flutter build` with an
+`ndk { abiFilters }` on the sideload flavor, or accept universal. The
+chat-decrypt regression from §75 is still open and still unfixed.
