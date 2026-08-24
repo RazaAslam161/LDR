@@ -7967,3 +7967,75 @@ Plus the five §77 checks, which still stand and are still unrun.
 **Exact next step:** on two handsets, dump the offer SDP first and confirm claim 1 before
 anything else — the whole backward-compatibility design rests on it, and it is a single
 `grep msid` on a logged SDP.
+
+## §79 — Voice notes get speed, a real waveform and a scrubber; a reply learns to point (2026-08-24)
+
+Owner asked for three things in chat: a speed control per voice note, a waveform that shows the
+recording and can be dragged to re-hear a part, and a way to tell WHICH message a reply is
+answering. Auto-advance was offered and **rejected by the owner** — audio that starts on its own
+can be overheard, and this app ships disguised.
+
+**The find that shaped it.** `messages.voice_peaks` was already in production. It was applied
+2026-08-20, recovered into the repo 2026-08-23 by §75, and had **no Dart writing or reading it** —
+that half died with the disk. Verified live against `sopictusdonlvuezmfep`: `voice_peaks text` NULL,
+`CHECK messages_voice_peaks_len (voice_peaks IS NULL OR length(voice_peaks) <= 256)`, and
+`authenticated` holding INSERT/SELECT/UPDATE on it. So **no migration was written**; the client was
+built to the column comment's contract instead (56 bars, one byte each, base64, loudest-in-bucket
+at 100ms, null means "no shape" and never a row of zeros).
+
+**DONE + verified (1129 tests pass, 0 analyzer errors, 0 warnings):**
+- `voice_peaks.dart` — pure encode/decode + `patternFor(messageId)`, the id-derived fallback the
+  column comment names. Replaces bars generated from the BAR INDEX, which drew a two-second note
+  and a two-minute note identically.
+- `voice_prefs.dart` — one SharedPreferences store for speed, resume position and played state,
+  bounded at 200 notes. **Speed persists across notes and launches**; WhatsApp and Instagram reset
+  to 1x every note, which is the actual annoyance.
+- `voice_note_bubble.dart` — `VoiceNotePlayer` gains speed (applied AFTER every `setUrl`, never
+  before), `seek`, a `_loadToken` so two fast taps cannot race, `_disposed` re-checks after every
+  await, and a **pending-seek**: just_audio's `seek` returns silently on
+  `ProcessingState.loading`, so every drag on a cold note was being discarded. New
+  `VoiceWavePainter`, a speed chip that SHOWS its rate rather than being counted, and an unplayed
+  dot.
+- `voice_note_cache.dart` — voice audio on disk in its OWN CacheManager, keyed by storage path not
+  signed URL. Joined to the sign-out wipe in `session_provider.dart` beside `EncryptedMediaCache`
+  and `DefaultCacheManager`.
+- `chat_input_bar.dart` — amplitude sampled at 100ms against a -45 dBFS floor (lifted from
+  `recorder_cover.dart`), subscription cancelled on EVERY exit path, and subscribed BEFORE
+  `start()` so a throw cannot leave the mic hot with `ChatInputBar.recording` false. **Peaks are a
+  parameter, not a field**: the retry snackbar outlives the recording, so a field would re-send
+  note A carrying note B's waveform.
+- `message_reveal.dart` + `measured_row.dart` + the jump in `chat_screen.dart` — tap a quoted reply
+  to walk to the original, centre it, flash it. The quote card now names its author, which is most
+  of what the owner actually asked for.
+- `original_message_sheet.dart` — a reply to a message older than the 300-row window fetches that
+  one row (`ChatRepository.fetchById`) and shows it, playable if it is a voice note. No dead end.
+- `schema_snapshot.json` gained `voice_peaks` AND `edited_at`; both were in prod and in neither
+  snapshot nor `schema_drift_test`'s view.
+
+**The wrong turn, recorded because it looks right and is not.** Scroll-to-index was first built as
+a bisection over the scroll offset, asking the itemBuilder which rows it had just built. It does
+not work: a sliver lays out SEQUENTIALLY, so one jump into the middle of a long conversation builds
+every row in between — a probe reported building rows 6..187 — then discards the ones far from the
+viewport. "Which rows did you build" is not "which rows are on screen", and the search declared
+victory on a row already thrown away. The widget test caught it because it asserted the ROW was
+findable, not that the search said so. The replacement uses that same sequential layout as the
+fix: one jump measures every row in front of the target, so the next pass is exact. Two passes is
+normal, four is the ceiling. A second trap sits behind it — `GlobalKey.currentContext != null`
+means BUILT, which includes the off-screen cache region, so `Scrollable.ensureVisible` is what
+actually puts it on screen.
+
+**Not fixed, not mine:**
+- `repo_hygiene_test` "the repository root holds nothing but the entry point" is RED at HEAD:
+  `CLAUDE.md` was committed to the root by `ff07d96` (§76). Every other test passes.
+- `mobile/analysis_options.yaml` still carries uncommitted analyzer excludes for the platform
+  folders, which `instructions.md:116` forbids. Left alone deliberately — it hides nothing in
+  `lib/`, and it is not this task's to discard.
+
+**Open / unverified:** nothing here has been on a handset. The list no test can reach: that Android
+actually reports amplitude at 100ms while recording to file; that the drawn shape matches what was
+said; that 1.5x and 2x keep pitch; that seeking a cached note is instant on mobile data. The
+gesture that worried me most IS covered — `voice_wave_scrub_test.dart` proves a flick on the
+waveform seeks and does not open a reply, and that the same flick elsewhere on the row still does.
+
+**Exact next step:** sideload and record one note, then check the drawn waveform against what was
+spoken; then reply to an old voice note and tap the quote.
