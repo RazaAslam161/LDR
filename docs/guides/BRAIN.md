@@ -8077,3 +8077,22 @@ waveform seeks and does not open a reply, and that the same flick elsewhere on t
 
 **Exact next step:** sideload and record one note, then check the drawn waveform against what was
 spoken; then reply to an old voice note and tap the quote.
+
+### §79 addendum — landed (2026-08-24)
+
+Pushed to `origin/fix-sprint`:
+- `da377bd` feat(chat) — the three features, 17 files, no migration.
+- `03caf66` docs(brain) — §79 itself.
+
+Gates at the moment of commit: `flutter test` 1129 passed / 1 failed, `flutter analyze mobile`
+0 errors / 0 warnings (541 infos). The single failure is repo_hygiene's "the repository root holds
+nothing but the entry point" — red at HEAD since `ff07d96` put `CLAUDE.md` in the root, and
+untouched by this work.
+
+`mobile/analysis_options.yaml` was deliberately NOT staged. It carries an uncommitted set of
+analyzer excludes for the platform folders that `instructions.md:116` forbids; it belongs to
+whoever wrote it, and it hides nothing under `lib/`.
+
+Note for whoever is next: at least two sessions were committing into THIS checkout at the same time
+(`02cccbe` landed on top of `03caf66` between a push and its verification). Re-read `git status`
+before staging anything — the working tree is shared.
