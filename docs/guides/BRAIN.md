@@ -8642,3 +8642,41 @@ point at. Owner is deciding.
 the full curl verification loop in the plan (every pinned URL 200,
 auth-callback byte-identical live-vs-repo, CSP header equality) → prod.
 Then the raster + Higgsfield asset pass.
+
+## §86 — The site is live, and the domain is ours again (2026-08-26)
+
+Continues §85. Both blockers fell in one move: the owner recovered the Vercel
+login and miles-legal now sits INSIDE the connected account (meta-tech-labs) —
+`vercel project ls` shows it beside advanced-hrms-client, where hours earlier
+the same listing had only the latter. Deployment is unblocked permanently, for
+this redesign and for the ads session's privacy-policy update alike.
+
+**Deployed to production and verified live, all pasted in-session:**
+- Every pinned URL 200 with correct content-type — including `security.html`
+  and `/.well-known/security.txt`, which had 404'd for NINE DAYS while the
+  shipped app's Settings row linked the former. That debt is closed.
+- Live CSP header string-equals the §85 edit (script/style 'self' added,
+  font-src + media-src 'self', 'unsafe-inline' retained).
+- `auth-callback.html` live byte-identical to the repo. `delete-account.html`
+  live <script> byte-identical to the pre-reskin baseline. The two auth/deletion
+  flows cannot have regressed.
+- Live `csae.html` now names the NCCIA (the stale-text debt from §39's era).
+- Fonts serve `font/woff2` with `immutable` caching. Landing serves the new
+  H1 and the ember canvas; an unknown path gets the night 404.
+
+**Process notes for the next deployer:** the CLI login lives on this machine
+now (`vercel whoami` → razaaslam5096-5430); deploy is `npx.cmd vercel deploy
+--prod` from `web/` (PowerShell blocks the .ps1 shim — use npx.cmd).
+Preview deployments are auth-protected on this project and the share-link
+tool couldn't mint access mid-transfer, so this deploy verified ON PROD
+immediately after promote with the rollback pointer armed — acceptable for
+static content already verified locally; revisit protection-bypass secrets
+if previews need real verification later. Rollback remains:
+`npx.cmd vercel rollback` (previous prod: miles-legal-5r2hkaiv2, 2026-08-17).
+
+**Still open from §85:** og.png + favicon rasters (need a visible browser
+pane), the Higgsfield imagery pass (connector loads at next session start;
+prompts in the plan file), and the Play chip flip when the listing exists.
+
+**Exact next step:** next session with the Higgsfield connector loaded runs
+the asset pass from the plan file, then the raster pass, then redeploys.
