@@ -4,57 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Miles — FAQ</title>
+<meta name="description" content="Plain answers about Miles: privacy, pairing, cost, and account control.">
 <meta name="robots" content="index,follow">
-<style>
-  :root {
-    --bg: #faf9f7; --ink: #1e1b1a; --muted: #6b625e; --line: #e5e0dc;
-    --accent: #b3261e; --card: #ffffff;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #16110f; --ink: #ece7e3; --muted: #a49a94; --line: #322a26;
-      --accent: #e58f89; --card: #201916;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 17px/1.65 -apple-system, "Segoe UI", Roboto, sans-serif;
-    -webkit-text-size-adjust: 100%;
-  }
-  main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
-  h1 { font-size: 1.7rem; margin: 0 0 .4rem; }
-  .lede { color: var(--muted); margin: 0 0 2.5rem; }
-  .lede a { color: var(--accent); }
-  h2 {
-    font-size: .85rem; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--muted); margin: 2.8rem 0 .8rem; font-weight: 600;
-  }
-  details {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; margin: 0 0 .6rem; overflow: hidden;
-  }
-  summary {
-    cursor: pointer; padding: .85rem 1rem; font-weight: 600;
-    list-style: none; display: flex; justify-content: space-between; gap: 1rem;
-  }
-  summary::-webkit-details-marker { display: none; }
-  summary::after { content: "+"; color: var(--muted); flex: none; }
-  details[open] summary::after { content: "–"; }
-  details > div { padding: 0 1rem .95rem; }
-  details p { margin: 0 0 .7rem; } details p:last-child { margin-bottom: 0; }
-  details a { color: var(--accent); }
-  footer {
-    margin-top: 3rem; padding-top: 1.4rem; border-top: 1px solid var(--line);
-    color: var(--muted); font-size: .85rem;
-  }
-  footer a { color: var(--accent); }
-  nav.set { margin-bottom: .6rem; }
-  nav.set a { margin-right: 1rem; white-space: nowrap; }
-</style>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Miles">
+<meta property="og:title" content="Miles — FAQ">
+<meta property="og:description" content="Plain answers about Miles: privacy, pairing, cost, and account control.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<meta name="theme-color" content="#120A0C">
+<link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
-<main>
+
+<header class="shell-head">
+  <div class="shell-head-in">
+    <a class="wordmark" href="/">Miles</a>
+    <nav class="shell-nav" aria-label="Site">
+      <a href="/">Home</a>
+      <a class="hide-s" href="/security.html">Security</a>
+      <a href="/faq.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main class="paper-wrap">
+<article class="paper">
   <h1>Frequently asked questions</h1>
   <p class="lede">Straight answers to the questions people actually ask.
   For full detail on data handling, the <a href="privacy-policy.html">privacy
@@ -292,18 +267,25 @@
     Never include your password; we will never ask for it.</p>
   </div></details>
 
-  <footer>
-    <nav class="set">
-      <a href="privacy-policy.html">Privacy Policy</a>
-      <a href="terms.html">Terms</a>
-      <a href="csae.html">Child Safety Standards</a>
-      <a href="delete-account.html">Delete your account</a>
-      <a href="security.html">Report a security issue</a>
-    </nav>
-    Miles · This page travels with the app; the
-    <a href="privacy-policy.html">privacy policy</a> is the authoritative
-    statement of data handling. Last updated 17 August 2026.
-  </footer>
+</article>
 </main>
+
+<footer class="shell-foot">
+  <div class="shell-foot-in">
+    <span class="wordmark" style="font-size:1.25rem">Miles</span>
+    <p class="tag">Made for two people, and no one else.</p>
+    <nav class="foot-links" aria-label="Legal">
+      <a href="/privacy-policy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/security.html">Security</a>
+      <a href="/csae.html">Child safety</a>
+      <a href="/delete-account.html">Delete account</a>
+      <a href="/.well-known/security.txt">security.txt</a>
+    </nav>
+    <p class="foot-copy">&copy; 2026 Miles</p>
+  </div>
+</footer>
+
 </body>
 </html>

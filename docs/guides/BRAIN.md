@@ -8510,3 +8510,135 @@ was the question and the answer is yes.
 AND the abiFilters question before any real build — a `flutter build` with an
 `ndk { abiFilters }` on the sideload flavor, or accept universal. The
 chat-decrypt regression from §75 is still open and still unfixed.
+
+## §84 — A clean APK, built from committed HEAD in an isolated worktree (2026-08-24)
+
+Asked for "the clean, updated, fresh APK". §83's build was a toolchain proof off
+the dirty tree — it carried the uncommitted ads work and Google's sample AdMob
+id. This one is built to be clean.
+
+**How, and why this way.** `git worktree add --detach /d/miles-clean-build HEAD`,
+then `flutter build apk --release --flavor sideload --target-platform
+android-arm64` inside it. A worktree, not the main tree, for one reason: another
+session is live in `D:\Miles` right now (call/chat/voice edits), and building
+from the shared tree would either sweep their uncommitted work into the artifact
+or fight their edits mid-build. HEAD is ads-free — `git grep google_mobile_ads
+HEAD` returns nothing — so a build from HEAD is clean by construction, no
+stashing and no touching what they hold. `.env` was copied in (gitignored, asset
+bundle needs it). The worktree was removed after.
+
+**Result: exit 0 in 596s** (warm caches; §83's cold build took 3428s). Artifact
+`app-sideload-release.apk`, 177,825,687 bytes (169.6 MiB), sha256
+`3b455227ed9ea41d727ea153b17e02d2e772e4f06a56734fc7934f3b99c43d99`,
+debug-signed (`CN=Android Debug`), versionCode 48, targetSdk 36. Copied to
+`D:\Miles\Miles.apk` (gitignored), copy sha256-verified identical.
+
+**Ads-free, verified three ways** — not just "built from HEAD so it should be":
+(1) `google_mobile_ads` is not a dependency in HEAD's pubspec/lock; (2) the
+manifest carries 0 AdMob `APPLICATION_ID` meta entries against the §83 dirty
+build's 1; (3) the clean APK is 3.25 MB smaller (169.6 vs 172.7 MiB), the SDK's
+weight. The §83 build's sample id `ca-app-pub-3940256099942544~3347511713` is
+absent.
+
+**What "clean" does and does not mean here:**
+- CLEAN — no ads code, no sample AdMob id, no uncommitted debris. Reproducible
+  from commit 9a42152 alone.
+- FRESH — built from a pristine checkout, not an incremental rebuild.
+- NOT "updated past the field", and this cannot be faked. HEAD's client code is
+  build 48 plus the two committed client changes since (the call-share fix
+  92283f0 and the voice-waveform client 1dec212). Builds 49-52 that are on real
+  handsets have client Dart that exists in NO commit — it died with the disk —
+  so the newest honest build from source is behind what users run. No build off
+  this repo can be genuinely newer than the field until that gap is owned.
+
+**VERSION IS THE OWNER'S DECISION, and I did not fake it.** The artifact carries
+its real number, 48. That collides with the 48 already shipped, and the field is
+on 52. Bumping to 53 would paint 48-era code with a higher number — the exact
+"two builds sharing meaning on one number" the rules warn about — and worse,
+sideloading a 53 onto a 52 handset would be accepted as an upgrade while
+DELETING features 49-52 added. Any APK from this repo is a content-downgrade for
+the two test phones regardless of its number. So this is a BASELINE artifact, not
+something to install over a 52 device. Renumbering past 52 needs the owner to
+decide how, given the repo is behind the field.
+
+**Known, not fixed (all pre-existing, none introduced here):**
+- `maps.properties` absent -> `MISSING_MAPS_API_KEY` baked in, Touch Map 3D
+  view degrades. Non-fatal; the app runs.
+- armeabi-v7a / x86_64 carry plugin `.so` but no Flutter engine (arm64-only
+  lever). release.sh:321 documents this as accepted and records that
+  `abiFilters` was measured to do nothing about it on build 47. Installs then
+  crashes on non-arm64 hardware; both test phones are arm64.
+
+**NOT DONE, on purpose:** not uploaded to R2, `app_release` untouched,
+`min_build` untouched, nothing committed. Producing the artifact is not
+publishing it.
+
+**Exact next step:** owner decides the renumber (how to go past 52 from a repo
+that sits at 48), supplies a rotated Maps key as `maps.properties`, and rules on
+the ads work and the armeabi-v7a strategy — then a real release goes out through
+release.sh, which also does the R2 upload and the app_release PATCH this build
+deliberately skipped. Chat-decrypt regression from §75 still open.
+
+## §85 — The website is a product now, not a filing cabinet (2026-08-26)
+
+Owner asked for a top-tier product site at the domain the legal pages live on.
+Built in `web/`, verified locally, NOT yet deployed — deployment is blocked on a
+finding bigger than this task (below). Full spec, copy sheet and Higgsfield
+prompts: `~/.claude/plans/use-higgsfield-ai-connector-shimmying-chipmunk.md`.
+
+**What exists now.** A shared Emberlight design system (`web/assets/site.css`,
+~16KB) ported token-for-token from `mobile/lib/core/ui/theme.dart` — palette,
+Fraunces/Inter (5 self-hosted latin woff2, 107KB, sources in
+`assets/fonts/SOURCES.txt`), the app's exact motion contract
+(120/220/420/620ms, easeOutCubic/easeOutQuart, 14px rise, blur BANNED). A new
+`index.html` product landing: canvas port of EmberBackground
+(`assets/miles-ambient.js` — sprite-blitted, 30fps cap, DPR≤2, frame-time
+governor, pauses offscreen/hidden, reduced-motion = finished state), the brand
+mark inline at exact icon geometry, and the one 620ms reveal: the thread
+drawing itself between the two lights via stroke-dashoffset — sanctioned
+one-off exception to opacity/transform-only, nowhere else may animate a
+stroke. Six legal pages re-skinned as warm paper (#FAF3EC) inside the dark
+shell — prose preserved VERBATIM from the working tree (privacy keeps the ads
+session's AdMob paragraphs: 5 refs before, 5 after, gated by grep).
+`delete-account.html` re-skinned chrome-only, its <script> byte-identical
+(diff-gated). `auth-callback.html` deliberately untouched — 1-second mid-auth
+page, all risk no payoff. New `404.html`: the two lights with no thread — the
+only page where the line is absent. `assets/icon.svg` is the launcher mark
+ported by hand from the adaptive-icon XML.
+
+**vercel.json** got two anchored additive edits on top of the ads session's
+working-tree copy (their /app-ads.txt block intact in the diff): CSP gains
+`'self'` in script-src/style-src, plus `font-src 'self'; media-src 'self'`,
+and an immutable cache block for /assets/fonts/. `'unsafe-inline'` stays —
+auth-callback and delete-account depend on it.
+
+**Verified locally** (npx serve via .claude/launch.json "site" on :3100):
+every asset 200 including all five woff2; body #120A0C; H1 Fraunces 72px;
+canvas alive; paper 704px radius-24 with Fraunces headings; deletion form's
+email/confirm/back/msg elements all present, zero console errors. One real
+bug found and fixed in verification: rAF never fires in a non-composited tab,
+so `hero-go` stalled — a 400ms setTimeout backstop now guarantees the page
+never sticks at opacity 0 for background-tab opens.
+
+**NOT done, deliberately:** og.png + favicon/apple-touch rasters need a
+visible browser pane to screenshot — their references are REMOVED from pages
+(a 404ing og:image is worse than none) and return with the asset pass. The
+Higgsfield imagery pass runs when a session starts with the connector loaded;
+prompts are in the plan file. The Play chip ships as "Coming to Google Play",
+non-interactive.
+
+**THE BLOCKER, and it outranks this task: nobody currently controls
+miles-legal.vercel.app.** The Vercel account this machine's connector is
+authenticated to (team meta-tech-labs) contains ONLY advanced-hrms-client —
+the miles-legal project lives under some OTHER account, the one lost with the
+disk. Until that login is recovered (check vercel.com for a GitHub-OAuth or
+second-email login), NOTHING can deploy: not this redesign, and not the ads
+session's AdMob privacy-policy update — which must be live before ads ship.
+If the account is unrecoverable, the pinned URLs keep serving frozen pages
+forever and the site moves to a new domain that only future APK builds can
+point at. Owner is deciding.
+
+**Exact next step:** owner recovers the Vercel login → preview deploy →
+the full curl verification loop in the plan (every pinned URL 200,
+auth-callback byte-identical live-vs-repo, CSP header equality) → prod.
+Then the raster + Higgsfield asset pass.

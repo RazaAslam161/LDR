@@ -3,108 +3,337 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Miles — Feel close, even from here</title>
+<meta name="description" content="Miles is a private app for two people — conversations, calls, rituals, and keepsakes in one place. End-to-end encrypted. Invite-only. Never public.">
 <meta name="robots" content="index,follow">
-<title>Miles — Legal &amp; Safety</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #fbf8f6;
-    --surface: #ffffff;
-    --ink: #1d1a19;
-    --ink-soft: #55504d;
-    --rule: #e6dfda;
-    --accent: #a8556b;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #141211;
-      --surface: #1c1917;
-      --ink: #ece7e3;
-      --ink-soft: #a49c97;
-      --rule: #322c29;
-      --accent: #e59db1;
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    padding: 2rem 1.15rem 5rem;
-    background: var(--bg);
-    color: var(--ink);
-    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  main { max-width: 44rem; margin: 0 auto; }
-  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .35rem; letter-spacing: -.015em; }
-  .updated { color: var(--ink-soft); font-size: .95rem; margin: 0 0 1.75rem; }
-  .lede { font-size: 1.05rem; }
-  a { color: var(--accent); }
-  ul.docs { list-style: none; padding: 0; margin: 2rem 0 0; }
-  ul.docs li {
-    background: var(--surface); border: 1px solid var(--rule);
-    border-radius: 6px; padding: .9rem 1rem; margin: .6rem 0;
-  }
-  ul.docs a { font-weight: 650; text-decoration: none; font-size: 1.05rem; }
-  ul.docs a:hover { text-decoration: underline; }
-  ul.docs p { margin: .3rem 0 0; color: var(--ink-soft); font-size: .95rem; }
-  footer {
-    margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
-    color: var(--ink-soft); font-size: .95rem;
-  }
-</style>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Miles">
+<meta property="og:title" content="Miles — Feel close, even from here">
+<meta property="og:description" content="A private app for two people. End-to-end encrypted. Invite-only. Never public.">
+<meta property="og:url" content="https://miles-legal.vercel.app/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<meta name="theme-color" content="#120A0C">
+<link rel="preload" href="assets/fonts/fraunces-300.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<script>document.documentElement.classList.add("js")</script>
 </head>
 <body>
+
+<header class="shell-head">
+  <div class="shell-head-in">
+    <a class="wordmark" href="/">Miles</a>
+    <nav class="shell-nav" aria-label="Site">
+      <a class="hide-s" href="#how">How it works</a>
+      <a class="hide-s" href="#security">Security</a>
+      <a href="/faq.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
 <main>
 
-<h1>Miles — Legal &amp; Safety</h1>
-<p class="updated">Last updated: 17 August 2026</p>
+<!-- 1 · hero -->
+<section class="hero" id="top">
+  <canvas class="hero-canvas" id="ember-canvas" aria-hidden="true"></canvas>
+  <div class="hero-in">
+    <div class="stack">
+      <h1 class="t-hero h-rise">Feel close, even from here.</h1>
+      <p class="hero-sub h-rise d1">Miles is a private app for two people — your
+        conversations, calls, rituals, and keepsakes in one place.
+        End-to-end&nbsp;encrypted. Invite-only. Never&nbsp;public.</p>
+      <div class="hero-cta h-rise d2">
+        <span class="chip-play" aria-disabled="true" title="The listing isn't live yet.">
+          <svg width="16" height="18" viewBox="0 0 16 18" fill="none" aria-hidden="true"><path d="M1.5 1.6v14.8c0 .5.55.82.98.55l12.04-7.4a.65.65 0 0 0 0-1.1L2.48 1.05a.65.65 0 0 0-.98.55Z" stroke="#D9A86C" stroke-width="1.3"/></svg>
+          Coming to Google Play
+        </span>
+        <a class="arrow-link" href="/security.html">See how it protects you &rarr;</a>
+      </div>
+      <p class="t-caption h-rise d3">The listing isn't live yet. Check back soon.</p>
+    </div>
+    <!-- the mark: two lights and the line between them -->
+    <svg class="hero-mark" viewBox="14 18 80 78" aria-hidden="true">
+      <defs>
+        <radialGradient id="hnear" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+          <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+          <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+          <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="hfar" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+          <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+          <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+          <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="hthread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+          <stop offset="0" stop-color="#FFA981"/>
+          <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+        </linearGradient>
+      </defs>
+      <g class="h-near">
+        <circle cx="40" cy="70" r="22" fill="url(#hnear)"/>
+      </g>
+      <g class="h-far">
+        <circle cx="73" cy="38" r="16" fill="url(#hfar)"/>
+      </g>
+      <path class="h-thread" d="M 40,70 C 44,54 56,42 73,38" fill="none"
+            stroke="url(#hthread)" stroke-width="1.7" stroke-linecap="round"/>
+      <g class="h-near"><circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/></g>
+      <g class="h-far"><circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/></g>
+    </svg>
+  </div>
+</section>
 
-<p class="lede">Miles is a private messaging app for two adults in a
-relationship. It is rated 18+, it pairs only by invitation, and it has no public
-surface — no directory, no discovery, nothing anyone posts is visible to
-anybody but their partner. These are the documents that govern it. They are
-written to be accurate rather than reassuring: where the app's ability to act is
-limited, they say so.</p>
+<!-- 2 · built for exactly two -->
+<section class="band band-deep">
+  <div class="band-tight reveal stack">
+    <p class="t-eyebrow"><span class="dots" aria-hidden="true"><i></i><i></i></span>For two</p>
+    <h2 class="t-d2">Built for exactly two</h2>
+    <p class="t-accent">No feed. No followers. Just the two of you.</p>
+    <p class="t-body-l">Pairing happens by invitation between two people. There are
+      no profiles to browse, no discovery, and no public surface at all — nothing
+      either of you shares is visible to anyone else. And there are no ads and no
+      sale of your data: private connection tools for couples, that's the whole
+      business.</p>
+  </div>
+</section>
 
-<ul class="docs">
-  <li>
-    <a href="privacy-policy.html">Privacy Policy</a>
-    <p>Everything the app collects, what is encrypted and what is not, who it is
-    sent to, and how long it is kept.</p>
-  </li>
-  <li>
-    <a href="terms.html">Terms of Use</a>
-    <p>The agreement you accept when you use Miles, including what may not be
-    sent and what happens to an account that sends it.</p>
-  </li>
-  <li>
-    <a href="csae.html">Child Safety Standards</a>
-    <p>Standards against child sexual abuse and exploitation, how to report it,
-    and who to contact.</p>
-  </li>
-  <li>
-    <a href="delete-account.html">Delete your account</a>
-    <p>Delete an account and its data from here, without needing to open the
-    app.</p>
-  </li>
-  <li>
-    <a href="faq.html">FAQ</a>
-    <p>Plain answers about encryption, recovery, pairing, notifications and
-    leaving.</p>
-  </li>
-  <li>
-    <a href="security.html">Security &amp; Vulnerability Disclosure</a>
-    <p>How to report a security problem, what is in scope, and what we promise
-    in return. For researchers rather than for users.</p>
-  </li>
-</ul>
+<!-- 3 · talk -->
+<section class="band" id="how">
+  <div class="band-in">
+    <div class="head-block reveal">
+      <p class="t-eyebrow">Talk</p>
+      <h2 class="t-d2">Say it like you're there</h2>
+    </div>
+    <div class="grid-2 reveal">
+      <div class="card">
+        <svg class="glyph" viewBox="0 0 44 44" aria-hidden="true">
+          <circle cx="16" cy="20" r="11" fill="#E8674A" opacity=".25"/>
+          <circle cx="16" cy="20" r="5" fill="#F2956F"/>
+          <circle cx="31" cy="27" r="8" fill="#C84B6A" opacity=".3"/>
+          <circle cx="31" cy="27" r="3.4" fill="#FCEFE6"/>
+        </svg>
+        <h3 class="t-h1 lag1">End-to-end encrypted chat</h3>
+        <p class="t-body-s">Messages are sealed with XChaCha20-Poly1305 on your
+          phone and opened on theirs. Nowhere in between can read them —
+          including us.</p>
+      </div>
+      <div class="card">
+        <svg class="glyph" viewBox="0 0 44 44" aria-hidden="true">
+          <g fill="#F2956F">
+            <circle cx="6" cy="22" r="2"/><circle cx="13" cy="22" r="2.6" opacity=".85"/>
+            <circle cx="20" cy="22" r="3.4"/><circle cx="27" cy="22" r="2.6" opacity=".85"/>
+            <circle cx="34" cy="22" r="2" opacity=".7"/><circle cx="40" cy="22" r="1.5" opacity=".5"/>
+          </g>
+          <circle cx="20" cy="22" r="8" fill="#E8674A" opacity=".18"/>
+        </svg>
+        <h3 class="t-h1 lag2">Voice &amp; video calls</h3>
+        <p class="t-body-s">Call across any distance, voice or video. Built for
+          the long conversations where someone falls asleep first.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-<footer>
-  <p>Miles is published by <strong>R&amp;D Dev</strong>, Sector C Commercial
-  Area, Bahria Town, Lahore, Pakistan.<br>
-  Contact: <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a></p>
-</footer>
+<!-- 4 · distance -->
+<section class="band bleed band-deep">
+  <div class="tint" aria-hidden="true"></div>
+  <div class="band-in">
+    <div class="head-block reveal">
+      <p class="t-eyebrow">Distance</p>
+      <h2 class="t-d2">The distance, made visible</h2>
+    </div>
+    <div class="grid-2 reveal">
+      <div class="stack-s">
+        <svg class="glyph" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M 6,34 C 14,16 30,12 38,10" fill="none" stroke="url(#arcg)" stroke-width="1.4" stroke-linecap="round"/>
+          <defs><linearGradient id="arcg" x1="6" y1="34" x2="38" y2="10" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#FFA981"/><stop offset="1" stop-color="#D9A86C" stop-opacity=".6"/>
+          </linearGradient></defs>
+          <circle cx="6" cy="34" r="3.4" fill="#FFF1E8"/><circle cx="38" cy="10" r="2.4" fill="#FFE4D2"/>
+        </svg>
+        <h3 class="t-h1">Presence &amp; live location</h3>
+        <p class="t-body-s">See where your person is on a shared 3D map. Shared by
+          choice, visible to exactly one other human.</p>
+      </div>
+      <div class="stack-s lag1">
+        <svg class="glyph" viewBox="0 0 44 44" aria-hidden="true">
+          <g fill="#FBEFD6"><circle cx="8" cy="10" r="1.3"/><circle cx="20" cy="6" r="1"/>
+          <circle cx="33" cy="12" r="1.4"/><circle cx="39" cy="5" r="1"/></g>
+          <circle cx="26" cy="9" r="1.2" fill="#8B7CF0"/>
+          <path d="M4 30 h36" stroke="#D9A86C" stroke-opacity=".3" stroke-width="1"/>
+          <circle cx="12" cy="30" r="2.6" fill="#F2956F"/><circle cx="32" cy="30" r="2.6" fill="#F2956F"/>
+        </svg>
+        <h3 class="t-h1">SkyBridge &amp; countdown</h3>
+        <p class="t-body-s">Count down to the next visit, and look up together —
+          SkyBridge shows the night sky above you both.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · rituals -->
+<section class="band">
+  <div class="band-in">
+    <div class="head-block reveal">
+      <p class="t-eyebrow">Rituals</p>
+      <h2 class="t-d2">Small rituals, kept daily</h2>
+    </div>
+    <div class="grid-4 reveal">
+      <div class="card-s">
+        <h3 class="t-h2">Daily Question</h3>
+        <p class="t-body-s">One question a day. Neither answer is revealed until
+          both of you have written yours.</p>
+      </div>
+      <div class="card-s lag1">
+        <h3 class="t-h2">Breath Sync</h3>
+        <p class="t-body-s">Breathe together in real time. A quiet minute that
+          ends with both of you slower than you started.</p>
+      </div>
+      <div class="card-s lag2">
+        <h3 class="t-h2">Reach</h3>
+        <p class="t-body-s">A touch from afar. Send a small moment they can feel
+          when words aren't quite enough.</p>
+      </div>
+      <div class="card-s lag2">
+        <h3 class="t-h2">Games &amp; Watch Together</h3>
+        <p class="t-body-s">Play synced games or watch things in step, reacting
+          side by side from two time zones.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 · keepsakes -->
+<section class="band band-deep">
+  <div class="band-in">
+    <div class="grid-2 reveal" style="align-items:center">
+      <div class="stack">
+        <p class="t-eyebrow">Keepsakes</p>
+        <h2 class="t-d2">What you keep</h2>
+        <p class="t-body-l">Seal notes for future dates, save what matters, and
+          drop small moments into a shared jar to open later. Some things are
+          written to be read <em style="color:#8B7CF0;font-style:normal">on a
+          certain night</em> — Miles keeps them sealed until it comes.</p>
+      </div>
+      <div class="panel lag1" aria-hidden="true" style="display:grid;place-items:center;min-height:240px">
+        <svg width="120" height="140" viewBox="0 0 120 140">
+          <rect x="30" y="34" width="60" height="86" rx="14" fill="#2F1620" stroke="#D9A86C" stroke-opacity=".25"/>
+          <rect x="40" y="24" width="40" height="14" rx="6" fill="#221017" stroke="#D9A86C" stroke-opacity=".3"/>
+          <g opacity=".9">
+            <rect x="40" y="66" width="16" height="10" rx="2" fill="#F2956F" transform="rotate(-12 48 71)"/>
+            <rect x="60" y="84" width="16" height="10" rx="2" fill="#D9A86C" transform="rotate(9 68 89)"/>
+            <rect x="46" y="98" width="16" height="10" rx="2" fill="#C84B6A" transform="rotate(-6 54 103)"/>
+            <rect x="62" y="56" width="14" height="9" rx="2" fill="#FBEFD6" opacity=".85" transform="rotate(14 69 60)"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · security -->
+<section class="band" id="security">
+  <div class="band-in">
+    <div class="head-block reveal">
+      <p class="t-eyebrow">Security</p>
+      <h2 class="t-d2">Private by design</h2>
+    </div>
+    <div class="panel reveal">
+      <dl class="deflist">
+        <div>
+          <dt>End-to-end encryption</dt>
+          <dd>Chat is sealed with <span class="code-chip">XChaCha20-Poly1305</span>
+            using keys that exist only on your two phones. The server stores
+            ciphertext it cannot open.</dd>
+        </div>
+        <div>
+          <dt>App lock &amp; covers</dt>
+          <dd>Biometric lock, plus optional covers — alternate launcher
+            identities, named honestly in settings — for phones that get handed
+            around.</dd>
+        </div>
+        <div>
+          <dt>Invite-only, always</dt>
+          <dd>Pairing happens by invitation between two people. No profiles to
+            browse, no discovery, no public surface at all.</dd>
+        </div>
+        <div>
+          <dt>No ads of your life</dt>
+          <dd>No sale of your data, ever. Where the app's ability to act is
+            limited, our documents say so — they are written to be accurate
+            rather than reassuring.</dd>
+        </div>
+      </dl>
+      <p style="margin:32px 0 0"><a class="arrow-link" href="/security.html">Read the full security page &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 · faq teaser -->
+<section class="band band-deep">
+  <div class="band-in" style="max-width:44rem">
+    <div class="head-block reveal">
+      <p class="t-eyebrow">FAQ</p>
+      <h2 class="t-d2">Questions, answered plainly</h2>
+    </div>
+    <div class="faqset reveal">
+      <details class="qa">
+        <summary>Can anyone find me on Miles?</summary>
+        <p>No. There is no directory, no search, and no public profile. The only
+          way two people connect is a private invitation code shared between
+          them.</p>
+      </details>
+      <details class="qa">
+        <summary>Can Miles read our messages?</summary>
+        <p>Chat is end-to-end encrypted with keys held on your two phones. What
+          the server stores, it cannot open. Our privacy policy spells out
+          exactly what is and isn't visible to us.</p>
+      </details>
+      <details class="qa">
+        <summary>What happens if I lose my phone?</summary>
+        <p>Your account recovers by email, and an encrypted key backup — locked
+          by a passphrase only you know — lets your history come back with you.
+          Without that passphrase, no one can unlock it. Not even us.</p>
+      </details>
+    </div>
+    <p style="margin:32px 0 0"><a class="arrow-link" href="/faq.html">All questions &rarr;</a></p>
+  </div>
+</section>
+
+<!-- 9 · closing -->
+<section class="band" style="background:radial-gradient(90% 90% at 50% 100%,#3A1622 0%,#1C0A10 55%,#120A0C 100%)">
+  <div class="band-tight reveal stack">
+    <h2 class="t-d2">One space, for the two of you.</h2>
+    <p class="hero-cta" style="justify-content:center">
+      <span class="chip-play" aria-disabled="true" title="The listing isn't live yet.">
+        <svg width="16" height="18" viewBox="0 0 16 18" fill="none" aria-hidden="true"><path d="M1.5 1.6v14.8c0 .5.55.82.98.55l12.04-7.4a.65.65 0 0 0 0-1.1L2.48 1.05a.65.65 0 0 0-.98.55Z" stroke="#D9A86C" stroke-width="1.3"/></svg>
+        Coming to Google Play
+      </span>
+    </p>
+    <p class="t-caption">The listing isn't live yet. Check back soon.</p>
+  </div>
+</section>
 
 </main>
+
+<footer class="shell-foot">
+  <div class="shell-foot-in">
+    <span class="wordmark" style="font-size:1.25rem">Miles</span>
+    <p class="tag">Made for two people, and no one else.</p>
+    <nav class="foot-links" aria-label="Legal">
+      <a href="/privacy-policy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/security.html">Security</a>
+      <a href="/csae.html">Child safety</a>
+      <a href="/delete-account.html">Delete account</a>
+      <a href="/.well-known/security.txt">security.txt</a>
+    </nav>
+    <p class="foot-copy">&copy; 2026 Miles</p>
+  </div>
+</footer>
+
+<script src="assets/miles-ambient.js" defer></script>
 </body>
 </html>

@@ -3,81 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security & Vulnerability Disclosure — Miles</title>
+<meta name="description" content="How Miles is secured, and how to report a vulnerability.">
 <meta name="robots" content="index,follow">
-<title>Security &amp; Vulnerability Disclosure — Miles</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #fbf8f6;
-    --surface: #ffffff;
-    --ink: #1d1a19;
-    --ink-soft: #55504d;
-    --rule: #e6dfda;
-    --accent: #a8556b;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #141211;
-      --surface: #1c1917;
-      --ink: #ece7e3;
-      --ink-soft: #a49c97;
-      --rule: #322c29;
-      --accent: #e59db1;
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    padding: 2rem 1.15rem 5rem;
-    background: var(--bg);
-    color: var(--ink);
-    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  main { max-width: 44rem; margin: 0 auto; }
-  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .35rem; letter-spacing: -.015em; }
-  h2 {
-    font-size: 1.2rem; line-height: 1.3; margin: 2.75rem 0 .75rem;
-    padding-top: 1.5rem; border-top: 1px solid var(--rule); letter-spacing: -.01em;
-  }
-  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
-  p, li { color: var(--ink); }
-  .updated { color: var(--ink-soft); font-size: .95rem; margin: 0 0 1.75rem; }
-  .lede { font-size: 1.05rem; }
-  strong { font-weight: 650; }
-  a { color: var(--accent); }
-  ul { padding-left: 1.15rem; }
-  li { margin: .4rem 0; }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: .9em; background: var(--surface); border: 1px solid var(--rule);
-    border-radius: 4px; padding: .05em .35em;
-  }
-  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1rem 0; }
-  table { border-collapse: collapse; width: 100%; min-width: 20rem; font-size: .95rem; }
-  th, td {
-    text-align: left; vertical-align: top; padding: .6rem .7rem;
-    border-bottom: 1px solid var(--rule);
-  }
-  th { font-weight: 650; color: var(--ink-soft); font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
-  td:first-child { font-weight: 600; }
-  .callout {
-    background: var(--surface); border: 1px solid var(--rule);
-    border-left: 3px solid var(--accent); border-radius: 6px;
-    padding: .9rem 1rem; margin: 1.25rem 0;
-  }
-  .callout p:first-child { margin-top: 0; }
-  .callout p:last-child { margin-bottom: 0; }
-  footer {
-    margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
-    color: var(--ink-soft); font-size: .95rem;
-  }
-  nav.set { margin-bottom: .6rem; }
-  nav.set a { margin-right: 1rem; white-space: nowrap; }
-</style>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Miles">
+<meta property="og:title" content="Security & Vulnerability Disclosure — Miles">
+<meta property="og:description" content="How Miles is secured, and how to report a vulnerability.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<meta name="theme-color" content="#120A0C">
+<link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
-<main>
+
+<header class="shell-head">
+  <div class="shell-head-in">
+    <a class="wordmark" href="/">Miles</a>
+    <nav class="shell-nav" aria-label="Site">
+      <a href="/">Home</a>
+      <a class="hide-s" href="/security.html">Security</a>
+      <a href="/faq.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main class="paper-wrap">
+<article class="paper">
 
 <h1>Miles — Security &amp; Vulnerability Disclosure</h1>
 <p class="updated">Last updated: 18 August 2026</p>
@@ -378,16 +330,26 @@ a report is read as a report rather than as ordinary mail.</p>
 feature that changes what is protected. The date at the top is the date of the
 last review.</p>
 
-<footer>
-<nav class="set">
-  <a href="privacy-policy.html">Privacy Policy</a>
-  <a href="terms.html">Terms</a>
-  <a href="csae.html">Child Safety Standards</a>
-  <a href="faq.html">FAQ</a>
-</nav>
-Miles — Security &amp; Vulnerability Disclosure · Last updated 18 August 2026
+
+</article>
+</main>
+
+<footer class="shell-foot">
+  <div class="shell-foot-in">
+    <span class="wordmark" style="font-size:1.25rem">Miles</span>
+    <p class="tag">Made for two people, and no one else.</p>
+    <nav class="foot-links" aria-label="Legal">
+      <a href="/privacy-policy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/security.html">Security</a>
+      <a href="/csae.html">Child safety</a>
+      <a href="/delete-account.html">Delete account</a>
+      <a href="/.well-known/security.txt">security.txt</a>
+    </nav>
+    <p class="foot-copy">&copy; 2026 Miles</p>
+  </div>
 </footer>
 
-</main>
 </body>
 </html>
