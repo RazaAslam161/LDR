@@ -4,100 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delete your Miles account</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #fbf8f6;
-    --surface: #ffffff;
-    --ink: #1d1a19;
-    --ink-soft: #55504d;
-    --rule: #e6dfda;
-    --accent: #a8556b;
-    --danger: #b3261e;
-    --danger-ink: #ffffff;
-    --ok-bg: #eaf4ec;
-    --ok-rule: #7ba985;
-    --err-bg: #fceceb;
-    --err-rule: #d98a84;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #141211;
-      --surface: #1c1917;
-      --ink: #ece7e3;
-      --ink-soft: #a49c97;
-      --rule: #322c29;
-      --accent: #e59db1;
-      --danger: #e2645a;
-      --danger-ink: #1d1a19;
-      --ok-bg: #17251a;
-      --ok-rule: #3f6a49;
-      --err-bg: #2a1715;
-      --err-rule: #7a3934;
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    padding: 2rem 1.15rem 5rem;
-    background: var(--bg);
-    color: var(--ink);
-    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  main { max-width: 38rem; margin: 0 auto; }
-  h1 { font-size: 1.85rem; line-height: 1.2; margin: 0 0 .5rem; letter-spacing: -.015em; }
-  h2 {
-    font-size: 1.1rem; margin: 2.5rem 0 .6rem;
-    padding-top: 1.4rem; border-top: 1px solid var(--rule);
-  }
-  p, li { margin: .7rem 0; }
-  .lede { font-size: 1.05rem; color: var(--ink-soft); margin-bottom: 1.75rem; }
-  ul { padding-left: 1.15rem; }
-  li { margin: .45rem 0; }
-  a { color: var(--accent); }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: .9em;
-  }
-  .card {
-    background: var(--surface); border: 1px solid var(--rule);
-    border-radius: 10px; padding: 1.25rem; margin: 1.5rem 0;
-  }
-  label { display: block; font-weight: 600; font-size: .95rem; margin-bottom: .4rem; }
-  input {
-    width: 100%; padding: .7rem .8rem; font-size: 1.05rem; font-family: inherit;
-    color: var(--ink); background: var(--bg);
-    border: 1px solid var(--rule); border-radius: 8px;
-  }
-  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  input#code { letter-spacing: .35em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  button {
-    width: 100%; margin-top: .9rem; padding: .8rem 1rem;
-    font: inherit; font-weight: 650; border: 0; border-radius: 8px; cursor: pointer;
-    background: var(--accent); color: #fff;
-  }
-  button.danger { background: var(--danger); color: var(--danger-ink); }
-  button[disabled] { opacity: .55; cursor: default; }
-  button.link {
-    width: auto; margin: .9rem 0 0; padding: 0; background: none;
-    color: var(--accent); font-weight: 500; text-decoration: underline;
-  }
-  .msg { border-radius: 8px; padding: .8rem .9rem; margin-top: 1rem; font-size: .97rem; }
-  .msg.ok { background: var(--ok-bg); border: 1px solid var(--ok-rule); }
-  .msg.err { background: var(--err-bg); border: 1px solid var(--err-rule); }
-  .hint { color: var(--ink-soft); font-size: .92rem; }
-  [hidden] { display: none !important; }
-  footer {
-    margin-top: 3rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
-    color: var(--ink-soft); font-size: .93rem;
-  }
-  nav.set { margin-bottom: .6rem; }
-  nav.set a { margin-right: 1rem; white-space: nowrap; }
-</style>
+<meta name="description" content="Delete your Miles account and the data that goes with it.">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Miles">
+<meta property="og:title" content="Delete your Miles account">
+<meta property="og:description" content="Delete your Miles account and the data that goes with it.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<meta name="theme-color" content="#120A0C">
+<link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
-<main>
+
+<header class="shell-head">
+  <div class="shell-head-in">
+    <a class="wordmark" href="/">Miles</a>
+    <nav class="shell-nav" aria-label="Site">
+      <a href="/">Home</a>
+      <a class="hide-s" href="/security.html">Security</a>
+      <a href="/faq.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main class="paper-wrap">
+<article class="paper">
 
 <h1>Delete your Miles account</h1>
 <p class="lede">You can do this here, in a browser, without reinstalling the
@@ -178,18 +110,6 @@ continue.</p>
 <p>Settings → Account → Delete account. Same effect, no code needed, because you
 are already signed in.</p>
 
-<footer>
-  <nav class="set">
-    <a href="privacy-policy.html">Privacy Policy</a>
-    <a href="terms.html">Terms</a>
-    <a href="csae.html">Child Safety Standards</a>
-    <a href="faq.html">FAQ</a>
-    <a href="security.html">Report a security issue</a>
-  </nav>
-  Questions, or trouble with the code:
-  <a href="mailto:Razaaslam3210@gmail.com">Razaaslam3210@gmail.com</a>.
-  Last updated 17 August 2026.
-</footer>
 
 <script>
 // ── CONFIG ───────────────────────────────────────────────────────────────────
@@ -291,6 +211,25 @@ $("back").addEventListener("click", () => {
 });
 </script>
 
+</article>
 </main>
+
+<footer class="shell-foot">
+  <div class="shell-foot-in">
+    <span class="wordmark" style="font-size:1.25rem">Miles</span>
+    <p class="tag">Made for two people, and no one else.</p>
+    <nav class="foot-links" aria-label="Legal">
+      <a href="/privacy-policy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/faq.html">FAQ</a>
+      <a href="/security.html">Security</a>
+      <a href="/csae.html">Child safety</a>
+      <a href="/delete-account.html">Delete account</a>
+      <a href="/.well-known/security.txt">security.txt</a>
+    </nav>
+    <p class="foot-copy">&copy; 2026 Miles</p>
+  </div>
+</footer>
+
 </body>
 </html>
