@@ -281,3 +281,72 @@ details.qa p{margin:var(--s3) 0 0;color:var(--taupe);
   font:400 .97rem/1.5 var(--f-body)}
 .paper .msg.ok{background:#EAF3E8;border:1px solid #C9DFC4;color:#2E4A2A}
 .paper .msg.err{background:#F9E7E4;border:1px solid #ECC8C1;color:#7A2E24}
+
+/* ---------- v2: depth, hover choreography, footer architecture ----------
+   Owner pass 2026-08-26. Every effect below is opacity/transform only —
+   3D transforms are compositor work, so perspective tilts are legal where
+   blur never will be. Hover motion stays inside the contract: 120ms
+   acknowledgement, 220ms movement, and the breathing glow is the app's own
+   BreathingGlow (4s, scale 0.98↔1.04) ported to the hero's near light. */
+
+/* cards: perspective tilt + ember underlight */
+.card,.card-s{position:relative;overflow:hidden;
+  transition:transform var(--t-quick) var(--ease-enter),
+             border-color var(--t-quick) var(--ease-enter)}
+.card::after,.card-s::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(80% 60% at 50% 110%,rgba(242,149,111,.14) 0%,rgba(242,149,111,0) 70%);
+  opacity:0;transition:opacity var(--t-quick) var(--ease-enter);pointer-events:none}
+.card:hover{transform:perspective(900px) rotateX(1.6deg) rotateY(-1deg) translateY(-3px);
+  border-color:var(--edge-18)}
+.card-s:hover{transform:perspective(900px) rotateX(1.4deg) translateY(-2px);
+  border-color:var(--edge-18)}
+.card:hover::after,.card-s:hover::after{opacity:1}
+.card .glyph,.card-s .glyph{transition:transform var(--t-quick) var(--ease-enter)}
+.card:hover .glyph{transform:scale(1.06)}
+
+/* panels get the underlight without the tilt — they hold reading content */
+.panel{position:relative;overflow:hidden;
+  transition:border-color var(--t-quick) var(--ease-enter)}
+.panel:hover{border-color:var(--edge-18)}
+
+/* hero: the near light breathes once the entrance has settled */
+@keyframes breathe{from{transform:scale(1)}to{transform:scale(1.045)}}
+.js.hero-go .h-near{animation:breathe 4s ease-in-out 1.4s infinite alternate}
+
+/* arrow links step toward their destination */
+.arrow-link{display:inline-block;
+  transition:transform var(--t-instant) var(--ease-enter),color var(--t-instant) var(--ease-enter)}
+.arrow-link:hover{transform:translateX(3px)}
+
+/* FAQ items acknowledge the pointer */
+details.qa{transition:border-color var(--t-quick) var(--ease-enter)}
+details.qa:hover{border-color:var(--edge-18)}
+details.qa summary{transition:color var(--t-instant) var(--ease-enter)}
+details.qa:hover summary{color:var(--starlight)}
+
+/* ---------- footer v2: three columns + the developer block ---------- */
+.shell-foot-in{align-items:stretch;text-align:left;gap:var(--s6)}
+.foot-top{display:flex;flex-direction:column;gap:var(--s2);align-items:center;
+  text-align:center}
+.foot-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:var(--s5);max-width:56rem;margin:0 auto;width:100%}
+@media (max-width:640px){.foot-cols{grid-template-columns:1fr;text-align:center}}
+.foot-col h4{font:600 .8125rem/1.4 var(--f-body);letter-spacing:.08em;
+  text-transform:uppercase;color:var(--faint);margin:0 0 var(--s3)}
+.foot-col ul{list-style:none;margin:0;padding:0;display:flex;
+  flex-direction:column;gap:var(--s2)}
+.foot-col a{font:400 .875rem/1.5 var(--f-body);color:var(--taupe)}
+.foot-col a:hover{color:var(--cream)}
+.foot-dev{font:400 .875rem/1.6 var(--f-body);color:var(--taupe);
+  font-style:normal}
+.foot-dev strong{font-weight:600;color:var(--cream-92)}
+.foot-dev a{color:var(--ember-soft)}
+.foot-dev a:hover{color:var(--cream)}
+.foot-base{display:flex;justify-content:center;gap:var(--s3);align-items:center;
+  border-top:1px solid var(--divider);padding-top:var(--s4);width:100%}
+
+@media (prefers-reduced-motion:reduce){
+  .card:hover,.card-s:hover,.arrow-link:hover{transform:none}
+  .card:hover .glyph{transform:none}
+  .js.hero-go .h-near{animation:none}
+}

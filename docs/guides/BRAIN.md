@@ -8680,3 +8680,37 @@ prompts in the plan file), and the Play chip flip when the listing exists.
 
 **Exact next step:** next session with the Higgsfield connector loaded runs
 the asset pass from the plan file, then the raster pass, then redeploys.
+
+## §87 — The site learned depth, and the footer says who made it (2026-08-26)
+
+Owner's recheck after §86 found two real defects and asked for more advanced
+motion/depth. Audit confirmed both and one more: the live site had exactly
+seven hover rules (links and one button), zero depth treatment, and the footer
+was a flat link row ending in the raw filename "security.txt" with no
+developer identity — the old index footer's publisher contact had been LOST in
+the §85 redesign, so that regression was ours.
+
+**Shipped, deployed, verified live:**
+- Footer v2 across all seven shell pages: brand row, three columns (Product /
+  Legal & safety / Developer), base row. The developer block is new content
+  from the owner, verbatim except one cleanup flagged to them (the doubled
+  "Sector C"): RZ Dev · Razaaslam3210@gmail.com · Sector C Commercial Area,
+  Bahria Town, Lahore. security.txt keeps its RFC 9116 link but is labelled
+  "(for researchers)" — the raw filename no longer appears as link text.
+- Depth pass, all inside the brand's laws (3D TRANSFORMS are compositor-only
+  and legal; blur stays banned): cards tilt on hover (perspective(900px)
+  rotateX/Y ≈1.5deg, 220ms) over a radial ember underlight that fades in via
+  opacity; glyphs scale 1.06; FAQ items brighten their hairline and summary;
+  arrow links step 3px toward their destination; and the hero's near light
+  breathes — the app's own BreathingGlow (4s, scale to 1.045) starting 1.4s
+  after the entrance settles. All of it zeroed under prefers-reduced-motion.
+- Re-verified live after deploy: auth-callback byte-identical, delete-account
+  script byte-identical (re-gated after the footer swap too), raw label count
+  0, new keyframes/classes serving, address rendering with the cleaned
+  wording.
+
+site.css is ~19.6KB now (target was 15) — noted, not worth a split yet.
+
+**Exact next step:** unchanged from §86 — Higgsfield asset pass + og/favicon
+rasters next session, Play chip flip when the listing exists. Four site
+commits plus this pass remain unpushed on fix-sprint.
