@@ -8729,3 +8729,37 @@ ugliness. Live checks after deploy: 0 refs on /, privacy, faq;
 /.well-known/security.txt still 200 text/plain; delete-account script still
 byte-identical. This commit is the first push of the whole website workstream
 (§85–§88) to origin.
+
+## §89 — The Higgsfield pass ran through the owner's own Chrome (2026-08-26)
+
+The connector never loads mid-session, so the owner authorized driving
+higgsfield.ai's web UI in their logged-in Chrome instead. Three of the seven
+planned assets were generated (Nano Banana Pro, 2 credits each) before the
+account hit "All credits used": A hero-plate 16:9, C distance 21:9, E
+keepsakes 4:5 — the three that carry the design. B talk, D ritual, F og-glow
+and the G ember-loop video remain for whenever credits return; prompts stay in
+the plan file.
+
+Every download carried a HIGGSFIELD watermark in the bottom band — acid-green
+chip, exactly the logo the reject rules forbid. Solved class-level, not
+per-image: ImageMagick (installed via winget) crops the fixed 78px watermark
+band off and converts to webp q82. Corner pixels sampled post-crop to prove
+removal. The three plates land at 15KB/23KB/50KB — 88KB total, inside the
+120KB/image budget with room to spare. One judgement call: asset C came back
+with several settlement glows rather than the prompt's two; accepted, because
+the section's two-lights symbolism is carried by the code-drawn arc glyph and
+the image is atmosphere at 40% under a dark overlay.
+
+Also caught mid-pass: Higgsfield auto-attaches the previous generation as an
+image reference on the prompt panel — left in place it would have turned asset
+C into img2img of the bokeh plate. Removed via its hover-X before generating.
+
+Integrated: hero-plate under the ember canvas at opacity .32; distance as the
+§Distance band's .bg at 40% under the tint; keepsakes replacing the placeholder
+jar SVG in a zero-padding panel figure with a real alt. Deployed to prod and
+verified: all three serve image/webp, landing references them, delete-account
+script still byte-identical live.
+
+**Exact next step:** when Higgsfield credits refresh — assets B, D, F, the G
+video loop, and the og.png/favicon raster pass (ImageMagick is now on the
+machine for it). The Play chip flip still waits on the listing.

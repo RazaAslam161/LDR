@@ -36,6 +36,8 @@
 
 <!-- 1 · hero -->
 <section class="hero" id="top">
+  <img class="hero-plate" src="assets/img/hero-plate.webp" alt="" aria-hidden="true"
+       width="1376" height="690" fetchpriority="low">
   <canvas class="hero-canvas" id="ember-canvas" aria-hidden="true"></canvas>
   <div class="hero-in">
     <div class="stack">
@@ -137,6 +139,7 @@
 
 <!-- 4 · distance -->
 <section class="band bleed band-deep">
+  <div class="bg" style="background-image:url(assets/img/distance.webp)" aria-hidden="true"></div>
   <div class="tint" aria-hidden="true"></div>
   <div class="band-in">
     <div class="head-block reveal">
@@ -216,18 +219,11 @@
           written to be read <em style="color:#8B7CF0;font-style:normal">on a
           certain night</em> — Miles keeps them sealed until it comes.</p>
       </div>
-      <div class="panel lag1" aria-hidden="true" style="display:grid;place-items:center;min-height:240px">
-        <svg width="120" height="140" viewBox="0 0 120 140">
-          <rect x="30" y="34" width="60" height="86" rx="14" fill="#2F1620" stroke="#D9A86C" stroke-opacity=".25"/>
-          <rect x="40" y="24" width="40" height="14" rx="6" fill="#221017" stroke="#D9A86C" stroke-opacity=".3"/>
-          <g opacity=".9">
-            <rect x="40" y="66" width="16" height="10" rx="2" fill="#F2956F" transform="rotate(-12 48 71)"/>
-            <rect x="60" y="84" width="16" height="10" rx="2" fill="#D9A86C" transform="rotate(9 68 89)"/>
-            <rect x="46" y="98" width="16" height="10" rx="2" fill="#C84B6A" transform="rotate(-6 54 103)"/>
-            <rect x="62" y="56" width="14" height="9" rx="2" fill="#FBEFD6" opacity=".85" transform="rotate(14 69 60)"/>
-          </g>
-        </svg>
-      </div>
+      <figure class="panel lag1" style="padding:0;overflow:hidden;margin:0">
+        <img src="assets/img/keepsakes.webp" width="928" height="1074" loading="lazy"
+             style="width:100%;height:100%;object-fit:cover;display:block"
+             alt="A glass jar of small folded notes beside a lit candle">
+      </figure>
     </div>
   </div>
 </section>
