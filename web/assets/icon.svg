@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <!-- Two lights and the line between them: the Miles mark, ported 1:1 from
+       android/.../drawable/ic_launcher_play_{bg,fg}.xml. Blooms are painted
+       before the thread so the line emerges from the glow; the thread is
+       brightest at the near (lower-left) end, which is what makes the curve
+       read as travelling away. No blur filters anywhere - the blooms are
+       radial gradients, honoring the app's blur ban even off-app. -->
+  <defs>
+    <radialGradient id="bg" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="86">
+      <stop offset="0" stop-color="#2E1418"/>
+      <stop offset="0.55" stop-color="#1C0D11"/>
+      <stop offset="1" stop-color="#120A0C"/>
+    </radialGradient>
+    <radialGradient id="near" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+      <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+      <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="far" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+      <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+      <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="thread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+      <stop offset="0" stop-color="#FFA981"/>
+      <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" fill="url(#bg)"/>
+  <circle cx="40" cy="70" r="22" fill="url(#near)"/>
+  <circle cx="73" cy="38" r="16" fill="url(#far)"/>
+  <path d="M 40,70 C 44,54 56,42 73,38" fill="none" stroke="url(#thread)"
+        stroke-width="1.7" stroke-linecap="round"/>
+  <circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/>
+  <circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/>
+</svg>
