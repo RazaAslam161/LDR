@@ -151,10 +151,11 @@ receives the encryption keys from your partner's. Everything not end-to-end
 encrypted is simply there after signing in.
 
 **What happens if we break up?**
-Either of you can leave the couple from Settings. When the second partner
-leaves (or an account is deleted), the couple's entire history — messages,
-photos, videos, everything — is permanently deleted 30 days later, storage
-included. Within those 30 days it can still be brought back, but it takes both
+Either of you can end it from Settings. It takes one of you — the couple is
+dissolved for both, immediately, and neither needs the other's agreement;
+deleting your own account does the same. From that moment the couple's entire
+history — messages, photos, videos, everything — is permanently deleted 30 days
+later, storage included. Within those 30 days it can still be brought back, but it takes both
 of you: one asks to reconnect and the other agrees. Neither of you can restore
 it alone, and once someone has declined a request that same person cannot ask
 again. Pairing again with a fresh invite code is not the same thing — that

@@ -10517,3 +10517,75 @@ work and is not mine to rewrite.
 **Exact next step:** whoever owns `docs/legal/privacy-policy.md` reconciles
 its dissolution-trigger row with the live HTML, and commits the AdMob
 disclosure sitting uncommitted in it.
+
+## §109 — The dissolution trigger: the markdown said it waits for the second person; it never has (2026-08-26)
+
+Closes the "found, not fixed" §108 left. Owner asked for it directly.
+
+**The claim, and why it mattered.** `docs/legal/privacy-policy.md` titled its
+retention row *"A relationship you both leave"* and said the history is
+*"deleted 30 days after the LAST partner leaves"*. `docs/legal/faq.md` said
+*"When the SECOND partner leaves (or an account is deleted)…"*. Both describe a
+clock that waits for the other person. Somebody reading either would believe
+their history is safe while their ex has not acted, and that the 30 days have
+not started.
+
+**Verified against production, by reading the deployed function body** — not
+the migration file, and not the HTML:
+```
+select pg_get_functiondef(oid) ... where proname='leave_couple'
+```
+Two lines settle it:
+- `update public.profiles set couple_id = null where couple_id = v_couple;`
+  — the predicate matches BOTH members, so one person leaving unpairs both.
+- `dissolved_at = coalesce(dissolved_at, now())` — the 30-day clock starts on
+  that single action.
+
+`20260818150000_deletion_dissolves_the_couple.sql` adds that deleting an
+account is at least leaving, and records why: before it, deleting with a
+partner remaining left the couple ACTIVE, so the survivor's next invite let a
+stranger redeem into the live couple and inherit the deleted user's entire
+message history. So "or deleting your account" belongs in the sentence.
+
+**A bonus confirmation of §108, from the code itself.** The live
+`leave_couple()` carries this comment against `dissolved_at`:
+> *"NOTE: the comment this replaces claimed 'Re-pairing clears it, so a
+> reconciliation inside the window keeps everything.' That is false and has
+> been since 20260601005900… There is no path back to this couple_id today."*
+
+The database has been documenting that the re-pairing promise was false. Two
+legal pages went on making it anyway until §108.
+
+**Fixed on two surfaces** (the live HTML was already correct on this point and
+was not touched):
+1. `docs/legal/privacy-policy.md` — row retitled *"A relationship either of you
+   ends"*, body now says removing your partner **or deleting your own account**
+   dissolves the couple *"for both of you at once; it does not wait for the
+   second person to act"*, deletion 30 days after **that**.
+2. `docs/legal/faq.md` — *"When the second partner leaves"* → *"It takes one of
+   you — the couple is dissolved for both, immediately, and neither needs the
+   other's agreement; deleting your own account does the same."*
+
+**The second one was nearly missed.** The first sweep grepped
+`last partner leaves` and reported NONE; `faq.md` says **second** partner, and
+only a re-read of the actual answer caught it. Phrase-matching a claim is not
+the same as reading the surfaces that make it.
+
+**Verified:**
+```
+grep -rniE "second partner|last partner|both leave|after the second" web/ docs/legal/ mobile/lib/
+  -> one unrelated code comment (session_provider.dart:59)
+all six legal surfaces now assert the one-person trigger  -> 1..2 hits each
+```
+
+**Still open:** unchanged from §106/§107/§108 — the film re-render (bakes the
+old false encryption/ads claims into pixels), `app-ads.txt` 404, the consent
+gate that cannot reach the privacy policy, the News cover's undisclosed
+BBC/Al Jazeera/NPR flows, the unmentioned data export, and the two prod-only
+surfaces (Supabase Auth email templates, redirect allow-list). The AdMob
+disclosure still sits UNCOMMITTED in `docs/legal/privacy-policy.md` — this
+session isolated around it again rather than committing another session's work.
+
+**Exact next step:** the ads session commits its AdMob disclosure in
+`docs/legal/privacy-policy.md` and `faq_text.dart`, which are the last two
+files where an uncommitted legal change is sitting in the tree.
