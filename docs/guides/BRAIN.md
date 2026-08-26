@@ -10243,3 +10243,205 @@ needs a build before handsets show the new address.
 deployment reaches Ready and all nine paths still serve 200. If it errors the
 alias stays on the good deployment (fails safe), and the fix is a
 `.vercelignore` or a revisit of the setting.
+
+## §106 — Full legal re-audit: the marketing site contradicts the legal pages on encryption and on ads (2026-08-26)
+
+Owner asked for a word-by-word re-audit cross-checking the app against the
+site after §101/§105 ("don't make me pay in future"). Eight agents: three
+gathered (repo / shipped app / live site), three cross-checked (identity,
+app-vs-web, Play risk), one adversarially refuted every finding, one hunted
+what the audit missed. **32 of 34 claims reproduced exactly, including every
+cited line number.** Nothing below is inference; each has a file:line or a
+curled status.
+
+**The identity work from §101 is clean.** Zero occurrences of
+`Razaaslam3210@gmail.com` / `RZ Dev` / `R&D Dev` anywhere user-facing, live or
+in the tree. What the audit found instead is older and worse.
+
+### CRITICAL — the live site makes two false factual claims
+
+- **C1 — the homepage says chat is end-to-end encrypted. It is not.** Four
+  places: `web/index.html:7`+`:12` (meta/og description — what Google and link
+  previews show), `:118-121`, `:242-244`, `:285-286`, e.g. *"Messages are
+  sealed with XChaCha20-Poly1305 on your phone and opened on theirs. Nowhere
+  in between can read them — including us."*
+  Two clicks away, `privacy-policy.html:170` says chat is *"NOT end-to-end
+  encrypted — stored so that the server could read them"*, `security.html` §2
+  agrees, and the contract every user must accept
+  (`terms_text.dart:125-130`) says *"not protected from us."*
+  `security.html:84` already pre-empts researchers reporting it — so the site
+  knows its own homepage is wrong. Play's Deceptive Behavior policy bites on
+  the marketing claim, not the buried disclaimer.
+- **C2 — "no ads" on the homepage and web FAQ while the app ships AdMob.**
+  `web/index.html:97`, `:258`, `web/faq.html:47` (*"no subscriptions, no ads,
+  no in-app purchases"*), and the canonical source `docs/legal/faq.md:20`.
+  Ships: `pubspec.yaml:121 google_mobile_ads: 9.1.0`, `mobile/lib/core/ads/`,
+  `AndroidManifest.xml:140`.
+  **Correction to my own premise going in:** the privacy policy is NOT the
+  problem — it discloses AdMob correctly and thoroughly
+  (`privacy-policy.html:125-131`). The in-app FAQ was updated too
+  (`faq_text.dart:41`). The homepage and the WEB FAQ were not, and the web FAQ
+  is the page a reviewer reaches from the listing's website field.
+
+### HIGH
+
+- **H1 — the homepage promises a recovery passphrase that does not exist.**
+  `web/index.html:291-293`: *"locked by a passphrase only you know… Not even
+  us."* Reality (`terms_text.dart:118-121`, `privacy-policy.html:234`): the
+  seal derives from the **account password**, the same string sent to the auth
+  service on every sign-in — *"the two secrets are one secret."*
+- **H2 — the app omits the re-pairing undo both the web FAQ and the policy
+  promise.** `faq_text.dart:232-237` says reconnecting *"is the same as the
+  first time"*; web and policy both say *"Re-pairing inside those 30 days
+  cancels the deletion."* App text predates `5c63e43`.
+- **H3 — the privacy policy was materially amended (AdMob disclosure) without
+  re-dating it**, breaking its own §11 change clause. Still reads
+  "Last updated: 17 August 2026".
+
+### Play-review risk, beyond the above
+
+- The release runbook still instructs declaring **ads: none** while the binary
+  ships an ad SDK.
+- `/app-ads.txt` **404s live** — untracked, so git builds never ship it
+  (found this session; §105). Its content is the placeholder
+  `pub-0000000000000000`, and the shipped AdMob `APPLICATION_ID` is still
+  Google's **sample** ID.
+- **Policy §7 gives the wrong deletion path** — "Settings → Delete my account"
+  vs the real "Settings → Account → Delete account". `csae.html` §8 gets it
+  right. This is the Play-required deletion route, on the page Play reads
+  first.
+- The app links a Play listing that **404s** (`main.dart:826`), while
+  `index.html` says "listing isn't live yet" and `faq.html:54` says "From the
+  Google Play Store."
+
+### What the completeness critic found that nobody had looked at
+
+- **The consent gate cannot reach the privacy policy.**
+  `terms_screen.dart:104-116` renders the contract as a bare `Text`, no links;
+  §11 names the policy but prints no URL; `milesPrivacyPolicyUrl` has exactly
+  one call site — Settings → About, which is *behind* the gate the router
+  forces every unaccepted account into. That is the Art. 13 surface.
+- **The 60-second homepage film bakes all three false claims into pixels**
+  (`scripts/film-render/composition/index.html`): "End-to-end encrypted chat
+  and calls", "Nowhere in between can read them — including us", "No ads of
+  your life". An HTML fix does not touch them; the film must be re-rendered,
+  and §104 destines it for the listing, where it becomes promotional material
+  under a stricter policy.
+- **The News cover sends the user's IP to BBC, Al Jazeera and NPR**
+  (`rss_service.dart:30-32`) plus their CDNs via `CachedNetworkImage`. None
+  appear in the policy's §4 recipients table.
+- **The app ships a data export the policy never mentions**
+  (`export_screen.dart`); live policy greps 0 for "export" and 0 for
+  "portab*". §7 tells users to email instead. The app over-delivers and the
+  contract under-promises — wrong way round for a DSAR clock.
+- Two prod-only surfaces this machine cannot check: the **Supabase Auth email
+  templates** (the account-deletion code is delivered by the *Magic Link*
+  template) and the **redirect allow-list** (`config.toml` lacks the https
+  `auth-callback.html` the client sends).
+- `settings_screen.dart:816` location subtitle claims *"Only your partner can
+  ever see this"*, contradicted by the app's own Terms §4 and policy §4.
+
+### Verified clean, so nobody re-runs them
+
+`data_extraction_rules.xml` (backup fully excluded), policy §5 permissions vs
+manifest, `csae.html` §3's in-app path, `safety_sheets.dart:128-143` (the one
+in-app surface that refuses the false encryption claim), the dead
+`onboarding=1` branch, and the `vercel.json` CSP.
+
+**Still open — nothing above is fixed.** These are content and product
+decisions, not typo fixes: C1 in particular can be closed either by making the
+copy honest or by shipping E2EE chat (built per §58, blocked by the field
+decrypt bug that keeps `chat_cipher_only` false). That is the owner's call and
+was not made unilaterally.
+
+**Exact next step:** owner rules on C1 (honest copy vs ship E2EE) and C2
+(rewrite the two "no ads" surfaces). Then: re-date the policy, fix the §7
+deletion path, ship app-ads.txt as a tracked file, and re-render the film —
+the film is the one that cannot be fixed by editing HTML.
+
+## §107 — The site stops claiming what it cannot do (2026-08-26)
+
+Owner ruled on §106 C1: **rewrite the copy to be honest** rather than wait on
+E2EE chat, and left the rest of the scope to judgement. Applied the two
+critical false claims plus the one live dating defect. Every edit is text; no
+code, no schema.
+
+**C1 — chat is no longer described as end-to-end encrypted.** Six places in
+`web/index.html`:
+- `:7` meta description and `:12` og:description — dropped the blanket
+  "End-to-end encrypted." (this is the string Google and link previews show,
+  so it was the widest-reaching instance).
+- `:45-47` hero sub — **this one was nearly missed**: the grep for the card
+  and panel text did not reach it, and only a second sweep for every
+  `end-to-end` occurrence caught it. Blanket claim, now dropped.
+- `:118-121` feature card: "End-to-end encrypted chat / Nowhere in between can
+  read them — including us" → "Invite-only chat", encrypted in transit and at
+  rest, per-row access, and the explicit sentence *"Chat is not end-to-end
+  encrypted."*
+- `:241-246` security panel: dt is now "End-to-end encryption, where it
+  applies", naming Memory Threads, Wish Jar and Personal Vault as the three
+  that are, and saying chat is not.
+- `:284-288` homepage FAQ "Can Miles read our messages?" — now answers with
+  the split rather than the false half.
+
+Wording was written against the source of truth, not invented:
+`privacy-policy.html` §2's two tables and `terms_text.dart:112-130`.
+
+**H1 — the recovery passphrase that does not exist.** `index.html:290-293`
+claimed *"locked by a passphrase only you know… Not even us."* Replaced with
+the real design: the seal derives from the account password, the same one sent
+to the auth service on every sign-in, pointing at policy §3.
+
+**C2 — "no ads" removed from the three surfaces that still said it**, matched
+to the in-app FAQ's already-correct wording (`faq_text.dart:41`):
+`web/faq.html` cost answer, `docs/legal/faq.md` cost answer, and
+`index.html:95-99` + the `:257-262` deflist item (dt "No ads of your life" →
+"Your life is not the product").
+
+**H3 — `web/privacy-policy.html` re-dated to 26 August 2026.** The AdMob
+disclosure is live and the page still said 17 August, which breaks its own
+§11 change clause.
+
+**Verified:**
+```
+grep -rniE "end-to-end encrypted chat|chat is end-to-end|chat is sealed" web/*.html  -> NONE
+grep -rniE "no ads" web/*.html docs/legal/*.md                                        -> NONE
+grep -rn "passphrase only you know" web/                                              -> NONE
+```
+Every surviving `end-to-end` string in `web/` re-read individually and is
+either scoped (terms.html "Some of Miles is…", faq.html "a set of especially
+sensitive areas", the three index.html rewrites) or a denial. `privacy-policy.html`
+and `security.html` still deny chat E2EE — unchanged. HTML re-parsed:
+`errors=0 unclosed=[]` on index/faq/privacy-policy.
+
+### Deliberately NOT changed, and why
+
+- **The "Re-pairing cancels the deletion" claim on all four surfaces.** §106
+  flagged the app FAQ for omitting it; investigating the fix found the WEB
+  claim is itself suspect. `20260826190000_restore_needs_both_of_them.sql`
+  states the owner's ruling: *"reunion needs BOTH, always. One asks, the other
+  confirms."* Re-pairing with a fresh code is a new couple, not a restored
+  one. Whether the reunite flow is reachable by a real user cannot be checked
+  from this machine (no device, and §100 records the client half unverified).
+  **Syncing the app FAQ to a web claim that may itself be wrong would have
+  propagated the error**, so nothing was touched. This needs the owner or a
+  device pass to settle, and it is a promise about permanent data loss.
+- `docs/legal/privacy-policy.md` — carries the ads session's UNCOMMITTED AdMob
+  disclosure. Not edited, not staged. Its §7 deletion path is still the wrong
+  "Settings → Delete my account"; the live HTML at `:444` already says the
+  correct "Settings → Account → Delete account", so the user-facing page is
+  fine and only the source doc is stale. Left for whoever owns that file.
+- The film (`scripts/film-render/composition/index.html`) still bakes all
+  three false claims into pixels. Text edits cannot reach it; it must be
+  re-rendered before any listing upload.
+- `web/app-ads.txt` — still untracked, still 404 live. It is the ads session's
+  file; committing another session's work is not mine to do.
+
+**Still open:** the film re-render; app-ads.txt; the consent gate that cannot
+reach the privacy policy (§106); the News cover's undisclosed BBC/Al Jazeera/
+NPR flows; the unmentioned data export; the two prod-only surfaces (Supabase
+Auth email templates, redirect allow-list).
+
+**Exact next step:** settle the re-pairing claim — either confirm the reunite
+flow is live and fix the app FAQ to describe mutual consent, or correct all
+four surfaces. It is the last known false-or-unproven promise on a legal page.

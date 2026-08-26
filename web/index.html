@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Miles — Feel close, even from here</title>
-<meta name="description" content="Miles is a private app for two people — conversations, calls, rituals, and keepsakes in one place. End-to-end encrypted. Invite-only. Never public.">
+<meta name="description" content="Miles is a private app for two people — conversations, calls, rituals, and keepsakes in one place. Invite-only. Never public.">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Miles">
 <meta property="og:title" content="Miles — Feel close, even from here">
-<meta property="og:description" content="A private app for two people. End-to-end encrypted. Invite-only. Never public.">
+<meta property="og:description" content="A private app for two people. Invite-only. Never public.">
 <meta property="og:url" content="https://miles-legal.vercel.app/">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
@@ -44,7 +44,7 @@
       <h1 class="t-hero h-rise">Feel close, even from here.</h1>
       <p class="hero-sub h-rise d1">Miles is a private app for two people — your
         conversations, calls, rituals, and keepsakes in one place.
-        End-to-end&nbsp;encrypted. Invite-only. Never&nbsp;public.</p>
+        Invite-only. Never&nbsp;public.</p>
       <div class="hero-cta h-rise d2">
         <span class="chip-play" aria-disabled="true" title="The listing isn't live yet.">
           <svg width="16" height="18" viewBox="0 0 16 18" fill="none" aria-hidden="true"><path d="M1.5 1.6v14.8c0 .5.55.82.98.55l12.04-7.4a.65.65 0 0 0 0-1.1L2.48 1.05a.65.65 0 0 0-.98.55Z" stroke="#D9A86C" stroke-width="1.3"/></svg>
@@ -94,9 +94,9 @@
     <p class="t-accent">No feed. No followers. Just the two of you.</p>
     <p class="t-body-l">Pairing happens by invitation between two people. There are
       no profiles to browse, no discovery, and no public surface at all — nothing
-      either of you shares is visible to anyone else. And there are no ads and no
-      sale of your data: private connection tools for couples, that's the whole
-      business.</p>
+      either of you shares is visible to anyone else. We never sell your data,
+      and nothing you write or send is used to target advertising: the one place
+      an ad can appear is a single banner on the Touch tab.</p>
   </div>
 </section>
 
@@ -115,10 +115,11 @@
           <circle cx="31" cy="27" r="8" fill="#C84B6A" opacity=".3"/>
           <circle cx="31" cy="27" r="3.4" fill="#FCEFE6"/>
         </svg>
-        <h3 class="t-h1 lag1">End-to-end encrypted chat</h3>
-        <p class="t-body-s">Messages are sealed with XChaCha20-Poly1305 on your
-          phone and opened on theirs. Nowhere in between can read them —
-          including us.</p>
+        <h3 class="t-h1 lag1">Invite-only chat</h3>
+        <p class="t-body-s">Messages are encrypted in transit and at rest, and
+          per-row access rules mean only you and your partner can reach them
+          through the app. Chat is not end-to-end encrypted — the privacy
+          policy names exactly what is, and what isn't.</p>
       </div>
       <div class="card">
         <svg class="glyph" viewBox="0 0 44 44" aria-hidden="true">
@@ -238,10 +239,13 @@
     <div class="panel reveal">
       <dl class="deflist">
         <div>
-          <dt>End-to-end encryption</dt>
-          <dd>Chat is sealed with <span class="code-chip">XChaCha20-Poly1305</span>
-            using keys that exist only on your two phones. The server stores
-            ciphertext it cannot open.</dd>
+          <dt>End-to-end encryption, where it applies</dt>
+          <dd>Memory Threads, Wish Jar entries and your Personal Vault files are
+            sealed with <span class="code-chip">XChaCha20-Poly1305</span> using
+            keys held on your two phones — the server stores ciphertext it
+            cannot open. Chat is not among them: it is encrypted in transit and
+            at rest, but the operator of the database could read it. Section 2
+            of the privacy policy lists both sides in full.</dd>
         </div>
         <div>
           <dt>App lock &amp; covers</dt>
@@ -255,9 +259,11 @@
             browse, no discovery, no public surface at all.</dd>
         </div>
         <div>
-          <dt>No ads of your life</dt>
-          <dd>No sale of your data, ever. Where the app's ability to act is
-            limited, our documents say so — they are written to be accurate
+          <dt>Your life is not the product</dt>
+          <dd>We never sell your data, and nothing you write, send or store is
+            used to target advertising. The app carries one banner slot on the
+            Touch tab and nothing anywhere else. Where the app's ability to act
+            is limited, our documents say so — they are written to be accurate
             rather than reassuring.</dd>
         </div>
       </dl>
@@ -282,15 +288,19 @@
       </details>
       <details class="qa">
         <summary>Can Miles read our messages?</summary>
-        <p>Chat is end-to-end encrypted with keys held on your two phones. What
-          the server stores, it cannot open. Our privacy policy spells out
-          exactly what is and isn't visible to us.</p>
+        <p>Your Memory Threads, Wish Jar entries and Personal Vault files are
+          end-to-end encrypted — those we cannot open. Chat is not: it is
+          encrypted in transit and at rest and locked to your couple by per-row
+          access rules, but the operator of the database could read it. The
+          privacy policy lists exactly what falls on each side.</p>
       </details>
       <details class="qa">
         <summary>What happens if I lose my phone?</summary>
-        <p>Your account recovers by email, and an encrypted key backup — locked
-          by a passphrase only you know — lets your history come back with you.
-          Without that passphrase, no one can unlock it. Not even us.</p>
+        <p>Your account recovers by email, and Miles keeps a sealed copy of your
+          encryption key so that reinstalling does not destroy your history.
+          That seal is derived from your account password — the same password
+          you sign in with — so anyone who has that password could open it.
+          Section 3 of the privacy policy sets out the trade.</p>
       </details>
     </div>
     <p style="margin:32px 0 0"><a class="arrow-link" href="/faq.html">All questions &rarr;</a></p>

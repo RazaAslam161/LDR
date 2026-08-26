@@ -17,7 +17,8 @@ couples who live apart. There is no feed, no followers, and no one else in it:
 every account is paired with exactly one partner.
 
 **How much does it cost?**
-Nothing. There are no subscriptions, ads, or in-app purchases.
+Nothing. No subscriptions and no in-app purchases. There is one banner on the
+Touch tab, and nowhere else in the app.
 
 **What devices does it work on?**
 Android phones (Android 7 and newer). There is no iPhone version at the moment.
