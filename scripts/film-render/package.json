@@ -1,0 +1,9 @@
+{
+  "name": "miles-film-render",
+  "private": true,
+  "description": "Deterministic renderer for the Miles intro film. See ../../.claude plan and BRAIN.",
+  "dependencies": {
+    "lottie-web": "5.12.2",
+    "puppeteer": "24.9.0"
+  }
+}

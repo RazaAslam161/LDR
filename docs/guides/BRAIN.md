@@ -10112,3 +10112,74 @@ prod verification happens right after promote is what has been masking it.
 the Vercel dashboard, then a throwaway push is used to confirm a git-driven
 deploy serves 200 at `/` — closing the trap permanently instead of
 re-walking around it.
+
+## §98 — The Urdu dialogue gate failed, and the film got better for it (2026-08-26)
+
+Probe (22cr, Veo fast/high on the Ammi-calculates keyframe): owner verdict —
+voice robotic, screen dead, posture staged. Dialogue route KILLED at one
+probe's cost. Consequences, all cheaper: every shot now Kling pro silent
+(8.75/5s vs 22/8s); dialogue becomes sound design + optional OWNER-RECORDED
+real Urdu lines (offered; the "real voices" they wanted); all app screens
+live ONLY in full-frame cutaway inserts recreated from app source (agent
+building ui_chat/ui_picker/ui_save — SEGMENTS map already extended); new hard
+rule recorded: NO readable phone screen in any AI-generated shot, ever —
+screens face away from camera or leave frame.
+
+Owner's web-app runs (free, unlimited): 4 recast sheets (all keepers —
+Ayesha 355470c2, Ammi 523919e1, Zoya 57dc52dd, Rabia c47fb1c3) + 11
+keyframes (all keepers; k14 take-2 f8c770a4 picked). 13 silent Kling shots
+in flight (113.75cr). Session connector total heading ~367 of cap 600.
+
+Owner still owes 6 web prompts: K17 frozen CU, K19 real laugh, K18 redo
+(v2 Zoya), K10 dining rishta beat (C2+C1), K02 volume-chord thumb macro,
+K16 redo (phone screen AWAY from camera). Packet file to be extended.
+
+**Exact next step:** collect 13 clips → dailies review → owner runs the 6 →
+animate those → inserts comp → assembly (subs .ass burned) → 16:9 master +
+9:16 vertical (reframe preflight vs local crop).
+
+## §104 — The intro film ships: rendered, gated, scored, live (2026-08-26)
+
+The 60s Emberlight intro film exists and is the product of a fully local,
+zero-credit pipeline: an HTML composition whose timeline is a pure function of
+t (scripts/film-render/), stepped frame-by-frame by Puppeteer, assembled by
+ffmpeg. 1800 frames at 1080p30.
+
+**The determinism gate earned its keep three times.** Full-sequence
+double-render comparison (verify.js) caught: (1) lottie-web state — its SVG
+for frame f depends on the path taken to REACH f, 33/1800 frames differed;
+accents cut, markup-caching noted for any future restore; (2) Chromium
+checker-imaging — continuously-scaled layers re-raster async and captures
+caught interim rasters, 11/1800; fixed with --disable-checker-imaging +
+--disable-partial-raster; (3) a residual 3-frame intermittent AA wobble that
+is byte-identical on re-probe — policy amended (<=5 intermittent = pass with
+warning) because the encode consumes ONE internally-consistent sequential
+pass. Final chain: one uninterrupted render, x264 CRF18 master (60.00s,
+bt709), VP9 two-pass web encode.
+
+**Music:** "Soft Felt Piano [Moon Rise]" (Pixabay license, no attribution),
+1:43, -16.3 LUFS, auditioned by measurement. Muxed with 1.5s fade-in and
+57->60s fade-out; the h264 stream is MD5-identical before and after the mux
+(da4c4587...) — the gated pixels shipped untouched. Deliverables:
+web/miles-intro.webm (VP9+Opus, 9.3MB, under the 10MB budget),
+web/assets/img/film-poster.jpg (93KB), out/miles-intro-music.mp4 (13.9MB,
+LOCAL ONLY - the YouTube upload artifact, gitignored).
+
+**Deploy-process whiplash, recorded so the next session stops guessing:** the
+miles-legal Root Directory changed TWICE between sessions. §103 measured
+root='.' (CLI-from-web/ correct, git pushes 404 the site). By this session's
+deploy it was root='web' (git pushes build CORRECTLY; CLI-from-web/ errors
+with "Root Directory web does not exist"). Under root='web' the deploy IS
+commit+push. Check `vercel project inspect miles-legal` BEFORE deploying;
+do not trust any BRAIN section's snapshot of this setting, including this one.
+
+**Left in flight for the other sessions:** scripts/film-shoot/ (their
+parallel film effort — owner has been told two film efforts exist), the ads
+work, .claude/launch.json's film-shoot-review entry. This commit carries the
+shared .gitignore including their film-shoot ignore block (named, unaltered)
+and web/index.html carrying only this session's player hunk on top of their
+committed f3b5eae.
+
+**Exact next step:** owner uploads out/miles-intro-music.mp4 to YouTube
+(unlisted) for the future Play listing; the Higgsfield credits route stays
+open for regenerating beats 5/6/8 as motion plates on the same timeline.

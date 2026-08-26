@@ -1,0 +1,110 @@
+/* Miles intro film - composition styles. Imports the site's own design system
+   for tokens and type; this file adds the stage, the beat layouts, and the
+   determinism kill-switch. Every animated property is written INLINE by
+   film.js's seek(t); nothing here may move on its own. */
+
+@import url("../../../web/assets/site.css");
+
+/* ---- determinism kill-switch ---- */
+*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+/* ---- stage ---- */
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+body { background: var(--night); }
+#stage {
+  position: relative; width: 1920px; height: 1080px;
+  background: var(--ambient);
+  overflow: hidden;
+  font-family: var(--f-body);
+}
+#ambient { position: absolute; inset: 0; }
+.layer { position: absolute; inset: 0; opacity: 0; }
+
+/* film grain - topmost, cycled by seek(t) */
+#grain {
+  position: absolute; inset: 0; z-index: 90;
+  background-repeat: repeat; background-size: 512px 512px;
+  mix-blend-mode: overlay; opacity: 0.05; pointer-events: none;
+}
+
+/* letterbox-free full frame; everything centers on a 1520px column */
+.center {
+  position: absolute; inset: 0;
+  display: grid; place-items: center; text-align: center;
+}
+.col { max-width: 1520px; padding: 0 120px; }
+
+/* ---- type roles (film sizes; the site scale, enlarged for 1080p canvas) ---- */
+.f-hero  { font: 300 104px/1.06 var(--f-display); letter-spacing: -0.02em; color: var(--cream); }
+.f-d2    { font: 300 72px/1.1 var(--f-display); letter-spacing: -0.014em; color: var(--cream); }
+.f-d3    { font: 400 44px/1.25 var(--f-display); color: var(--cream); }
+.f-accent{ font: italic 400 40px/1.4 var(--f-display); color: var(--ember-soft); }
+.f-body  { font: 400 30px/1.6 var(--f-body); color: var(--taupe); }
+.f-line  { font: 400 34px/1.6 var(--f-body); color: var(--cream-92); }
+.f-eyebrow { font: 600 24px/1.4 var(--f-body); letter-spacing: 0.1em;
+             text-transform: uppercase; color: var(--taupe); }
+.f-chip  { font: 600 26px/1 var(--f-body); color: var(--gilt);
+           background: var(--surface-2); border: 1px solid var(--edge-18);
+           border-radius: 16px; padding: 14px 24px; display: inline-block; }
+.f-wordmark {
+  font: italic 400 96px/1.1 var(--f-display); letter-spacing: 0.015em;
+  background: linear-gradient(180deg, #FCEFE6 0%, #D9A86C 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+}
+.f-wordmark-sm { font-size: 64px; }
+
+/* word-by-word rise: film.js sets opacity/transform inline per .w */
+.w { display: inline-block; white-space: pre; }
+
+/* dot-lights beside eyebrows */
+.dots { display: inline-flex; gap: 12px; vertical-align: middle; margin-right: 14px; }
+.dots i { width: 9px; height: 9px; border-radius: 999px; background: var(--ember-soft);
+          box-shadow: 0 0 12px 3px rgba(242,149,111,.45); }
+.dots i:last-child { width: 6px; height: 6px; align-self: flex-start; }
+
+/* ---- plates: framed cards over the ambient, never full-bleed ---- */
+.plate-wrap {
+  position: absolute; overflow: hidden; border-radius: 28px;
+  border: 1px solid var(--edge-14);
+}
+.plate-wrap img { position: absolute; left: 50%; top: 50%; will-change: transform; }
+.scrim {
+  position: absolute; inset: -40px;
+  background: radial-gradient(120% 120% at 50% 100%, rgba(10,5,6,0) 40%, rgba(10,5,6,.75) 100%);
+}
+
+/* beat 5: hero plate low-opacity backdrop card */
+#talk-plate  { left: 200px; top: 150px; width: 1240px; height: 622px; }
+/* beat 6: distance near-bleed */
+#dist-plate  { left: 120px; top: 210px; width: 1680px; height: 630px; }
+/* beat 8: keepsakes portrait, right side */
+#keep-plate  { left: 1090px; top: 130px; width: 620px; height: 820px; }
+
+/* left-aligned text blocks that pair with plates */
+.side-left { position: absolute; left: 160px; top: 0; height: 1080px;
+             display: flex; flex-direction: column; justify-content: center;
+             align-items: flex-start; text-align: left; max-width: 800px; }
+
+/* rituals triptych */
+.trip { display: flex; gap: 40px; justify-content: center; }
+.trip .card-f {
+  width: 460px; text-align: left; background: var(--surface-1);
+  border: 1px solid var(--edge-12); border-radius: 18px; padding: 44px;
+}
+.trip .card-f h3 { font: 400 40px/1.2 var(--f-display); color: var(--cream); margin: 0 0 16px; }
+.trip .card-f p  { font: 400 26px/1.55 var(--f-body); color: var(--taupe); margin: 0; }
+
+/* security panel lines */
+.sec-lines { display: flex; flex-direction: column; gap: 28px; align-items: center; }
+
+/* lottie accent slots */
+.lottie-slot { position: absolute; width: 160px; height: 160px; pointer-events: none; }
+
+/* the mark svg scales per beat via inline transform on #mark-wrap */
+#mark-wrap { position: absolute; left: 50%; top: 50%; width: 900px; height: 878px;
+             margin: -439px 0 0 -450px; }

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Miles — film composition</title>
+<link rel="stylesheet" href="film.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="ambient"></canvas>
+
+  <!-- beats 1-2: the mark (persists under hero) -->
+  <div class="layer" id="l-mark">
+    <div id="mark-wrap">
+      <svg viewBox="14 18 80 78" width="900" height="878" aria-hidden="true">
+        <defs>
+          <radialGradient id="fnear" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="ffar" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="fthread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+            <stop offset="0" stop-color="#FFA981"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+          </linearGradient>
+        </defs>
+        <g id="near-g" style="transform-origin:37% 66%">
+          <circle cx="40" cy="70" r="22" fill="url(#fnear)"/>
+          <circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/>
+        </g>
+        <g id="far-g" style="transform-origin:74% 26%">
+          <circle cx="73" cy="38" r="16" fill="url(#ffar)"/>
+          <circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/>
+        </g>
+        <path id="thread" d="M 40,70 C 44,54 56,42 73,38" fill="none"
+              stroke="url(#fthread)" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- beat: hero -->
+  <div class="layer" id="l-hero">
+    <div class="center"><div class="col">
+      <div id="wordmark" class="f-wordmark" style="margin-bottom:56px">Miles</div>
+      <h1 id="hero-h1" class="f-hero" style="margin:0 0 40px">Feel close, even from here.</h1>
+      <p id="hero-sub" class="f-body" style="margin:0">A private app for two people.</p>
+    </div></div>
+  </div>
+
+  <!-- beat: for two -->
+  <div class="layer" id="l-fortwo">
+    <div class="center"><div class="col">
+      <p id="ft-eyebrow" class="f-eyebrow" style="margin:0 0 28px">
+        <span class="dots"><i></i><i></i></span>For two</p>
+      <h2 id="ft-h2" class="f-d2" style="margin:0 0 36px">Built for exactly two</h2>
+      <p id="ft-accent" class="f-accent" style="margin:0">No feed. No followers. Just the two of you.</p>
+      <div class="lottie-slot" id="lot-loving" style="left:1560px;top:420px"></div>
+    </div></div>
+  </div>
+
+  <!-- beat: talk -->
+  <div class="layer" id="l-talk">
+    <div class="plate-wrap" id="talk-plate" style="opacity:.5">
+      <img id="talk-plate-img" data-plate src="assets/plates/hero-plate@2x.png" width="1280">
+      <div class="scrim"></div>
+    </div>
+    <div class="center"><div class="col">
+      <p id="talk-eyebrow" class="f-eyebrow" style="margin:0 0 28px">Talk</p>
+      <h2 id="talk-h2" class="f-d2" style="margin:0 0 44px">Say it like you're there</h2>
+      <p id="talk-l1" class="f-line" style="margin:0 0 30px">End-to-end encrypted chat and calls.</p>
+      <div id="talk-chip" class="f-chip" style="margin:0 0 30px">XChaCha20-Poly1305</div>
+      <p id="talk-l2" class="f-body" style="margin:0">Nowhere in between can read them &mdash; including us.</p>
+    </div></div>
+  </div>
+
+  <!-- beat: distance -->
+  <div class="layer" id="l-distance">
+    <div class="plate-wrap" id="dist-plate">
+      <img id="dist-plate-img" data-plate src="assets/plates/distance@2x.png" width="1680">
+      <div class="scrim" id="dist-scrim"></div>
+      <svg style="position:absolute;inset:0" viewBox="0 0 1680 630" aria-hidden="true">
+        <defs><linearGradient id="farc" x1="360" y1="470" x2="1330" y2="210" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#FFA981"/><stop offset="1" stop-color="#D9A86C" stop-opacity=".6"/>
+        </linearGradient></defs>
+        <path id="dist-arc" data-len="1030" d="M 360,470 C 620,290 1080,220 1330,210"
+              fill="none" stroke="url(#farc)" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="360" cy="470" r="7" fill="#FFF1E8"/>
+        <circle cx="1330" cy="210" r="5" fill="#FFE4D2"/>
+      </svg>
+    </div>
+    <div class="side-left" style="z-index:2">
+      <p id="dist-eyebrow" class="f-eyebrow" style="margin:0 0 24px">Distance</p>
+      <h2 id="dist-h2" class="f-d2" style="margin:0 0 36px">The distance,<br>made visible</h2>
+      <p id="dist-l1" class="f-line" style="margin:0 0 22px">See where your person is<br>on a shared 3D map.</p>
+      <p id="dist-l2" class="f-body" style="margin:0">Shared by choice, visible to<br>exactly one other human.</p>
+    </div>
+  </div>
+
+  <!-- beat: rituals -->
+  <div class="layer" id="l-rituals" style="transform-origin:50% 50%">
+    <div class="center"><div>
+      <p id="rit-eyebrow" class="f-eyebrow" style="margin:0 0 24px;text-align:center">Rituals</p>
+      <h2 id="rit-h2" class="f-d2" style="margin:0 0 56px;text-align:center">Small rituals, kept daily</h2>
+      <div class="trip">
+        <div class="card-f" id="rit-c1">
+          <h3>Daily Question</h3>
+          <p>Neither answer is revealed until both of you have written yours.</p>
+        </div>
+        <div class="card-f" id="rit-c2">
+          <h3>Breath Sync</h3>
+          <p>Breathe together in real time, a quiet minute that slows you both.</p>
+        </div>
+        <div class="card-f" id="rit-c3">
+          <h3>Reach</h3>
+          <p>A touch from afar, for when words aren't quite enough.</p>
+        </div>
+      </div>
+      <div class="lottie-slot" id="lot-calm" style="left:120px;top:160px"></div>
+      <div class="lottie-slot" id="lot-missing" style="left:1640px;top:760px"></div>
+    </div></div>
+  </div>
+
+  <!-- beat: keepsakes -->
+  <div class="layer" id="l-keepsakes">
+    <div class="plate-wrap" id="keep-plate">
+      <img id="keep-plate-img" data-plate src="assets/plates/keepsakes@2x.png" width="660">
+      <div class="scrim"></div>
+    </div>
+    <div class="side-left">
+      <p id="keep-eyebrow" class="f-eyebrow" style="margin:0 0 24px">Keepsakes</p>
+      <h2 id="keep-h2" class="f-d2" style="margin:0 0 36px">What you keep</h2>
+      <p id="keep-l1" class="f-line" style="margin:0 0 22px">Seal notes for future dates.<br>Drop small moments into a shared jar.</p>
+      <p id="keep-l2" class="f-accent" style="margin:0;color:#8B7CF0">Sealed until a certain night.</p>
+    </div>
+  </div>
+
+  <!-- beat: security -->
+  <div class="layer" id="l-security">
+    <div class="center"><div class="col">
+      <h2 id="sec-h2" class="f-d2" style="margin:0 0 64px">Private by design</h2>
+      <div class="sec-lines">
+        <p id="sec-l1" class="f-line" style="margin:0">Invite-only, always.</p>
+        <p id="sec-l2" class="f-line" style="margin:0">No ads of your life.</p>
+        <p id="sec-l3" class="f-line" style="margin:0">Keys that exist only on your two phones.</p>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- beat: closing -->
+  <div class="layer" id="l-closing">
+    <div class="center"><div class="col">
+      <h2 id="close-h2" class="f-d2">One space, for the two of you.</h2>
+    </div></div>
+  </div>
+
+  <!-- beat: endcard (holds to last frame) -->
+  <div class="layer" id="l-endcard">
+    <div class="center"><div class="col">
+      <svg id="end-mark" viewBox="14 18 80 78" width="360" aria-hidden="true" style="margin:0 auto 40px">
+        <defs>
+          <radialGradient id="enear" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="efar" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="ethread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+            <stop offset="0" stop-color="#FFA981"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+          </linearGradient>
+        </defs>
+        <circle cx="40" cy="70" r="22" fill="url(#enear)"/>
+        <circle cx="73" cy="38" r="16" fill="url(#efar)"/>
+        <path d="M 40,70 C 44,54 56,42 73,38" fill="none" stroke="url(#ethread)"
+              stroke-width="1.7" stroke-linecap="round"/>
+        <circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/>
+        <circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/>
+      </svg>
+      <div id="end-wordmark" class="f-wordmark f-wordmark-sm" style="margin-bottom:36px">Miles</div>
+      <div id="end-chip" class="f-chip">Coming to Google Play</div>
+    </div></div>
+  </div>
+
+  <div id="grain"></div>
+  <div id="black" style="position:absolute;inset:0;background:#000;z-index:95"></div>
+</div>
+
+<script src="lottie.min.js"></script>
+<script src="ambient-film.js"></script>
+<script src="film.js"></script>
+</body>
+</html>

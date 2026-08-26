@@ -50,3 +50,27 @@ _trash/
 *.jks
 *.keystore
 key.properties
+
+# Film renderer (scripts/film-render): local toolchain + generated inputs +
+# rendered frames. Only the finished webm/poster in web/ are committed.
+scripts/film-render/node_modules/
+scripts/film-render/out/
+scripts/film-render/composition/assets/plates/
+scripts/film-render/composition/emoji/
+scripts/film-render/composition/lottie.min.js
+
+# Film shoot (scripts/film-shoot): AI-generated media + intermediates.
+# Prompts, ledger, and scripts are committed; media never is.
+scripts/film-shoot/stills/
+scripts/film-shoot/shots/
+scripts/film-shoot/audio/
+scripts/film-shoot/graphics/
+scripts/film-shoot/work/
+scripts/film-shoot/out/
+
+# Vercel deploy-local state (root-directory deploys)
+.vercel/
+.vercelignore
+
+.vercel
+.env*
