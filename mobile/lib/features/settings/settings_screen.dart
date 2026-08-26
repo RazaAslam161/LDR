@@ -36,6 +36,7 @@ import 'package:miles/features/legal/terms_text.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/features/safety/report_service.dart';
 import 'package:miles/features/safety/safety_sheets.dart';
+import 'package:miles/features/safety/severance_sheet.dart';
 import 'package:miles/features/settings/security_code_dialog.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -362,40 +363,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     }
   }
 
-  Future<void> _removePartner(String partnerName) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Disconnect from $partnerName?'),
-        content: const Text(
-          'This will unlink your accounts. Your private data and time capsules '
-          "are preserved, but you'll both need to re-pair to reconnect. "
-          'This cannot be undone.',
-          style: TextStyle(color: MilesColors.taupe, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFB83A57),), // passionCrimson
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Yes, disconnect'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
+  /// The one destructive action in the app that used to ask for nothing.
+  ///
+  /// It asked less than deleting an account does, and its dialog was wrong
+  /// twice over: the private vault is derived from this account's own seed and
+  /// was never at risk, and "this cannot be undone" contradicted the app's own
+  /// FAQ two taps away. Both the dialog and its copy are gone; the sheet owns
+  /// the wording now, and the sheet is in features/safety because it is read
+  /// under the same over-the-shoulder rule as the report and pause sheets.
+  Future<void> _removePartner() async {
+    final outcome = await showSeveranceSheet(context, onEnd: _endConnection);
+    if (!mounted) return;
+    // Both follow-ups are opened from HERE rather than from inside the sheet:
+    // a sheet that pops itself and then pushes from its own context is
+    // pushing onto a route that no longer exists.
+    switch (outcome) {
+      case SeveranceOutcome.paused:
+        await showContactPauseSheet(context);
+      case SeveranceOutcome.deleteRequested:
+        await _deleteAccount();
+      case SeveranceOutcome.ended:
+      case null:
+        break;
+    }
+  }
+
+  /// Enforcement first, and the local wipe second — never the other way round.
+  ///
+  /// The couple id is captured BEFORE anything clears it: loadProfile() nulls
+  /// it, and endCouple needs it to clear the unread tally, which is keyed by
+  /// couple. The wipe runs in a finally for the reason signOut() documents —
+  /// a teardown that only happens when nothing threw is a teardown that skips
+  /// exactly the cases it exists for.
+  Future<void> _endConnection() async {
+    final coupleId = ref.read(sessionProvider).couple?.id;
     setState(() => _busy = true);
     try {
       await SupabaseRepository.leaveCouple();
-      await ref.read(sessionProvider.notifier).loadProfile();
+      try {
+        await ref.read(sessionProvider.notifier).endCouple(coupleId);
+      } finally {
+        await ref.read(sessionProvider.notifier).loadProfile();
+      }
       if (mounted) context.go('/couple');
-    } catch (_) {
-      _toast('Could not disconnect. Try again.');
+    } catch (e) {
+      // Rethrown so the sheet can show its own error and stay open. Swallowing
+      // it here would leave the sheet reporting success for a couple that is
+      // still very much intact.
       if (mounted) setState(() => _busy = false);
+      rethrow;
     }
   }
 
@@ -485,7 +501,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFB83A57),),
+                backgroundColor: MilesColors.danger,),
             onPressed: controller.text.trim().toUpperCase() == 'DELETE'
                 ? () => Navigator.pop(ctx, true)
                 : null,
@@ -982,11 +998,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFB83A57),
+                  foregroundColor: MilesColors.danger,
                   side: const BorderSide(color: Color(0x55B83A57)),
                 ),
-                onPressed:
-                    _busy ? null : () => _removePartner(partner.displayName),
+                onPressed: _busy ? null : _removePartner,
                 icon: const Icon(Icons.link_off, size: 18),
                 label: const Text('Remove partner'),
               ),
@@ -1127,9 +1142,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading:
-                  const Icon(Icons.delete_forever, color: Color(0xFFB83A57)),
+                  const Icon(Icons.delete_forever, color: MilesColors.danger),
               title: const Text('Delete account',
-                  style: TextStyle(color: Color(0xFFB83A57)),),
+                  style: TextStyle(color: MilesColors.danger),),
               subtitle: const Text('Permanently erases your data',
                   style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
               onTap: _busy ? null : _deleteAccount,

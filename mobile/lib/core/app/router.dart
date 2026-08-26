@@ -21,19 +21,17 @@ import 'package:miles/features/capsule/capsule_list_screen.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 import 'package:miles/features/care/care_screen.dart';
 import 'package:miles/features/chat/camera/rapid_camera_screen.dart';
-import 'package:miles/features/closer/warmth/warmth_meter_screen.dart';
-import 'package:miles/features/closer/wish_jar/wish_jar_screen.dart';
 import 'package:miles/features/closer/memory_threads/memory_threads_screen.dart';
 import 'package:miles/features/closer/memory_threads/propose_memory_screen.dart';
 import 'package:miles/features/closer/mood_lamp/mood_lamp_screen.dart';
 import 'package:miles/features/closer/pick_for_us/pick_for_us_screen.dart';
-import 'package:miles/features/gallery/gallery_screen.dart';
-import 'package:miles/features/reels/reel_queue_screen.dart';
-import 'package:miles/features/routines/routine_screen.dart';
 import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
+import 'package:miles/features/closer/warmth/warmth_meter_screen.dart';
+import 'package:miles/features/closer/wish_jar/wish_jar_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
 import 'package:miles/features/disguise/disguise_picker_screen.dart';
+import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/games/games_screen.dart';
 import 'package:miles/features/games/synced_card_game_screen.dart';
 import 'package:miles/features/games/truth_dare_screen.dart';
@@ -43,7 +41,10 @@ import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/legal/terms_screen.dart';
 import 'package:miles/features/profile/partner_profile_screen.dart';
 import 'package:miles/features/reasons/reasons_screen.dart';
+import 'package:miles/features/reels/reel_queue_screen.dart';
 import 'package:miles/features/rituals/rituals_screen.dart';
+import 'package:miles/features/routines/routine_screen.dart';
+import 'package:miles/features/safety/severance_state.dart';
 import 'package:miles/features/settings/export_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
@@ -62,8 +63,15 @@ PresenceRouteObserver? presenceRouteObserver;
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {
   return GoRouter(
-    refreshListenable: Listenable.merge(
-        [_SessionListenable(ref), CryptoCore.keyless, TermsGate.accepted],),
+    refreshListenable: Listenable.merge([
+      _SessionListenable(ref),
+      CryptoCore.keyless,
+      TermsGate.accepted,
+      // Read by the redirect below. Without it the /rewrap allowance is
+      // decided once, against whatever was loaded when the router was built,
+      // and a state that arrives afterwards never reopens the route.
+      SeveranceState.held,
+    ],),
     // Presence is published from here rather than from each screen, so every
     // route reports — including the 31 that never did, and any added later.
     observers: [presenceRouteObserver = PresenceRouteObserver(ref)],
@@ -126,6 +134,32 @@ GoRouter buildRouter(Ref ref) {
         return path == '/welcome' ? null : '/welcome';
       }
       if (needsCouple) {
+        // One exception, and only one: the key ceremony, when there is
+        // genuinely somebody who can answer it.
+        //
+        // This gate used to be unconditional, and the keyless check below was
+        // placed under it with the reason "an account with no partner has
+        // nobody to ask". That was true until 20260826180000. A dissolved
+        // couple inside its window now has two members who can still run the
+        // ceremony, and a phone that reinstalled during that window has
+        // nothing but the account password between it and history it can never
+        // read again.
+        //
+        // NOT hoisted above this gate, which would have been the smaller diff
+        // and the wrong one: a fresh keyless account that never had a couple
+        // would then be sent to /rewrap with nobody to ask — exactly the
+        // deadlock the old ordering avoided. The allowance is conditional on
+        // SeveranceState, so it opens only for somebody who has a counterpart.
+        //
+        // ALLOWED, never redirected TO. /rewrap is reached with push() from
+        // the reconnect sheet, so it keeps its back button; forcing an
+        // unpaired account onto it would cut them off from /couple, which is
+        // where sign-out and the permanent erase live.
+        if (path == '/rewrap' &&
+            CryptoCore.keyless.value &&
+            SeveranceState.held.value != null) {
+          return null;
+        }
         // Stay on /couple while linking (Create shows the invite code there).
         return path == '/couple' ? null : '/couple';
       }
@@ -143,7 +177,8 @@ GoRouter buildRouter(Ref ref) {
       // before its own navigation can run, and a relaunch (the ordinary case,
       // since the cover backgrounds the app and Android kills it) never passes
       // through that page at all. Below the funnel because an account with no
-      // partner has nobody to ask.
+      // partner and no dissolved couple has nobody to ask — the needsCouple
+      // gate above carves out the case where there is somebody.
       //
       // '/call' is the one exception: the ceremony's own instructions are to
       // get on a call, and blocking that is a deadlock, not a guard.
@@ -204,8 +239,10 @@ GoRouter buildRouter(Ref ref) {
       ),
       // Deliberately outside the funnel's sweep-to-/app list: a phone that
       // reached here has no key, and bouncing it into the app is how that
-      // becomes an empty screen nobody can explain. The funnel still moves an
-      // unpaired account on to /couple, where there is nobody to ask anyway.
+      // becomes an empty screen nobody can explain. The funnel moves an
+      // unpaired account on to /couple UNLESS a dissolved couple is still
+      // inside its window, in which case there is somebody to ask and the
+      // ceremony is worth reaching.
       GoRoute(
         path: '/rewrap',
         builder: (context, state) => const RewrapScreen(),

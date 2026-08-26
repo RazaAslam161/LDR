@@ -222,17 +222,22 @@ class SupabaseRepository {
   /// stranded phone mints a stand-in and escrows it over the real row. Both
   /// callers default an unknown to LOST.
   ///
-  /// Note what false does NOT distinguish. `partner_keys_select_member` scopes
-  /// reads to the caller's couple, so an unpaired account sees no row whether
-  /// or not one exists, and RLS filtering returns an empty set rather than an
-  /// error — `.maybeSingle()` answers null without throwing. So false covers
-  /// both "never published" and "unpaired, so hidden".
+  /// False used to be ambiguous, and is not any more. `partner_keys_select_member`
+  /// scopes reads to the caller's couple, so an unpaired account saw no row
+  /// whether or not one existed — RLS filters rather than errors, so
+  /// `.maybeSingle()` answered null without throwing and false covered both
+  /// "never published" and "unpaired, so hidden".
   ///
-  /// That is survivable rather than ideal, and only because of what an unpaired
-  /// account is: it has no partner, so the ceremony false would skip has nobody
-  /// to answer it, and the funnel routes it to `/couple` above the keyless gate
-  /// in `buildRouter` anyway. The dangerous direction is the paired reinstall,
-  /// and there the read is authoritative.
+  /// The comment here used to argue that was survivable, because an unpaired
+  /// account has no partner and so nobody to answer the ceremony that false
+  /// would skip. Severance breaks that argument: a dissolved couple has a way
+  /// back, so an unpaired account still has someone who could answer, and a
+  /// reinstall during that window is exactly the case the silence stranded.
+  ///
+  /// `partner_keys_select_own` (20260826150000) ORs a self-row read beside the
+  /// couple-scoped one, so this read is now authoritative in both directions.
+  /// Null still means the read FAILED and still must not be taken as "brand
+  /// new".
   static Future<bool?> _publishedIdentity() async {
     try {
       final uid = _c.auth.currentUser?.id;
@@ -653,6 +658,43 @@ class SupabaseRepository {
     if (patch.isEmpty) return;
     await _c.from('profiles').update(patch).eq('id', uid);
   }
+
+  /// What, if anything, is still recoverable from the couple that ended.
+  ///
+  /// Returns null for every negative case — never a member, severed, window
+  /// expired, already purged, paired with somebody else. That uniformity is
+  /// deliberate on the server side and must not be unpicked here: it is what
+  /// stops this call telling an ex whether the other person chose the
+  /// permanent exit or simply let the clock run out.
+  static Future<Map<String, dynamic>?> coupleRestoreState() async {
+    final row = await _c.rpc<dynamic>('couple_restore_state');
+    return row == null ? null : Map<String, dynamic>.from(row as Map);
+  }
+
+  /// Ask to reconnect. Cannot restore anything on its own.
+  static Future<void> coupleRestoreRequest() =>
+      _c.rpc<void>('couple_restore_request');
+
+  /// Withdraw your own ask, or turn down theirs. The server records which it
+  /// was; either way the request is closed and the person who was turned down
+  /// cannot re-open it.
+  static Future<void> coupleRestoreCancel() =>
+      _c.rpc<void>('couple_restore_cancel');
+
+  /// Agree to the other person's ask, which restores the couple.
+  ///
+  /// The server refuses this if you are the one who asked. That check is the
+  /// whole guarantee and it deliberately does not live here.
+  static Future<void> coupleRestoreConfirm() =>
+      _c.rpc<void>('couple_restore_confirm');
+
+  /// End it now, for both, with nothing kept.
+  ///
+  /// Reachable by EITHER ex-member, including the one who did not start it —
+  /// a window opened over your own history by somebody else is one you must be
+  /// able to close. Silent on the server when there is nothing to end.
+  static Future<void> leaveCouplePermanently() =>
+      _c.rpc<void>('leave_couple_permanently');
 
   /// Unlink from the partner (dissolves the couple; data preserved server-side).
   static Future<void> leaveCouple() async {

@@ -8763,3 +8763,1112 @@ script still byte-identical live.
 **Exact next step:** when Higgsfield credits refresh — assets B, D, F, the G
 video loop, and the og.png/favicon raster pass (ImageMagick is now on the
 machine for it). The Play chip flip still waits on the listing.
+
+## §90 — Unpair stops lying, and starts cleaning up after itself (2026-08-26)
+
+Stage 1 of the severance plan. Client only — no migration, nothing for builds
+49/51/52 to break on. Plan at
+`C:\Users\RAZA\.claude\plans\i-want-some-extraordinary-valiant-clarke.md`.
+
+**The thing that was actually wrong.** Three sources in this repo disagreed
+about whether an unpair can be undone, and all three were wrong. The dialog
+said "This cannot be undone"; `faq_text.dart` said re-pairing within 30 days
+cancels the deletion; the live `leave_couple()` body carries the comment
+"Re-pairing clears it, so a reconciliation inside the window keeps everything."
+The code does a fourth thing: `redeem_pairing_invite` raises `couple_dissolved`
+for any invite pointing at a dissolved couple (`20260815071024:73-77`) and
+`create_pairing_invite` mints a NEW couple because the caller has none
+(`20260601005900:44-49`), so the old couple is unreachable by anyone from the
+moment you leave and is deleted at day 30. **The 30-day window exists and has
+no door.** The comment promising otherwise is a lie living in production SQL.
+
+**What changed**
+- `core/widgets/hold_to_confirm.dart` (new) — 1.2s press-and-hold. Typed
+  confirmation was rejected deliberately: it is two-handed and slow, and the
+  escape path must never get slower for someone who needs it. A hold taxes
+  sustained attention, which anger has and fear does not.
+- `features/safety/severance_sheet.dart` (new) — pause / end / delete on one
+  sheet. In `features/safety`, not settings, so it inherits the
+  over-the-shoulder rule. No `SnackBarAction` anywhere in it and there must
+  never be one.
+- `core/app/session_provider.dart` — **`endCouple()` extracted from
+  `_endSession()`.** This is the real fix. `leaveCouple()` ends with
+  `refreshSession()`, which fires `tokenRefreshed`, not `signedOut`, so the
+  entire local wipe was wired to an event a breakup does not raise. Surviving
+  every unpair until now: decrypted photographs in `DefaultCacheManager`,
+  `VoiceNoteCache` audio, `ChatDraftStore` bodies in secure storage, an ARMED
+  `ChatSendQueue` retry, the ex-partner's name in `LoveNoteRecipient`, live
+  signed `MediaUrls`, and the ex-couple's shared key held live by
+  `CoupleKey`'s memoized verdict. `UnreadTally.clear(coupleId)` is new to both
+  paths — it is keyed by couple, which is why sign-out never could clear it.
+- `core/data/crypto_core.dart` — `forgetPartner()`. Drops the shared key, the
+  ring and bumps the epoch; deliberately leaves `_accountId`, `_myKeyPair`,
+  `_vaultKey` and `keyless` alone, because the account is still signed in and
+  `/rewrap` reads `keyless`.
+- `settings_screen.dart` — inline `AlertDialog` and its false copy deleted;
+  `_endConnection()` does leave → wipe → reload in that order, wipe in a
+  `finally`. Button label/icon/colour unchanged: "Remove partner" is the
+  string a stressed user hunts for.
+- `faq_text.dart` — the false re-pairing answer replaced.
+- `core/ui/theme.dart` — `MilesColors.danger`; the three crimson literals in
+  settings_screen now point at it.
+
+**Verified** — `flutter test`: **1162 passed, 0 failed**. `dart analyze` on all
+changed files: 7 infos, every one pre-existing (2 `directives_ordering`
+confirmed against HEAD — `wordmark` and `encrypted_media_cache` were already
+misplaced; 5 `comment_references` in crypto_core outside the added block).
+New tests: `severance_teardown_test`, `severance_confirm_test`,
+`crypto_forget_partner_test`, `hold_to_confirm_test` (17 cases).
+
+Two defects were found and fixed **during** the work, both mine:
+1. The sheet popped itself and then used its own dead context to push the pause
+   sheet. Both follow-ups now return an outcome and the caller opens them.
+2. `HoldToConfirm` latched `_fired` for the widget's whole lifetime, so after a
+   failed end the sheet said "Try again" above a control that could never fire
+   again. The latch now clears on `dismissed`, and the release handler is
+   deliberately NOT gated on it — gating it deadlocks the drain.
+
+The repo hygiene gate also caught a real translucent-surface violation in the
+new widget; fixed with `MilesColors.tint()`, gate not touched.
+
+**Corrected a stale audit finding.** `MARKET-READINESS-AUDIT.md:101` claims
+leaving "permanently destroys your own Private Vault". False since the
+`miles-vault-v1` derivation landed — `crypto_core.dart:497-507` derives the
+vault key from the account's OWN seed. It described the dead `vault_items`
+table. The new copy says the vault survives, because it does.
+
+**Still open**
+- Stages 2–6 (all backend) are unbuilt: the presence PII scrub, `couple_members`,
+  `leave_couple_permanently()`, rewrap-in-window, and the two-party reunion
+  handshake. Owner ruled: reunion needs BOTH, always; nothing announces an
+  unpair.
+- **Live PII leak, unfixed, Stage 2.** `leave_couple()` lost its 18-column
+  presence scrub when `20260601005100` replaced the `20260601002400` body;
+  `20260815071024` inherited it. Coordinates, mood, `body_photo_path` and
+  `checkin_photo_url` survive every unpair on a row `prune_dissolved_couples`
+  can never reach, and `sync_presence_couple_id` re-attaches them to the NEXT
+  partner.
+- **No device pass is possible on this machine** — no Android SDK, no adb, no
+  APK. Everything above is analyzer- and test-verified only.
+- `docs/guides/PLAY-READINESS-AUDIT.md` and `THREAT-MODEL.md` §3 not yet
+  updated for the new flow (plan §1.9).
+
+**Exact next step:** write
+`supabase/migrations/20260826140000_unpair_takes_the_coordinates_with_it.sql`
+— re-instate the presence scrub BEFORE the `profiles` update (the 002400
+ordering note still binds), queue `body_photo_path`/`checkin_photo_url` into
+`storage_reap` first, and add the column-list assertion that fails the next
+`ALTER TABLE presence ADD COLUMN`. Confirm the two bucket ids before writing it.
+
+## §91 — leave_couple takes the coordinates with it again (2026-08-26)
+
+Stage 2 of the severance plan. Migration written and **verified on staging**;
+**NOT applied to production** — the backfill is irreversible and destroys real
+photos, so it waits on the owner.
+
+**The regression, confirmed against live production.** `pg_get_functiondef` on
+prod returned a body byte-identical to `20260815071024` — no drift, and no
+presence scrub. `20260601002400` added a 16-column wipe with an ordering note;
+`20260601005100` `create or replace`d the function to add `dissolved_at` and
+carried the wipe away with it; `20260815071024` inherited the short body.
+Nothing failed and no test noticed — the one test that mentions the wipe
+(`migrations_hygiene_test`, 'presence_server_time precedes newuser_fixes')
+only names it in a comment while asserting something else.
+
+**Measured on production, not inferred:** presence has 3 rows, **all 3
+orphaned** (`couple_id is null`). 2 carry GPS coordinates, 2 a `location_label`,
+2 a check-in photo path, 2 a mood, and **2 sit at `location_sharing_mode <>
+'off'`** — pair either account with someone new and the new partner gets a pin
+and a sharing mode nobody turned on. Both check-in values are paths (not legacy
+URLs), in `couple_media`, and both objects still exist.
+
+**New file:** `supabase/migrations/20260826140000_unpair_takes_the_coordinates_with_it.sql`
+- Scrubs 22 presence columns, **before** the profiles update — the
+  `20260601002400` ordering note still binds, because
+  `trg_sync_presence_couple_id` nulls `presence.couple_id` the instant
+  `profiles.couple_id` changes and a scrub placed after it matches zero rows.
+- Covers six fields `20260601002400` itself never did: `location_accuracy`,
+  `current_activity`, `mood_updated_at`, `is_typing`, `typing_in_chat`,
+  `avatar_emoji`. `user_id` and `last_seen` deliberately kept — they describe
+  the account, not the relationship.
+- Queues `body_photo_path` (`couple_intimate`) and `checkin_photo_url`
+  (`couple_media`) into `storage_reap` **before** nulling them, selected FROM
+  `storage.objects` so a stale path or a legacy URL queues nothing. Buckets
+  confirmed from `clear_body_photo` (`20260817120000:169-195`) and
+  `home_screen.dart:151-157`. Neither column has thumbnails — only chat
+  image/video do — so no `regexp_replace` thumb term is needed.
+- One-time backfill for the already-orphaned rows, reporting rows touched.
+- A column-list assertion so the next `ALTER TABLE presence ADD COLUMN` fails
+  the migration that writes it until somebody decides keep-or-clear.
+- Also deletes the false comment on `dissolved_at` claiming "Re-pairing clears
+  it, so a reconciliation inside the window keeps everything." There is no path
+  back to that `couple_id` today.
+
+**New guard:** `mobile/test/unit/hygiene/leave_couple_privacy_test.dart`. The
+in-migration assertion catches a new COLUMN; it cannot catch what actually
+happened twice — someone replacing the whole function for an unrelated reason.
+This reads the LAST definition in replay order and asserts the scrub, the
+ordering, the reap-not-delete rule and `location_sharing_mode = 'off'`.
+
+**Verified**
+- `flutter test`: **1166 passed, 0 failed.**
+- Falsification: with the migration moved aside, the new guard fails 4/4; with
+  it restored, passes 4/4.
+- **Staging, end to end.** Seeded two users with full PII, called
+  `leave_couple()` as a real `auth.uid()`: every field on BOTH rows cleared,
+  `last_seen` kept. Re-paired A with a fresh third account — the new partner
+  inherited nothing.
+- **Reproduced the leak first.** Restored the pre-fix body on staging: after
+  `leave_couple()` the row kept lat 51.5074, 'Camden, London',
+  `sharing_mode='precise'`, mood and both photo paths, and a brand-new partner
+  read all of it. Re-applied the fix, same scenario, all null. The command
+  flipped.
+- Idempotent: three consecutive calls, 0 rows left dirty.
+- Staging test data removed.
+
+**Found, not fixed — staging drift.** `couples.dissolved_at` did not exist on
+staging, so `20260601005100` was never applied there. `apply_migration`
+returned `{"success":true}` anyway, because `create or replace` does not
+validate a body until it runs — the function was broken on staging and reported
+green. **"Applied successfully" is not evidence for a migration.** I added the
+one column so staging could rehearse; the rest of its drift is untouched and
+unmeasured.
+
+**Still open**
+- **Production is UNTOUCHED and the leak is still live there.** Applying it
+  permanently erases 2 real check-in photos (queued to `storage_reap`, drained
+  hourly) and clears the PII on 3 rows. Irreversible; rollback does not
+  un-scrub. Owner's call.
+- Stages 3–6 unbuilt: `couple_members`, `leave_couple_permanently()`,
+  rewrap-in-window, the two-party reunion handshake.
+- No device pass possible on this machine (no Android SDK).
+
+**Exact next step:** owner decides on production. Apply the file as written to
+`sopictusdonlvuezmfep`, then re-run the §91 measurement query and confirm
+`orphaned=3` with every PII counter at 0, and check `storage_reap` gained the
+2 `couple_media` rows.
+
+## §92 — The intro film: MCP shoot is running, and Max delivery is watermark-free (2026-08-26)
+
+The owner asked for a cinematic intro film (all features, disguise highlighted,
+ultra-realistic characters, zero wasted credits). Plan approved and executing:
+`C:\Users\RAZA\.claude\plans\hi-fable-i-want-structured-harbor.md`.
+
+**Done and verified:**
+- Higgsfield MCP loads and works mid-session on this machine — §89's "connector
+  never loads mid-session" no longer holds. Balance 1800 (Max, granted 2026-08-25).
+- `get_cost:true` preflights any generation free. Verified costs: NBP still 2K = 2;
+  Kling 3.0 pro 5s/10s = 12.5/25; Veo 3.1 fast 8s = 22, preview high = 58;
+  Seedance 2.0 std 1080p 10s = 90; seed_audio TTS line = 0.2.
+- **MCP/Max downloads carry NO watermark** — probe still corners inspected clean
+  (magick corner crops + pixel samples). §89's 78px crop fix is web-UI-only debt.
+- `scripts/film-shoot/` created (ledger.csv + prompts/, media dirs gitignored via
+  a new block appended to the same uncommitted .gitignore edit as film-render's).
+- Cast sheets + env plates generated (NBP charsheets, 14 credits so far, all in
+  ledger.csv). Owner redirected casting live: female lead recast white/glamorous
+  (bold wine-satin evening look — kept Play-safe: audit bans suggestive listing
+  assets). Male lead unchanged pending owner word.
+- Environment reference Elements created: miles-livingroom
+  a026c4c0-2941-4c92-aafc-82e0f39f546b, miles-bedroom
+  3d88c482-7a8f-49fe-a013-0682ecc52bc6. **Character Element creation was BLOCKED
+  by the permission classifier** — identity lock uses NBP `image_references`
+  (charsheet job_id) per keyframe instead; works, no workaround attempted.
+
+**Open:** keyframes → Kling/Veo shots (first-clip probe gates the batch) → VO →
+graphics inserts via a parameterized render.js copy → local ffmpeg assembly →
+`web/miles-intro.webm` + `web/assets/img/film-poster.jpg` (site slot at
+web/index.html:305). ffmpeg install via winget was running in background — verify
+before Stage 5/6. Budget: ~228 planned vs cap 500.
+
+**Exact next step:** approve recast sheet, shoot 13 keyframes (26 cr), then the
+12.5-cr Kling probe clip before any batch.
+
+## §93 — §91 is applied to production (2026-08-26)
+
+(Numbered 93, not 92: another session appended its own §92 — the intro-film
+entry above — while this work was in flight. Their section is untouched.)
+
+Amends §91's "NOT applied to production" — the owner approved the full file and
+it is live on `sopictusdonlvuezmfep`. Appended rather than edited, per the
+append-only rule.
+
+**Verified by measurement, not by the tool's return value.** `apply_migration`
+returned `{"success":true}`, which §91 already records as insufficient — the
+same call reported green on staging while the function was broken. So:
+
+Before → after, same query:
+
+| counter | before | after |
+|---|---|---|
+| total_rows | 3 | 3 |
+| orphaned | 3 | 3 |
+| orphan_with_coords | 2 | **0** |
+| orphan_with_place | 2 | **0** |
+| orphan_with_checkin | 2 | **0** |
+| orphan_with_mood | 2 | **0** |
+| orphan_still_sharing | 2 | **0** |
+| last_seen_kept | — | 3 |
+
+`storage_reap` backlog is **2 rows, bucket `couple_media`, all `/checkins/`** —
+exactly the two objects measured as still existing in §91, and no body photos,
+which matches `orphan_with_body_photo = 0` beforehand. The hourly
+`drain-storage-reap` cron erases them through the Storage API.
+
+Asserted against the LIVE `pg_get_functiondef`, not the file:
+`scrubs_location = true`, `queues_photos = true`, and
+`scrub_runs_first = true` — that last one is the ordering invariant the
+20260601002400 note exists for, checked on the deployed body.
+
+The backfill do-block having run successfully on prod is also what proves the
+scrub UPDATE and the storage_reap INSERT resolve against prod's real schema;
+they are the same statements the function runs, differing only in predicate.
+
+**Still open:** unchanged from §91 — stages 3–6 unbuilt, no device pass possible
+on this machine, and staging's remaining drift unmeasured (only
+`couples.dissolved_at` was added, and only so it could rehearse).
+
+**Exact next step:** unchanged — stage 3a,
+`20260826150000_a_user_can_always_read_their_own_key.sql`, the additive
+`partner_keys_select_own` policy. It is standalone, but it changes behaviour on
+builds already in the field (keyWasReplaced starts firing correctly), so the
+client half at `supabase_repository.dart:225-235` needs its now-obsolete
+justification comment rewritten in the same change.
+
+## §94 — A user can always read their own key (2026-08-26)
+
+Stage 3a of the severance plan. Written, staging-verified, **applied to
+production**. Non-destructive: no data written, reverses with one `drop policy`.
+
+**The bug, confirmed under real RLS.** `partner_keys_select_member` scopes reads
+to the caller's couple:
+
+    user_id in (select p.id from profiles p
+                 where p.couple_id = (select current_user_couple_id()))
+
+Unpaired, that subquery is empty, so **a user cannot read their own row**. RLS
+filters rather than errors, so `.maybeSingle()` answers null and the miss is
+indistinguishable from "no row exists". Reproduced on staging as
+`authenticated` with a real `auth.uid()`: row `PUBKEY_A` present in the table,
+`can_read_own_row = 0`.
+
+**The tell that this was an oversight, not a boundary.** Read live from prod:
+
+    partner_keys_insert_self   INSERT  with_check user_id = (select auth.uid())
+    partner_keys_update_self   UPDATE  using/check user_id = (select auth.uid())
+    partner_keys_select_member SELECT  couple-scoped        <- the odd one out
+
+An unpaired account could already WRITE and REPLACE its own row. It just could
+not read back what it wrote. This brings the read into line; it opens nothing
+that was shut.
+
+**What it cost.** `publishMyPublicKey` (`supabase_repository.dart:466-474`)
+selects `existing` to compare against the key it is about to publish. Unpaired
+that returned null, so `prev` was null, so **`keyWasReplaced` never fired** —
+the app said nothing about history it had just made unreadable.
+`_publishedIdentity` conflated "never published" with "unpaired, so hidden",
+and its own comment argued that was survivable *"only because an unpaired
+account has no partner, so the ceremony false would skip has nobody to answer
+it."* Severance makes that false, so the comment is rewritten in the same
+change rather than left to mislead.
+
+**New file:** `supabase/migrations/20260826150000_a_user_can_always_read_their_own_key.sql`
+- One PERMISSIVE SELECT policy, `user_id = (select auth.uid())`, ORed beside the
+  member policy, which is untouched. Shape copied verbatim from
+  `key_escrow_own_select` in this same database.
+- The subselect wrapper is deliberate: `20260601004200` hoisted every
+  `auth.uid()` in the schema into an InitPlan, and a bare call here would be the
+  only un-hoisted predicate left on the table.
+- Assertion block: raises if `partner_keys_select_member` is missing, or no
+  longer mentions `current_user_couple_id`. A self-only policy standing ALONE
+  would stop a paired user reading their partner's key and break every derive
+  door in the app, so the "sits beside" property is enforced, not assumed.
+
+**Client:** `supabase_repository.dart:225-235` — the obsolete justification
+replaced. No logic change; the existing code already handles a non-null `prev`
+correctly, so the policy is the whole fix.
+
+**Verified — negative matrix, real JWTs, `set role authenticated`, never
+`set role postgres`:**
+
+| identity | own | partner/ex | stranger | total visible |
+|---|---|---|---|---|
+| A unpaired, BEFORE | **0** | 0 | 0 | 0 |
+| A unpaired, AFTER | **1** | 0 | 0 | 1 |
+| A paired with B | 1 | **1** (`PUBKEY_B`) | 0 | 2 |
+| C, never a member | 1 | 0 | 0 | 1 |
+| anon | — | — | — | denied (error) |
+
+The paired row is the regression guard: the member policy still works, so the
+derive doors are intact. Repeated on **production against a real unpaired
+account**: `own_row = 1`, `other_users_row = 0`, `total_visible = 1`.
+`flutter test`: 1166 passed. Staging test data removed.
+
+**Found, not fixed:** `anon` holds a **SELECT grant on `public.partner_keys`**
+on both projects. Pre-existing, and this migration gives it nothing —
+`auth.uid()` is null for anon so `user_id = null` never matches. Today anon is
+stopped by lacking EXECUTE on `current_user_couple_id`, which makes the member
+policy raise rather than filter. That is defence-in-depth by accident: grant
+anon that EXECUTE, or add any policy true for anon, and a public key directory
+becomes readable. Worth a deliberate `revoke select on public.partner_keys from
+anon`, traced first — PostgREST introspection may rely on the grant.
+
+**Still open:** stages 3b–6 (`couple_members`, `leave_couple_permanently()`,
+rewrap-in-window, the reunion handshake). No device pass possible on this
+machine. Staging drift still unmeasured beyond the one column added in §91.
+
+**Exact next step:** stage 3b,
+`20260826160000_couple_members_is_the_way_back.sql` — the history table with no
+DML grant, `dissolution_window()`, `current_user_restorable_couple_id()`, the
+`sync_couple_members` trigger, the three-source backfill, and
+`couple_restore_state()`. Nothing becomes restorable in that migration; it only
+makes a dissolved couple addressable. Note before writing: the backfill cannot
+reconstruct a couple whose partner never sent a message and never touched an
+invite, and prod's `messages` and `pairing_invites` should be counted first so
+the warning it raises has an expected number to compare against.
+
+## §95 — couple_members: a dissolved couple is addressable again (2026-08-26)
+
+Stage 3b of the severance plan. Staging-verified, **applied to production**.
+**Nothing became restorable** — this only makes a dissolved couple addressable
+and defines the one predicate everything later routes through.
+
+**The problem.** `profiles.couple_id` was the only record a couple ever
+existed, and `leave_couple()` nulls it on both sides. From that instant the
+couple is unaddressable by either ex-member, and `prune_dissolved_couples()`
+deletes it at 30 days. The window was real and had no door.
+
+**Rejected: `profiles.former_couple_id`.** `20260601003300` rebuilds the
+`authenticated` UPDATE grant on profiles from `information_schema` excluding
+ONLY `couple_id`, and the README makes re-running that block mandatory for any
+migration adding a profiles column. A pointer there becomes client-writable on
+the next such migration, and `guard_couple_id()` guards `couple_id` alone — one
+PATCH would aim your pointer at any couple you can name. That is the exact
+takeover 20260601003300 exists to close.
+
+**Chosen: `public.couple_members`**, with **no DML grant to `authenticated` at
+all**. Verified on prod: `SELECT true`, `INSERT/UPDATE/DELETE false`, and
+`anon SELECT false` — deliberately not repeating the `partner_keys` anon grant
+flagged in §94.
+
+**New file:** `supabase/migrations/20260826160000_couple_members_is_the_way_back.sql`
+- `couple_members (couple_id, user_id, joined_at, left_at, severed_at)`, both
+  FKs `ON DELETE CASCADE` so the `20260601003800` guard passes; own-rows-only
+  SELECT policy.
+- `dissolution_window()` — the 30 days now lives in one place;
+  `prune_dissolved_couples()` refactored to read it (body otherwise byte-for-byte
+  the live prod definition, captured and diffed first).
+- `sync_couple_members()` trigger on `profiles`, `after insert or update of
+  couple_id`, mirroring `sync_presence_couple_id`. TG_OP tests are NESTED, not
+  ANDed: PL/pgSQL does not promise to short-circuit a boolean and `old.couple_id`
+  under an INSERT raises.
+- `current_user_restorable_couple_id()` — the single safety invariant. Its last
+  clause (the caller currently has no couple) is the whole safety argument and
+  lives here rather than in each caller.
+- `couple_restore_state()` — an RPC, deliberately NOT a `couples` SELECT policy,
+  because a SELECT policy is all-columns and `couples` carries
+  `stripe_customer_id` and `invite_code`.
+- Three-source backfill, and the two assertions (FK guard re-run, and
+  "authenticated cannot write this table").
+
+**Two bugs caught in my own draft before it ran anywhere:** a mangled
+`raise warning` string, and `min(left_at)` in the backfill would have stamped a
+CURRENT member as having left (min ignores nulls). The second cannot happen
+today because leave_couple nulls both profiles — but a derived column that is
+wrong only in a corner nobody reaches is still wrong.
+
+**Verified on staging, real JWTs under `set role authenticated`:**
+
+| case | restorable | state |
+|---|---|---|
+| A, dissolved 0d ago | the couple id | jsonb, `expires_at` = +30d |
+| C, never a member | null | null |
+| A, has since paired with someone else | null | null |
+| B, severed | null | null |
+| B, 31 days after dissolution | null | null |
+
+Plus: pairing wrote 2 membership rows with nothing writing them explicitly;
+`leave_couple()` stamped `left_at` on BOTH rows while membership survived;
+`membership_rows_visible = 1` for A (own row only — A cannot see whether B
+severed, which is what keeps the exit silent); INSERT and UPDATE by
+`authenticated` both refused at the **grant** level, before RLS runs;
+`prune_dissolved_couples()` collected a 31-day-old couple through
+`dissolution_window()` and `couple_members` cascaded to 0.
+
+**Verified on production:**
+- Backfill inserted **2 rows — exactly the number predicted by a dry run before
+  applying** (all three sources agreed on the same 2 members).
+  `every_couple_has_two = true`, so the short-count warning did not fire.
+- 4 new functions, trigger live, 1 policy, window = 30 days.
+- Real prod account: couple `676fa191-…` is now addressable,
+  `expires_at 2026-09-22` (dissolved 08-23 + 30d), `membership_rows_visible = 1`.
+  That couple was unaddressable before this migration.
+- `flutter test`: 1166 passed.
+- Staging test data removed.
+
+**Still open**
+- Stages 4, 5, 6: `leave_couple_permanently()` (**must land before restore, never
+  after**), rewrap-in-window, and the two-party reunion handshake.
+- The read-only archive is a later round, deferred by the owner.
+- `anon` still holds SELECT on `public.partner_keys` (§94) — found, not fixed.
+- No device pass possible on this machine.
+- Staging drift beyond `couples.dissolved_at` still unmeasured.
+
+**Exact next step:** stage 4,
+`20260826170000_leaving_now_means_now.sql` — `purge_couple(p_couple)` (internal,
+all execute revoked) plus `leave_couple_permanently()`. Two details decided in
+the plan and easy to get wrong: the couple is resolved with
+`coalesce(current couple, current_user_restorable_couple_id())` so the person
+who did NOT initiate can also slam the door, and `severed_at` is stamped on ALL
+rows of the couple, never just the caller's — severing binds the couple, not the
+person, or the ex could still restore unilaterally. `prune_dissolved_couples()`
+should be refactored to call `purge_couple()` so there is one purge
+implementation and two triggers.
+
+## §96 — Leaving now means now (2026-08-26)
+
+Stage 4 of the severance plan. Staging-verified, **applied to production**. The
+apply itself destroyed nothing — it creates functions; nothing is purged until
+somebody calls the escape.
+
+**Why this landed before the restore path.** 20260826160000 made a dissolved
+couple addressable and 20260826190000 will make it restorable. Between those two
+there must never be a deployed state where restoration exists and the way to
+refuse it does not. THREAT-MODEL.md §3 sells unpair as the exit from a partner
+who has become dangerous; a 30-day window only one person can close is a door
+left ajar.
+
+**New file:** `supabase/migrations/20260826170000_leaving_now_means_now.sql`
+- `purge_couple(p_couple)` — internal, execute revoked from every client role.
+  Folder-prefix sweep into `storage_reap` across the four couple buckets
+  (complete, because every object in them lives under `<couple_id>/…`, so it
+  catches thumbnails too), a presence scrub, then `delete from couples` and let
+  the cascade do the rest.
+- `prune_dissolved_couples()` refactored to call it — one purge implementation,
+  two triggers, so the scheduled and immediate paths cannot drift about what
+  "purged" means.
+- `leave_couple_permanently()` — the escape.
+
+**The three properties that had to be right, and were tested individually:**
+
+1. **`coalesce(current couple, current_user_restorable_couple_id())`.** A
+   unpairs normally, which opens a window over BOTH histories — and B never
+   chose it. B is already unpaired and has no `profiles.couple_id`, so resolving
+   only there hands the escape exclusively to whoever moved first. Verified: B
+   resolved the couple and purged it.
+2. **`severed_at` on EVERY row, not just the caller's.** Stamp only your own and
+   the other person's `current_user_restorable_couple_id()` still resolves, so
+   they could restore unilaterally — the whole attack.
+3. **Silent on nothing-to-do.** Returns rather than raising: an error message is
+   an oracle, and "no couple to end" told to the wrong person is information
+   about somebody who left.
+
+**Verified on staging, real JWTs under `set role authenticated`:**
+
+| case | result |
+|---|---|
+| A unpairs, then **B** calls it | couple gone, members gone, **4 objects queued across 3 buckets, thumbnail included** |
+| A afterwards | `restorable` null, `state` null, membership visible 0 — cannot tell B chose the exit |
+| C, never a member | silent no-op; A+B's other couple intact (1 couple, 2 members, 2 paired) |
+| A currently **paired**, one call | dissolved AND purged in one act |
+| second and third call | silent no-ops |
+
+**The subtlest case, and the one that could have damaged a live relationship.**
+A member who has since paired with somebody NEW must not have their current
+presence wiped when the OLD couple is purged. Built it: A left couple X, paired
+with C in couple Y, set location `Paris, with C`, mood `happy`, sharing
+`precise`. B then purged X. A's presence row came back **untouched** — still
+couple Y, still Paris, still precise — while X was gone. That is the
+`coalesce(couple_id, p_couple) = p_couple` guard in `purge_couple`, and without
+it closing an old window would blank a current partner's view of you.
+
+**An existing gate caught the refactor, correctly.**
+`test/unit/chat/file_message_lifecycle_test.dart` asserts every sweep that
+removes a couple's media also removes `couple_files`. Moving the sweep into
+`purge_couple` meant `prune_dissolved_couples` no longer contained the literal.
+The behaviour was preserved and in fact improved — the bucket list went from
+four copies to three, which is the direction that test's own comment argues for
+— so the test was **strengthened, not weakened**: it now follows one level of
+delegation, covers `purge_couple` directly, and its definition slice is bounded
+at the next `create or replace` (reading to end-of-file previously let a
+function pass on a literal belonging to a different function lower in the same
+file). Falsified: breaking `purge_couple`'s bucket list fails the test through
+the delegation chain.
+
+**Verified on production:** apply destroyed nothing — 1 couple, 2 membership
+rows, 5 messages all still present. `auth_can_escape true`,
+`auth_can_purge false`, `anon_can_escape false`, 2 new functions.
+`flutter test`: 1166 passed.
+
+**Closed an assumption left open in §93.** That section claimed the hourly
+reaper would erase the two queued check-in photos. It was not verified then; it
+is now. `cron.job_run_details` only proves the `net.http_post` was queued —
+"succeeded" there says nothing about the edge function — but `net._http_response`
+holds the real answer: **`{"ok":true,"drained":2}`, status 200, at 23:23**, and
+`storage_reap` went to 0. Timing checked first so the earlier backlog was not
+misread as failure: rows queued 22:45, last drain 22:23,
+`drain_ran_after_queueing = false` — it simply had not had a turn yet.
+
+**Found, not fixed**
+- **`drain-storage-reap` writes nothing to `ops_job_runs`.** Every other
+  scheduled job records its outcome there; this one does not, so the only
+  evidence it actually erases anything is `net._http_response`, which is
+  transient. A reaper whose success is unobservable is one that can start
+  failing silently.
+- 3 older `/checkins/` objects remain under the dissolved couple's prefix.
+  Presence only ever names the LATEST check-in, so every previous object is
+  unreferenced. Not permanently orphaned — the prefix sweep catches them at
+  purge — but nothing reclaims them before that.
+- 4 fake `storage.objects` rows litter STAGING from this test run.
+  `storage.protect_delete()` refuses direct deletion from SQL by design, which
+  independently validates this migration's queue-never-delete rule.
+- `anon` still holds SELECT on `public.partner_keys` (§94).
+
+**Still open:** stages 5 and 6 — rewrap-in-window, and the two-party reunion
+handshake. Read-only archive deferred by the owner. No device pass possible on
+this machine.
+
+**Exact next step:** stage 5,
+`20260826180000_rewrap_survives_the_breakup.sql`. Three additive permissive
+policies on `partner_rewrap_requests` predicated on
+`current_user_restorable_couple_id()`; `partner_rewrap_close` needs nothing
+(verified `from_user = auth.uid()`, couple-independent). Plus
+`partner_keys_select_rewrap_peer`, which must expose the peer's key ONLY after
+they have answered (`wrapped_by` is null until then) and only while the request
+is unexpired — deliberately not an ambient read, because `partner_keys.updated_at`
+is a rotation timeline and "my ex just reinstalled their phone" is a behavioural
+signal about someone who left. Confirm against prod first that
+`partner_rewrap_requests` has the four policies the repo expects.
+
+## §97 — The rewrap ceremony survives the breakup (2026-08-26)
+
+Stage 5 of the severance plan. Staging-verified, **applied to production**.
+Policies only — no data written, no existing policy or grant touched.
+
+**The sharpest risk in the plan, and it is cryptographic.**
+`partner_rewrap_requests.couple_id` is NOT NULL and three of its four policies
+test `couple_id = current_user_couple_id()`, which is null while unpaired.
+Confirmed against live prod before writing. So the only recovery left to
+somebody who reinstalls during the 30-day window is `KeyEscrow` — their account
+password — and `key_escrow.dart` says in its own words that a forgotten password
+means the escrow cannot be opened either. A reinstall during a broken window is
+not an edge case; it is what people do after a fight.
+
+`partner_rewrap_close` needed nothing: verified `from_user = auth.uid()`,
+couple-independent, already works unpaired.
+
+**New file:** `supabase/migrations/20260826180000_rewrap_survives_the_breakup.sql`
+- Three additive PERMISSIVE policies (SELECT / INSERT / UPDATE) predicated on
+  `current_user_restorable_couple_id()`, sitting beside the live-couple ones.
+- `partner_keys_select_rewrap_peer` — the row that completes the ceremony.
+  Exposes exactly one key, only while the request lives, and **only after that
+  person answered** (`wrapped_by` is null until they do). Deliberately not an
+  ambient read: `partner_keys.updated_at` is a rotation timeline, and "my ex just
+  reinstalled their phone" is a behavioural signal about somebody who left.
+- Three assertions: the four original policies still exist; UPDATE stays
+  column-scoped to `wrapped_at/wrapped_by/wrapped_keys`; the peer policy still
+  requires an answered, unexpired request.
+
+**No grant change was needed, and checking mattered.** `authenticated` holds no
+table-level UPDATE on this table — only column grants on those three columns.
+`has_table_privilege` reports true when ANY column is grantable, so the
+assertion compares the actual column set rather than trusting the table-level
+answer.
+
+**Verified on staging, real JWTs, full ceremony inside a dissolved window:**
+
+| step | result |
+|---|---|
+| A opens the ceremony while unpaired | inserted; request visible to A |
+| A tries to read B's key before B answers | **0 rows** — consent gate holds |
+| A answers own request (stolen-phone attack) | **0 rows sealed** |
+| C, never a member: sees / answers / reads keys | 0 / 0 / 0 |
+| B answers while unpaired | sealed, 298-byte blob |
+| A reads B's key afterwards | `PUBKEY_B`; C's key still 0; total visible 2 |
+| request expires | back to 0 — total visible 1 |
+| couple severed, A opens a ceremony | **RLS refuses the INSERT** |
+| **paired** couple, whole ceremony | works end to end — no regression |
+
+That last row is the one that mattered most: breaking it would break key
+recovery for everyone, not just the severance case.
+
+**Verified on production:** all three original rewrap policies plus the three
+restorable ones present, `partner_keys` now carries member + own + rewrap_peer.
+Real prod account: `inside_window true`, `keys_visible 1`,
+`other_peoples_keys_visible 0`, so the peer policy grants nothing without an
+answered ceremony. `flutter test`: 1166 passed. Staging test data removed.
+
+**Found, not fixed**
+- **Staging drift, third instance.** `partner_rewrap_requests` did not exist on
+  staging at all — `20260601008700` was never applied. I created the table and
+  its four original policies from the repo so staging could rehearse; the rest
+  of its drift remains unmeasured. Staging is not a faithful rehearsal and
+  should not be treated as one.
+- **Nothing prunes `partner_rewrap_requests`.** Production holds an abandoned
+  request created 2026-08-17, unanswered, expired 8 days ago.
+  `partner_rewrap_close` lets the requester delete it but nothing does so
+  automatically and there is no cron. No live risk — the answer policy requires
+  `expires_at > now()` — but an expired row keeps `new_public_key` and
+  `code_hash`, and the Argon2id argument in 20260601008700's header is
+  explicitly sized to a 10-MINUTE window, not to forever. A `prune_ephemera`
+  clause would close it.
+- `anon` still holds SELECT on `public.partner_keys` (§94).
+- `drain-storage-reap` still writes nothing to `ops_job_runs` (§96).
+
+**Still open:** stage 6 — the two-party reunion handshake and `restore_couple()`,
+plus its client half. Read-only archive deferred by the owner. No device pass
+possible on this machine.
+
+**Client half of stage 5, deferred on purpose.** `PartnerRewrap.pending()` takes
+a couple id and the session has none while unpaired, so it must read
+`couple_restore_state()` instead. Left for stage 6's client work: the screen
+that would reach this state does not exist yet, and shipping the plumbing early
+would put a control on screen that cannot do anything. The database side is
+ready and inert until something calls it.
+
+**Exact next step:** stage 6,
+`20260826190000_restore_needs_both_of_them.sql` — `couple_restore_requests`
+(PK on couple_id, so one open request per couple for free; no DML grant,
+RPC-only) plus the four RPCs. The details that are easy to get wrong:
+`couple_restore_confirm` must assert `requested_by is distinct from auth.uid()`;
+there must be NO force-after-N-days counterpart to `memory_force_delete`,
+because for a relationship that is a mechanism to force restoration; a decline
+is FINAL for the person who declined; and `restore_couple` must refuse
+`partner_has_moved_on` if EITHER id now has a couple_id, re-checking
+`dissolved_at` inside a `for update` lock. Only `kind='reunite'` is reachable
+this round — the RPC must reject `'archive'` until the read half exists.
+
+## §98 — Restore needs both of them (2026-08-26)
+
+Stage 6, the last of the severance plan. Staging-verified, **applied to
+production**. The apply is inert: it creates a table and four RPCs and restores
+nobody until somebody calls them.
+
+**The owner's ruling, and the whole shape of it.** Reunion needs BOTH, always.
+One asks, the other confirms, nobody confirms their own request. In the
+situation this was built for — a partner removed in anger, regretted an hour
+later — the other person wants it back too, so consent is cheap. In the
+situation THREAT-MODEL.md §3 is about, it is the entire protection: somebody
+who takes an unlocked phone finds nothing here that restores their access.
+
+**New file:** `supabase/migrations/20260826190000_restore_needs_both_of_them.sql`
+- `couple_restore_requests`, PK on `couple_id` so "one open request per couple"
+  is free. **No DML grant** — RPC-only, the `memory_threads` posture. SELECT
+  policy on `current_user_restorable_couple_id()`.
+- `couple_restore_request` / `couple_restore_cancel` / `couple_restore_confirm`
+  / `restore_couple`.
+- `couple_restore_state()` extended with `request_kind`, `request_is_mine`,
+  `awaiting_me`, `confirmed`, `declined` — still returning one indistinguishable
+  NULL for every negative case.
+- **No force counterpart, and an assertion that fails if one is ever added.**
+  `memory_force_delete` lets one person act alone after 14 days, which is
+  reasonable for a single memory row; for a relationship a unilateral path is
+  not an escape hatch, it is a mechanism to force restoration on somebody who
+  declined.
+
+**Verified on staging, real JWTs — the attacks first:**
+
+| attempt | result |
+|---|---|
+| A confirms **own** request | `only your partner can confirm this` |
+| A calls `restore_couple()` skipping the handshake | `consent_required` |
+| C, never a member, confirms | `no_restorable_couple` |
+| A re-asks after being declined | `declined` |
+| B (who declined) asks their own | allowed — changing your own mind is not badgering |
+| A confirms while A has since paired | `no_restorable_couple` (invariant fires first) |
+| B restores while A has since paired, consent present | **`partner_has_moved_on`** |
+| **B confirms A's request** | reunited on the ORIGINAL couple id |
+
+The reunion result in full: `both_paired 2`, `dissolved_at null`, `active true`,
+both membership rows rejoined (`left_at` cleared by the 3b trigger),
+`marked_restored true`, `confirmed_by = B`. Because the ORIGINAL `couple_id` is
+restored rather than a new couple minted, every couple-scoped row — messages,
+gallery, memories, capsules — is reachable again. That is the entire point of
+the six stages. `clear_dissolved_on_join`, written in 20260601005100 and made
+unreachable by 20260601005900, fired correctly for the first time.
+
+Repeat `restore_couple()` calls inside five minutes returned without error and
+mutated nothing (`still_paired 2`, `request_rows 1`).
+
+**A false alarm I chased down rather than assumed.** `partner_has_moved_on`
+appeared not to fire — `consent_required` came back instead. It was correct:
+an earlier exception had rolled back the statement that paired A with somebody
+new, so the scenario under test did not exist. I queried the table, found
+`a_couple` null, rebuilt the setup in isolation, and got `partner_has_moved_on`
+as designed. Worth recording because the MCP runs each call as one transaction:
+**an exception rolls back the seed in the same batch**, so multi-step scenarios
+must be set up one call at a time or the test silently checks a different state.
+
+**Verified on production:** 4 new RPCs, 0 request rows, `auth_read true`,
+`auth_insert false`, `auth_update false`, `anon_read false`, couples and members
+untouched, nobody re-paired by the apply. A real prod account gets the extended
+state object with `request_kind null`, `awaiting_me null` — restorable,
+nothing asked. `flutter test`: **1166 passed** (this run took 7m42s rather than
+the usual 2–3m; process was confirmed alive mid-run rather than assumed).
+Staging test data removed.
+
+**The six stages, all live in production**
+```
+20260826140000  presence PII scrub on unpair        §91/§93
+20260826150000  a user can read their own key       §94
+20260826160000  couple_members + the invariant      §95
+20260826170000  leave_couple_permanently            §96
+20260826180000  rewrap survives the breakup         §97
+20260826190000  restore needs both of them          §98
+```
+Stage 1 (client) is in the working tree, uncommitted, per the standing rule.
+
+**Still open**
+- **The client half of stages 2–6 does not exist.** The database can now hold a
+  window, refuse it, recover keys inside it and reunite two people — and no
+  screen in the app calls any of it. `PartnerRewrap.pending()` still takes a
+  couple id the unpaired session does not have. Nothing is broken by this; the
+  RPCs are simply unreached.
+- Read-only archive: deferred by the owner. `kind` accepts `'archive'` so that
+  round is additive; the RPC refuses it today.
+- **No device pass is possible on this machine** — no Android SDK, no adb, no
+  APK. Every client change is analyzer- and test-verified only, and a real
+  unpair on a real handset from a cold start remains unexercised.
+- `anon` holds SELECT on `public.partner_keys` (§94).
+- `drain-storage-reap` writes nothing to `ops_job_runs` (§96).
+- Nothing prunes `partner_rewrap_requests` (§97).
+- Staging drift: three instances found and only patched where a rehearsal
+  needed it. Staging is not a faithful rehearsal.
+
+**Exact next step:** the client half, and it should start with
+`SeveranceState`/`couple_restore_state()` wiring on `CouplePage`, because that
+is the only screen an unpaired account can reach — `router.dart:125-131`
+redirects everything else to `/couple`. Decide first, with the owner, how the
+restore control is surfaced without announcing a window: §90's ruling was that
+nothing announces an unpair, and the resolution recorded there is an
+always-present, state-independent row whose mere existence discloses nothing.
+
+## §93 — The intro film exists: 69.3s, cut, mixed, mastered (2026-08-26)
+
+Continues §92. The film is assembled and the site deliverables are done or in
+flight. Owner steered casting live three times mid-shoot; final lead locked by
+owner ("use this one"): white, sweet-faced, wine-satin mini — charsheet job
+c9130652. Male lead 080d9606. All media in scripts/film-shoot/ (gitignored),
+ledger.csv is the credit record.
+
+**Timeline (24fps, 1920x1080, 69.29s):** S1 her/window → S2 him/desk → G1
+two-lights+wordmark → S3 bed 10s (start+end frame Kling) → S4 aerial →
+S5 still-life → S6 wish-jar macro → S7 lounge → G2 real-icon cover morph →
+S8 face/ember close-up → S9 airport reunion (Veo high 1080p) → G3 endcard
+8.5s. VO: 9 Willow (seed_audio) lines; "Discretion — not invisibility" kept
+verbatim; lines dropped where on-screen text already said it.
+
+**Verified (commands+outputs in session):** all clips 24fps native; MCP
+delivery watermark-free (stills AND video — corner crops clean); master
+bt709/tv fully tagged (h264_metadata bsf re-tag after -color_* flags half-
+applied — colorspace took, primaries/trc needed the bsf); mix loudnorm -14
+LUFS, peak -1.5dB; poster 1600x900 at web/assets/img/film-poster.jpg (S8
+frame, 51.2s). Graphics: 444 deterministic frames (g3 re-rendered at 8.5s),
+SHA-256 double-render verified by subagent; real Miles VECTOR icon ported to
+SVG because ic_launcher.png is the News cover art — a News tile labeled
+"Miles" was caught and fixed before render.
+
+**Credits:** session spend ≈ 195 of 1800 (cap 500). Unlim tested: MCP rejects
+use_unlim for both nano_banana_pro and kling3_0 ("Unlimited generations
+aren't supported") — Max unlimited is web-app-only; every MCP call bills
+credits. Non-session mystery: Seedance 2.5 net −90 at 22:16–22:23 (owner's
+own web-UI Animate click, most likely — flagged to owner). Veo 3.1 fast
+"basic"=720p, "high"=1080p at the SAME 22 credits — always pass quality:high.
+Kling sound:off = 30% cheaper (8.75/5s pro). CDN lag: results 403 for
+minutes after completion; poll with fresh cache-buster per attempt.
+
+**Open:** web/miles-intro.webm VP9 two-pass encoding in background at ~1100k
+(≤10MiB gate pending); site playback check pending; ffmpeg installed 9.0.1
+via winget (first attempt hung 25min, killed, foreground retry worked).
+found, not fixed: scripts/film-render/render.js — compositor-flag deadlock
+class (its own flags never completed a render on this machine; inserts
+renderer dropped the flag pair).
+
+**Exact next step:** verify webm ≤10,485,760 bytes + bt709 tags + site plays
+it on :3100, then owner's G8 for any deploy. Vertical 9:16 cut via reframe
+still unpriced.
+
+## §94 — The film ships its gates: webm under budget, site plays it (2026-08-26)
+
+Closes §93's next step. web/miles-intro.webm: 9,583,628 bytes (≤10,485,760,
+902KB headroom), 1920x1080@24, bt709/bt709/bt709/tv all tagged, Opus 48k,
+69.292s. Site check on :3100 (working-tree serve): the closing-band <video>
+loaded it, poster film-poster.jpg resolved, play() advanced currentTime to
+1.63s, no errors. Master mp4 (bt709 via h264_metadata bsf) local at
+scripts/film-shoot/out/. Final reconciliation: session 201.7 credits, balance
+1508.3 exact (ledger.csv row 'reconciled').
+
+Owner has the 540p preview in chat for G7 notes; timing/VO fixes are free
+local re-cuts (assemble.sh preview|master|web|poster). Nothing committed —
+working tree holds: web/miles-intro.webm, web/assets/img/film-poster.jpg,
+scripts/film-shoot/** (media gitignored), .gitignore block, launch.json
+film-shoot-review entry, BRAIN §92-§94.
+
+**Exact next step:** owner watches the preview; on approval the deploy is
+`npx.cmd vercel deploy --prod` from web/ (§86 path) — G8 gate, owner's call.
+Also still open from §93: found-not-fixed render.js deadlock class; the
+site's five false chat-E2EE claims (seen live again during playback check).
+
+## §95 — G7 notes actioned: VO retimed, original score composed (2026-08-26)
+
+Owner's notes on the v1 cut: VO gaps too long, no music. Both fixed, 0 credits:
+- Cue retime in assemble.sh — v2_line03 ("No feed, no followers...") reinstated
+  over the bed scene (the 7.8s hole), "Miles..." now hits as the logo lights
+  fade up (G1−0.48s), every other gap ≤1.5s with two ~3s deliberate breaths.
+  Gap check: mean_volume −27..−33dB at former dead-air points (was silence).
+- Music: no music model on the MCP (game engines off-limits), so an ORIGINAL
+  ambient bed is synthesized in scripts/film-shoot/work/music.js (Node, no
+  deps, deterministic): Fmaj9/C/E/Dm11/Bbmaj9 pad cycle, sparse bell motif,
+  swell at the reunion (53–58s), −12.3dB peak → mixed at 0.45 under loudnorm.
+  License-clean by construction. audio/music/bed.wav (gitignored).
+- Master re-encoded + bt709 bsf re-tag (the -color_* flags half-apply on this
+  ffmpeg build every time; the bsf step is REQUIRED, now recorded twice).
+- webm re-encode running in background at the same budget parametrization.
+
+**Exact next step:** verify new webm size/tags + site playback again (same
+gates as §94), then owner watches v2 preview (sent in chat).
+
+## §96 — Film One deployed to production; HISAAB greenlit (2026-08-26)
+
+Deploy (owner G8): `npx.cmd vercel deploy --prod` from web/ →
+dpl_HX7PpzgqKSmWQKJh5mLyRbePUh8w, target=production, Ready. Live checks:
+/miles-intro.webm 200 Content-Length 9721182 == local; /assets/img/
+film-poster.jpg 200 93429 == local; page references both. v2 webm gates:
+9,721,182 ≤ 10MiB, bt709/tv, 69.308s. Ships-with: uncommitted index.html
+video slot (required) + untracked app-ads.txt (ads workstream, benign).
+Rollback: `npx.cmd vercel rollback` from web/. NOTHING COMMITTED.
+
+Film Two approved ("HISAAB", ~100s, Lahore, Urdu+subs): full screenplay +
+realism bible + pipeline in the plan file (hi-fable-i-want-structured-
+harbor.md). Cast reuses paid sheets (Ayesha=c882f5ba, Bilal=080d9606); new:
+Ammi/Zoya/Rabia. Cap 600 on balance 1508.3. Save-scene mechanisms verified
+real (volume-chord emergency lock, working calculator cover, reskinned
+notification strings). Ledger continues in scripts/film-shoot/ledger.csv.
+
+**Exact next step:** cast sheets → continuity.md → ~22 keyframes (gate) →
+Urdu dialogue probe (gate) → video batch.
+
+## §99 — The client half, and the funnel learns about the window (2026-08-26)
+
+Two pieces: the client surface for stages 2–6, and the router change that makes
+the key ceremony reachable while unpaired. Nothing committed.
+
+### The client surface
+
+The database could hold a window, refuse it, recover keys inside it and reunite
+two people, and no screen called any of it.
+
+- **`features/safety/severance_state.dart`** — `SeveranceState` + `HeldHistory`,
+  shaped like `ContactPause`. **Fails open, and open here means EMPTY**: a read
+  that did not come back renders nothing, because the alternative is a control
+  that may do nothing. Loaded only on the no-couple branch of `loadProfile()`,
+  reset in `_endSession`.
+- **`features/safety/reconnect_sheet.dart`** — ask / withdraw / confirm /
+  decline, plus the permanent erase. Server error strings mapped to sentences
+  that never describe the other person's choices.
+- **`couple_page.dart`** — one row, **drawn unconditionally**: "Were you
+  connected before?". That is the disclosure argument. A row that appears only
+  when a window is open announces the window to whoever is holding the phone,
+  and §90's ruling was that nothing announces an unpair. A row that is always
+  there announces nothing; what it says when tapped is the first anyone learns.
+- Five repository methods over the stage 2–6 RPCs.
+
+**Re-auth calibration, deliberate:** confirming asks for the password, because
+it is the one action that completes a restoration on its own and a grabbed
+unlocked phone can otherwise tap it. Asking does not — it cannot restore
+anything alone. **Erasing does not, and that is the important one:** the way out
+must never be slower than the way back.
+
+**Three defects found in my own adversarial pass, all mine:**
+1. The success snackbar resolved `ScaffoldMessenger.of(context)` AFTER
+   `Navigator.pop` — the same dead-context bug stage 1 hit, reintroduced. Both
+   handles are now taken before the pop.
+2. `HeldHistory.expired` was a getter nothing called. Now guards the sheet, so a
+   state that ages in memory shows the empty branch rather than controls that
+   would fail.
+3. `coupleId` was parsed and never read. Removed.
+
+### The router
+
+`router.dart` returned `/couple` before the keyless gate ever ran, so `/rewrap`
+was unreachable while unpaired. Its own comment said why — *"Below the funnel
+because an account with no partner has nobody to ask."* **20260826180000 made
+that false.** Three comments repeating it are corrected.
+
+```dart
+if (needsCouple) {
+  if (path == '/rewrap' &&
+      CryptoCore.keyless.value &&
+      SeveranceState.held.value != null) {
+    return null;
+  }
+  return path == '/couple' ? null : '/couple';
+}
+```
+
+- **NOT hoisted above the gate**, which was the smaller diff and the wrong one:
+  a fresh keyless account that never had a couple would then be sent to
+  `/rewrap` with nobody to ask — the deadlock the old ordering avoided.
+- **Allowed, never redirected TO.** Forcing an unpaired account onto `/rewrap`
+  cuts it off from `/couple`, where sign-out and the permanent erase live. That
+  is the trap class `onboarding_escape_test` exists for; it still passes.
+- **`SeveranceState.held` added to `refreshListenable`.** A redirect that reads
+  a notifier the router does not observe is evaluated once and never re-runs, so
+  the route would silently never open.
+
+### NOT shipped, on purpose
+
+A "Recover your history" button. It was written and then removed: `RewrapScreen`
+cannot run unpaired — its load and open paths read the couple off the session,
+and its claim path needs the peer's id, which `couple_members` deliberately does
+not disclose. The id it should use is `partner_rewrap_requests.wrapped_by`,
+visible to the requester once answered and already what
+`partner_keys_select_rewrap_peer` keys on — but `RewrapRequest` does not carry
+that column. Shipping the button first would give somebody a spinner that never
+resolves. A test now guards the ABSENCE and says what to flip it to.
+
+### Verified
+
+- `flutter test`: **1183 passed**, run after the last edit.
+- Falsified, not assumed: gating the row on `SeveranceState` fails the
+  drawn-unconditionally test; removing re-auth from confirm fails the
+  way-out-never-gated test; stripping the router condition fails the
+  conditional-allowance test.
+- `dart analyze lib/`: no errors, no warnings.
+- 18 new tests across `severance_state_test`, `reconnect_disclosure_test`,
+  `rewrap_reachable_test`.
+
+### Two gates caught me, and both were right
+
+- **`schema_drift_test` was RED** on the client half. `schema_snapshot.json` was
+  11 days stale: **22 functions missing — 13 of them nothing to do with this
+  work** (`closeness_*`, `edit_message`, `deliver_rituals`, `storage_quota_*`,
+  `claim_turn_mint`, `reconcile_storage_usage`, `ritual_next_at`,
+  `diag_events_rate_limit`, `notify_closeness`) — plus `notify_care_nudge` still
+  listed after `20260815085538` dropped it, 3 tables absent
+  (`message_reactions`, `storage_usage`, `turn_mints`) and 4 tables missing from
+  `authenticated_update_columns`. **Wrote `supabase/scripts/dump_schema_snapshot.sql`**
+  — the generator the snapshot header has pointed at since 2026-08-15 and which
+  §1910 records never existed — and synced the file to production. Verified
+  against live counts: 93 functions, 67 tables, 9 grant-restricted tables. The
+  stricter snapshot surfaced no client violations. Key order canonicalised
+  alphabetically, which is most of the diff.
+  - The generator joins `pg_class` for the oid rather than filtering by name:
+    `role_column_grants` names a relation that no longer exists on prod
+    (`pg_stat_statements_info`), `has_table_privilege` RAISES on a dangling name
+    rather than returning false, and Postgres does not promise to evaluate the
+    existence test first.
+- **`repo_hygiene_test` "no code is commented out"** flagged
+  `reconnect_sheet.dart:210` — my prose contained `_openRequest()` and
+  `_claim()`, which parse like statements. The gate was right; the comment was
+  rewritten as prose. Gate untouched.
+
+### Still open
+
+- **`RewrapScreen` cannot run unpaired.** Thread the peer id: add `wrapped_by`
+  to `RewrapRequest.fromRow` and the selects behind `pending`/`fetchOwn`, fall
+  back to `SeveranceState` for the couple id in the load and open paths, and use
+  the answered row's `wrapped_by` where the claim path reads `session.partner`.
+  Then re-add the sheet entry with `push`, never `go`, and flip
+  `rewrap_reachable_test`'s last case.
+- **No device pass is possible on this machine** — no Android SDK, no adb, no
+  APK. Every client change this session is analyzer- and test-verified only. A
+  real unpair on a real handset from a cold start remains unexercised, and it is
+  the likeliest thing to break.
+- `anon` holds SELECT on `public.partner_keys` (§94); `drain-storage-reap`
+  writes nothing to `ops_job_runs` (§96); nothing prunes
+  `partner_rewrap_requests` (§97); staging drift measured three times and only
+  patched where a rehearsal needed it.
+- Section numbering collided again mid-session: another session appended its own
+  §94 and §95 after mine. Numbered §99 to stay clear.
+
+**Exact next step:** the `RewrapScreen` wiring above, or a device pass on stage
+1's client work — whichever the owner wants first. Everything in this session is
+in the working tree, uncommitted.
+
+## §100 — The ceremony runs without a couple (2026-08-26)
+
+§99 left `/rewrap` routable but inert. It now runs. Nothing committed.
+
+**The blocker was an identity, not a route.** `RewrapScreen` read the couple off
+the session and the peer off `session.partner`; both are null once the couple
+dissolves, and `couple_members` is own-rows-only by design, so nothing on the
+client could name the other person. The answer was already in the schema:
+`partner_rewrap_requests.wrapped_by`.
+
+### Data layer — `core/data/partner_rewrap.dart`
+- `RewrapRequest` carries `wrappedBy` (null until answered); `wrapped_by` added
+  to the `fetchOwn` and `pending` selects.
+- **`claim()` dropped its `partnerId` parameter and resolves the peer off the
+  row it already reads.** `wrapped_by` is written by the same UPDATE as
+  `wrapped_keys` — the answer policy's `with_check` requires
+  `wrapped_by = auth.uid()` — so it is never null when there is anything to
+  claim, and it names whoever ACTUALLY sealed the chain rather than whoever the
+  session calls the partner. That is strictly more precise for a live couple
+  too, and it is the identity `partner_keys_select_rewrap_peer` already keys on,
+  so the client and the policy now agree by construction rather than by
+  coincidence.
+
+### Screen — `features/auth/rewrap_screen.dart`
+- One resolver: `_coupleId => session.couple?.id ?? SeveranceState.held.value?.coupleId`,
+  used by the load, open and subscribe paths.
+- The `partner == null` guard in the open path is gone. It was only ever a
+  still-loading proxy — opening a request never needed a partner — and while
+  dissolved there is none to find.
+- Three `_claim(partner.id)` call sites became `_claim()`.
+- `HeldHistory.coupleId` restored. It was removed in §99 for being unused; it
+  now earns its place as the only thing that names a dissolved couple.
+- `_asked` latches only AFTER the null check, so a load that runs before
+  `SeveranceState` arrives retries instead of sticking. `initState`'s
+  post-frame `_load()` is the entry, and the sheet loads the state before
+  pushing, so in practice it resolves first time.
+
+### Entry point — `features/safety/reconnect_sheet.dart`
+"Recover your history", shown only when `CryptoCore.keyless.value` — the same
+condition the router opens the route on. `push`, never `go`: go replaces the
+stack and strands whoever arrives.
+
+### Verified
+- `flutter test`: **1185 passed**, run after the last edit.
+- `dart analyze lib/`: no errors, no warnings.
+- Falsified, not assumed: reverting `_claim()` to take `partner.id` fails "the
+  claim resolves its peer from the answered row"; removing the `SeveranceState`
+  fallback fails "the ceremony screen resolves a couple without a session
+  couple". Both pass restored.
+- `onboarding_escape_test` still passes — no new trap.
+- Import-order lint at `rewrap_screen.dart:6` is PRE-EXISTING: HEAD has the same
+  `package:cryptography` placement, byte for byte.
+
+### Known degradation, stated rather than discovered later
+**Realtime is denied while unpaired.** The topic policy is
+`realtime.topic() like '%' || current_user_couple_id() || '%'`
+(`20260601004500:31,37`), and that is null once the couple dissolves, so
+`_subscribe` will not attach. The ceremony falls back to the 15-second poll in
+`_startTicking`, which the code already documents as deliberate — "the realtime
+event is the fast path, not the only one: a socket that dropped during the ten
+minutes used to cost the couple the attempt with no diagnosis." So an unpaired
+ceremony works and notices the answer up to 15s later than a paired one.
+
+Widening the realtime policy to `current_user_restorable_couple_id()` would
+close it and is a small additive migration, but the poll makes it optional
+rather than required. Not done: it adds a live surface for a window, and the
+gain is 15 seconds.
+
+### Still open
+- **NO DEVICE PASS IS POSSIBLE ON THIS MACHINE** — no Android SDK, no adb, no
+  APK. This is the headline for the whole session, and it is sharpest here: the
+  rewrap ceremony is the one path where being wrong permanently strands
+  somebody's history, and every change to it has been verified by analyzer and
+  source-level tests only. The claim path in particular has never run against a
+  real answered row on a handset.
+- The unpaired ceremony has not been exercised end to end even on staging —
+  the RPC policies were proven in §97, but not with this client code driving
+  them.
+- `anon` holds SELECT on `public.partner_keys` (§94); `drain-storage-reap`
+  writes nothing to `ops_job_runs` (§96); nothing prunes
+  `partner_rewrap_requests` (§97); staging drift measured three times.
+
+**Exact next step:** a device pass, or — if a handset is still unavailable —
+drive the unpaired ceremony against staging with two seeded identities the way
+§97 did, but through the Dart client rather than raw SQL, to prove
+`pending`/`claim` behave with `wrapped_by` resolution. Everything from this
+session is in the working tree, uncommitted.

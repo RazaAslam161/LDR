@@ -20,6 +20,7 @@ class RewrapRequest {
     required this.newPublicKeyB64,
     required this.codeHash,
     required this.expiresAt,
+    this.wrappedBy,
   });
 
   factory RewrapRequest.fromRow(Map<String, dynamic> row) => RewrapRequest(
@@ -28,6 +29,7 @@ class RewrapRequest {
         newPublicKeyB64: row['new_public_key'] as String,
         codeHash: byteaToBytes(row['code_hash']),
         expiresAt: DateTime.parse(row['expires_at'] as String),
+        wrappedBy: row['wrapped_by'] as String?,
       );
 
   final String id;
@@ -38,6 +40,15 @@ class RewrapRequest {
   final String newPublicKeyB64;
   final Uint8List codeHash;
   final DateTime expiresAt;
+
+  /// Who answered, or null while it is still unanswered.
+  ///
+  /// This is the peer identity the claim resolves against, and it is more
+  /// precise than "whoever the session calls my partner": it names the account
+  /// that actually sealed the chain. While the couple is dissolved the session
+  /// has no partner at all, and this column is the only thing that does —
+  /// couple_members is own-rows-only on purpose, so it will not say.
+  final String? wrappedBy;
 }
 
 /// One byte of version on a format that has nowhere else to put one, shipping
@@ -223,7 +234,8 @@ class PartnerRewrap {
   static Future<RewrapRequest?> fetchOwn(String requestId) async {
     final row = await SupabaseService.client
         .from('partner_rewrap_requests')
-        .select('id, from_user, new_public_key, code_hash, expires_at')
+        .select('id, from_user, new_public_key, code_hash, expires_at, '
+            'wrapped_by')
         .eq('id', requestId)
         .maybeSingle();
     return row == null ? null : RewrapRequest.fromRow(row);
@@ -235,7 +247,8 @@ class PartnerRewrap {
     if (uid == null) return null;
     final row = await SupabaseService.client
         .from('partner_rewrap_requests')
-        .select('id, from_user, new_public_key, code_hash, expires_at')
+        .select('id, from_user, new_public_key, code_hash, expires_at, '
+            'wrapped_by')
         .eq('couple_id', coupleId)
         // Answering your own request is the attack this ceremony exists to
         // stop; the policy refuses it too, and this keeps it off the screen.
@@ -388,16 +401,23 @@ class PartnerRewrap {
   /// fallback of any kind: that means it was sealed to a public key this device
   /// does not hold, and adopting anything at all from there is the one thing
   /// this ceremony must never do.
-  static Future<({int added, int dropped})?> claim(
-    String requestId,
-    String partnerId,
-  ) async {
+  ///
+  /// The peer is read off the row rather than passed in. wrapped_by is written
+  /// by the same UPDATE as wrapped_keys — the answer policy's with_check
+  /// requires `wrapped_by = auth.uid()` — so it is never null when there is
+  /// anything to claim, and it names whoever actually sealed the chain. For a
+  /// live couple that is the same account the session calls the partner; for a
+  /// dissolved one inside its window the session has no partner and this is the
+  /// only thing that knows.
+  static Future<({int added, int dropped})?> claim(String requestId) async {
     final row = await SupabaseService.client
         .from('partner_rewrap_requests')
-        .select('id, wrapped_keys')
+        .select('id, wrapped_keys, wrapped_by')
         .eq('id', requestId)
         .maybeSingle();
     if (row == null || row['wrapped_keys'] == null) return null;
+    final partnerId = row['wrapped_by'] as String?;
+    if (partnerId == null) return null;
 
     final partnerPub = await SupabaseRepository.fetchPartnerPublicKey(partnerId);
     if (partnerPub == null || partnerPub == CryptoCore.legacyPublicKey) {

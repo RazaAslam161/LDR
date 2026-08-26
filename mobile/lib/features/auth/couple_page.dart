@@ -14,6 +14,7 @@ import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
+import 'package:miles/features/safety/reconnect_sheet.dart';
 
 /// Deep-link/share format for an invite.
 String inviteLinkFor(String code) => 'tethered://join?code=$code';
@@ -289,6 +290,24 @@ class _ConnectView extends StatelessWidget {
             const SizedBox(height: 16),
             AlertBanner(message: error!),
           ],
+
+          const SizedBox(height: 28),
+          // ALWAYS drawn, whether or not anything is recoverable. That is the
+          // whole disclosure argument: a row that appears only when a window
+          // is open announces the window to anyone holding the phone, and
+          // nothing is supposed to announce an unpair. A row that is always
+          // here announces nothing, and what it says when tapped is the first
+          // anyone learns. It costs one line of text on a first-run screen.
+          Center(
+            child: TextButton(
+              onPressed: loading ? null : () => showReconnectSheet(context),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 48),
+                foregroundColor: MilesColors.taupe,
+              ),
+              child: const Text('Were you connected before?'),
+            ),
+          ),
         ],
       ),
     );

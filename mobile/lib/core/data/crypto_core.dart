@@ -276,6 +276,30 @@ class CryptoCore {
   /// Sign-out. Drops every decrypted byte and every key still held in memory;
   /// the account's sealed seed stays in storage so signing back in works
   /// offline. See [_accountId] for why this does not delete.
+  /// The partner left, but the account did not.
+  ///
+  /// Drops every key derived WITH them and every plaintext cache keyed on it,
+  /// and leaves this account's own seed, keypair and vault key exactly where
+  /// they are. Between [forgetAccount] — the sign-out hammer — and doing
+  /// nothing, there was no third option, so unpair took the third one.
+  ///
+  /// Deliberately does NOT touch [keyless]: it answers a question about this
+  /// account's own seed, and the /rewrap gate reads it. Resetting it here
+  /// would hide a genuine rewrap-needed state behind a breakup.
+  ///
+  /// The epoch bump is the load-bearing half. Nulling [_sharedKey] alone
+  /// leaves the plaintext caches keyed on the old epoch still serving bytes
+  /// decrypted under the ex-couple's key; the bump is what makes them clear
+  /// rather than merely re-key. It also drops the vault's plaintext cache,
+  /// which costs one re-derive from the local seed and no data.
+  static void forgetPartner() {
+    _sharedKey = null;
+    _derivedFrom = null;
+    _ring = null;
+    _ringHit = -1;
+    _bumpEpoch();
+  }
+
   static void forgetAccount() {
     _accountId = null;
     _myKeyPair = null;

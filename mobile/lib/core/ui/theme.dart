@@ -36,6 +36,11 @@ class MilesColors {
   static const starlight = Color(0xFFFBEFD6); // sparkles / warm highlights
   static const sage = Color(0xFF8FB48A); // success / "in sync"
 
+  /// The one destructive colour. Three copies of it lived as a literal in
+  /// settings_screen — remove-partner, delete-account and the account row —
+  /// which is how a fourth ends up a slightly different crimson.
+  static const danger = Color(0xFFB83A57); // passionCrimson
+
   // Back-compat accent aliases:
   static const coral400 = emberSoft;
   static const coral500 = ember;
@@ -311,4 +316,3 @@ ThemeData milesDarkTheme() {
     ),
   );
 }
-

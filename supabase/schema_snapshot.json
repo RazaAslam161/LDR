@@ -11,13 +11,13 @@
     "",
     "So the database's shape is checked in, and schema_drift_test.dart diffs",
     "every column the Dart writes against it. Regenerate with:",
-    "  scripts/dump_schema_snapshot.sql  (run through the Supabase SQL editor",
-    "  or apply_migration's execute_sql, and paste the result here)",
+    "  supabase/scripts/dump_schema_snapshot.sql — run it against production",
+    "  and paste the single JSON value it returns over this whole file.",
     "",
     "A missing column here is a test failure, not a runtime 403."
   ],
   "generated_from": "sopictusdonlvuezmfep",
-  "generated_on": "2026-08-15",
+  "generated_on": "2026-08-26",
   "tables": {
     "afterglow_entries": [
       "couple_id",
@@ -135,6 +135,16 @@
       "updated_at",
       "user_id"
     ],
+    "client_errors": [
+      "build",
+      "detail",
+      "error_type",
+      "id",
+      "kind",
+      "received_at",
+      "stack",
+      "user_id"
+    ],
     "consent_state": [
       "couple_id",
       "feature",
@@ -143,12 +153,42 @@
       "revoked_at",
       "user_id"
     ],
+    "content_reports": [
+      "build",
+      "created_at",
+      "id",
+      "note",
+      "reason",
+      "reported_user_id",
+      "reporter_id",
+      "target_kind",
+      "target_ref"
+    ],
     "couple_dissolutions": [
       "cancelled_at",
       "couple_id",
       "initiated_at",
       "initiated_by",
       "purge_at"
+    ],
+    "couple_members": [
+      "couple_id",
+      "joined_at",
+      "left_at",
+      "severed_at",
+      "user_id"
+    ],
+    "couple_restore_requests": [
+      "archive_expires_at",
+      "confirmed_at",
+      "confirmed_by",
+      "couple_id",
+      "declined_at",
+      "declined_by",
+      "kind",
+      "requested_at",
+      "requested_by",
+      "restored_at"
     ],
     "couples": [
       "active",
@@ -241,6 +281,26 @@
       "revealed_at",
       "user_id"
     ],
+    "gallery_items": [
+      "byte_size",
+      "caption",
+      "couple_id",
+      "created_at",
+      "delete_refused_count",
+      "delete_requested",
+      "delete_requested_at",
+      "delete_requested_by",
+      "deleted",
+      "deleted_at",
+      "deleted_by",
+      "height",
+      "id",
+      "mime_type",
+      "storage_path",
+      "thumb_path",
+      "uploaded_by",
+      "width"
+    ],
     "intimacy_prefs": [
       "receiving_enabled",
       "signaling_enabled",
@@ -323,6 +383,15 @@
       "title_nonce",
       "visit_id"
     ],
+    "message_reactions": [
+      "couple_id",
+      "created_at",
+      "emoji_cipher",
+      "emoji_nonce",
+      "message_id",
+      "updated_at",
+      "user_id"
+    ],
     "messages": [
       "album_id",
       "body",
@@ -357,6 +426,13 @@
       "color_rgb",
       "couple_id",
       "updated_at",
+      "user_id"
+    ],
+    "notification_mutes": [
+      "expires_at",
+      "kind",
+      "muted_at",
+      "partner_id",
       "user_id"
     ],
     "ops_job_runs": [
@@ -505,10 +581,59 @@
       "message",
       "type"
     ],
+    "routine_checks": [
+      "count",
+      "item_id",
+      "on_date",
+      "user_id"
+    ],
+    "routine_items": [
+      "couple_id",
+      "created_at",
+      "created_by",
+      "deleted",
+      "emoji",
+      "id",
+      "is_default",
+      "sort_minutes",
+      "target_count",
+      "title"
+    ],
+    "shared_reel_views": [
+      "reel_id",
+      "seen_at",
+      "user_id"
+    ],
+    "shared_reels": [
+      "added_by",
+      "couple_id",
+      "created_at",
+      "deleted",
+      "id",
+      "note",
+      "source",
+      "url"
+    ],
     "storage_reap": [
       "bucket_id",
       "name",
       "queued_at"
+    ],
+    "storage_usage": [
+      "bytes",
+      "updated_at",
+      "user_id"
+    ],
+    "tos_acceptances": [
+      "accepted_at",
+      "build",
+      "user_id",
+      "version"
+    ],
+    "turn_mints": [
+      "id",
+      "minted_at",
+      "user_id"
     ],
     "vault_items": [
       "ad",
@@ -554,69 +679,6 @@
       "note",
       "start_date"
     ],
-    "client_errors": [
-      "build",
-      "detail",
-      "error_type",
-      "id",
-      "kind",
-      "received_at",
-      "stack",
-      "user_id"
-    ],
-    "gallery_items": [
-      "byte_size",
-      "caption",
-      "couple_id",
-      "created_at",
-      "delete_refused_count",
-      "delete_requested",
-      "delete_requested_at",
-      "delete_requested_by",
-      "deleted",
-      "deleted_at",
-      "deleted_by",
-      "height",
-      "id",
-      "mime_type",
-      "storage_path",
-      "thumb_path",
-      "uploaded_by",
-      "width"
-    ],
-    "routine_items": [
-      "couple_id",
-      "created_at",
-      "created_by",
-      "deleted",
-      "emoji",
-      "id",
-      "is_default",
-      "sort_minutes",
-      "target_count",
-      "title"
-    ],
-    "routine_checks": [
-      "count",
-      "item_id",
-      "on_date",
-      "user_id"
-    ],
-    "shared_reels": [
-      "added_by",
-      "couple_id",
-      "created_at",
-      "deleted",
-      "id",
-      "note",
-      "source",
-      "url"
-    ],
-    "shared_reel_views": [
-      "reel_id",
-      "seen_at",
-      "user_id"
-    ],
     "watch_sessions": [
       "couple_id",
       "kind",
@@ -625,30 +687,6 @@
       "start_ms",
       "started_at",
       "started_by"
-    ],
-    "notification_mutes": [
-      "expires_at",
-      "kind",
-      "muted_at",
-      "partner_id",
-      "user_id"
-    ],
-    "content_reports": [
-      "build",
-      "created_at",
-      "id",
-      "note",
-      "reason",
-      "reported_user_id",
-      "reporter_id",
-      "target_kind",
-      "target_ref"
-    ],
-    "tos_acceptances": [
-      "accepted_at",
-      "build",
-      "user_id",
-      "version"
     ]
   },
   "functions": [
@@ -663,21 +701,33 @@
     "capsule_seal_summary",
     "claim_fcm_token",
     "claim_thumb",
+    "claim_turn_mint",
     "clear_body_photo",
     "clear_conversation_everyone",
     "clear_dissolved_on_join",
     "client_errors_rate_limit",
+    "closeness_revealed",
+    "couple_restore_cancel",
+    "couple_restore_confirm",
+    "couple_restore_request",
+    "couple_restore_state",
     "create_couple",
     "create_pairing_invite",
     "current_user_couple_id",
+    "current_user_restorable_couple_id",
     "delete_message_for_everyone",
     "delete_my_account",
+    "deliver_rituals",
+    "diag_events_rate_limit",
+    "dissolution_window",
+    "edit_message",
     "enforce_send_rate",
     "ensure_default_routines",
     "functions_base_url",
     "gallery_cancel_delete",
     "gallery_confirm_delete",
     "gallery_request_delete",
+    "get_closeness",
     "guard_couple_id",
     "handle_new_user",
     "has_active_intimacy_signal",
@@ -686,6 +736,7 @@
     "init_chat_receipt",
     "init_presence_on_profile",
     "leave_couple",
+    "leave_couple_permanently",
     "memory_accept",
     "memory_cancel_delete",
     "memory_clear_inline_photo",
@@ -700,7 +751,7 @@
     "my_intimacy_signaling_enabled",
     "notify_call",
     "notify_care",
-    "notify_care_nudge",
+    "notify_closeness",
     "notify_memory",
     "notify_message",
     "notify_reach",
@@ -712,14 +763,22 @@
     "prune_dissolved_couples",
     "prune_ephemera",
     "prune_pairing_attempts",
+    "purge_couple",
     "purge_deleted_memories",
     "push_muted",
     "reach_cooldown_seconds",
     "reap_storage_objects",
+    "reconcile_storage_usage",
     "redeem_pairing_invite",
+    "restore_couple",
+    "ritual_next_at",
     "send_next_allowed_at",
+    "set_closeness",
     "set_vault_pin",
+    "storage_quota_bytes",
+    "storage_quota_ok",
     "submit_report",
+    "sync_couple_members",
     "sync_presence_couple_id",
     "unlock_capsule",
     "unmute_partner",
@@ -739,6 +798,15 @@
       "title",
       "unlock_date",
       "unlock_mode"
+    ],
+    "couples": [
+      "anniversary_date",
+      "modest_mode",
+      "name",
+      "primary_tz"
+    ],
+    "gallery_items": [
+      "caption"
     ],
     "memory_photos": [
       "caption_cipher",
@@ -777,6 +845,17 @@
       "status_message",
       "timezone",
       "wake_time"
+    ],
+    "routine_items": [
+      "deleted",
+      "emoji",
+      "sort_minutes",
+      "target_count",
+      "title"
+    ],
+    "shared_reels": [
+      "deleted",
+      "note"
     ]
   }
 }

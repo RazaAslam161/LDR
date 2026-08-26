@@ -19,6 +19,7 @@ import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/memory_threads/memory_failure.dart';
+import 'package:miles/features/safety/severance_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Both halves of the rewrap ceremony, on one screen.
@@ -79,12 +80,23 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
     super.dispose();
   }
 
+  /// The couple this ceremony belongs to, live or dissolved.
+  ///
+  /// A dissolved couple inside its window still has two people who can run the
+  /// ceremony — 20260826180000 opened the policies for exactly that — but
+  /// profiles.couple_id is null on both sides by then, so the session cannot
+  /// name it. SeveranceState can, and the router only lets an unpaired account
+  /// reach this screen when it does.
+  String? get _coupleId =>
+      ref.read(sessionProvider).couple?.id ??
+      SeveranceState.held.value?.coupleId;
+
   /// Which half of the ceremony this is — as soon as there is a couple to ask
   /// about; sign-in routes straight here, so the profile and the couple are
   /// usually still in flight when the first frame lands.
   Future<void> _load() async {
-    final couple = ref.read(sessionProvider).couple;
-    if (_asked || couple == null) return;
+    final coupleId = _coupleId;
+    if (_asked || coupleId == null) return;
     _asked = true;
 
     // This phone may already be mid-ask from before a process death. The hold
@@ -107,17 +119,17 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
         _loading = false;
       });
       _startTicking();
-      _subscribe(couple.id);
-      // An answer may have landed while this phone was dead.
-      final partner = ref.read(sessionProvider).partner;
-      if (partner != null) unawaited(_claim(partner.id));
+      _subscribe(coupleId);
+      // An answer may have landed while this phone was dead. The peer comes off
+      // the answered row, so this no longer needs a partner in the session.
+      unawaited(_claim());
       return;
     }
 
     RewrapRequest? req;
     var reached = false;
     try {
-      req = await PartnerRewrap.pending(couple.id);
+      req = await PartnerRewrap.pending(coupleId);
       reached = true;
     } catch (_) {
       // Offline, or the table is unreachable. Fall through to the asking side
@@ -133,7 +145,7 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
       _expiresAt = req?.expiresAt;
       _loading = false;
     });
-    if (reached) _subscribe(couple.id);
+    if (reached) _subscribe(coupleId);
     if (req != null) _startTicking();
   }
 
@@ -155,8 +167,7 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
   Future<void> _onRowChange(String coupleId) async {
     if (!mounted || _busy || _claiming) return;
     if (_requestId != null) {
-      final partner = ref.read(sessionProvider).partner;
-      if (partner != null) await _claim(partner.id);
+      await _claim();
       return;
     }
     RewrapRequest? req;
@@ -190,8 +201,7 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
       // with no diagnosis. Fifteen seconds is far inside the window and free
       // against a request that is usually answered in one or two of them.
       if (++beats % 15 == 0 && _requestId != null && !_claiming) {
-        final partner = ref.read(sessionProvider).partner;
-        if (partner != null) unawaited(_claim(partner.id));
+        unawaited(_claim());
       }
       setState(() {});
     });
@@ -213,10 +223,11 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
 
   /// D: post the request and start watching for the answer.
   Future<void> _openRequest() async {
-    final session = ref.read(sessionProvider);
-    final couple = session.couple;
-    final partner = session.partner;
-    if (couple == null || partner == null) {
+    final coupleId = _coupleId;
+    // The partner used to be checked here too, purely as a still-loading
+    // proxy — opening a request never needed one, and while the couple is
+    // dissolved there is no partner in the session to find.
+    if (coupleId == null) {
       // Sign-in routes straight here, so the profile is often still in flight
       // when the button is first tappable. Returning bare made "Ask them" a
       // button that did nothing, twice, and then worked.
@@ -228,7 +239,7 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
       _error = null;
     });
     try {
-      final (id, code, expiresAt) = await PartnerRewrap.open(couple.id);
+      final (id, code, expiresAt) = await PartnerRewrap.open(coupleId);
       if (!mounted) return;
       setState(() {
         _requestId = id;
@@ -237,7 +248,7 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
         _busy = false;
       });
       _startTicking();
-      _subscribe(couple.id);
+      _subscribe(coupleId);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -255,12 +266,12 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
   }
 
   /// D: try to open whatever the partner has left in the row.
-  Future<void> _claim(String partnerId) async {
+  Future<void> _claim() async {
     final id = _requestId;
     if (id == null || _claiming) return;
     _claiming = true;
     try {
-      final result = await PartnerRewrap.claim(id, partnerId);
+      final result = await PartnerRewrap.claim(id);
       if (result == null || !mounted) return;
       _tick?.cancel();
       // added == 0 is stated, not dressed up: the chain held nothing this

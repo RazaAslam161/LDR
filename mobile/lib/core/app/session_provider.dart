@@ -16,6 +16,7 @@ import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/session_scope.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_reactions.dart';
@@ -25,6 +26,7 @@ import 'package:miles/features/cycle/love_notes_pool.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
+import 'package:miles/features/safety/severance_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 
@@ -229,6 +231,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
       if (partner != null) unawaited(CoupleKey.prime(state));
 
       if (couple == null) {
+        // Only ever asked for when there is no couple. A paired account has
+        // nothing to restore and the server would answer null for it anyway,
+        // so this is a round trip nobody else pays for. Unawaited: the pairing
+        // screen renders without it and the sheet re-reads on open, so a slow
+        // answer costs nothing and a failed one shows nothing.
+        unawaited(SeveranceState.load());
         // No couple (just left, or never paired): clear any stale presence
         // couple_id so a future partner can't inherit a dangling link. The DB
         // trigger + leave_couple() already handle this server-side; this is the
@@ -355,8 +363,22 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
-  /// Everything that must not outlive a session, however it ended.
-  Future<void> _endSession() async {
+  /// Everything that must not outlive a COUPLE, however the couple ended.
+  ///
+  /// Split out of [_endSession] because unpair never reached it. leaveCouple()
+  /// ends with refreshSession(), which fires `tokenRefreshed`, not
+  /// `signedOut` — so the whole wipe below was wired to an event a breakup
+  /// does not raise, and every one of these survived it: the decrypted
+  /// photographs on disk, the voice notes, the unsent draft, the ex-partner's
+  /// name, and a send queue still armed to deliver whatever was typed during
+  /// the fight.
+  ///
+  /// [coupleId] is a parameter rather than read from [state] because the
+  /// caller must capture it BEFORE loadProfile() nulls it, and because
+  /// UnreadTally is keyed by it — which is why sign-out could never clear that
+  /// one and still cannot. Null is tolerated: everything else here is
+  /// couple-agnostic and must still run.
+  Future<void> endCouple(String? coupleId) async {
     final ch = _presenceChannel;
     _presenceChannel = null;
     if (ch != null) {
@@ -364,68 +386,94 @@ class SessionNotifier extends StateNotifier<SessionState> {
         await SupabaseService.client.removeChannel(ch);
       } catch (_) {}
     }
-    // Both are process-scoped and outlive the session: a map of live signed
+    // Both are process-scoped and outlive the couple: a map of live signed
     // URLs to this couple's storage objects, and uploads accepted for it.
-    // Neither belongs to whoever signs in on this handset next.
+    // Neither belongs to whoever this account pairs with next.
     MediaUrls.clear();
     MapToken.clear();
+    // Not merely stale — ARMED. A message typed during the argument and left
+    // unsent would retry minutes after the user walked away, delivering it to
+    // a couple they have just ended.
     ChatSendQueue.instance.clear();
     // Same reason, and one more: the reaction outbox keeps an armed backoff
-    // timer, so a reaction left unsent would have retried minutes later under
+    // timer, so a reaction left unsent would have retried later under
     // whichever session came next. Its disk copy survives on purpose — it is
     // ciphertext under this account's own key, and signing back in restores it.
     ChatReactionOutbox.instance.endSession();
     // The gallery's failed-upload tiles render the picked file straight from
-    // disk — the previous account's photograph, shown to the next account,
-    // if this is skipped.
+    // disk — the ex-partner's photograph, still on screen, if this is skipped.
     GalleryScreen.clearFailedUploads();
     // The unsent draft goes with them. It is a message body — the most personal
-    // thing in the app — and it now survives a screen change on purpose, which
-    // means without this it would survive a SIGN-OUT too and wait in the field
-    // for whoever signs in on this handset next.
+    // thing in the app — and it survives a screen change on purpose, which
+    // means without this it survives the breakup too.
     unawaited(ChatDraftStore.clearAll());
     // Ciphertext too, unlike a cover raise. Raising the cover keeps the disk
     // layer because it is unreadable without the key and re-fetching it every
     // time someone glances at their phone is a great deal of traffic for
-    // nothing; signing out is different, because the next account on this
-    // handset has no business inheriting the previous couple's objects.
+    // nothing; ending a couple is different, because the key that opens it is
+    // being dropped in the same breath.
     unawaited(EncryptedMediaCache.clearAll());
     // And the PLAINTEXT layer beside it, which nothing ever emptied. Chat
     // photos and gallery images render through CachedNetworkImage, so the
     // decrypted bytes sit in flutter_cache_manager's store under stable keys —
-    // readable at the filesystem level by whoever signs in next, and in the
-    // image cache until something evicts them.
+    // readable at the filesystem level long after the couple is gone.
     unawaited(DefaultCacheManager().emptyCache());
     // And the third store beside those two. Voice notes are audio of the two of
     // them talking, kept on disk so the waveform can be scrubbed without a
-    // range request per drag; a handset that changes hands must not carry them
-    // into the next account.
+    // range request per drag.
     unawaited(VoiceNoteCache.clearAll());
     imageCache
       ..clear()
       ..clearLiveImages();
-    // A push that arrived for the couple that just left. Left standing it
-    // opens their memory on the next account's first frame.
+    // A push that arrived for the couple that just ended. Left standing it
+    // opens their memory on the next first frame.
     pendingMemory.value = null;
-    // The partner's NAME, device-scoped: the next account's love notes were
-    // auto-addressed with it — another couple's relationship PII.
+    // The partner's NAME, device-scoped: love notes were auto-addressed with
+    // it, so without this the next relationship inherits the last one's.
     unawaited(LoveNoteRecipient.clear());
-    // The keypair and the derived couple key are process-scoped too, and every
-    // decrypted byte still held anywhere belongs to the account that just left.
-    // The account's sealed seed stays in storage — signing back in must work
-    // offline, and for anyone without an escrow row it is the only copy.
-    CryptoCore.forgetAccount();
-    // And the memoized derive VERDICT beside the key itself. forgetAccount
-    // nulls the key, but CoupleKey held a completed future that kept
-    // answering for the account that left — so the next sign-in ran with
-    // encryption silently off (and cipher rows unreadable) until process
-    // death, and skipped publishing its own public key.
+    // The badge count for a couple that no longer exists. Keyed by coupleId,
+    // which is the whole reason this method takes one — _endSession never had
+    // the id to hand and so has never cleared this, on any path.
+    if (coupleId != null) unawaited(UnreadTally.clear(coupleId));
+    // The shared key and the retired-key ring, and the epoch bump that makes
+    // the plaintext caches CLEAR rather than re-key. Not forgetAccount(): this
+    // account is still signed in, still owns its seed, and still needs
+    // `keyless` to answer honestly for the /rewrap gate.
+    //
+    // PartnerKeyPin is deliberately NOT cleared here. It looks like leftover
+    // state and it is not: it is the only record that would make a genuine key
+    // substitution visible if these two accounts pair again. Clearing it
+    // silently downgrades the pair back to trust-on-first-use.
+    CryptoCore.forgetPartner();
+    // And the memoized derive VERDICT beside the key itself. forgetPartner
+    // nulls the key, but CoupleKey holds a completed future that keeps
+    // answering for the couple that left — so the next pairing would run with
+    // encryption silently off until process death.
     CoupleKey.reset();
+  }
+
+  /// Everything that must not outlive a session, however it ended.
+  Future<void> _endSession() async {
+    // The couple always ends with the session. The reverse is not true, which
+    // is the entire reason these are two methods.
+    await endCouple(state.couple?.id);
+    // The keypair is process-scoped too, and every decrypted byte still held
+    // anywhere belongs to the account that just left. The account's sealed
+    // seed stays in storage — signing back in must work offline, and for
+    // anyone without an escrow row it is the only copy. Bumps the epoch a
+    // second time after endCouple; the caches are already empty, so it costs
+    // nothing and keeps this correct if it is ever called alone.
+    CryptoCore.forgetAccount();
     // Process-scoped answers about the account that just left. Left standing,
     // the next person to sign in on this handset walks past a terms gate they
-    // never saw and inherits a pause they never set.
+    // never saw and inherits a pause they never set. Neither belongs in
+    // endCouple: a mute is per-user-per-kind, not per-couple, and a pause that
+    // silently lifted itself at the moment of a breakup is exactly backwards.
     TermsGate.reset();
     ContactPause.reset();
+    // Describes a couple THIS account used to be in. Left standing, the next
+    // person to sign in on this handset is told about somebody else's breakup.
+    SeveranceState.reset();
     state = const SessionState(loading: false);
   }
 
