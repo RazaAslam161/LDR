@@ -10183,3 +10183,63 @@ committed f3b5eae.
 **Exact next step:** owner uploads out/miles-intro-music.mp4 to YouTube
 (unlisted) for the future Play listing; the Higgsfield credits route stays
 open for regenerating beats 5/6/8 as motion plates on the same timeline.
+
+## §105 — Root Directory is `web`; deploys are git-push now, and §86's CLI command is DEAD (2026-08-26)
+
+Closes the §103 trap at its cause instead of walking around it. Owner asked
+for the fix explicitly.
+
+**Changed:** `npx.cmd vercel project update miles-legal --root-directory web --json`
+→ `{"changed":true,"changedSettings":["rootDirectory"],"settings":{"rootDirectory":"web"}}`.
+Confirmed by `vercel project inspect miles-legal` → `Root Directory  web`.
+
+**READ THIS BEFORE DEPLOYING — §86's documented command now FAILS.**
+`cd web && npx.cmd vercel deploy --prod` errors:
+`The specified Root Directory "web" does not exist. Please update your Project Settings.`
+(deployment `9vrbfvre9`). Cause: the CLI uploads `web/`'s 27 files as the
+deployment root, then Vercel applies rootDirectory=web and looks for
+`web/web`. **The deploy path is now `git push`.** If a CLI deploy is ever
+needed again it must run from the REPO ROOT, not `web/` — NOT exercised this
+session, and there is no `.vercelignore`, so a root upload would drag in
+`scripts/film-render/node_modules` and mobile build output. Treat
+CLI-from-root as unproven.
+
+**Safety property, observed rather than assumed, and worth keeping:** an
+ERRORED build does NOT take the alias. The live site served 200 on every path
+throughout the failed `9vrbfvre9` build. A failed deploy on this project fails
+safe — which is why testing on prod here is tolerable.
+
+**Git path verified working.** Redeployed a TRUE git-sourced deployment
+(`oyawsqhgx`, sha 6a4d625) → `jjpetosbj`, Ready in 10s,
+`▲ Aliased https://miles-legal.vercel.app`. Live afterwards:
+- `/`, `privacy-policy.html`, `terms.html`, `faq.html`, `csae.html`,
+  `security.html`, `delete-account.html`, `auth-callback.html`,
+  `/.well-known/security.txt`, `404.html` → all **200**.
+- `Razaaslam3210@gmail.com` / `RZ Dev` / `R&D Dev` / `R&amp;D Dev` → **0
+  occurrences on every page**.
+- `milesapp.officials@gmail.com` present on all contact surfaces;
+  `RD Developers` on all seven pages.
+- `/.well-known/security.txt` **byte-identical to the repo copy** (`diff`
+  clean ignoring CRLF), `Contact: mailto:milesapp.officials@gmail.com`.
+
+**Telling a true git build from a CLI build** in `vercel ls miles-legal --json`:
+CLI deploys carry `meta.gitDirty="1"` AND `meta.gitRootDirectory="web"`; true
+git builds have neither. Useful when diagnosing which source produced a bad
+deployment.
+
+**Rollback, fastest first:**
+- Instant alias switch, no rebuild:
+  `npx.cmd vercel promote miles-legal-34u4jspgd-meta-tech-labs.vercel.app`
+- Undo the setting: `npx.cmd vercel project update miles-legal --auto-detect root-directory`,
+  then CLI-deploy from `web/` as §86 described.
+
+**Still open:** a GitHub-App-triggered push has not yet been observed end to
+end under this setting — the redeploy exercised the same clone-and-build path,
+but not the App's own trigger. This commit is that test. Also open:
+CLI-from-repo-root unproven; no `.vercelignore`; the APP half of §101 still
+needs a build before handsets show the new address.
+
+**Exact next step:** after this commit lands, confirm the GitHub-App
+deployment reaches Ready and all nine paths still serve 200. If it errors the
+alias stays on the good deployment (fails safe), and the fix is a
+`.vercelignore` or a revisit of the setting.
