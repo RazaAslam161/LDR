@@ -10445,3 +10445,75 @@ Auth email templates, redirect allow-list).
 **Exact next step:** settle the re-pairing claim — either confirm the reunite
 flow is live and fix the app FAQ to describe mutual consent, or correct all
 four surfaces. It is the last known false-or-unproven promise on a legal page.
+
+## §108 — The re-pairing promise was false on SIX surfaces, not four (2026-08-26)
+
+Closes the item §107 left open. Owner asked for the fix; the claim was
+*"Re-pairing within those 30 days cancels the deletion"*, which tells someone
+they can get their history back by pairing again. They cannot.
+
+**Ground truth established against PRODUCTION, not against migration files
+on disk** — the distinction matters, because the tree is build 48 and prod is
+ahead of it:
+```
+select proname from pg_proc ... -> couple_restore_cancel, couple_restore_confirm,
+                                   couple_restore_request, couple_restore_state,
+                                   restore_couple          (all five LIVE on prod)
+select public.dissolution_window()                      -> 30 days
+```
+The client half exists too: `supabase_repository.dart:670-689` wraps all four
+RPCs and `features/safety/reconnect_sheet.dart` is the sheet.
+
+**What actually happens**, from `20260826190000_restore_needs_both_of_them.sql`
+and `restore_couple()`:
+- Either ex-partner may ASK (`couple_restore_request`); the OTHER must confirm
+  (`couple_restore_confirm`). Nobody confirms their own request — the owner's
+  ruling in the file header is *"reunion needs BOTH, always."*
+- A decline is FINAL for the person declined; they cannot ask again. The other
+  may still make their own request.
+- `restore_couple()` refuses if either person has since joined a new couple,
+  if the 30-day window has passed, or if the membership is not exactly two.
+- **Pairing again with a fresh invite code is a NEW couple.** It does not
+  restore anything, and the old history is still erased on schedule. That is
+  precisely what the old sentence promised and the system does not do.
+
+**Fixed on six surfaces — the audit said four; a repo-wide sweep found two
+more:**
+1. `web/faq.html` — "What happens if we break up?"
+2. `docs/legal/faq.md` — same answer
+3. `web/privacy-policy.html` — the retention table row
+4. `docs/legal/privacy-policy.md` — same row
+5. `mobile/lib/features/legal/faq_text.dart` — **the app said the opposite
+   error**: *"Connecting again is the same as the first time"*, i.e. it denied
+   the restore path exists. Not in the owner's list, but leaving it would have
+   rebuilt the app-vs-web contradiction §107 just removed.
+6. `web/delete-account.html:66` — *"Re-pairing inside those 30 days cancels
+   it."* **Nobody had looked at this page for this claim**, including the
+   eight-agent audit in §106.
+
+New wording says the same thing everywhere: both must agree, one asks and the
+other confirms, a declined person cannot ask again, and a fresh code starts a
+new couple rather than restoring the old one. It matches the copy already
+written in `reconnect_sheet.dart:197-198` — *"Bringing it back needs both of
+you to agree."*
+
+**Verified:**
+```
+grep -rniE "re-pairing|cancels the deletion|cancels it" web/ docs/legal/ mobile/lib/
+  -> only two unrelated code comments (session_provider.dart, disguise_service.dart)
+grep -c "asks to reconnect" on all six -> 1 each
+grep -c "same as the first" faq_text.dart -> 0
+HTML re-parsed: faq/privacy-policy/delete-account -> errors=0 unclosed=[]
+```
+
+**Found, not fixed:** `docs/legal/privacy-policy.md` is stale on the
+dissolution TRIGGER as well — its row still reads "A relationship you both
+leave… 30 days after the LAST partner leaves", while the live HTML correctly
+says removing a partner dissolves the couple "for both of you at once — it
+does not wait for the second person to act". Only the re-pairing sentence was
+corrected there, because that file carries the ads session's uncommitted AdMob
+work and is not mine to rewrite.
+
+**Exact next step:** whoever owns `docs/legal/privacy-policy.md` reconciles
+its dissolution-trigger row with the live HTML, and commits the AdMob
+disclosure sitting uncommitted in it.

@@ -267,7 +267,7 @@ can be refused or withdrawn in Android's app settings.
 | Unanswered joint delete requests | the requester can force them through after 14 days |
 | Reports you file | kept with no expiry, so that a pattern of abuse can be acted on. Deleting your account deletes the reports you filed; a report filed *about* you outlives your account, with your account id removed from it |
 | Terms acceptances, call-relay credential requests | kept with no expiry |
-| **A relationship you both leave** | the couple's entire history — messages, photographs, videos, Closer content — is **deleted 30 days after the last partner leaves**. Re-pairing inside those 30 days cancels the deletion. |
+| **A relationship you both leave** | the couple's entire history — messages, photographs, videos, Closer content — is **deleted 30 days after the last partner leaves**. Inside those 30 days the deletion can still be cancelled, but only by both of you: one asks to reconnect and the other agrees — neither can do it alone. Pairing again with a fresh code does not cancel it; that is a new couple, and these records are still deleted on schedule. |
 
 Two honest notes on files. Deleting your account queues every file you and your
 partner stored for real deletion, and a job runs hourly to carry it out — if

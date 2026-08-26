@@ -154,7 +154,11 @@ encrypted is simply there after signing in.
 Either of you can leave the couple from Settings. When the second partner
 leaves (or an account is deleted), the couple's entire history — messages,
 photos, videos, everything — is permanently deleted 30 days later, storage
-included. Re-pairing within those 30 days cancels the deletion.
+included. Within those 30 days it can still be brought back, but it takes both
+of you: one asks to reconnect and the other agrees. Neither of you can restore
+it alone, and once someone has declined a request that same person cannot ask
+again. Pairing again with a fresh invite code is not the same thing — that
+starts a new couple, and the old history is still erased on schedule.
 
 **How do I delete my account?**
 Settings → Account → Delete account removes your account and your content —
