@@ -7,8 +7,8 @@ it stores, what it cannot read, who else touches your data, how long any of it
 survives, and how to get rid of it. It is written to be accurate rather than
 reassuring — where something is *not* protected, this document says so.
 
-Miles is published by **R&D Dev**, Sector C Commercial Area, Bahria Town, Lahore, Pakistan. Privacy questions and data requests:
-**Razaaslam3210@gmail.com**.
+Miles is published by **RD Developers**, Sector C Commercial Area, Bahria Town, Lahore, Pakistan. Privacy questions and data requests:
+**milesapp.officials@gmail.com**.
 
 ---
 
@@ -294,7 +294,7 @@ requests, and reports — including reports you filed yourself. Reports are
 unreadable from every client key, because a screen listing "reports you have
 filed about your partner", on a phone that partner may pick up, is the most
 dangerous thing this app could draw. For a copy of any of it, including the
-hidden four, write to Razaaslam3210@gmail.com.
+hidden four, write to milesapp.officials@gmail.com.
 
 **Correct it.** Profile, name, photo, time zone and every preference are
 editable in Settings.
@@ -334,7 +334,7 @@ Android settings, or stop using a feature. None of it is retroactive: turning
 sharing off erases the stored position, but does not unsend what your partner
 already saw.
 
-**Object or complain.** Write to Razaaslam3210@gmail.com. If you are in the
+**Object or complain.** Write to milesapp.officials@gmail.com. If you are in the
 UK, EEA or another jurisdiction with a data-protection authority, you may
 complain to it directly.
 
@@ -394,7 +394,7 @@ policy applies.
 
 ## 12. Contact
 
-R&D Dev
+RD Developers
 Sector C Commercial Area, Bahria Town
 Lahore, Pakistan
-Razaaslam3210@gmail.com
+milesapp.officials@gmail.com

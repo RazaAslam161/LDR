@@ -63,7 +63,7 @@ bool get milesTermsHasContact =>
 /// anything conditional in it is a compile error, and a document that changes
 /// shape depending on a constant is worse than one that points at the store
 /// listing. This exists so [milesTermsHasContact] can flag the gap.
-const milesContactEmail = 'Razaaslam3210@gmail.com';
+const milesContactEmail = 'milesapp.officials@gmail.com';
 
 const milesTermsBody = '''
 Miles is a private app for two people. These terms are the agreement between
@@ -217,5 +217,5 @@ long any of it survives.
 
 12. CONTACT
 
-Razaaslam3210@gmail.com
+milesapp.officials@gmail.com
 ''';

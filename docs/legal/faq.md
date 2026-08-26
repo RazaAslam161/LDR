@@ -183,5 +183,5 @@ the most serious category we have — the [Child Safety Standards](../../web/csa
 page explains what happens to such a report and who to contact directly.
 
 **How do I get help?**
-Razaaslam3210@gmail.com — include your app version (Settings → About) so we can
+milesapp.officials@gmail.com — include your app version (Settings → About) so we can
 help faster. Never include your password; we will never ask for it.

@@ -1217,7 +1217,7 @@ class _AboutCard extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
             child: Column(
               children: [
-                _AboutRow(label: 'Developed by', value: 'R&D Dev'),
+                _AboutRow(label: 'Developed by', value: 'RD Developers'),
                 _AboutRow(
                   label: 'Version',
                   value: '${ReleaseGate.versionName} '
