@@ -10039,3 +10039,76 @@ staging through the Dart client. Committing verified nothing about that.
 staging through the Dart client with two seeded identities, proving
 `pending`/`claim` behave with `wrapped_by` resolution. Or a device pass, if a
 handset becomes available.
+
+## §103 — §101 shipped and deployed; a git push to this repo takes the site DOWN (2026-08-26)
+
+Continues §101 (which closed saying "nothing committed" — that is now stale;
+owner asked for commit + push + deploy immediately after).
+
+**Shipped:** commit `f3b5eae` on `fix-sprint`, pushed `5c63e43..f3b5eae`.
+14 files, +214/-47. Three of them (`web/index.html`,
+`docs/legal/privacy-policy.md`, `settings_screen.dart`) were ALSO carrying an
+in-flight ads/intro-film session's work, so those were staged by
+reconstructing HEAD + only my hunks via `git hash-object -w` +
+`git update-index --cacheinfo`, cross-checked with `diff -u` in both
+directions before staging. The other session's AdMob disclosure paragraphs,
+the intro-film `<video>` block and `_AdPrivacyOptionsLink` are untouched and
+still uncommitted in the tree.
+
+**THE FINDING, and it is the important part of this section — a git push to
+this repo 404s the entire legal site.** The `miles-legal` Vercel project has
+**Root Directory = `.`** (`vercel project inspect miles-legal`), but every
+site file lives in `web/`. Consequences:
+- CLI deploys run from `web/` upload `web/`'s contents → correct site.
+- The Vercel GitHub App builds from the REPO ROOT, finds no `index.html`,
+  and produces a Ready-but-empty production deployment.
+- Vercel auto-aliases the newest production deployment, so that empty build
+  **takes over `miles-legal.vercel.app` and every page 404s** — including
+  `privacy-policy.html` and `csae.html`, the two URLs the shipped app links
+  and Play requires.
+
+That is exactly what my push did: git deployment `kpgyul2xf` went Ready,
+GitHub reported "Deployment has completed" — and the live site served
+`404: NOT_FOUND` at `/`. **A green GitHub deployment check on this repo is
+not evidence the site is up; it is close to evidence it is down.** This has
+been latent since §86 and silently fires on every push that a session then
+happens to "fix" with a CLI deploy without noticing why. §86's own note that
+prod verification happens right after promote is what has been masking it.
+
+**Fixed forward this session** with the §86 process:
+`npx.cmd vercel deploy --prod --yes` from `web/` → `dpl_AgBtLf5VnhQsVeMwyA9XKDLGqw84`,
+`▲ Aliased https://miles-legal.vercel.app`.
+
+**Verified live on prod, pasted in-session:**
+- `/`, `privacy-policy.html`, `terms.html`, `faq.html`, `csae.html`,
+  `security.html`, `delete-account.html`, `/.well-known/security.txt` → all
+  **200**.
+- `Razaaslam3210@gmail.com` on all 9 live paths → **0 occurrences**.
+- `RZ Dev` / `R&D Dev` / `R&amp;D Dev` on all live pages → **0 occurrences**.
+- `milesapp.officials@gmail.com` live: 10 in privacy-policy, 6 security,
+  4 terms/faq/csae, 3 delete-account, 2 index, 1 auth-callback, 1
+  security.txt (HTML counts double: mailto href + link text).
+- `RD Developers` live on all 7 pages.
+- Live `security.txt` `Contact: mailto:milesapp.officials@gmail.com`; live
+  privacy policy publisher line and §12 both read `RD Developers`.
+- Browser render of the live privacy policy confirms the publisher sentence.
+
+**Still open:**
+- **The root-directory defect is NOT fixed, only worked around.** Next push
+  that touches anything will 404 the site again until someone CLI-deploys.
+  The real fix is one of: set the project's Root Directory to `web` in Vercel
+  (then git pushes deploy correctly and the manual step disappears), or
+  disconnect the GitHub integration so only CLI deploys exist. Setting Root
+  Directory to `web` is the right one — it makes the documented manual step
+  unnecessary rather than merely safe. Owner's call; I did not change project
+  settings.
+- The APP half of §101 is code-only. `terms_text.dart` and the Settings
+  About card carry the new address, but the shipped builds (48–52) still show
+  the old one. Needs a build, which this machine cannot produce.
+- `mobile/tool/make-keystore.sh` still defaults Organisation to `R&D Dev`
+  (flagged in §101, deliberately not fixed).
+
+**Exact next step:** owner sets `miles-legal`'s Root Directory to `web` in
+the Vercel dashboard, then a throwaway push is used to confirm a git-driven
+deploy serves 200 at `/` — closing the trap permanently instead of
+re-walking around it.
