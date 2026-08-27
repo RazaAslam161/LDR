@@ -46,6 +46,7 @@ import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/media_album.dart';
 import 'package:miles/features/chat/message_reveal.dart';
+import 'package:miles/features/chat/theme/chat_backdrop.dart';
 import 'package:miles/features/chat/theme/chat_theme.dart';
 import 'package:miles/features/chat/theme/chat_theme_controller.dart';
 import 'package:miles/features/chat/theme/chat_theme_picker.dart';
@@ -3298,17 +3299,7 @@ class _ChatBg extends StatelessWidget {
         ],
       );
     }
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: theme.bg.length == 1
-              ? [theme.bg.first, theme.bg.first]
-              : theme.bg,
-        ),
-      ),
-    );
+    return ChatBackdrop(theme: theme);
   }
 }
 

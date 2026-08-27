@@ -12305,3 +12305,69 @@ working tree:**
 4. found, not fixed: `mobile/tool/generate_art.dart` writes intermediate PNGs
    into `assets/art/`, which the orphan detector fails on until they are
    removed by hand.
+
+## §144 — The chat backdrops, dithered (2026-08-28)
+
+Closes the last unbuilt item of the sensory overhaul. §139 retired the six
+image-generated chat backdrops (the prompts kept failing on negation-tail
+dilution) and promised a procedural replacement. **That replacement was never
+written, and I reported the program complete anyway** — caught only when the
+owner asked what was left and I grepped instead of answering from memory:
+
+    grep -rn "bgAsset|BackdropTexture|backdropTexture" lib/   ->  (empty)
+
+**What it is, and why it is not decoration.** A two-stop gradient across a
+dark panel bands, and five of the six themes are dark. `DEVICE-CHECKLIST.md`
+§3.1 already asks the owner to look for exactly that. The fix film has always
+used is grain. New `lib/features/chat/theme/chat_backdrop.dart`:
+- one 128x128 noise tile, baked ONCE per process via `toImageSync` and tiled
+  with an `ImageShader` — every frame after is a single `drawRect`;
+- `BlendMode.overlay` against a tile centred on mid-grey, so it dithers rather
+  than tints. A one-directional grain — the obvious build — would lift every
+  black in the app;
+- shader matrix carries `1/devicePixelRatio`, so one texel is one DEVICE pixel.
+  Without it the grain lands in 2x2 and 3x3 blocks on exactly the dense panels
+  that need it finest;
+- nothing animates. Chat is the restraint zone.
+
+Contrast with `camera_filter_painter.dart`, which re-seeds ~90,000 `drawRect`
+calls at 15fps. That is the cost class the plan CUT for whole-app FilmGrain.
+A grain that never moves pays none of it, which is how the cut motion comes
+back legally.
+
+**Measured across all six themes, not asserted:**
+
+    velvet   meanPlain=25.833 meanGrained=25.912 shift=0.0790 maxPixelDev=9/255
+    ember    meanPlain=35.000 meanGrained=35.093 shift=0.0926 maxPixelDev=16/255
+    aurora   meanPlain=43.000 meanGrained=43.052 shift=0.0519 maxPixelDev=9/255
+    rose     meanPlain=36.167 meanGrained=36.250 shift=0.0830 maxPixelDev=14/255
+    midnight meanPlain=26.167 meanGrained=26.224 shift=0.0575 maxPixelDev=3/255
+    dawn     meanPlain=223.833 meanGrained=223.927 shift=0.0934 maxPixelDev=4/255
+
+Mean shift under 0.1/255 everywhere: it dithers, it does not wash. The
+excursion is NOT one number, because overlay scales with the base — 3/255 on
+Starlit, 16/255 on Candlelit's bright corner. **My first comment claimed a flat
+"±3/255" and my own measurement falsified it; the comment now states the range.**
+
+**Checked by eye, not only by number.** Rendered ember (the loudest) and dawn
+(the only light theme) to PNG at dpr 1 — the coarsest the grain can ever look,
+since a denser panel scales it finer — and looked at both. Ember reads as fine
+film grain on a warm gradient with the banding gone; dawn reads as textured
+paper. Neither reads as dirt. Temp render harness deleted.
+
+7 new tests in `test/widget/motion/chat_backdrop_test.dart`, including both
+directions of `shouldRepaint` — a always-false version is the cheapest way to
+pass the scroll test and silently break the theme picker.
+
+`errors=0 warnings=0`; repo+asset hygiene 23/23; full suite **1225/1225** (was
+1218). Shipped in the same commit as this section.
+
+**Not verified, and it is the same gap as everything else here:** banding is a
+PANEL property. This was proven on a host rasterizer, which does not band the
+way a cheap OLED does. `DEVICE-CHECKLIST.md` §3.1 is still the check that
+settles it — and the knob if it reads wrong is `_spread` in
+`chat_backdrop.dart`, one number.
+
+**Open, unchanged:** owner device pass; rotate the Maps key (5403769, three
+remote branches); apply `ui_sound_kill` to production before a sound build
+ships; generate_art.dart's stray intermediate PNGs.
