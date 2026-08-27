@@ -11162,3 +11162,62 @@ they belong to that session's commit.
 **Exact next step:** none on ads. At the next build anyone runs, grep the merged
 manifest for `AD_ID` and paste the zero — that is the one check this session was
 not allowed to perform.
+
+## §119 — §118 blamed the wrong session for 101 lints. It was me, and the fix is one line (2026-08-27)
+
+**§118 and commit `aafee7d` both assert: "The 448 → 557 analyzer jump is NOT
+from this work… every file whose count moved belongs to §117's `google_fonts`
+→ `MilesType` migration." That is wrong.** The jump was mine. This section
+stands the record back up; §118 is left as written, because sections are not
+rewritten here.
+
+**Root cause, one sentence:** the `sdk:` lower bound in `pubspec.yaml` sets the
+package's Dart *language version*, and `require_trailing_commas` only fires
+below language version 3.10 — so reverting the floor from `>=3.10.0` to
+`>=3.4.0` re-enabled a whole lint generation this codebase does not satisfy.
+
+**The controlled test §118 should have run before making the claim.** Same
+checkout, one variable, nothing else touched:
+```
+sdk: ">=3.4.0  <4.0.0"  ->  549 issues found.   require_trailing_commas: 101
+sdk: ">=3.10.0 <4.0.0"  ->  448 issues found.   require_trailing_commas: 0
+```
+What §118 offered instead was a per-file count comparison showing the moved
+files were ones §117 had touched. That was true and it was not attribution —
+§117's migration edits thousands of argument lists, so of course a
+trailing-comma lint lands on exactly those files. Correlation dressed as cause.
+
+**The fix, and why it is not a partial retreat from the removal.** The SDK
+floors are restored to `sdk: ">=3.10.0 <4.0.0"` / `flutter: ">=3.38.1"`.
+§118 removed them on the reasoning that they "existed only for
+google_mobile_ads", which was true of their ORIGIN and false of their EFFECT:
+the tree has since been written to the 3.10 language version. The floor governs
+who can BUILD, never who can run, and CI already pins Flutter 3.44.2 — so
+raising it back costs nothing and lowering it cost 101 lints. Nothing else from
+§118 is reverted: the package, the code, the tests, the manifest blocks, the
+migration and all five surfaces of ad copy stay gone.
+
+**Verified after the correction, on the real tree:**
+```
+flutter analyze -> 449 issues found.   require_trailing_commas: 0   0 error, 0 warning
+flutter test    -> 02:07 +1175: All tests passed!
+```
+449 against the 448 baseline of two days ago — one info, from §117's in-flight
+work. **The ads removal is analyzer-neutral**, which is what §118 should have
+been able to say and could not.
+
+**Also verified, and this closes §118's stated gap about hand-built blobs.**
+§118's commit staged synthetic blobs (HEAD + only the ads edits) that had never
+been compiled as a set, because the working tree that passed the gates also
+held §117's work. A detached worktree was checked out at `aafee7d` and analyzed
+in isolation: `549 issues found`, **0 errors, 0 warnings**, `lib/core/ads`
+absent, `google_mobile_ads` absent, and none of §117's work present — proving
+the committed tree stands on its own. That 549 is what put this section's error
+on the table.
+
+**Still open:** unchanged from §118, minus the attribution claim. The AD_ID
+merged-manifest proof is still the one check nobody has run, and still needs a
+build nobody has asked for.
+
+**Exact next step:** none. If §117's session sees a lint count move again,
+check `pubspec.yaml`'s `sdk:` bound before checking their own diff.
