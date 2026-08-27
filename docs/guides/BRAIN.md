@@ -11057,3 +11057,108 @@ reconciliation and §110/§114 items are untouched by the owner's instruction.
 **Exact next step:** none on ads. Next session takes §115's non-ads open
 items — the repo↔prod migration reconciliation is the one that can still be
 hiding lost DDL.
+
+## §118 — google_mobile_ads is out of the tree, and the ad claims are out of five surfaces (2026-08-27)
+
+Owner took exit 2 from §116: remove the SDK, unwind the legal copy. Done. The
+instruction named two things; the tree held five, and the two it did not name
+were the ones the public actually reads.
+
+**The surprise, and the reason an inventory came before any edit.** The ad
+claims were not confined to the privacy policy. `web/index.html` — the landing
+page, live — advertised the banner in TWO places: the "Built for exactly two"
+band ("the one place an ad can appear is a single banner on the Touch tab") and
+the summary list ("The app carries one banner slot on the Touch tab"). Both
+were introduced by `a0d94ac`, whose entire point was that the site must not
+claim what the app cannot do. Unwinding only `privacy-policy.md` would have
+left the front door still selling a banner that no longer exists.
+
+**Removed:**
+- `google_mobile_ads: 9.1.0` from `pubspec.yaml`; SDK floors reverted to
+  `sdk >=3.4.0` / `flutter >=3.22.0`, which existed only to satisfy it.
+- `mobile/lib/core/ads/` (both files), `test/unit/core/ads_gate_test.dart`,
+  `test/widget/anchored_banner_band_test.dart`.
+- The `AnchoredBannerBand` mount in `touch_map_screen.dart` and the
+  `_AdPrivacyOptionsLink` row in `settings_screen.dart`, with their imports —
+  including `dart:async`, which only `unawaited()` in that widget needed.
+- Both AdMob `meta-data` blocks from `AndroidManifest.xml`.
+- `20260824020000_ads_are_a_row_not_a_release.sql`. Deleted rather than
+  reversed because it was applied NOWHERE: prod's ledger ends at
+  `20260825235216`, and staging's `app_release` columns are
+  `id, min_build, latest_build, message, updated_at, min_build_play,
+  chat_cipher_only, ui_sound_kill` — no `ads_enabled` on either. Nothing to
+  roll back.
+- `web/app-ads.txt` and its `/app-ads.txt` content-type rule in
+  `web/vercel.json` — the rule predates the ads work (`42679d9`) but served
+  only that file.
+
+**Claims unwound, five surfaces:** `docs/legal/privacy-policy.md` AND the live
+`web/privacy-policy.html` (paragraph, third-party table row, sharing sentence);
+`mobile/lib/features/legal/faq_text.dart` AND `web/faq.html`; `web/index.html`
+twice; and the Privacy row in `PLAY-READINESS-AUDIT.md`, restored to its
+build-40 wording now that the annotation is moot.
+
+**Kept on purpose: the stepped column-set ladder in `release_gate.dart`.** It
+arrived in the ads commit but it is not ads — it is the fix for PostgREST 400ing
+a whole select over one missing column, and §117's sound-kill rail is built
+directly on it. Only the `withAds` rung, the `adsEnabled` field and its parse
+are gone; `[withCipher, legacy]` remains.
+
+**Gates, after the last edit:**
+```
+flutter pub get -> These packages are no longer being depended on:
+                   - google_mobile_ads 9.1.0
+                   - webview_flutter 4.14.1  (+3 more webview_flutter_*)
+                   Changed 5 dependencies!
+grep google_mobile_ads .flutter-plugins-dependencies -> 0
+flutter analyze -> 557 issues found.  (557 info, 0 error, 0 warning)
+flutter test    -> 02:14 +1175: All tests passed!
+```
+1185 → 1175 is 14 deleted ads tests plus 4 new ones from §117, which is exactly
+right. **The 448 → 557 analyzer jump is NOT from this work**: a per-file
+comparison of the two runs shows every file whose count moved belongs to §117's
+`google_fonts` → `MilesType` migration or its new tests; not one file this
+section touched appears in that list.
+
+**The gap, stated as the headline rather than a footnote.** The AD_ID
+permission was never in this repo's manifest — it came from the transitive
+`play-services-ads` 25.4.0 AAR, and the proof it is gone would be a merged
+manifest with no `AD_ID` line. **No build was run**, because building without
+being asked is forbidden here. What IS proven is one step upstream: the package
+is out of the lockfile and out of `.flutter-plugins-dependencies`, so Gradle
+has nothing left to pull the AAR from. Treat the manifest itself as unproven
+until someone builds.
+
+**Concurrency — four files were being written by §117's session at the same
+time.** `pubspec.yaml`, `touch_map_screen.dart`, `release_gate.dart` and this
+doc. None of their hunks are in this commit: the index was built with
+`git hash-object -w` + `git update-index --cacheinfo` from HEAD plus only the
+ads edits, so their `google_fonts` removal, bundled font assets, `MilesType`
+migration and `ui_sound_kill` rail all stay in the working tree, uncommitted
+and untouched.
+
+**LEFT IN THE WORKING TREE FOR §117's SESSION — read this before committing
+`release_gate.dart`:** their `withSoundKill` column string contained
+`ads_enabled`. With the ads column removed and existing in no environment, that
+rung would 400 on every launch and fall through to `withCipher`, which has no
+`ui_sound_kill` — the sound kill would silently never load, on every handset.
+The string is corrected in the WORKING TREE only, and so is the `uiSoundKilled`
+doc comment that cited "Ads and cipher-only". Neither correction is committed;
+they belong to that session's commit.
+
+**Still open:**
+- `supabase/migrations/20260827100000_ui_sound_is_a_switch_not_a_release.sql:14`
+  still cites `ads_enabled` in its polarity comment. Not this session's file.
+- `docs/REFERENCE.md` lists `google_mobile_ads` in its dependency table. Stale
+  since `1e93e84`, long before this work, and describes the OLD ads module —
+  left alone rather than drive-by fixed, but it is now wrong twice over.
+- `BLUEPRINT.md`, `BUILD_PLAN.md`, `PERF_PLAN.md` and
+  `architecture/inventory/rest.md` all describe an earlier ads module. They are
+  archive and plan documents; they record what was true when written.
+- Everything else in §115's open list, minus every ads line, which is now moot —
+  including the Data Safety declaration, which this section closes: with the SDK
+  gone there is no advertising ID to declare.
+
+**Exact next step:** none on ads. At the next build anyone runs, grep the merged
+manifest for `AD_ID` and paste the zero — that is the one check this session was
+not allowed to perform.

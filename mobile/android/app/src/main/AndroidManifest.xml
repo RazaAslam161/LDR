@@ -122,32 +122,6 @@
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
-        <!-- AdMob application ID. PLACEHOLDER: this is Google's own sample ID,
-             which serves test creatives against no account. Swap it for the
-             real one from AdMob console > Settings > App ID before the first
-             release that flips app_release.ads_enabled.
-
-             Hardcoded, unlike the Maps key above, and the difference is real:
-             this is not a credential. It ships in the clear in every APK by
-             design and identifies the publisher rather than authorising
-             anything, so routing it through maps.properties would add a second
-             untracked file the build already fails on for no security gained.
-
-             Note the TILDE. The ad unit id in ads_service.dart uses a slash and
-             shares this prefix; swapping the two crashes the app on the SDK's
-             first call rather than failing to fill. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
-        <!-- The Dart-side kill switch cannot reach this far. The ads SDK is
-             brought up by a ContentProvider at PROCESS START, before any Dart
-             runs, so app_release.ads_enabled can stop ad REQUESTS but not the
-             SDK waking up and measuring. This defers the measurement half until
-             something actually initialises the SDK — which AdsService only does
-             on the first banner mount, behind the same server flag. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
-            android:value="true" />
 
         <!-- importantForAutofill: belt-and-braces. Flutter only registers a
              field with the Autofill framework when autofillHints is set, and

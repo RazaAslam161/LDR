@@ -4,8 +4,8 @@ publish_to: "none"
 version: 0.1.0+48
 
 environment:
-  sdk: ">=3.10.0 <4.0.0"
-  flutter: ">=3.38.1"
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
 
 dependencies:
   flutter:
@@ -111,15 +111,6 @@ dependencies:
   flutter_image_compress: ^2.5.1
   google_maps_flutter: ^2.18.0
   mapbox_maps_flutter: ^2.28.1
-
-  # ─── Ads (AdMob banner in Touch) ─────────────────────────────
-  # EXACT pin, no caret. A minor bump can change ad-request or consent
-  # behaviour on a live publisher account, and the failure mode there is an
-  # account action rather than a red gate. 9.1.0, published 2026-08-11.
-  # Requires Dart >=3.10.0 / Flutter >=3.38.1, which is why the floors above
-  # moved. Ships the UMP consent SDK in the same package.
-  google_mobile_ads: 9.1.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

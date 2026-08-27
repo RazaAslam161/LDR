@@ -91,20 +91,6 @@ class ReleaseGate {
   /// "stop", because the failure mode of guessing wrong is unreadable messages.
   static bool chatCipherOnly = false;
 
-  /// Whether this fleet may request ads.
-  ///
-  /// Server-side for the same reason as the flag above, but the failure it
-  /// guards is bigger than a blank bubble. AdMob and AdSense are one publisher
-  /// identity, and the banner sits on a screen showing a photograph this app
-  /// cannot inspect — so if a policy call turns out to be wrong, the way back
-  /// has to be one UPDATE, not a release cycle waiting on installs.
-  ///
-  /// Defaults FALSE and stays false on ANY failure — an unreachable gate, a
-  /// paused project, a column that does not exist yet. Every one of those must
-  /// mean "no ads", because there is no version of "guessed wrong and served
-  /// anyway" that a later fix undoes.
-  static bool adsEnabled = false;
-
   /// Which channel this install is — 'sideload' or 'play', as the Android
   /// side's BuildConfig reports it. The two fleets need separate floors:
   /// raising min_build tells sideload clients to install the published APK
@@ -162,21 +148,11 @@ class ReleaseGate {
     // the sideload fleet quietly loses its only update channel. So the column
     // list degrades in steps, newest column first, and each step gives up only
     // what the environment below it cannot answer.
-    //
-    // A step per column generation, NOT one newest-vs-legacy pair. ads_enabled
-    // does not exist in production yet, so folding it into the first list and
-    // dropping straight to the last one would take min_build_play and
-    // chat_cipher_only down with it on every launch, on every handset, until
-    // the migration lands — turning the play floor off and re-deciding the chat
-    // cipher flag from an absent column. Each generation stands on its own.
-    const withAds = 'min_build, min_build_play, latest_build, message, '
-        'apk_url, apk_sha256, latest_version_name, chat_cipher_only, '
-        'ads_enabled';
     const withCipher = 'min_build, min_build_play, latest_build, message, '
         'apk_url, apk_sha256, latest_version_name, chat_cipher_only';
     const legacy = 'min_build, latest_build, message, '
         'apk_url, apk_sha256, latest_version_name';
-    const columnSets = [withAds, withCipher, legacy];
+    const columnSets = [withCipher, legacy];
     for (final columns in columnSets) {
       try {
         final row = await SupabaseService.client
@@ -229,14 +205,7 @@ class ReleaseGate {
     // this must read false. Anything other than an explicit true keeps chat
     // writing plaintext, which is the safe direction.
     chatCipherOnly = row['chat_cipher_only'] == true;
-    final wasAds = adsEnabled;
-    // Same `== true` for the same reason, and it carries more weight here: the
-    // fallback select omits this column, so every environment that has not run
-    // the migration reads absent, and absent must be "no ads".
-    adsEnabled = row['ads_enabled'] == true;
-    if (_blocked != wasBlocked ||
-        latestBuild != wasLatest ||
-        adsEnabled != wasAds) {
+    if (_blocked != wasBlocked || latestBuild != wasLatest) {
       revision.value++;
     }
     // Unconditional, and it is not only a trace: reading buildStamp is what
