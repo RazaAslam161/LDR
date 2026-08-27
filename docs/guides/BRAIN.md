@@ -11005,3 +11005,55 @@ before any build that flips it, update the Play Console Data Safety form. Do
 not raise `app_release.ads_enabled` on either project until a real banner unit
 id exists; with `liveBannerUnitId` empty it would reserve 63dp and request
 nothing.
+
+## §116 — Owner: skip ad work. §115's next step is CANCELLED (2026-08-27)
+
+Owner said "skip ad work" immediately after §115. **§115's exact next step —
+apply `20260824020000` to staging then prod — must NOT be executed.** Any
+session picking up that instruction is picking up a cancelled one.
+
+**Nothing was reverted, and that is deliberate.** "Skip" is not "undo", and
+`94d0f18` / `f2d8d3d` are pushed. The committed state is inert on its own:
+`liveBannerUnitId` is `''` so a release build has no unit to request against,
+`app_release.ads_enabled` defaults false, and the migration is unapplied on
+both projects. No user can see a banner from this tree.
+
+**What skipping does NOT skip, verified against a real merged manifest rather
+than inherited from the audit doc's annotation.** From the 2026-08-24 build
+(`build/app/intermediates/merged_manifests/sideloadRelease/processSideloadReleaseManifest/AndroidManifest.xml`,
+mtime Aug 24 23:03):
+```
+212:    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+213:    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" />
+818:            android:name="com.google.android.gms.ads.MobileAdsInitProvider"
+```
+The plugin's own manifest declares only INTERNET; both AD_ID permissions and
+the init ContentProvider arrive from the transitive `play-services-ads`
+25.4.0 AAR. So while `google_mobile_ads: 9.1.0` is in `pubspec.yaml`, **the
+next Play upload declares advertising ID in Data Safety whether or not anyone
+does another minute of ad work.** The server switch governs REQUESTS; it does
+not govern what is in the artifact.
+
+**Two ways to actually be finished with this, owner's call:**
+1. *Leave it.* Ads stay dark, the dependency ships, and the Data Safety form
+   gets the AD_ID declaration before the next upload. Cost: one console form.
+2. *Remove it.* Drop `google_mobile_ads` from `pubspec.yaml`, delete
+   `lib/core/ads/`, the two test suites, the `AnchoredBannerBand` mount in
+   `touch_map_screen.dart`, the `_AdPrivacyOptionsLink` in
+   `settings_screen.dart` and the two manifest `meta-data` blocks; revert the
+   SDK floor bump (`sdk >=3.10.0`, `flutter >=3.38.1`) only if nothing else
+   needs it. The migration file can stay unapplied and harmless, or be
+   deleted. Then the legal copy in `f2d8d3d` has to go back the other way,
+   because a policy that discloses an SDK the app no longer has is wrong in
+   the opposite direction.
+
+Not doing either without a word — this section exists so the choice is not
+made by silence.
+
+**Still open, unchanged by this:** everything in §115's open list EXCEPT the
+ads-migration line, which is cancelled. The film, film-shoot, migration
+reconciliation and §110/§114 items are untouched by the owner's instruction.
+
+**Exact next step:** none on ads. Next session takes §115's non-ads open
+items — the repo↔prod migration reconciliation is the one that can still be
+hiding lost DDL.
