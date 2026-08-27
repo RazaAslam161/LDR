@@ -12265,3 +12265,43 @@ until they are deleted by hand.**
 
 **Open / next unchanged from §141:** owner-device checklist is the blocking item;
 `ui_sound_kill` still needs prod; Maps key at 5403769 still needs rotating.
+
+## §143 — Pushed to origin, and what the pre-push check established (2026-08-28)
+
+`be58337..95a6cdf  fix-sprint -> fix-sprint`. Server-side confirmed, not assumed:
+
+    git ls-remote origin refs/heads/fix-sprint
+    95a6cdf177457d534e2f424d2dcf759d2358c19d	refs/heads/fix-sprint
+
+Two commits published — 0fb285e (§139, the drawn illustrations) and 95a6cdf
+(§140-§142). 18 files. Working tree clean, 0 ahead / 0 behind.
+
+**Checks run BEFORE publishing, because a push is not revertible from the
+working tree:**
+- Repo visibility: `{"isPrivate":true,"visibility":"PRIVATE"}`.
+- **The Maps-key commit 5403769 was ALREADY on the remote** — `git branch -r
+  --contains 5403769` returns origin/fix-sprint plus two claude/* branches. So
+  this push did not newly expose it. **That is not absolution: the key is on
+  GitHub, in three remote branches, and still needs rotating.** A private repo
+  is an access-control boundary, not a secret store, and history rewriting gets
+  harder with every push. This is the oldest open item in this doc.
+- Outgoing diff grepped for `api_key|secret|token|password|bearer|private_key|
+  AIza|sk-|ghp_`: the only hit was the word "token" in BRAIN prose.
+- `mobile/.env` and `mobile/android/maps.properties` confirmed untracked —
+  `did not match any file(s) known to git`.
+- `git fetch` first: remote had not moved (0 behind), so this was a
+  fast-forward and no concurrent session's work was at risk.
+
+**Still open, unchanged and now the whole backlog:**
+1. **Owner device pass** — `docs/guides/DEVICE-CHECKLIST.md`. The entire sensory
+   overhaul is gate-green and device-unproven. Frame timing of the
+   EmberBackground rewrite, audio latency/feel, Impeller go/no-go, parallax
+   feel, and the two shipped defects that were fixed (LockScreen
+   ParentDataWidget crash, FLAG_SECURE inversion). This is the riskiest
+   unexercised path in the program.
+2. **Rotate the Google Maps API key** (5403769, now on three remote branches).
+3. **Apply the `ui_sound_kill` migration to production** — staging only so far;
+   must land before a build carrying sound ships.
+4. found, not fixed: `mobile/tool/generate_art.dart` writes intermediate PNGs
+   into `assets/art/`, which the orphan detector fails on until they are
+   removed by hand.
