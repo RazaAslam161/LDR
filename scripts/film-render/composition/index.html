@@ -66,14 +66,15 @@
   <!-- beat: talk -->
   <div class="layer" id="l-talk">
     <div class="plate-wrap" id="talk-plate" style="opacity:.5">
-      <img id="talk-plate-img" data-plate src="assets/plates/hero-plate@2x.png" width="1280">
+      <img class="plate-media" id="talk-plate-vid" data-iplate data-start="16.5" data-seq="assets/plates/talk" data-fps="24" data-count="193" src="assets/plates/talk/f000.png" width="1280" style="position:absolute;left:50%;top:50%">
+      <img id="talk-plate-img" data-plate data-plate-fallback src="assets/plates/hero-plate@2x.png" width="1280">
       <div class="scrim"></div>
     </div>
     <div class="center"><div class="col">
       <p id="talk-eyebrow" class="f-eyebrow" style="margin:0 0 28px">Talk</p>
       <h2 id="talk-h2" class="f-d2" style="margin:0 0 44px">Say it like you're there</h2>
-      <p id="talk-l1" class="f-line" style="margin:0 0 30px">End-to-end encrypted chat and calls.</p>
-      <div id="talk-chip" class="f-chip" style="margin:0 0 30px">XChaCha20-Poly1305</div>
+      <p id="talk-l1" class="f-line" style="margin:0 0 30px">End-to-end encrypted calls.</p>
+      <div id="talk-chip" class="f-chip" style="margin:0 0 30px">DTLS-SRTP</div>
       <p id="talk-l2" class="f-body" style="margin:0">Nowhere in between can read them &mdash; including us.</p>
     </div></div>
   </div>
@@ -81,7 +82,8 @@
   <!-- beat: distance -->
   <div class="layer" id="l-distance">
     <div class="plate-wrap" id="dist-plate">
-      <img id="dist-plate-img" data-plate src="assets/plates/distance@2x.png" width="1680">
+      <img class="plate-media" id="dist-plate-vid" data-iplate data-start="22" data-seq="assets/plates/distance" data-fps="24" data-count="193" src="assets/plates/distance/f000.png" width="1680" style="position:absolute;left:50%;top:50%;filter:sepia(.22) hue-rotate(-12deg) saturate(1.15) brightness(.96)">
+      <img id="dist-plate-img" data-plate data-plate-fallback src="assets/plates/distance@2x.png" width="1680">
       <div class="scrim" id="dist-scrim"></div>
       <svg style="position:absolute;inset:0" viewBox="0 0 1680 630" aria-hidden="true">
         <defs><linearGradient id="farc" x1="360" y1="470" x2="1330" y2="210" gradientUnits="userSpaceOnUse">
@@ -128,7 +130,8 @@
   <!-- beat: keepsakes -->
   <div class="layer" id="l-keepsakes">
     <div class="plate-wrap" id="keep-plate">
-      <img id="keep-plate-img" data-plate src="assets/plates/keepsakes@2x.png" width="660">
+      <img class="plate-media" id="keep-plate-vid" data-iplate data-start="35" data-seq="assets/plates/keepsakes" data-fps="24" data-count="193" src="assets/plates/keepsakes/f000.png" style="position:absolute;left:50%;top:50%;width:1458px;height:820px;max-width:none">
+      <img id="keep-plate-img" data-plate data-plate-fallback src="assets/plates/keepsakes@2x.png" width="660">
       <div class="scrim"></div>
     </div>
     <div class="side-left">
@@ -145,8 +148,8 @@
       <h2 id="sec-h2" class="f-d2" style="margin:0 0 64px">Private by design</h2>
       <div class="sec-lines">
         <p id="sec-l1" class="f-line" style="margin:0">Invite-only, always.</p>
-        <p id="sec-l2" class="f-line" style="margin:0">No ads of your life.</p>
-        <p id="sec-l3" class="f-line" style="margin:0">Keys that exist only on your two phones.</p>
+        <p id="sec-l2" class="f-line" style="margin:0">Your data is never sold.</p>
+        <p id="sec-l3" class="f-line" style="margin:0">Vault and memories, sealed on your phone.</p>
       </div>
     </div></div>
   </div>

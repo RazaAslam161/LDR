@@ -1,5 +1,6 @@
 /* Deterministic frame renderer for the Miles intro film.
-   One warm Puppeteer page; every frame is window.seek(t) + double-rAF + PNG.
+   One warm Puppeteer page; every frame is window.seek(t) + one controlled
+   BeginFrame whose synchronous draw IS the PNG.
    Usage:
      node render.js                 # all 1800 frames, resume-aware
      node render.js --beat talk     # just that beat's frames (use --force to redo)
@@ -80,43 +81,129 @@ function parseArgs() {
   const srv = await serve(REPO);
   const url = `http://127.0.0.1:${srv.address().port}${PAGE}`;
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    defaultViewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
-    args: [
-      "--force-color-profile=srgb", "--disable-lcd-text", "--font-render-hinting=none",
-      "--disable-gpu", "--disable-accelerated-2d-canvas",
-      /* Continuously-scaled layers (plate push-ins, the breathing rituals
-         beat) re-raster asynchronously under checker-imaging, so a capture
-         can catch the interim raster - the source of scattered frame-pair
-         mismatches. Force synchronous full-tile raster. */
-      "--disable-checker-imaging", "--disable-partial-raster",
-      /* NOTE: --run-all-compositor-stages-before-draw deadlocks captureScreenshot
-         in new headless (it expects begin-frame control); the double-rAF await in
-         seek() is what actually guarantees the paint is flushed. */
-      "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-features=Translate,BackForwardCache",
-      "--hide-scrollbars", "--mute-audio",
-    ],
-  });
-  const page = await browser.newPage();
-  page.on("pageerror", e => { console.error("PAGE ERROR:", e.message); process.exitCode = 1; });
-  await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
-  const ready = await page.evaluate(() => Promise.race([
-    window.filmReady,
-    new Promise((_, rej) => setTimeout(() =>
-      rej(new Error("filmReady hung; stages: " + JSON.stringify(window.bootStage || {}))), 45000)),
-  ]));
-  console.log("filmReady:", ready);
+  /* Capture is BeginFrame-controlled: the free-running compositor was the
+     last nondeterminism source — ±1-LSB alpha-blend rounding noise across the
+     whole frame with seams at the 512px raster band boundaries, cached per
+     tile for a few frames (hence disjoint 12/8/7-frame gate failures that no
+     composition change moved). HeadlessExperimental.beginFrame runs every
+     compositor stage synchronously and returns the screenshot from that exact
+     draw — no interim raster, no stale tiles. The domain lives in the old
+     headless architecture, hence headless: "shell". */
+  async function boot() {
+    const browser = await puppeteer.launch({
+      headless: "shell",
+      defaultViewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
+      args: [
+        "--enable-begin-frame-control", "--run-all-compositor-stages-before-draw",
+        "--disable-threaded-animation", "--disable-image-animation-resync",
+        "--disable-new-content-rendering-timeout",
+        /* BOTH color profiles pinned to sRGB. With only the display profile
+           forced, composite sometimes ran the raster->display color conversion
+           and sometimes its identity fast path — a BISTABLE ±1-LSB shift on all
+           dark pixels (steep end of the sRGB curve), flipping for a few frames
+           at a time. Same profile on both sides = conversion is identity in
+           every path, so both attractors collapse into one. */
+        "--force-color-profile=srgb", "--force-raster-color-profile=srgb",
+        "--disable-lcd-text", "--font-render-hinting=none",
+        "--disable-gpu", "--disable-accelerated-2d-canvas",
+        "--disable-checker-imaging", "--disable-partial-raster",
+        "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-features=Translate,BackForwardCache",
+        "--hide-scrollbars", "--mute-audio",
+      ],
+    });
+    const page = await browser.newPage();
+    page.on("pageerror", e => { console.error("PAGE ERROR:", e.message); process.exitCode = 1; });
+    const cdp = await page.createCDPSession();
+
+    /* Under BeginFrame control nothing frames the page on its own, but boot
+       (layout, font checks) and img.decode() inside seek() both need lifecycle
+       frames. One serialized driver issues every beginFrame so the background
+       pump can never overlap a capture (overlapping protocol sends error out).
+       The pump runs for the whole session. */
+    let bfQueue = Promise.resolve();
+    const sendBF = params => {
+      const op = bfQueue.then(() =>
+        cdp.send("HeadlessExperimental.beginFrame", params)
+          .catch(e => { if (params.screenshot) throw e; }));
+      bfQueue = op.catch(() => {});
+      return op;
+    };
+    const pump = setInterval(() => { sendBF({ noDisplayUpdates: false }); }, 100);
+    await page.evaluateOnNewDocument(() => { window.__BF__ = true; });
+    await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
+    const ready = await page.evaluate(() => Promise.race([
+      window.filmReady,
+      new Promise((_, rej) => setTimeout(() =>
+        rej(new Error("filmReady hung; stages: " + JSON.stringify(window.bootStage || {}))), 45000)),
+    ]));
+    /* A hold frame (seek sets every style to its current value) produces no
+       damage, and a damage-less beginFrame returns no screenshot. A 1px div
+       parked off-viewport flips its transform each frame: guaranteed damage,
+       zero visible pixels. */
+    await page.evaluate(() => {
+      const d = document.createElement("div");
+      d.id = "__tick";
+      d.style.cssText = "position:fixed;left:-8px;top:-8px;width:1px;height:1px;background:#000;";
+      document.body.appendChild(d);
+    });
+    /* Throwaway warm-up capture: the very first composite after boot showed a
+       one-frame variance once (f0480 in one of three otherwise-identical
+       slice passes). No real frame gets to be the first draw. */
+    await page.evaluate(t => window.seek(t), 0);
+    await sendBF({ noDisplayUpdates: false, screenshot: { format: "png" } });
+    return { browser, page, sendBF, pump, ready };
+  }
+
+  async function shutdown(s) {
+    clearInterval(s.pump);
+    try { await s.browser.close(); } catch { /* already gone */ }
+  }
+
+  const withTimeout = async (p, ms, what) => {
+    p.catch(() => {});          /* abandoning it must not crash the process */
+    let timer;
+    try {
+      return await Promise.race([p, new Promise((_, rej) => {
+        timer = setTimeout(() => rej(new Error(`watchdog: ${what} still pending after ${ms}ms`)), ms);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+
+  let sess = await boot();
+  console.log("filmReady:", sess.ready);
   console.log("composition ready:", url);
 
   const t0 = process.hrtime.bigint();
-  let done = 0;
+  let done = 0, relaunches = 0;
   for (const f of todo) {
-    await page.evaluate(t => window.seek(t), f / FPS);
-    const buf = await page.screenshot({ type: "png", optimizeForSpeed: true });
-    fs.writeFileSync(path.join(OUT, `f${String(f).padStart(4, "0")}.png`), buf);
+    /* The capture loop occasionally wedges before a frame (renderer stuck in
+       a lifecycle wait). Determinism is cross-boot (proven: three separate
+       boots, byte-identical slices), so the watchdog relaunches the browser
+       and retries the frame — once. A second wedge on the same frame is real
+       and fatal. */
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await withTimeout(sess.page.evaluate((t, n) => {
+          document.getElementById("__tick").style.transform = `translateX(${-(n % 2)}px)`;
+          return window.seek(t);
+        }, f / FPS, f), 45000, `seek f${f}`);
+        const bf = await withTimeout(
+          sess.sendBF({ noDisplayUpdates: false, screenshot: { format: "png" } }),
+          45000, `capture f${f}`);
+        if (!bf || !bf.screenshotData) throw new Error(`no screenshot at f${f} (hasDamage=${bf && bf.hasDamage})`);
+        fs.writeFileSync(path.join(OUT, `f${String(f).padStart(4, "0")}.png`),
+          Buffer.from(bf.screenshotData, "base64"));
+        break;
+      } catch (e) {
+        if (attempt >= 1) { await shutdown(sess); throw e; }
+        relaunches++;
+        console.error(`f${f}: ${e.message} — relaunching browser, retrying frame`);
+        await shutdown(sess);
+        sess = await boot();
+      }
+    }
     done++;
     if (done % 30 === 0 || done === todo.length) {
       const el = Number(process.hrtime.bigint() - t0) / 1e9;
@@ -126,7 +213,7 @@ function parseArgs() {
     }
   }
 
-  await browser.close();
+  await shutdown(sess);
   srv.close();
-  console.log(`rendered ${done} frames -> ${OUT}`);
+  console.log(`rendered ${done} frames -> ${OUT}${relaunches ? ` (${relaunches} browser relaunch(es))` : ""}`);
 })().catch(e => { console.error(e); process.exit(1); });

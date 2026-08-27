@@ -48,7 +48,51 @@ const BEAT = {
 };
 
 /* ---------- boot: element refs, word splitting, lottie, ambient ---------- */
-let els = {}, threadLen = 52, lotties = [];
+let els = {}, threadLen = 52, lotties = [], iplates = [];
+
+/* Motion plates, PNG-sequence edition. <video> is banished from the
+   composition: even parked, three video elements' async frame-delivery
+   machinery raised the intermittent raster wobble past the gate (12/8/7
+   mismatches across three runs, disjoint frame sets — one raster thread
+   changed nothing). The plates' frames are pre-extracted to PNG (ffmpeg,
+   forced bt709 in-matrix to match Chromium's video conversion), and seek()
+   swaps the <img> src and awaits decode() — the same synchronous img path
+   the stills proved stable. Falls back to the still when a sequence is
+   absent. Source frame for t mirrors video presentation: the frame whose
+   1/fps interval contains (t - start). */
+async function initImagePlates() {
+  const imgs = [...document.querySelectorAll("img[data-iplate]")];
+  const ready = await Promise.all(imgs.map(async el => {
+    try { await el.decode(); return { el, ok: true }; }
+    catch { return { el, ok: false }; }
+  }));
+  return ready.filter(r => {
+    const still = r.el.nextElementSibling;
+    if (!r.ok) {                       /* keep the still, drop the sequence */
+      if (still && still.dataset.plateFallback !== undefined) still.style.display = "";
+      r.el.remove();
+      return false;
+    }
+    if (still && still.dataset.plateFallback !== undefined) still.style.display = "none";
+    return true;
+  }).map(r => ({
+    el: r.el, start: Number(r.el.dataset.start), seq: r.el.dataset.seq,
+    fps: Number(r.el.dataset.fps), count: Number(r.el.dataset.count), idx: 0,
+  }));
+}
+
+function seekPlate(p, t) {
+  /* Step only inside the beat window (plus crossfade margin); park on frame 0
+     elsewhere so covered beats do zero decode work. */
+  const active = t >= p.start - 0.6 && t <= p.start + p.count / p.fps + 0.6;
+  const idx = active
+    ? Math.min(Math.max(Math.floor((t - p.start) * p.fps), 0), p.count - 1)
+    : 0;
+  if (idx === p.idx) return Promise.resolve();
+  p.idx = idx;
+  p.el.src = `${p.seq}/f${String(idx).padStart(3, "0")}.png`;
+  return p.el.decode();
+}
 
 function splitWords(el) {
   const words = el.textContent.split(" ");
@@ -125,6 +169,7 @@ window.filmReady = (async () => {
   })));
 
   window.bootStage.lottie = true;
+  iplates = await initImagePlates();
   AMBIENT.init(els.ambient);
   return "ready";
 })();
@@ -194,8 +239,10 @@ window.seek = async function (tSec) {
   {
     const p = window01(t, BEAT.talk[0], BEAT.talk[1]);
     const push = 1.02 + 0.08 * ramp(t, BEAT.talk[0], BEAT.talk[1], inOut);
-    style($("talk-plate-img"), { transform:
-      `translate(-50%,-50%) scale(${push}) translateY(${-8 * p}px)` });
+    for (const [id, base] of [["talk-plate-vid","-50%"],["talk-plate-img","-50%"]]) {
+      const el = $(id);
+      if (el) style(el, { transform: `translate(${base},-50%) scale(${push}) translateY(${-8 * p}px)` });
+    }
     style($("talk-eyebrow"), enter(t, 16.9));
     style($("talk-h2"),   enter(t, 17.1));
     style($("talk-l1"),   enter(t, 18.0));
@@ -206,7 +253,10 @@ window.seek = async function (tSec) {
   /* ---- distance ---- */
   {
     const push = 1.0 + 0.08 * ramp(t, BEAT.distance[0], BEAT.distance[1], inOut);
-    style($("dist-plate-img"), { transform: `translate(-50%,-50%) scale(${push})` });
+    for (const [id, base] of [["dist-plate-vid","-50%"],["dist-plate-img","-50%"]]) {
+      const el = $(id);
+      if (el) style(el, { transform: `translate(${base},-50%) scale(${push})` });
+    }
     style($("dist-scrim"), { transform:
       `translateY(${-6 * ramp(t, BEAT.distance[0], BEAT.distance[1], inOut)}px)` });
     style($("dist-eyebrow"), enter(t, 22.5));
@@ -235,7 +285,10 @@ window.seek = async function (tSec) {
   /* ---- keepsakes ---- */
   {
     const push = 1.0 + 0.09 * ramp(t, BEAT.keepsakes[0], BEAT.keepsakes[1], inOut);
-    style($("keep-plate-img"), { transform: `translate(-50%,-50%) scale(${push})` });
+    for (const [id, base] of [["keep-plate-vid","-64%"],["keep-plate-img","-50%"]]) {
+      const el = $(id);
+      if (el) style(el, { transform: `translate(${base},-50%) scale(${push})` });
+    }
     style($("keep-eyebrow"), enter(t, 35.5));
     style($("keep-h2"), enter(t, 35.7));
     style($("keep-l1"), enter(t, 36.6));
@@ -270,6 +323,13 @@ window.seek = async function (tSec) {
     }
   }
 
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await Promise.all(iplates.map(p => seekPlate(p, tSec)));
+  /* Paint flush. Under BeginFrame control (render.js sets __BF__) rAF only
+     fires when the harness issues a beginFrame, so awaiting it here would
+     deadlock — and the beginFrame itself is the flush: all compositor stages
+     run before its draw. The double-rAF stays for live-browser preview. */
+  if (!window.__BF__) {
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }
   return "ok";
 };
