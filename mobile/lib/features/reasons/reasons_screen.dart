@@ -179,11 +179,23 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                           ? Center(
                               child: Padding(
                                 padding: const EdgeInsets.all(32),
-                                child: Text(
-                                  'Add the first reason you love $partnerName.\nOne shows up here each day.',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                      color: MilesColors.taupe, fontSize: 13,),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.asset('assets/art/lantern.webp',
+                                        width: 120, height: 120,),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'Add the first reason you love '
+                                      '$partnerName.\nOne shows up here '
+                                      'each day.',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: MilesColors.taupe,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             )

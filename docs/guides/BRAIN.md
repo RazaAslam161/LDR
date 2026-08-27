@@ -12128,3 +12128,140 @@ Owner separately produced a genuinely excellent photoreal jar (round 4):
 corked glass on wood, warm amber points, no butterflies, no label, no cold
 colour. That one is BETTER than the drawn jar for the hero slot and should
 replace it when the file lands.
+
+## §140 — The jar swap exposed two holes in my own asset law (2026-08-28)
+
+Follows §139 (committed as 0fb285e). Owner replaced the drawn jar with their
+photo. Checking it found three things, two of them mine.
+
+**1. The file landed wrong.** It arrived as `assets/art/jar.webp.png` — a
+1.2MB 16-bit PNG with a doubled extension — and `jar.webp` was deleted, so
+the tree referenced an asset that no longer existed. Converted with ffmpeg
+to a real WebP (768x768, 29,772 bytes); art dir now 56,974 bytes total,
+against a 2.5MB budget.
+
+**2. `jar.webp` HAD NO CALL SITE — my §139 claim that all five were wired
+was wrong.** chest, lantern, frame and thread were; the jar never was.
+
+**3. The asset-hygiene law had TWO holes, and the orphan sailed through both:**
+- `assets/art` was not in the scanned-directory list at all, so no art asset
+  was ever checked for orphanhood.
+- The quoted-stem escape hatch (written for mood.dart's dynamic
+  `assets/emoji/$key.json`) was UNSCOPED, so any asset whose stem is an
+  ordinary word in the codebase passed with no call site.
+FIX: `assets/art` added to the scan; the stem hatch scoped to
+`assets/emoji/` only. **Proven by mutation, not assertion:**
+
+    with a missing referenced asset: exit=1
+    with an ORPHAN asset:            exit=1
+    shipped but referenced by nothing — delete or wire: [assets/art/zz_unused.webp]
+
+**Assets re-homed so every one has a real call site:** the jar PHOTO now
+fills the wish jar's own empty state (the natural illustration for "your jar
+is empty"), and the drawn lantern moved to the reasons screen's empty state,
+which had no illustration at all.
+
+**My error, stated plainly:** I deleted the owner's source PNG immediately
+after converting, before checking the crop. The 768x768 square cuts off the
+jar's base and the table reflection — the best part of the photograph. The
+original is unrecoverable on my side. Asked the owner to drop the PNG again
+so it can be cropped keeping the base (crop window ~y=330 of the 768x1376
+original), rather than shipping a crop that loses the shot's best feature.
+
+Analyzer 0/0; asset hygiene 4/4; full suite re-running at write time.
+Nothing committed since 0fb285e.
+
+## §141 — The jar, cropped properly; and a correction to §140 (2026-08-28)
+
+**Correction first: §140 says the owner's source PNG is unrecoverable. That was
+wrong.** I deleted the copy inside the repo, not the original — it was sitting in
+`C:\Users\RAZA\Downloads\jar.webp.png` the whole time. Checking Downloads before
+declaring a file lost costs one `ls`. The claim was published without it.
+
+**The old crop was measurably wrong, not just aesthetically.** Measured the source
+by row luminance (16-bit PNG — the first pass read every pixel as lit because raw
+`.r` is 0..65535, not 0..255; `luminanceNormalized` is the correct reader):
+
+    size 768x1376 bpc=16
+    content rows 358..1375   <- cork top at 358; frame bottom is all reflection
+    content cols 109..584
+
+Jar base sits at y~1040. The old `crop=768:768:0:180` ran y=180..948 — **178px of
+dead black above the cork and a cut 92px ABOVE the base**, losing base and table
+reflection both. New crop `768:1024:0:330` then `scale=576:768` keeps cork through
+reflection at a true 3:4.
+
+**Pipeline (one lossy generation, not two):** source PNG -> ffmpeg crop+lanczos
+scale -> rgb24 PNG -> warm clamp -> libwebp q88. My first attempt encoded to WebP,
+decoded, clamped, and re-encoded — two lossy passes for a cosmetically-null gain.
+
+**On the warm law and photographs.** `tool/generate_art.dart` holds the drawn
+assets to zero pixels bluer than red. A photograph through lossy WebP cannot hold
+a per-pixel invariant: chroma subsampling reintroduces cold pixels *after* a
+clamp. Measured the distribution rather than loosening the law or distorting the
+image further:
+
+    b-r=+8 : 16 ... b-r=+9 : 4
+    cold pixels that are NOT near-black (r>0x30): 2
+
+Two pixels out of 442,368, max deviation 13/255, all in the black surround. The
+asset is warm everywhere it is visible. **Not gated by a suite test** — the warm
+law lives in the generator, which the photo does not pass through. Recorded, not
+asserted.
+
+**Call site corrected too:** `wish_jar_screen.dart` was rendering a now-3:4 asset
+in a 148x148 box, which would squash it. Now 144x192.
+
+`assets/art` 68,922 bytes against a 2.5MB ceiling. Analyzer errors=0 warnings=0
+(526 infos = the pre-existing SDK-floor baseline, §119). asset_hygiene 4/4,
+repo_hygiene 19/19. Full suite 1218/1218 passed. Committed together with §140
+and §142 — see §142 for what the commit review turned up.
+
+One trap worth the line: the first two suite runs reported nothing because the
+shell CWD had drifted to the repo root and `flutter test` answered "Test
+directory "test" not found" — the exact failure this repo's CLAUDE.md warns
+about. A background run that produces no output is not a slow run; it is a run
+that never started. Always `cd /d/Miles/mobile` in the same command.
+
+**Open / next:** owner-device checklist (`docs/guides/DEVICE-CHECKLIST.md`) is
+still the blocking item for frame timing, audio latency, Impeller go/no-go and
+parallax feel. `ui_sound_kill` still needs applying to prod after a sound build
+ships. Maps key at commit 5403769 still needs rotating.
+
+## §142 — The commit review found a generator that would have eaten the photo (2026-08-28)
+
+Owner asked for a commit of §140/§141. Reading the diff before staging turned up
+a defect the gates could not see: `mobile/assets/art/jar.webp` showed as
+`Bin 11992 -> 41720`, i.e. the photo REPLACED a drawn asset — and
+`tool/generate_art.dart` still had a `jar()` function in its work map.
+
+**The trap.** The generator writes `assets/art/<name>.png`; the shipped `.webp`
+files come from a manual convert step afterwards. So a future run of the
+generator plus that convert step would have regenerated `jar.png` and
+overwritten `jar.webp` with the drawing — destroying a photograph this repo
+holds no copy of. Nothing in the suite would have said a word: the drawn jar
+passes the warm law, passes asset hygiene, and is the right size.
+
+**FIX:** deleted `jar()` (91 lines) and its work-map entry, with the reason left
+where the next person will look — inside the map itself. Proven, not asserted:
+
+    wrote 4 files to assets/art/        <- was 5
+    jar.webp BYTE-IDENTICAL after a generator run
+
+**A free live proof of §140's hygiene fix.** That generator run left four
+intermediate PNGs in `assets/art/`, and the orphan detector I widened in §140
+caught them unprompted — a real accident, not a staged mutation:
+
+    shipped but referenced by nothing — delete or wire: [assets/art/chest.png,
+    assets/art/frame.png, assets/art/lantern.png, assets/art/thread.png]
+    00:01 +3 -1: Some tests failed.
+
+Intermediates removed; asset hygiene back to 4/4. This is also the answer to
+"why does the generator write PNGs into the shipped asset directory at all" —
+it is a footgun, but making it write to a temp dir is a change to a working tool
+outside this diff. **found, not fixed: mobile/tool/generate_art.dart — writes
+intermediate PNGs into assets/art/, which the orphan detector then fails on
+until they are deleted by hand.**
+
+**Open / next unchanged from §141:** owner-device checklist is the blocking item;
+`ui_sound_kill` still needs prod; Maps key at 5403769 still needs rotating.

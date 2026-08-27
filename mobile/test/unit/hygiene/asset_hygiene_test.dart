@@ -9,7 +9,12 @@ import 'package:flutter_test/flutter_test.dart';
 /// does the hunting.)
 void main() {
   final assetFiles = <String>[];
-  for (final dir in ['assets/emoji', 'assets/sound', 'assets/fonts']) {
+  for (final dir in const [
+    'assets/emoji',
+    'assets/sound',
+    'assets/fonts',
+    'assets/art',
+  ]) {
     final d = Directory(dir);
     if (!d.existsSync()) continue;
     for (final f in d.listSync(recursive: true).whereType<File>()) {
@@ -30,13 +35,19 @@ void main() {
       final name = path.split('/').last;
       final stem = name.split('.').first;
       // Fonts are consumed via pubspec's fonts: section; the OFL texts via
-      // LicenseRegistry loads that name them explicitly. A quoted stem covers
-      // the dynamic-path pattern (mood.dart builds 'assets/emoji/\$key.json'
-      // from mood keys that appear as string literals).
+      // LicenseRegistry loads that name them explicitly.
+      //
+      // The quoted-stem escape hatch is SCOPED TO EMOJI deliberately. It
+      // exists for one dynamic path (mood.dart builds
+      // 'assets/emoji/\$key.json' from mood keys that appear as string
+      // literals). Unscoped it is a hole: any asset whose stem happens to be
+      // an ordinary word elsewhere in the codebase passes with no call site
+      // at all — and assets/art was not even being scanned, so jar.webp
+      // shipped unreferenced through both gaps at once.
       final ok = pubspec.contains(path) ||
           lib.contains(path) ||
           lib.contains(name) ||
-          lib.contains("'$stem'") ||
+          (path.startsWith('assets/emoji/') && lib.contains("'$stem'")) ||
           path.startsWith('assets/fonts/');
       if (!ok) orphans.add(path);
     }

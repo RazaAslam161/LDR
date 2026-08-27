@@ -270,98 +270,6 @@ img.Image frame(int s) {
   return art;
 }
 
-// ── 5. jar — wish jar hero ───────────────────────────────────────────────
-//
-// Lights only. No insects, no label, nothing to read.
-img.Image jar(int s) {
-  final art = canvas(s);
-  final cx = s ~/ 2;
-  final w = (s * 0.19).round();
-  final top = (s * 0.26).round();
-  final bot = (s * 0.76).round();
-  final rnd = math.Random(7);
-
-  // The pool of light the jar throws on the surface — wide but shallow, so
-  // it reads as light on a table rather than a second glowing object.
-  final pool = glowLayer(s);
-  final poolY = bot + (s * 0.018).round();
-  for (var dy = -(s * 0.045).round(); dy <= (s * 0.045).round(); dy++) {
-    final k = dy / (s * 0.045);
-    final hw = ((s * 0.20) * math.sqrt((1 - k * k).clamp(0.0, 1.0))).round();
-    img.drawLine(pool,
-        x1: cx - hw, y1: poolY + dy, x2: cx + hw, y2: poolY + dy,
-        color: emberDeep,);
-  }
-  img.gaussianBlur(pool, radius: (s * 0.050).round());
-  addLayer(art, pool, gain: 0.45);
-
-  // Glass. Drawn row by row so the jar has SHOULDERS — the first version was
-  // a rounded rectangle, which reads as a battery, not a jar.
-  final glass = img.ColorRgb8(0x1D, 0x12, 0x15);
-  final neckTop = top - (s * 0.050).round();
-  final shoulder = top + (s * 0.075).round();
-    final baseCurve = (s * 0.022).round(); // the glass turns under, not off
-    int halfWidthAt(int y) {
-      if (y > bot - baseCurve) {
-        final k = (y - (bot - baseCurve)) / baseCurve;
-        return (w * math.sqrt((1 - k * k).clamp(0.0, 1.0))).round();
-      }
-      if (y >= shoulder) return w;
-      final k = (shoulder - y) / (shoulder - neckTop); // 0 shoulder, 1 neck
-      final e = math.pow(k, 1.7).toDouble();
-      return (w * (1 - 0.42 * e)).round();
-    }
-
-  for (var y = neckTop; y <= bot; y++) {
-    final hw = halfWidthAt(y);
-    img.drawLine(art, x1: cx - hw, y1: y, x2: cx + hw, y2: y, color: glass);
-  }
-  // Cork.
-  img.fillRect(art,
-      x1: cx - (w * 0.60).round(), y1: neckTop - (s * 0.038).round(),
-      x2: cx + (w * 0.60).round(), y2: neckTop + (s * 0.006).round(),
-      color: img.ColorRgb8(0x6B, 0x4A, 0x33), radius: (s * 0.008).round(),);
-
-  // The fireflies.
-  final lights = glowLayer(s);
-  final cores = <List<num>>[];
-  for (var i = 0; i < 34; i++) {
-    final x = cx + (rnd.nextDouble() * 2 - 1) * w * 0.78;
-    final y = top + (s * 0.06) + rnd.nextDouble() * (bot - top - s * 0.09);
-    final r = s * (0.006 + rnd.nextDouble() * 0.010);
-    img.fillCircle(lights,
-        x: x.round(), y: y.round(), radius: (r * 2.4).round(),
-        color: rnd.nextBool() ? ember : gilt, antialias: true,);
-    cores.add([x, y, r]);
-  }
-  img.gaussianBlur(lights, radius: (s * 0.018).round());
-  addLayer(art, lights, gain: 1.0);
-  for (final c in cores) {
-    img.fillCircle(art,
-        x: c[0].round(), y: c[1].round(), radius: c[2].round(),
-        color: starlight, antialias: true,);
-  }
-
-  // Glass edge last, tracing the same profile so it reads in front of the
-  // light: a warm rim on both sides, brighter where the light is strongest.
-  for (var y = neckTop; y <= bot; y++) {
-    final hw = halfWidthAt(y);
-    final k = ((y - neckTop) / (bot - neckTop)).clamp(0.0, 1.0);
-    final lit = 0.35 + 0.65 * math.sin(k * math.pi);
-    final rim = img.ColorRgb8(
-      (0x8A * lit).toInt(),
-      (0x5E * lit).toInt(),
-      (0x4A * lit).toInt(),
-    );
-    for (final x in [cx - hw, cx + hw]) {
-      img.fillCircle(art,
-          x: x, y: y, radius: (s * 0.002).round(), color: rim,
-          antialias: true,);
-    }
-  }
-  return art;
-}
-
 /// Proves what the eye would have to be trusted for otherwise: nothing cold
 /// got in, and the frame is not empty.
 void report(String name, img.Image im) {
@@ -396,7 +304,10 @@ void main() {
     'lantern': lantern(768),
     'chest': chest(768),
     'frame': frame(768),
-    'jar': jar(1024),
+    // No 'jar' here on purpose. The wish jar ships the OWNER'S photograph,
+    // not a drawing — see BRAIN §141. A jar() entry would emit assets/art/
+    // jar.png, and the convert step would then overwrite jar.webp and destroy
+    // a source this repo does not hold a copy of.
   };
   work.forEach((name, im) {
     report(name, im);

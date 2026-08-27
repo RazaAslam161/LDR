@@ -388,7 +388,9 @@ class _WishJarScreenState extends ConsumerState<WishJarScreen> {
       padding: const EdgeInsets.only(top: 40),
       child: Column(
         children: [
-          Image.asset('assets/art/lantern.webp', width: 132, height: 132),
+          // 3:4, matching the asset — a square box would letterbox it and
+          // reserve column width the photo never fills.
+          Image.asset('assets/art/jar.webp', width: 144, height: 192),
           const SizedBox(height: 16),
           Text(
             'Your jar is empty',

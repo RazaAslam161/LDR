@@ -136,8 +136,11 @@ flutter:
     # the clear. Provenance per cue lives beside its enum in
     # core/services/sound/cue.dart.
     - assets/sound/
-    # Spot illustrations, DRAWN BY tool/generate_art.dart — not generated
-    # images. 39KB for five, exact palette, no text possible.
+    # Spot illustrations. Four are DRAWN BY tool/generate_art.dart — not
+    # generated images, so exact palette and no text possible. jar.webp is the
+    # owner's photograph (3:4, cork through table reflection); its warm-clamp
+    # and crop are not reproducible from this repo — see BRAIN §141. 69KB for
+    # five against a 2.5MB ceiling.
     - assets/art/
     # The OFL texts ship because the license requires them to travel with the
     # font software; theme.dart registers both with LicenseRegistry so they
