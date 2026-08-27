@@ -10137,7 +10137,6 @@ K16 redo (phone screen AWAY from camera). Packet file to be extended.
 **Exact next step:** collect 13 clips → dailies review → owner runs the 6 →
 animate those → inserts comp → assembly (subs .ass burned) → 16:9 master +
 9:16 vertical (reframe preflight vs local crop).
-
 ## §104 — The intro film ships: rendered, gated, scored, live (2026-08-26)
 
 The 60s Emberlight intro film exists and is the product of a fully local,
@@ -10243,6 +10242,31 @@ needs a build before handsets show the new address.
 deployment reaches Ready and all nine paths still serve 200. If it errors the
 alias stays on the good deployment (fails safe), and the fix is a
 `.vercelignore` or a revisit of the setting.
+
+## §99 — HISAAB principal photography wrapped; screens are real code (2026-08-26)
+
+All 13 silent Kling shots down and verified on disk (h_k01..h_k20 in
+scripts/film-shoot/shots/, 113.75cr, dailies approved-quality; sent to owner).
+UI inserts DONE by subagent: ui_chat/ui_picker/ui_save — 336 deterministic
+frames, every string traced to app source file:line (provenance table in the
+agent report; e.g. "How this app looks" disguise_picker_screen.dart:180,
+"Forecast updated · {n} areas" disguise_notification.dart:159, calculator
+palette calculator_cover.dart). One nondeterministic frame root-caused
+(layer-promotion on .kov opacity wash) and fixed, not routed around.
+found, not fixed: disguise_picker_screen.dart:221-223 hardcodes "News" as
+the Settings›Apps name — contradicts the Play manifest label "Miles" (same
+CLAUDE.md contradiction, now visible in a user-facing string).
+
+Urdu voice: owner can't record; two TTS auditions sent (seed_audio wav +
+text2speech_v2/elevenlabs mp3, ~1cr) — owner's ear decides; "no voice" ships
+visual+score. Assembly note: phone mock ~60% frame height — bump scale before
+final insert render for cutaway sharpness.
+
+Waiting on owner: 6 round-2 web stills (K02 K10 K16-redo K17 K18-redo K19)
++ voice verdict. Then: animate the 6 (52.5cr), assembly (subs, score reuse
+of music.js theme), 16:9 master + 9:16 vertical. Connector spend ≈ 368/600.
+
+**Exact next step:** owner's stills land → animate → assemble.
 
 ## §106 — Full legal re-audit: the marketing site contradicts the legal pages on encryption and on ads (2026-08-26)
 
@@ -10446,6 +10470,33 @@ Auth email templates, redirect allow-list).
 flow is live and fix the app FAQ to describe mutual consent, or correct all
 four surfaces. It is the last known false-or-unproven promise on a legal page.
 
+## §100 — HISAAB is cut: 90.2s, scored, voiced, subtitled (2026-08-26)
+
+Rough cut delivered to owner (out/hisaab-preview.mp4, 9.7MB 540p). Master +
+9:16 vertical encoding in background. The film: 22 pieces — 16 AI shots
+(silent Kling, owner-generated keyframes under web unlimited) + 6
+deterministic inserts (title_card NEW, ui_chat/ui_picker/ui_save at 92%%
+phone scale after polish agent pass, g1_mark + g3_endcard reused from Film
+One). Assembly: assemble-hisaab.sh (hard-cut concat demuxer of CRF12
+mezzanines; trims per TL table; loudnorm -14; afade tail).
+
+Audio: owner-approved ElevenLabs Urdu — narrator line = the audition take
+itself (urdu_audition_eleven.mp3), Ammi O.S. call generated same voice
+(2.32s, lowpass 3000 as from-another-room); score = work/music2.js — 90.2s
+sectioned envelopes (cold-open drone+heartbeat, theme, minor-lean wall,
+tension w/ 64bpm lub-dub pulse, release swell at Zoya's mercy, endcard
+bells). Subs burned via subtitles=subs.ass (Segoe UI Semibold, 2 events).
+
+Owner ran K17/K18/K19 in web (all keepers, found in history after a deeper
+pull — size=16 pagination had hidden them); K02/K10/K16-redo unrun — edit
+restructured so they're unneeded (Ammi's calculator plays as HER POV
+cutaway). 3 final Kling animations 26.25cr. Ammi call ~0.3cr.
+
+Session connector spend ≈ 394/600 cap. Balance ≈ 1114.
+
+**Exact next step:** master+vertical finish → ffprobe gates + owner verdict →
+BRAIN §101 closes the production.
+
 ## §108 — The re-pairing promise was false on SIX surfaces, not four (2026-08-26)
 
 Closes the item §107 left open. Owner asked for the fix; the claim was
@@ -10589,3 +10640,368 @@ session isolated around it again rather than committing another session's work.
 **Exact next step:** the ads session commits its AdMob disclosure in
 `docs/legal/privacy-policy.md` and `faq_text.dart`, which are the last two
 files where an uncommitted legal change is sitting in the tree.
+
+## §110 — The film's false claims are fixed in the composition; the RE-RENDER is blocked on an active encode (2026-08-26)
+
+Owner asked for the film to be re-rendered without the false claims (§106 G5).
+The copy is corrected. **The render is NOT done, and this section says so
+plainly rather than burying it.**
+
+**Why the film mattered more than the HTML.** §107 fixed the same three claims
+on the site by editing text. The film bakes them into pixels, and BRAIN §104
+sends it to the Play listing — where it stops being website body copy and
+becomes *promotional material* under Deceptive Behavior, a stricter surface.
+
+**Established before writing a word of replacement copy:**
+- **No voiceover.** `composition/` has zero audio refs; the film is kinetic
+  typography and music is muxed in afterwards by ffmpeg. So on-screen text is
+  the whole claim surface — a text fix is a complete fix. (Had there been VO,
+  editing text would have left the false claim in the narration.)
+- **Calls really ARE end-to-end encrypted.** Live policy §2: *"Voice and video
+  are peer-to-peer and encrypted in transit (DTLS-SRTP)… the encrypted stream
+  is relayed through Cloudflare, which sees the relayed packets and both
+  devices' IP addresses but not the contents."* So "End-to-end encrypted chat
+  and calls" was **half** true, not wholly false. Only chat had to go.
+
+**Four strings changed in `composition/index.html`. Text only — no timing, no
+layout, no JS, no `film.js`:**
+
+| id | was | now |
+|---|---|---|
+| `talk-l1` | End-to-end encrypted chat and calls. | End-to-end encrypted calls. |
+| `talk-chip` | XChaCha20-Poly1305 | DTLS-SRTP |
+| `sec-l2` | No ads of your life. | Your data is never sold. |
+| `sec-l3` | Keys that exist only on your two phones. | Vault and memories, sealed on your phone. |
+
+`talk-l2` — *"Nowhere in between can read them — including us."* — was left
+**unchanged and is now true**, because `talk-l1` no longer claims chat. The
+chip had to move too: XChaCha20-Poly1305 is the vault/memories cipher, and
+leaving it beside a calls line would have been a NEW inaccuracy, not a fix.
+`sec-l3` was false because a password-derived sealed copy of the key sits
+server-side (policy §3), so "keys that exist only on your two phones" is not
+what the system does.
+
+**THE RENDER IS BLOCKED, and this is the headline.** Another session owns the
+film and is in an active render/encode loop on this machine:
+```
+08:23:32  ffmpeg 15656  -i out/frames/f%04d.png ... libx264   (exited 08:30:07)
+08:30:33  ffmpeg  8148  -i out/frames/f%04d.png ... libx264   (started immediately)
+```
+`render.js` writes `out/frames/*.png`, which is exactly what those encodes are
+reading. Running it would have corrupted their output mid-read. Nothing was
+rendered, verified or encoded by this session — `out/`, `web/miles-intro.webm`
+and the poster are untouched.
+
+**The live film still carries the old claims.** `web/miles-intro.webm` is
+whatever was last encoded, and the master those encodes are producing came
+from frames rendered BEFORE this fix. Messaged the peer session (`miles-7c`)
+with the change and an explicit request not to publish that master as-is.
+
+**To finish, once the machine is free** (from `scripts/film-render/`):
+```
+node render.js        # ~10-15 min, resume-aware
+node verify.js        # determinism gate — MUST pass before encoding
+.\encode.ps1 web      # -> ../../web/miles-intro.webm (2-pass VP9, <=10MB)
+.\encode.ps1 poster   # -> ../../web/assets/img/film-poster.jpg
+```
+The README forbids encoding until `verify.js` passes; that gate is not mine to
+skip.
+
+**Still open:** the render above; plus `app-ads.txt` 404, the consent gate that
+cannot reach the privacy policy, the News cover's undisclosed BBC/Al Jazeera/
+NPR flows, the unmentioned data export, and the two prod-only surfaces
+(Supabase Auth email templates, redirect allow-list).
+
+**Exact next step:** whoever holds the film renders from the corrected
+composition and re-encodes `web/miles-intro.webm`, then confirms the four
+strings above by stepping the master — until then the site plays a film that
+contradicts the site's own pages.
+
+## §110 — HISAAB v2: the owner's scene, cut the owner's way (2026-08-26)
+
+(Numbering note: this session's earlier sections are §92–§100; §100 sits AFTER
+§107 in file order because five sessions appended concurrently — same class as
+the duplicate §65. Read by header, not position.)
+
+Owner rejected v1's save scene (Ammi/calculator + shade "makes no sense",
+"looks AI generated") — root cause honestly recorded: the brief's ONE
+non-negotiable image was sibling-suddenly-close + instant notification-bar
+swipe; this session invented a different scene around it. v2 restores the
+owner's scene: Zoya bursts in excited to show her phone → sits shoulder to
+shoulder → Ayesha's instant swipe → shade covers the chat, only reskinned
+"News update / Weather" rows visible (ui_swipe insert, strings traced to
+disguise_notification.dart, shade mechanic pixel-true — subagent proved
+full-range byte determinism after root-causing a layer-promotion AA race) →
+Zoya shows her meme → both laughing (owner-generated stills under web
+unlimited; 2 Kling animations 17.5cr; thumb insert free via zoompan).
+
+v2 timeline 86.8s, 24 pieces, calculator/ui_save CUT, k01 repurposed into the
+kitchen close-call that MOTIVATES the cover choice. Score recomposed
+(music2.js): tension+64bpm heartbeat under the sister sequence, silence at
+the swipe, swell on the laugh. 2 spoken lines only (Ammi call 37.4s,
+ElevenLabs narrator 76s — owner-approved voice). Subs .ass, 2 events.
+Preview delivered; master + 9:16 vertical encoding in background.
+
+Cross-session: miles-62's 4 corrected film-render strings verified NOT
+present in either of this session's films. Site slot conflict surfaced to
+owner (their §104 kinetic film is live; this session's cinematic film master
+survives at scripts/film-shoot/out/miles-intro-master.mp4) — owner to rule;
+both sessions agreed not to re-push meanwhile. web/miles-intro.webm was
+observed 0 bytes mid-write at 08:30 by the other stream's encode.
+
+Connector spend total ≈ 429 of cap 600 (HISAAB ≈ 227). Balance ≈ 1079.
+
+**Exact next step:** owner verdict on v2 → masters' ffprobe gates → deliver
+both aspect files → close with §111.
+
+## §111 — The narrator saga ends on Evie: v3 Urdu killed, v4 English delivered (2026-08-26)
+
+v3 (83.13s, 10-line Urdu narration on Maeve) was rejected by owner: voice "not
+even close" — robotic, slow, sparse. ROOT CAUSE recorded: romanized Urdu
+through English ElevenLabs presets phoneme-guesses → flat delivery; the
+connector exposes no style/emotion knobs; three young-preset Urdu auditions
+(Evie/Daisy/Gracie, all age:"young" per result metadata) rejected identically.
+Constraint named to owner honestly: Urdu TTS quality ceiling on this route.
+Owner chose English narration after hearing a same-line English A/B (native
+language = the robotic quality vanishes); picked EVIE (7a6845a2).
+
+v4: 19 excited-storyteller English lines written; Evie ran ~25% long → fix
+WITHOUT regeneration: atempo 1.11 (inaudible), 3 connective lines dropped
+(covers-list/festival/sisters-laugh — the visuals say them), 16 lines
+HARD-PINNED to shots with overlap-guarded cues computed from actual probed
+durations ("One swipe. That's all it took." lands 57.5 exactly on the swipe;
+"phones are opened in front of everyone" on the face-down-phone macro). Ammi
+call retimed 34.08; subs now 1 event (the Urdu call); old Urdu closer removed
+from mix (3-input graph). Verified: voice at 5 probe points -15..-21dB, peak
+-1.18, 83.2s. Preview delivered; master+vertical encoding.
+
+Ops lessons this leg: ffmpeg 9 dropped -filter_complex_script → use
+-/filter_complex FILE; audio TTS bills ~0.5-0.7/elevenlabs line; CDN
+materialization poke (§ prior) held for all 19 (per-id by_ids + immediate
+fetch, 19/19). Narration total spend ~12cr; production ≈ 447 of cap 600.
+
+**Exact next step:** owner verdict on v4 → masters' bt709/duration gates →
+deliver 16:9 + 9:16 → §112 closes.
+
+## §112 — HISAAB final: two languages, the hook, and the books (2026-08-26)
+
+Owner iterations closed: v4 English narration (Evie, young preset — owner-
+picked after the Urdu-TTS root cause was named: Urdu through English engines
+= the robotic sound; 4 voices rejected before the diagnosis); Urdu variant
+delivered anyway on explicit ask (17 lines, ceiling flagged); "Suniye
+suniye" opening replaced with the social hook formula — "One swipe just
+saved Ayesha's biggest secret. Let me tell you how." over the swipe cold
+open, both languages. Found-and-fixed in passing: both beds overflowed
+83.13s so the final line clipped at the trim (v4 shipped that way, masked
+by the fade) — line e07/u07+u10 dropped, guard now asserts <=83.0.
+
+Deliverables in scripts/film-shoot/out/: hisaab-{master,vertical}{,-urdu}
+(.mp4, bt709-retagged, 24fps 83.2s) + preview pairs (sent in chat). Beds
+rebuilt via work/bb_{en,ur}.sh (generated, deterministic given inputs).
+Subs: subs.ass (EN cut: hook+18 lines+call), subs-urdu.ass (all translated).
+
+Audio spend for the entire voice saga (v3 Urdu + auditions + v4 English +
+Urdu variant + hooks) ≈ 20cr. Production connector total ≈ 480 of cap 600;
+images all owner-web-free; balance ≈ 1029 of 1800.
+
+**Exact next step:** owner verdict on the hook pair → if good, final ledger
+row + close. Site-slot decision (kinetic vs cinematic film) still owner's.
+
+## §113 — The film's determinism gate went red four times; the renderer is now BeginFrame-controlled (2026-08-26)
+
+Continuation of §104's film, upgraded with the three Higgsfield motion plates
+(§104's zero-credit stills → seedance_2_0 image-to-video, ~108 credits). The
+determinism gate (verify.js, full 1800-frame double render, SHA-256) went red
+FOUR times before the root cause fell. The fix history matters because three
+plausible fixes did nothing:
+
+1. **12/1800** — hypothesis: stepping all three `<video>` decoders every frame.
+   Fix: seek only inside beat windows. → **8/1800, disjoint frames.**
+2. Hypothesis: tile-raster thread ordering. Fix: `--num-raster-threads=1`.
+   → **7/1800, disjoint again** (and half the render speed).
+3. Hypothesis: video compositor layers as wobble amplifier. Fix: replaced
+   `<video>` with pre-extracted PNG sequences (ffmpeg, forced bt709 in-matrix;
+   `composition/assets/plates/{talk,distance,keepsakes}/f000-192.png`, stepped
+   by `img.src` swap + `decode()` in film.js). → **7/1800 AGAIN.**
+4. **Actual evidence pass** (should have been step 1): amplified pixel diff of
+   a failing pair = uniform ±1-LSB noise on all DARK pixels, zero diff at the
+   bright bloom core, seams at 512px raster bands. Re-render matched pass B
+   byte-exactly on 2 of 3 probes, and the third flipped to a SECOND stable
+   value that a later pass reproduced exactly: **bistable color-conversion
+   rounding** — composite sometimes runs the raster→display conversion,
+   sometimes its identity fast path. Steep-end sRGB rounding = ±1 in darks.
+
+**The renderer rework (render.js):**
+- `headless: "shell"` + `--enable-begin-frame-control` +
+  `--run-all-compositor-stages-before-draw`; every frame is ONE explicit
+  `HeadlessExperimental.beginFrame` whose synchronous draw returns the PNG.
+  (The run-all flag deadlocks WITHOUT beginFrame driving — §104 noted the
+  deadlock, this is the pairing that works.)
+- `--force-raster-color-profile=srgb` beside `--force-color-profile=srgb`:
+  conversion becomes identity in every path — the bistability collapses.
+  Proven: slice f0000-99 ×3 passes byte-identical (previously flipped 1-in-3).
+- Serialized beginFrame queue + 100ms pump (boot and img.decode need
+  lifecycle frames; overlapping protocol sends error).
+- Throwaway warm-up capture at boot: the process's FIRST composite is a
+  one-frame variant (proven on f0480); no real frame may be the first draw.
+- Per-frame 45s watchdog → browser relaunch + retry once (cross-boot
+  determinism proven, so a relaunch boundary is byte-safe).
+- film.js's double-rAF flush is skipped under `window.__BF__` (rAF never
+  fires un-driven under BeginFrame control — it would deadlock).
+
+**§110's four corrected strings are in every frame rendered today** — the
+smoke frames show "End-to-end encrypted calls." and the DTLS-SRTP chip. The
+tainted master encoded past the first red gate was deleted; §110's "don't
+publish that master" is honored by construction.
+
+**Verified:** two 100-frame slices ×3 passes each byte-identical under the new
+renderer; plate visual parity vs the video pipeline 48/41 dB PSNR (keepsakes
+lower only from flame-flicker frame phase, eyeballed equal).
+**Open:** full 1800×2 gate + encodes running (this session); then music mux
+(Moon Rise), webm deploy via commit+push (Vercel root='web'), poster
+unaffected (f0270 carries none of the changed strings).
+**Next step:** on green gate — mux, send to owner, deploy, confirm live webm.
+
+## §114 — The motion-plate film SHIPPED: gate green 1796/1800, site webm swapped (2026-08-26)
+
+Closes §113 (and §110's "exact next step").
+
+**Gate (run 4, BeginFrame renderer):** `determinism gate PASSED — 1796/1800
+frames byte-identical across two full passes`; 4 intermittent mismatches
+[535, 979, 1404, 1409], within the pre-existing ≤5 tolerance. The chain's only
+failure was cosmetic: encode.ps1's post-encode ffprobe prints to stderr and
+PowerShell's NativeCommandError killed the chain AFTER the master encode
+finished — the web encode was simply re-run. `found, not fixed:
+scripts/film-render/encode.ps1 — stderr from the info probe reads as a fake
+failure under strict invocation`.
+
+**Artifacts, all verified by pasted output this session:**
+- `out/miles-intro-master.mp4` — 13,382,447 B, from the gated pass.
+- `out/miles-intro-music.mp4` — 14,878,495 B, 60.000 s, h264+aac 192k, Moon
+  Rise faded 0-1.5s in / 57-60s out; video stream MD5 e4d699e4a47ad4d95a…
+  IDENTICAL to master (copy mux, not re-encode). Sent to owner; owner still
+  owns the YouTube upload.
+- `web/miles-intro.webm` — 9,350,594 B (1.1 MB under the 10 MB budget),
+  vp9+opus 96k, VP9 stream MD5 df53fd901304c04f4… unchanged by the music mux.
+- Poster NOT re-encoded: f0270 (hero) carries none of §110's four strings.
+
+**Deploy:** commit `45d5c40` = ONLY `web/miles-intro.webm` via pathspec commit
+(`git commit -- <path>`) because BRAIN.md and composition/index.html sat MM —
+another session's hunks are STAGED right now; a plain commit would have
+shipped them. Pushed; root='web' means push IS the deploy.
+
+**§110's ask is met:** the live film now carries the corrected four strings
+(rendered into every frame; confirmed on smoke frames before the full pass).
+
+**Open, not mine:** encode.ps1 stderr quirk above; film sources
+(render.js/film.js/index.html plate swap, §113) remain uncommitted in the
+working tree for the owner; the §110 non-film items (app-ads.txt 404, consent
+gate, News cover disclosures, data export, prod Auth surfaces).
+**Next step:** none for the film — it is live once the in-flight
+content-length check against the deployment confirms 9,350,594 B.
+
+## §115 — The commit audit: five sessions' work was in the working tree and none of it was in git (2026-08-27)
+
+Owner asked for an audit of every session's work — committed or not, pushed
+or not — and for whatever was neither to be finished. The tree held 13
+modified files and 28 untracked ones, from at least five separate
+workstreams, and `origin/fix-sprint` was byte-for-byte HEAD: **nothing at all
+had been pushed since 45d5c40.**
+
+**The headline, because it is the thing that was actually at risk.** 45d5c40
+committed `web/miles-intro.webm` — 9.35 MB of shipped, live, deployed film —
+and its own message says the sources were "left uncommitted for their
+owners". They still were. The binary the site serves had **no source in git**,
+including the four corrected claim strings that same commit credits itself
+with carrying. A `git checkout` of this repo could not have reproduced the
+file it ships. That is now closed by `c74140c`.
+
+**Git truth, established first:**
+```
+## fix-sprint...origin/fix-sprint      (no ahead/behind marker)
+git rev-list --left-right --count origin/fix-sprint...HEAD  ->  0   0
+git stash list                          ->  (empty)
+git worktree list                       ->  D:/Miles 45d5c40 [fix-sprint]  (only one)
+git merge-base --is-ancestor 880ef6f fix-sprint  ->  YES
+```
+The two `remotes/origin/claude/*` branches are 880ef6f, an ancestor of
+fix-sprint — fully contained, nothing to recover there. No stashes, no second
+worktree, no second clone.
+
+**Committed, in five topic commits, explicit pathspecs only — never `-A`:**
+| sha | what |
+|---|---|
+| `94d0f18` | feat(ads) — AdMob banner, server kill switch, migration, 2 test suites |
+| `f2d8d3d` | docs(legal) — the "no ads" claims in policy, FAQ and the Play audit |
+| `c74140c` | feat(film) — render.js / film.js / composition, the sources behind the shipped webm |
+| `0d2e604` | feat(film-shoot) — HISAAB toolkit: assembly, inserts, prompts, ledger, subs |
+| this one | docs(brain) — §99, §100, §110×2, §111–§114 from four sessions, plus this |
+
+`docs/guides/BRAIN.md` and `scripts/film-render/composition/index.html` were
+sitting `MM` — partially staged by earlier sessions. Both were unstaged with
+`git restore --staged` before the first commit, after proving the worktree
+was a strict superset of the index (`grep -c` for the staged §110 heading and
+for `DTLS-SRTP`), so nothing was dropped and no session's message got another
+session's hunks.
+
+**Gates, run on the full tree before the first commit:**
+```
+flutter analyze   ->  448 issues found. (ran in 259.7s)
+                      severity breakdown: 448 info, 0 error, 0 warning
+                      issues in lib/core/ads or the two new tests: NONE
+flutter test      ->  02:29 +1185: All tests passed!
+flutter test test/unit/core/ads_gate_test.dart test/widget/anchored_banner_band_test.dart
+                  ->  00:01 +14: All tests passed!
+```
+448 info-level lints are pre-existing `very_good_analysis` suggestions across
+`tool/` and `lib/`; the PLAY-READINESS-AUDIT's "0 errors / 0 warnings" claim
+still holds and is now re-verified rather than inherited.
+
+**Secret scan** over every committed path (`api_key|secret|password|token|
+service_role|eyJ…|sk-…|AIza…|xox…`): no hits. The AdMob App ID in the
+manifest and the unit id in `ads_service.dart` are Google's published sample
+ids — placeholders, not credentials. `web/app-ads.txt` carries a zeroed
+publisher line. `${mapsApiKey}` is a build placeholder and pre-existing.
+
+**Ads are not live and cannot become live by accident.** Three independent
+stops: `liveBannerUnitId` is `''` so a release build has no unit;
+`app_release.ads_enabled` defaults false; and the migration is **NOT applied
+to production** — confirmed against the live ledger, whose last entry is
+`20260825235216 restore_needs_both_of_them`.
+
+**Still open (found, not fixed):**
+- `20260824020000_ads_are_a_row_not_a_release.sql` is committed and unapplied.
+  Staging first, then prod, per the project rule.
+- The **Play Console Data Safety declaration** still says no ads. It is not in
+  this repo and no commit can fix it. `google_mobile_ads` merges
+  `com.google.android.gms.permission.AD_ID` into the manifest; that must be
+  declared before the next upload, regardless of the switch being off.
+- The real AdMob App ID, banner unit id and `app-ads.txt` line are all
+  placeholders awaiting a publisher account.
+- `assemble.sh` and `assemble-hisaab.sh` hardcode `/d/Miles`. This repo has
+  already moved once (E:\LDR → D:\Miles) and took every absolute path with it.
+- `.claude/launch.json`'s `film-shoot-review` entry points at
+  `scripts/film-shoot/work/serve.js`, and `work/` is gitignored — the entry
+  resolves on this machine and on no other.
+- **Repo↔prod migration reconciliation is still not clean.** Nine prod
+  migration names have no repo counterpart by name, and a token grep found no
+  covering DDL for several (`presence_writes_scoped_to_own_couple`,
+  `shared_media_index_exact_link_predicate`,
+  `call_invites_policy_consolidation`, `redeem_cleanup_only_touches_an_empty_couple`,
+  `dual_consent_guard_vault_afterglow_rituals`, `no_message_push`). A name
+  grep is weak evidence and this is NOT a finding of lost DDL — it is a
+  finding that nobody can currently prove the repo reproduces production.
+- Everything §110 and §114 already listed: `app-ads.txt` 404, the consent gate
+  that cannot reach the privacy policy, the News cover's undisclosed
+  BBC/Al Jazeera/NPR flows, the unmentioned data export, and the two prod-only
+  surfaces (Supabase Auth email templates, redirect allow-list).
+- Unchanged from §75: chat decryption still failing in the field, so
+  `chat_cipher_only` stays false; the Maps key at `5403769` still needs
+  rotating; builds 49/51/52 still exist in no commit.
+
+**Exact next step:** apply `20260824020000` to staging
+(`zqltaobarpcuantrqxha`), verify the column reads back false, then prod — and
+before any build that flips it, update the Play Console Data Safety form. Do
+not raise `app_release.ads_enabled` on either project until a real banner unit
+id exists; with `liveBannerUnitId` empty it would reserve 63dp and request
+nothing.
