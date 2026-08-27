@@ -91,6 +91,21 @@ class ReleaseGate {
   /// "stop", because the failure mode of guessing wrong is unreadable messages.
   static bool chatCipherOnly = false;
 
+  /// Whether the fleet's UI sounds have been remotely silenced.
+  ///
+  /// Named as a KILL, not an enable, because the safe direction here is the
+  /// opposite of the flag above. Cipher-only must fail OFF; a
+  /// working sound layer must fail ON — an unreachable gate or an unmigrated
+  /// environment should leave sound following the on-device toggle, not strip
+  /// a shipped feature from every offline client. `== true` on an absent
+  /// column reads false, and false means "not killed".
+  ///
+  /// The kill exists for one scenario: a device-population audio bug found in
+  /// the field — an OEM Vorbis path that ANRs, a focus fight with a dialer —
+  /// where the way back has to be one UPDATE, not a release cycle waiting on
+  /// installs.
+  static bool uiSoundKilled = false;
+
   /// Which channel this install is — 'sideload' or 'play', as the Android
   /// side's BuildConfig reports it. The two fleets need separate floors:
   /// raising min_build tells sideload clients to install the published APK
@@ -148,11 +163,14 @@ class ReleaseGate {
     // the sideload fleet quietly loses its only update channel. So the column
     // list degrades in steps, newest column first, and each step gives up only
     // what the environment below it cannot answer.
+    const withSoundKill = 'min_build, min_build_play, latest_build, message, '
+        'apk_url, apk_sha256, latest_version_name, chat_cipher_only, '
+        'ui_sound_kill';
     const withCipher = 'min_build, min_build_play, latest_build, message, '
         'apk_url, apk_sha256, latest_version_name, chat_cipher_only';
     const legacy = 'min_build, latest_build, message, '
         'apk_url, apk_sha256, latest_version_name';
-    const columnSets = [withCipher, legacy];
+    const columnSets = [withSoundKill, withCipher, legacy];
     for (final columns in columnSets) {
       try {
         final row = await SupabaseService.client
@@ -205,7 +223,14 @@ class ReleaseGate {
     // this must read false. Anything other than an explicit true keeps chat
     // writing plaintext, which is the safe direction.
     chatCipherOnly = row['chat_cipher_only'] == true;
-    if (_blocked != wasBlocked || latestBuild != wasLatest) {
+    final wasSoundKilled = uiSoundKilled;
+    // `== true` again, but note the polarity: absent reads false, and false
+    // means sound stays ON (following the local toggle). The safe failure for
+    // this flag is a working feature, which is why the column is a kill.
+    uiSoundKilled = row['ui_sound_kill'] == true;
+    if (_blocked != wasBlocked ||
+        latestBuild != wasLatest ||
+        uiSoundKilled != wasSoundKilled) {
       revision.value++;
     }
     // Unconditional, and it is not only a trace: reading buildStamp is what

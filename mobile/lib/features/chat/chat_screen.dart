@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/couple_key.dart';
@@ -161,6 +163,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _sendTextFast(String coupleId, String t) async {
     final body = t.trim();
     if (body.isEmpty) return;
+    MilesSound.cue(Cue.send);
     final replyId = _takeReplyId();
     final id = _uuid.v4();
     final myUid = SupabaseService.currentUserId;
@@ -1173,7 +1176,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // I'm looking at the chat, so their message is read the moment it lands.
     // Edge-triggered, where the old 5s timer re-acked a seq that had not moved
     // twelve times a minute.
-    if (!mine) _ackRead('incoming');
+    if (!mine) {
+      _ackRead('incoming');
+      // A NEW message from them, LIVE — only the broadcast path cues. The
+      // duplicate branch above keeps a broadcast+db echo pair to one sound,
+      // and gating on source keeps a reconnect catch-up of N missed messages
+      // from playing N chimes in a row.
+      if (source == 'broadcast') MilesSound.cue(Cue.receive);
+    }
     // Don't yank a user who's reading history; show a chip instead.
     if (mine || atBottom) {
       _scrollToNewest();

@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/presence_route_observer.dart';
-import 'package:miles/core/realtime/screen_presence.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 
 /// Presence drives what one partner believes the other is doing. A wrong value
@@ -109,45 +108,41 @@ void main() {
         'Prefs',
       ]) {
         expect(joinableRouteFor(private), isNull, reason: '$private is private');
-        expect(joinableTabIndex(private, showTouch: true), isNull, reason: '$private is private');
+        expect(joinableTabIdentity(private), isNull,
+            reason: '$private is private',);
       }
     });
 
     test('a screen nobody published is not joinable', () {
       expect(joinableRouteFor(null), isNull);
-      expect(joinableTabIndex(null, showTouch: true), isNull);
+      expect(joinableTabIdentity(null), isNull);
       expect(joinableRouteFor('Some Future Screen'), isNull);
     });
 
-    test('tab screens join by index, not by route', () {
-      // They live inside the shell, so pushing '/app/chat' would 404.
-      expect(joinableTabIndex('Chat', showTouch: true), 1);
+    test('tab screens join by identity, not by route', () {
+      // They live inside the shell, so pushing '/app/chat' would 404 — and
+      // identity, not a bar index: an index was only meaningful against the
+      // exact flag set the bar was built with.
+      expect(joinableTabIdentity('Chat'), 'chat');
       expect(joinableRouteFor('Chat'), isNull);
-      // Index 2 is the camera button — a capture action, not a room.
-      for (final showTouch in [true, false]) {
-        expect(joinableTabs(showTouch: showTouch).values, isNot(contains(2)),
-            reason: 'camera is joinable with showTouch: $showTouch',);
-      }
+      // The camera is a capture action, not a room.
+      expect(joinableTabIdentity('Camera'), isNull,
+          reason: 'camera must never be joinable',);
     });
 
-    test('tab indices match the bottom nav in BOTH shapes', () {
-      // Touch sits in the middle and disappears with modest mode, sliding
-      // Closer down one. A fixed table landed on the right tab only because the
-      // shell clamps an out-of-range index — so this walks both shapes.
-      for (final showTouch in [true, false]) {
-        final visible = visibleTabScreens(showTouch: showTouch);
-        joinableTabs(showTouch: showTouch).forEach((name, index) {
-          expect(visible[index], name,
-              reason: 'showTouch: $showTouch — tab $index is ${visible[index]}, '
-                  'not $name',);
-        });
+    test('every room identity survives the round trip', () {
+      // Identity replaced the index map precisely because indices were only
+      // meaningful against one flag shape. Identities are shape-free; the
+      // shell resolves a hidden room ('touch' under modest mode) to Home at
+      // selection time, which its own logic owns.
+      for (final (screen, id) in [
+        ('Home', 'home'),
+        ('Chat', 'chat'),
+        ('Touch', 'touch'),
+        ('Closer', 'closer'),
+      ]) {
+        expect(joinableTabIdentity(screen), id);
       }
-    });
-
-    test('Touch is unjoinable exactly when it is not on the bar', () {
-      expect(joinableTabs(showTouch: true).containsKey('Touch'), isTrue);
-      expect(joinableTabs(showTouch: false).containsKey('Touch'), isFalse,
-          reason: 'joining a tab that is not rendered lands on another one',);
     });
   });
 
@@ -269,7 +264,7 @@ void main() {
 
     test('the shell reports whichever tab is selected', () {
       final (obs, c) = build();
-      c.read(shellTabProvider.notifier).state = 1;
+      c.read(shellTabProvider.notifier).state = 'chat';
       obs.didPush(page('/app'), null);
       expect(c.read(myScreenProvider), 'Chat');
     });

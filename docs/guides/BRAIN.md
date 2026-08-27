@@ -11058,6 +11058,39 @@ reconciliation and §110/§114 items are untouched by the owner's instruction.
 items — the repo↔prod migration reconciliation is the one that can still be
 hiding lost DDL.
 
+## §117 — Sensory Overhaul begins: P0 sound-kill rail is in (2026-08-27)
+
+Owner approved the full Sensory Overhaul plan (plan file: the whole-app motion +
+sound + generated-asset program; two Explore recons and two Plan designs are in
+the session record). Locked decisions: whole app phased · sound ON by default
+with a Settings toggle · owner generates static art from a prompt pack (Nano
+Banana Pro) · Higgsfield credits (523.77 at approval) reserved for motion/3D,
+expected spend ~60–100, cap 150.
+
+**P0 — rollout safety rail, done and verified this session:**
+- `supabase/migrations/20260827100000_ui_sound_is_a_switch_not_a_release.sql` —
+  additive `app_release.ui_sound_kill boolean not null default false`, polarity
+  INVERTED vs ads on purpose (absent/false = not killed = sound follows the
+  local toggle; the safe failure for sound is a working feature). Applied to
+  STAGING and read back: boolean, NOT NULL, default false. **Prod NOT applied
+  yet** — waits until the sound client ships (degrading sets make order safe).
+- `mobile/lib/core/app/release_gate.dart` — new `withSoundKill` column set
+  PREPENDED to `columnSets` (its own generation; never folded into withAds),
+  `uiSoundKilled` static (`== true` parse), included in `revision` change
+  detection. NOTE: this file also carries the ads session's uncommitted work —
+  anchored edits only, and §116 says ad work is skipped, so do not assume the
+  ads hunks are moving.
+- `mobile/test/unit/core/sound_kill_gate_test.dart` — 4 tests: absent column ≠
+  kill, only explicit true kills, revision bump on flip (and not on repeat),
+  and a source pin that `columnSets = [withSoundKill, withAds…]` stays
+  prepended. `flutter analyze` 0 err/0 warn (449 infos baseline), gate tests
+  14/14, hygiene 52/52.
+
+**Next step:** F foundations — bundle Fraunces/Inter and remove google_fonts
+(28 call sites, 7 files), then DissolveIn page transitions, TabDissolve,
+GiltSelect, EmberPress, BreathingGlow compositor-safe rewrite, EmberBackground
+drawAtlas rewrite. Nothing committed, per standing rule.
+
 ## §118 — google_mobile_ads is out of the tree, and the ad claims are out of five surfaces (2026-08-27)
 
 Owner took exit 2 from §116: remove the SDK, unwind the legal copy. Done. The
@@ -11221,3 +11254,648 @@ build nobody has asked for.
 
 **Exact next step:** none. If §117's session sees a lint count move again,
 check `pubspec.yaml`'s `sdk:` bound before checking their own diff.
+
+## §118 — Sensory Overhaul F1–F5: fonts bundled, the app moves (2026-08-27)
+
+Follows §117. All verified this session: `flutter analyze` 0 err / 0 warn,
+full suite **1182/1182 green**, motion suite 7/7.
+
+- **F1 fonts**: Fraunces 300/300i/400/400i + Inter 400/500/600/700 static TTFs
+  in `mobile/assets/fonts/` (460KB, OFL texts shipped + registered via
+  LicenseRegistry in `MilesType.registerLicenses()`); `fonts:` section in
+  pubspec; google_fonts REMOVED (28 call sites in 7 files renamed to
+  `MilesType.fraunces/inter` — same signature, mechanical). PERF_PLAN hotspot
+  #9 (runtime font fetch) is dead; opaque_modal_surfaces_test lost its
+  runZonedGuarded fetch-absorbing scaffolding and now rasterizes real glyphs.
+- **F2 DissolveIn**: `lib/core/ui/route_motion.dart` — fade-through
+  PageTransitionsBuilder (in: fade 0→1 over front 70% + 14px rise; out: dim
+  to 0.85; spec's blur cut per hygiene law), wired ONCE via
+  `pageTransitionsTheme` — all ~45 routes + every MaterialPageRoute push move
+  now. `dissolvePage()` (go_router CustomTransitionPage, 420ms) ready for
+  hero routes.
+- **F3 TabDissolve** (`lib/core/ui/tab_dissolve.dart`) wraps the shell's body
+  swap — first tab transition the app has ever had.
+- **F4 GiltSelect** (`lib/core/widgets/gilt_nav_icon.dart`): two-layer opacity
+  cross-fade + 2px lift + one-shot gilt ring; nav indicator pill now
+  transparent; camera destination deliberately stays plain (it is a push).
+- **F5 EmberPress** (`lib/core/widgets/ember_press.dart`): scale 0.97
+  press/release on MilesMotion tokens, light haptic, hover/focus 1.015 via
+  AnimatedScale, sound-hook callback for the coming audio layer. First call
+  site: the Home partner avatar.
+- All new controllers honor `MilesMotion.off()` (finished screen, zero
+  tickers — asserted by `test/widget/motion/motion_foundations_test.dart`).
+
+**Debugging lessons paid for and recorded:**
+1. A 2-hour "hang" was an orphaned process holding Flutter's startup lock —
+   and my own `| tail` piping swallowed the wait message. Run gates with
+   output to a log file, never through a silencing pipe.
+2. `Matrix4.getMaxScaleOnAxis()` CANNOT detect a uniform 2D scale —
+   `Transform.scale(s)` builds diagonal(s, s, 1.0) and the method returns the
+   untouched Z=1.0. Read `transform.storage[0]`. Two "failures" were this
+   ruler, not the widget.
+3. In widget tests, `MediaQuery(disableAnimations)` wrapped AROUND MaterialApp
+   is silently discarded (WidgetsApp rebuilds MediaQuery from the view) —
+   inject via `MaterialApp.builder`. And build ThemeData ONCE per test file:
+   a fresh instance per pump makes AnimatedTheme animate and leaks a ticker
+   into transientCallbackCount assertions.
+
+**Concurrent-session note:** the ads cancellation (§116) landed underneath my
+edits mid-session — release_gate.dart lost its withAds generation and the
+other session correctly folded my ui_sound_kill into a clean `withSoundKill`
+set; my source-pin test was the stale piece and now pins the shape (head +
+older-generation purity), not a named neighbour.
+
+**Open / next:** F6 BreathingGlow compositor-safe rewrite, F7 EmberBackground
+drawAtlas rewrite (both fix documented law violations), then M motions.
+Adversarial review of F1–F5 running as a background workflow — findings land
+in a follow-up section. Nothing committed.
+
+## §119 — Sensory Overhaul F6+F7: the two law-breakers are law-abiding (2026-08-27)
+
+Follows §118. Verified: analyzer 0 err / 0 warn, full suite **1191/1191**,
+motion suite 14/14 (incl. 4 new EmberBackground behavioral tests).
+
+- **F6 BreathingGlow rewrite** (`core/widgets/breathing_glow.dart`): the
+  animated BoxShadow (blur 16→52/frame — the documented motion-law violation)
+  is now a STATIC radial-gradient halo in its own RepaintBoundary, moved only
+  by ScaleTransition (0.9→1.25) + FadeTransition (0.4→1.0); child breathes
+  0.98→1.04 as before. minGlow/maxGlow/borderRadius params retired (no caller
+  passed them). off() = mid-breath finished state, zero tickers, live-checked
+  in didChangeDependencies. Pinned by test: the glow's Decoration object is
+  IDENTICAL across frames.
+- **F7 EmberBackground rewrite** (`core/widgets/ember_background.dart`,
+  PERF_PLAN hotspot #1): candle glow rendered once per size into a ui.Image
+  and transform-animated (= CandleBreath, 7.2s pulse + hue-static drift);
+  stars+embers = TWO drawAtlas calls over process-lifetime sprites (ember halo
+  baked in — no more per-frame MaskFilter.blur; ~50 primitives → 2 calls);
+  repaint quantized to ≤24fps via a frame-index ValueNotifier; StarfieldDrift
+  folded in (two half-fields, 60s/120s wrap). NEW `EmberBackgroundHidden`
+  marker pauses the root ticker (mounted in call_screen + rapid_camera_screen)
+  — proven by test: covered → transientCallbackCount 0, uncover → resumes.
+  off() honored for the first time (fixed frame t=0.3). Pixel-smoke test
+  proves the atlas path draws light (>100 lit pixels over the night base).
+- New ambient tokens in `core/ui/motion.dart`: breath 4s, beat 850ms, float
+  6s, flicker 1100ms, tick 140ms, curve breathe=easeInOutSine.
+- One red-gate cycle mid-phase: my pixel-smoke test carried `dynamic` typing —
+  analyzer 2 errors, caught by the hygiene suite's analyzer-mirror test on the
+  full run. Fixed (typed ByteData + dart:typed_data import). The "re-run the
+  full gate after the last edit" rule is what caught it.
+
+**BLOCKED — owner device (unchanged, accumulating):** EmberBackground frame
+timing + drawAtlas visual parity vs the old MaskFilter look; BreathingGlow
+halo feel; Impeller re-enable A/B; TabDissolve/press haptics feel; bundled
+fonts on device.
+
+**Open / next:** adversarial review workflow over F1–F5 still running —
+findings + a second pass covering F6/F7 land in a follow-up section. Then
+M phase (BreathOrb, ReachPulse, CountTick, FlickerWelcome, GravityFloat +
+motion_hygiene conformance test). Nothing committed.
+
+## §120 — Adversarial review round 1: 22 confirmed, all addressed (2026-08-27)
+
+Follows §119. A 30-agent review workflow (3 lenses → adversarial refute-verify
+per finding) over the F1–F5 diff confirmed 22 findings, 5 refuted. Full
+verdicts: session workflow wf_d7a03666-8e6 journal. All fixes verified:
+analyzer 0/0, full suite **1189/1189**.
+
+**The two that mattered:**
+1. **TabDissolve's 220ms double-mount inverted FLAG_SECURE on Touch** (new
+   instance sets secure, OLD instance's delayed dispose clears it →
+   screenshots enabled on the intimate surface) and double-joined per-couple
+   realtime topics into the documented joined-but-dead state. FIX: TabDissolve
+   v2 = single-child incoming fade (core/ui/tab_dissolve.dart) — original
+   one-instance swap lifecycle restored, motion kept, shape-stable across
+   off() flips (no more subtree remounts that killed in-progress recordings).
+2. **shellTabProvider stores a raw bar index whose meaning changes when
+   showTouch/showCloser flip** (partner toggles modest mode; loadProfile
+   refetches on resume/token refresh) → a user standing in Closer was moved
+   into Touch without a tap. FIX: identity-based remap in app_shell (room
+   preserved across flag flips; a vanished room goes Home, never sideways
+   into an intimate surface). Pre-existing defect, not introduced by the
+   overhaul.
+
+**The rest:** GiltNavIcon off()-in-build + bounce-back guard + tokenized
+curves/duration; EmberPress fast-tap-in-scrollable visibility (forward
+completes before reverse), off-flip snaps, deferToChild when untappable,
+tokenized curve; DissolveIn duration getters return Duration.zero under the
+platform remove-animations flag (review DISPROVED the "builder cannot change
+duration" comment — a pop was a 300ms dead tap for accessibility users),
+incoming fade holds 30% (double-exposure), dead dissolvePage deleted (P2
+reintroduces with its caller); milesDarkTheme() memoized (fresh ThemeData per
+root rebuild ran AnimatedTheme's 200ms ticker even for animations-off users);
+splash test re-pinned to MilesMotion.flicker instead of a stale 1000ms
+literal; GravityFloat wired into Home's hero card (hygiene reachability
+forced its P1 site forward).
+
+**Flagged, not fixed** (gate edits are the owner's): repo_hygiene's nakedFill
+regex is case-sensitive `Colors.transparent`-shaped and scoped to a
+modal-surface name list — theme-level transparent fills (DialogThemeData
+etc.) are invisible to it; proven via the suite's own self-test.
+
+**Known accepted deviation:** with animations off, route PUSH still runs a
+zero-length... correction: push now runs Duration.zero via the getters; the
+MediaQuery-driven test harness cannot exercise the platform-flag path (no
+BuildContext in the getters) — flagged as a device-check item.
+
+**Next:** review-of-fixes workflow (this diff + F6/F7) running in background;
+M phase continues (BreathOrb, ReachPulse, CountTick). Nothing committed.
+
+## §121 — Adversarial round 2: the fixes had two HIGHs; identity now rules the tabs (2026-08-27)
+
+Follows §120. A 23-agent review over the round-1 FIXES + the unreviewed F6/F7
+rewrites confirmed 16 findings — including two HIGH in round 1's own fixes,
+which is the whole argument for reviewing fixes. All addressed; verified:
+analyzer 0/0, full suite **1188/1188**.
+
+**The two HIGHs, and their structural fixes:**
+1. **The remap baseline died with the shell State** (the disguise cover
+   replaces the whole tree on every background; loadProfile refetches while
+   covered) — so the Closer→Touch teleport survived round 1's fix through the
+   remount path. STRUCTURAL FIX: `shellTabProvider` now stores ROOM IDENTITY
+   ('home'/'chat'/'touch'/'closer'), never a bar index. No baseline, no
+   remap; a vanished room resolves to 'home' AND publishes the move (round
+   1's remap forgot the publish — a live join-offer into a dead room). The
+   identity flows end-to-end: badge joins by identity (`joinableTabIdentity`,
+   flag-free — `joinableTabs` index map deleted), observer publishes by
+   identity (its write-only `showTouch` field deleted), `_landHome` lands the
+   literal 'home' (resume test re-pinned to the same invariant).
+2. **F7's per-painter glow leaked a multi-MB GPU image per screen visit, AND
+   the nesting dedupe never engaged** — the root EmberBackground wrapped only
+   `SizedBox.shrink()` as a Stack SIBLING of the Navigator, so all 13 screen
+   wrappers were full painting instances over a root that kept ticking under
+   their opaque fills (pre-existing since 95b11f8 — the dedupe NEVER worked).
+   FIX: the root now WRAPS the overlay Stack (main.dart) so every screen
+   wrapper collapses to the pass-through the scope always promised; the glow
+   is one process-lifetime grow-only image, baked at DEVICE resolution (was
+   1/DPR — banding ×3 upscale) with a 10% margin (drift never exposes an
+   edge), immune to per-IME-frame re-bake; `_frame` disposed.
+
+**The rest:** CurvedAnimation-leak class killed in route_motion + tab_dissolve
+(listenerless drive(CurveTween) — ~57 leaked status listeners per navigation);
+atlas paints get FilterQuality.low (nearest-neighbor blockiness); CandleBreath
+pulse to the spec's 6%; star drift = integer-cycle sine sway (the 60/120s wrap
+drift jumped every star at each 36s loop restart); GiltNavIcon reselect guard
+tightened to value==0 (0.1 is ~64% lit through the fade curve).
+
+**Also on record:** hot-reload staleness of the memoized theme = dev-only
+friction, deliberately accepted (a kDebugMode bypass would resurrect the
+AnimatedTheme ticker the memo fixed). The concurrent session commits actively
+(aafee7d, 059e7b2 touched pubspec twice in two hours) — per-hunk staging
+discipline remains mandatory on pubspec/theme/motion/app_shell.
+
+**Next:** M phase resumes — BreathOrb (4-1-4), ReachPulse, CountTick, then
+motion_hygiene conformance test; then sound phase. Nothing committed.
+
+## §122 — M phase complete: all twelve motions live, and the law enforces itself (2026-08-27)
+
+Follows §121. Verified: analyzer 0/0, hygiene 56/56, full suite **1192/1192**.
+
+The design-system.md §5 motion language is BUILT — eleven of twelve, one cut:
+EmberPress ✓ (F5) · CandleBreath ✓ (in EmberBackground) · FilmGrain CUT
+(full-screen re-raster class) · DissolveIn ✓ (app-wide) · StarfieldDrift ✓
+(sine sway, integer loop cycles) · ShootingStarWish → P3 as planned ·
+OrbBreathe ✓ NEW `features/breath/widgets/breath_orb.dart` (the old orb
+resized a Container per frame — per-frame LAYOUT — now fixed-box transforms,
+halo swell + hot-core cross-fade at peak; off() renders each phase's finished
+state, the label carries pacing) · GiltSelect ✓ (F4) · ReachPulse ✓ NEW
+`features/reach/widgets/reach_pulse.dart` (lub-dub TweenSequence on the
+button while ready + per-beat ripple ring + one-shot 620ms bloom on a
+successful send via a bloomTick notifier; receiver's overlay heart carries
+the same pulse; overlay entrances migrated off flutter_animate literals to
+EntranceStagger) · CountTick ✓ NEW `core/widgets/countdown_digits.dart`
+(sealed date-capsules count down — '12 days' coarse, live mm:ss in the final
+hour, per-digit 140ms tick-and-slip, tabular figures; wired into
+capsule_detail; still updates with animations off — a clock must tell the
+time) · FlickerWelcome ✓ (splash) · GravityFloat ✓ (Home hero card).
+
+**NEW `test/unit/hygiene/motion_hygiene_test.dart`** — the token law as a
+gate, repo_hygiene idiom (counted tolerances with named reasons): raw
+`Duration(` budgeted per motion-set file (timers exempt by count, not by
+silence); every controller-owning file must consult MilesMotion.off; ZERO
+blurRadius in the motion set; `Curves.*` spelled only where tokens are
+defined. It caught its first real violation while being written (the splash
+spelled disableAnimationsOf raw — now the token). BreathingGlow's default
+period now references MilesMotion.breath.
+
+`found, not fixed: lib/core/widgets/glow_button.dart — animates BoxShadow
+blur 22→36 on press (pre-existing motion-law violation outside the set;
+its rewrite belongs to the rollout phase, likely onto EmberPress).`
+
+**Next:** sound phase — CC0 cue sourcing (durations/loudness verifiable here
+via ffprobe; how they FEEL is an owner device check), `core/services/sound/`
+module behind the SoundEngine seam, Settings tile, ceremonial cue wiring.
+Then rollout P1–P3. Nothing committed; owner's art prompt pack
+(ART-PROMPTS.md) comes with the sound step per plan.
+
+## §123 — The app has a voice: sound phase complete (2026-08-27)
+
+Follows §122. Verified: analyzer 0/0, hygiene 60/60, full suite **1204/1204**.
+
+- **Assets** (`mobile/assets/sound/`, 730,468 B against a test-enforced 1.5MB
+  ceiling): 14 cues + `bed_air.ogg` (28s, seamless via 2s tail-to-head
+  acrossfade). All sourced from Pixabay CC0 BY ME this session via the in-app
+  browser (detail pages expose download URLs; search → harvest → curl),
+  mastered with ffmpeg: mono OGG q3, loudnorm I=-23:TP=-3, silence-trimmed,
+  per-cue duration caps; breath_out is breath_in's slice REVERSED (the exhale
+  is the inhale, guaranteed paired texture). Provenance table lives beside
+  the enum in `core/services/sound/cue.dart`.
+- **Module** (`lib/core/services/sound/`): `SoundEngine` (5-method swap
+  seam) → `JustAudioEngine` (3-player round-robin pool; dedicated bed player
+  LoopMode.one; 20-step volume ramps; every failure logged with the cue
+  name) → `MilesSound` facade (TouchHaptics/ReleaseGate house style). Gate
+  chain per play: fleet kill → user toggle (ON default, `ui_sounds` pref) →
+  cover mute (TOTAL — a chiming calculator is a tell; haptics respect this
+  gate too) → PiP-call mute. Engine constructed lazily on first allowed play.
+  8/8 unit tests prove each gate silences ALONE against a FakeSoundEngine.
+- **Wiring**: send (optimistic paint), receive (non-duplicate incoming only —
+  broadcast+db echo sounds once), reach (+ bloom already via ReachPulse),
+  glow (replaces warmth_overlay's bare haptic), seal (capsule create), open
+  (ceremony), chime (already-open), pulse (heartbeat CONNECT only — per-beat
+  stays haptic by design), deal (truth_dare + synced cards), unlock (all 3
+  vault success paths), wish (jar save), breath_in/out swells + bed
+  start/stop on session begin/stop/dispose, tap (glow_button). main.dart:
+  loadPref + wireProbes (cover = !showRealApp, call = PipMode.active) + warm
+  on real-app entry + silenceAll on paused/detached beside raiseCover.
+- **Settings**: "Sounds" SwitchListTile between Privacy and Security,
+  revision-listening — shows "Turned off remotely for this release." and
+  disables when the server kill is up.
+- **NEW `test/unit/hygiene/asset_hygiene_test.dart`**: orphan assets, phantom
+  asset references, per-dir + total size ceilings, undeclared asset dirs —
+  all red tests now (dynamic mood-path pattern handled via quoted stems).
+- **`docs/guides/ART-PROMPTS.md`** delivered — the owner's 14-prompt pack,
+  batched in wiring order; the jar feeds the Higgsfield turntable.
+
+**BLOCKED — owner device:** cue latency + FEEL (the one thing this machine
+cannot judge — first device session: sounds on, tap everything); OGG loop
+seam on bed_air; audio-focus behavior vs Spotify/dialer; Vorbis on the MTK
+SoC. **Prod migration for ui_sound_kill still pending** — apply after this
+client actually ships (degrading sets make order safe).
+
+**Open program:** rollout P1–P3 (screen choreography), tilt parallax (2
+surfaces), art batches + turntable (owner-gated on generation). Adversarial
+review of the sound phase launching in background. Nothing committed.
+
+## §124 — Sound review round: 17 confirmed, the Spotify killer among them (2026-08-27)
+
+Follows §123. A 21-agent adversarial review of the sound phase confirmed 17
+findings. All addressed; verified: analyzer 0/0, full suite **1205/1205**
+(9/9 sound contracts incl. two new).
+
+**The one that would have shipped angry users:** an unconfigured audio
+session made every 200ms cue request PERMANENT exclusive audio focus — one
+tap KILLED the user's Spotify until they manually restarted it, and never
+gave focus back (just_audio contains no setActive(false) anywhere). FIX:
+session configured once (sonification + gainTransientMayDuck,
+willPauseWhenDucked false); the cue pool opts out of session activation
+entirely (`handleAudioSessionActivation: false` — a murmur owns no focus);
+the bed ducks the user's music and releases the session on stop.
+audio_session promoted to a direct pinned dep (same resolved version).
+
+**The discretion set:** silenceAll now stops the CUE POOL too (stopCues() on
+the engine seam — a 2.6s bowl tail rang on under a raised cover); panic
+gesture + sign-out silence via the showRealApp false-edge (no lifecycle
+event fires there); a mid-session ui_sound_kill flip stops a running bed
+(attachKillSwitch on ReleaseGate.revision); full-screen calls now gate cues
+(new `CallController.liveCall` static — PipMode alone missed them).
+
+**The correctness set:** receive cues only on source=='broadcast' (a
+reconnect catch-up of N messages played N chimes); the bed starts for the
+JOINER of a partner-initiated breath session (the idle guard only covered
+the initiator); voice-note ducking actually wired (holdAmbient had zero call
+sites — now on the player's playing edges, paired by construction); pool
+play() prefers a warm slot (blind rotation evicted warm()'s work); bed ramp
+epoch guards the start/stop race (a stale stop's completion could kill a
+fresh bed).
+
+`found, not fixed: mobile/lib/features/capsule/capsule_detail_screen.dart:108
+— bare catch(_){} swallows _reload failures that gate the open ceremony
+(pre-existing; violates the no-silent-failures law).`
+
+**Next:** rollout P1 completion (ScreenEntrance + remaining P1 screens),
+then P2/P3, parallax, art batches (owner-gated). Nothing committed; prod
+ui_sound_kill migration still deliberately pending until a build ships.
+
+## §125 — Owner directive: NO further Higgsfield credit spend + rollout batch 1 (2026-08-27)
+
+Follows §124.
+
+**STANDING CONSTRAINT (owner, this session): "stop using higgsfield ai
+credits."** Applies from now on, not just to this program. Balance stands at
+523.77 and the Sensory Overhaul spent NONE of it — the 108 credits in the
+ledger belong to the intro film (§104/§114), before this program began.
+
+Plan items cancelled and replaced with free equivalents (plan file amended so
+they cannot be revived by accident):
+- **Wish-jar turntable** (~60 credits) → the owner-generated `jar.webp` still
+  under `GravityFloat` + the existing `BreathingGlow` halo. Same "alive"
+  read, no credits, no sprite atlas.
+- **Capsule seal glint** (~40, optional) → `ShaderMask` light sweep across
+  the static `seal.webp` (transform of a gradient over a static image). This
+  was already the plan's own "try free first" branch.
+- Consequently NOT built: `mobile/tool/make_atlas.dart`,
+  `lib/core/widgets/flipbook_sprite.dart`, `assets/motion/`. Nothing would
+  consume them, and the hygiene reachability law would fail them.
+- `docs/guides/ART-PROMPTS.md` is UNAFFECTED — it is Nano Banana Pro work by
+  the owner, free, and still the art path. Only the jar's note "feeds the
+  Higgsfield turntable" is now obsolete; the jar is still wanted as a still.
+
+**Rollout batch 1** (verified: analyzer 0/0, full suite 1205/1205 on the
+prior seal; the batch's own seal was in flight at write time):
+- `core/widgets/screen_entrance.dart` — the 3-line adoption wrapper over
+  EntranceStagger.
+- Home: whole page rises as ONE coordinated entrance (ScreenEntrance as a
+  single ListView child).
+- Closer hub tiles, Games hub cards, Capsule shelf cards: GestureDetector →
+  EmberPress + `Cue.tap`.
+- **Restraint calls recorded, not oversights:** gallery grid tiles keep their
+  plain GestureDetector (they wrap a `Hero`; a press scale fights the flight
+  animation) and timeline rows keep `InkWell` (Material ink is the right
+  affordance in a dense list, and doubling it with a scale reads as jitter).
+
+**Next:** P3 long tail (entrance-only), ShootingStarWish on Home, tilt
+parallax (2 surfaces), then the art batches when the owner generates them.
+Nothing committed.
+
+## §126 — ShootingStarWish: the twelfth motion, and the last one (2026-08-27)
+
+Follows §125. Rollout batch 1's seal came back green (**1205/1205**);
+analyzer 0/0; the wish's own tests 5/5.
+
+`ShootingStarWish` is built — the design-system.md §5 language is now
+COMPLETE (eleven built, FilmGrain cut on the record in §122):
+- One slow streak per 36s ambient loop, in the window t∈[0.62, 0.645]
+  (~900ms), entering high-left on a shallow arc, head + 6 diminishing trail
+  dots, sin fade in/out.
+- It costs NO extra draw call: the head and trail are appended to the star
+  atlas's own transform/rect/color lists. Pure function of t — no timer, no
+  ticker, nothing to dispose.
+- **Architecture note for whoever adds the next ambient flourish:** the
+  planned `wishes: true` CONSTRUCTOR FLAG could not work. Since §121 moved
+  the root EmberBackground to wrap the whole app, every screen-level wrapper
+  is a pass-through, so a screen cannot configure the field by passing an
+  argument to its own wrapper. Screens talk to the root field through
+  MARKERS: `EmberBackgroundHidden` (pause) and now
+  `EmberBackgroundWishes` (wish), both static counters in the same idiom.
+  Home mounts the wish marker as a ListView child; it renders nothing.
+- Test proves PIXELS, not a counter: the same loop frame rendered with and
+  without the marker, asserting strictly more lit pixels with it — a wish
+  that drew nothing would fail. Marker release on dispose asserted too.
+
+**Next:** P3 long-tail entrances, tilt parallax (2 surfaces), art batches
+when the owner generates them (Higgsfield items cancelled per §125).
+Nothing committed.
+
+## §127 — Tilt parallax: the last unbuilt plan item (2026-08-27)
+
+Follows §126. ShootingStarWish's seal came back green (**1205/1205**);
+parallax tests 4/4; hygiene 60/60 with the motion set expanded; analyzer 0/0.
+
+`lib/core/widgets/tilt_parallax.dart` — the hero surface leans a few pixels
+with the handset:
+- ACCELEROMETER (gravity), not gyro: absolute tilt, no drift, no integration,
+  nothing to recalibrate. Low-pass 0.12 so a hand's tremor never reaches the
+  screen; a 0.1px deadzone so a phone lying still costs literally nothing.
+- Travel clamped to `depth`, and depth itself clamped to 6px — past that a
+  card stops reading as "under glass" and starts reading as loose.
+- The subscription exists ONLY while mounted + route current
+  (`TickerMode.of`, which the Navigator turns off under a cover) + app
+  resumed. Everything else cancels it and returns the offset to zero.
+  `MilesMotion.off()` opens no stream at all.
+- Surfaces (exactly two, per plan): Home's partner card (depth 4, inside
+  GravityFloat) and the capsule ceremony orb (depth 6). NOT on the root
+  ember field — an always-on sensor above the Navigator is the battery cost
+  this design exists to avoid.
+- **Testable by construction:** `debugSource` injects a fake accelerometer
+  stream, so a machine with no sensors still proves the clamp (a 40g tilt
+  moves ≤4px but >0.5px — a clamp is not a mute), the depth ceiling, the
+  off() path opening no stream, and the subscription dying with the widget
+  (onListen/onCancel log).
+- `screen_entrance.dart` and `tilt_parallax.dart` added to
+  motion_hygiene_test's enforced set.
+
+**The plan's engineering is now COMPLETE except the art wiring.** Remaining:
+P3 long-tail entrances (cosmetic, mechanical), and the owner's Nano Banana
+batches → their call sites. Everything else outstanding is the
+BLOCKED-owner-device list (frame timing, haptic/audio feel, audio-focus vs
+Spotify, Impeller A/B, parallax feel + battery soak).
+
+Nothing committed.
+
+## §128 — The wish marker was in the wrong place, and the test proves it (2026-08-27)
+
+Follows §127. Parallax seal green (**1210/1210**); ember tests now 6/6.
+
+**Self-caught defect, fixed before the review agents returned.** §126 mounted
+`EmberBackgroundWishes` as the FIRST CHILD OF HOME'S ListView. A list
+destroys the elements of children scrolled past its cache extent, so the
+marker released its claim the moment the user scrolled down and re-took it
+on the way back: the wish blinked in and out with the SCROLL POSITION
+instead of belonging to the screen.
+
+- FIX: the marker moved into the screen's body — Home's `EmberBackground`
+  child is now a `Stack` holding the marker beside the `SafeArea`.
+- The widget's own doc comment now carries the rule (PLACEMENT MATTERS:
+  body/Stack, never a lazily-built sliver), so the next person who reaches
+  for it is told before they choose.
+- **Regression pin by demonstration:** a test mounts the marker in a tall
+  ListView, flings past the cache extent, and asserts the claim IS lost
+  (value 1 → 0). It documents Flutter behaving correctly, which is precisely
+  why the marker must not live in a list. It also failed-then-passed as
+  written, so it measures what it claims.
+
+Noted while there, not changed: wrapping Home's whole page in one
+`ScreenEntrance` makes its ListView effectively a single-child scroll view —
+no laziness left. Acceptable here (Home is ~6 cards, most of them on screen
+at once, and a staggered entrance cannot be lazy by definition), but the
+same pattern must NOT be applied to a long list — chat, gallery and timeline
+are already excluded from entrance choreography for exactly this reason.
+
+**Next:** the adversarial review of parallax/wish/rollout is still running;
+its findings land next. Then P3 long-tail entrances (cosmetic) and the art
+wiring. Nothing committed.
+
+## §129 — GlowButton loses its shadow animation and its controller (2026-08-28)
+
+Follows §128 (whose seal came back green, **1211/1211**).
+
+The last standing motion-law violation in the app — flagged `found, not
+fixed` in §122 — is fixed, because the rollout phase is where it belonged:
+
+- `core/widgets/glow_button.dart` animated `BoxShadow.blurRadius` 22→36
+  across every press of the app's MOST-USED control, rebuilding the whole
+  decoration (gradient included) per frame. The glow is now STATIC; the
+  scale and haptic carry the acknowledgment, exactly as everywhere else.
+- It no longer owns an AnimationController at all: it delegates to
+  [EmberPress]. One press idiom app-wide, and `MilesMotion.off()` handled in
+  one place instead of eleven. The widget dropped from StatefulWidget to
+  StatelessWidget and lost ~30 lines.
+- Pinned by `test/widget/motion/glow_button_test.dart`: the Decoration
+  object must be IDENTICAL across a press (only the transform moves), and a
+  disabled/loading button neither scales nor calls back.
+- Deliberately NOT added to motion_hygiene's file set: that rule bans
+  `blurRadius` outright, and its rationale is "a static shadow beside an
+  AnimationController is one refactor away from an animated one". This
+  widget now has no controller, so its static shadow is legal and the
+  behavioural test is the right guard.
+
+One test-authoring lesson recorded: `pumpAndSettle` on a `loading:true`
+button hangs forever — a CircularProgressIndicator by design never settles.
+Pump a fixed duration instead.
+
+**Next:** the parallax/wish/rollout adversarial review is still running.
+Then P3 long-tail entrances and the art wiring. Nothing committed.
+
+## §130 — Two red gates, one real: the cast and the phantom (2026-08-28)
+
+Follows §129. Motion suite 22/22; analyzer 0/0 after the fix below.
+
+The §129 seal came back RED with two distinct causes, and telling them apart
+matters more than either fix:
+
+1. **REAL:** `test/widget/motion/glow_button_test.dart:20` carried an
+   `as Decoration` cast on an already-non-null value — analyzer warning, and
+   the hygiene suite's analyzer-mirror test failed on it exactly as designed.
+   Removed. (My test, my defect; the gate did its job.)
+2. **PHANTOM:** a second failure named
+   `test/widget/motion/zzz_verify_gap_probe_test.dart`, a file I never wrote
+   and which no longer exists. It was a PROBE created by an agent of the
+   adversarial review workflow that was running at that moment; the agent
+   deleted it after use, and my full-suite run happened to catch it mid-life.
+
+**Operational rule learned: do not trust a full-suite run taken WHILE a
+review workflow is live.** Its agents write and delete probe files inside
+`mobile/test/` to verify their own findings, so the tree is not stable under
+them. Either wait for the workflow to finish, or re-run the suite after it
+does before believing a red. (Both fixes above were verified after the
+probe had gone.)
+
+Nothing committed.
+
+## §131 — Round 4: the parallax was wrong for a phone on a table (2026-08-28)
+
+Follows §130. A 20-agent adversarial review of parallax/wish/rollout
+confirmed 10 findings — and its agents ran REAL PROBES rather than reading,
+which is why it caught what four green suites had not.
+
+**HIGH 1 — the neutral was a bolt-upright portrait hold.** `ty = (e.y-9.8)/9.8`
+means "level" is a phone held vertically. Probe measurements:
+- flat on a table: dy = −3.976 of a 4px range (99.4% RAILED, permanently);
+- ordinary ~45° hold: −1.12px permanent bias;
+- landscape (this app rotates freely — only uCrop and two players lock
+  orientation): BOTH axes saturated, and a genuine 20° lean moved the card
+  0.2px out of 4 — the control was DEAD, not merely biased.
+FIX: the rest posture is LEARNED (first sample defines it, then creeps at
+0.5%/sample) and the lean is the deviation from it, so any steady posture is
+level — table, recliner, landscape. Device→screen axes are mapped by
+`MediaQuery.orientationOf` because Android's sensor frame is fixed to the
+handset's natural orientation (verified in sensors_plus 6.1.2: raw values
+forwarded, no remapCoordinateSystem). Which of the two landscape rotations
+is unknowable from MediaQuery, so the horizontal lean may mirror there —
+documented in the code as an acceptable ±4px difference, never a stuck one.
+
+**HIGH 2 — TickerMode never reached this app's own covers.** Flutter mutes
+tickers for ROUTE/OVERLAY-scoped subtrees; Miles's LockScreen and stealth
+scrim are Stack SIBLINGS in main's builder. Probe: cover raised → the
+parallax subscription log showed `[listen]` with no cancel, and the card
+kept moving at 15Hz behind a screen whose whole purpose is to show nothing —
+indefinitely for the stealth scrim (no lifecycle event ever ends it) and on
+every resume behind the biometric prompt. It also re-painted the hidden page
+and pushed a semantics update per sample.
+FIX: main.dart's builder now wraps the whole tree in
+`TickerMode(enabled: !locked && !stealth)`, with the covers themselves
+OUTSIDE it (a lock screen that muted its own animations would be the one
+thing on screen and frozen). This closes the same hole for GravityFloat,
+BreathingGlow, EntranceStagger, ReachPulse and the ember field at once.
+
+**HIGH 3 — the wish was mount-scoped, not visibility-scoped.** Home stays
+mounted under every pushed route, so the shooting star followed the user
+into the vault, settings and the capsule ceremony. FIX: the marker claims on
+`TickerMode.of(context)` (which IS route-scoped, and now cover-scoped too)
+and releases when covered.
+
+**Tests added** (7/7 parallax): flat-on-table rests at zero, 45° hold rests
+at zero, a real lean off a learned rest still moves. The rig now sets a
+PHONE-SHAPED surface — the default 800×600 test window is LANDSCAPE, which
+is itself why the first run of the new tests failed and proved the axis
+mapping works.
+
+Also removed: three leftover `zz_*_probe_test.dart` files that review agents
+had left in `test/widget/motion/`.
+
+Nothing committed.
+
+## §132 — The biometric app lock has been throwing since it shipped (2026-08-28)
+
+Follows §131 (whose fixes sealed green: **1216/1216**, analyzer 0/0).
+
+**A SHIPPED SECURITY-FEATURE DEFECT, found by verifying my own edit.**
+
+While restructuring main.dart's builder for the TickerMode fix I touched the
+line that mounts [LockScreen], so I probed the nesting rather than trusting
+the green suite. Three shapes, measured:
+
+    PROBE A (my new shape):        Incorrect use of ParentDataWidget.
+    PROBE B (the ORIGINAL shape):  Incorrect use of ParentDataWidget.
+    PROBE C (direct Stack child):  null
+
+`lock_screen.dart` is UNMODIFIED committed code and its build() returns
+`Positioned.fill`. main.dart mounted it under a `RepaintBoundary`, so the
+Positioned's nearest ancestor render object was the boundary, not the Stack.
+That is the exact error main.dart's own CallPip comment documents as one
+that "greys out the entire app and swallows every touch" — meaning **every
+time the biometric app lock raised, it took the overlay layer down with
+it.** No test ever rendered the locked state, so 1216 green tests said
+nothing about it.
+
+- FIX (the same line I was already editing, so not a drive-by): the lock is
+  now a DIRECT child of the root Stack — `if (locked) const LockScreen()`.
+  Isolation belongs inside the widget, the way CallPip does it.
+- NEW `test/widget/lock_screen_overlay_test.dart` pins it from both sides:
+  direct mounting is clean, AND a render object between it and the Stack
+  still throws (so if LockScreen ever stops being a Positioned, the rule is
+  relaxed deliberately rather than by accident).
+
+**Owner note:** this is worth knowing independently of the overhaul. If
+anyone has reported "the app greys out / stops responding after the
+fingerprint prompt", this was why, and it is fixed in this tree.
+
+Nothing committed.
+
+## §133 — The device checklist, and where the program actually stands (2026-08-28)
+
+Follows §132 (sealed green: **1218/1218**, analyzer 0/0).
+
+**NEW `docs/guides/DEVICE-CHECKLIST.md`** — every BLOCKED-owner item from
+§117–§132 consolidated into one ordered document with pass/fail criteria:
+the two pre-existing defects to confirm fixed on hardware (app-lock overlay,
+modest-mode tab teleport), the six sound checks (latency, does-Spotify-
+survive, loop seam, discretion under cover/panic, call bleed, Vorbis on the
+oldest handset), five motion checks (field parity, the first REAL frame-time
+measurement of PERF_PLAN hotspot #1, parallax in all three postures,
+battery soak, haptics), two typography/transition checks, and the Impeller
+go/no-go with its revert condition. Scattered flags in a handoff doc are not
+a checklist; this is.
+
+**Engineering state: the plan is complete except cosmetics.**
+- Built and sealed: P0 server rail · F foundations (bundled fonts, DissolveIn
+  everywhere, TabDissolve, GiltSelect, EmberPress) · both perf-law rewrites
+  (BreathingGlow, EmberBackground) · all twelve spec'd motions (eleven built,
+  FilmGrain cut) · the sound system end to end · tilt parallax · GlowButton
+  onto EmberPress.
+- Four adversarial rounds (74 agents) + one self-caught find: **66 confirmed
+  defects, all fixed or explicitly recorded**, including one security
+  regression I introduced (FLAG_SECURE via TabDissolve), one privacy defect
+  that predated me (the Closer→Touch teleport), the audio-focus bug that
+  killed the user's music, and the shipped app-lock overlay crash.
+- Laws made mechanical: motion_hygiene (tokens, off(), no shadow blur) and
+  asset_hygiene (orphans, phantom refs, size ceilings) are red tests now.
+
+**Remaining, in order of value:**
+1. OWNER: work `DEVICE-CHECKLIST.md`. Nothing else can settle those.
+2. OWNER: generate `ART-PROMPTS.md` batch A (jar first) → I wire each asset
+   to its call site.
+3. ME, cosmetic: P3 long-tail entrances (~13 screens, ScreenEntrance +
+   EmberPress). Deliberately last — lowest value, and every wrap is a
+   bracket edit on a file another session may be holding.
+
+Nothing committed. The tree is coherent: analyzer 0/0, 1218/1218.

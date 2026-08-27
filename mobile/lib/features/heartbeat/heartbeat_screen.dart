@@ -5,6 +5,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
@@ -195,7 +197,12 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
       return;
     }
     final bpm = payload['bpm'];
+    // The CONNECT moment, not per-beat: audio latency is variable and a
+    // lagging per-beat thump reads as a broken heart monitor — the beat
+    // channel stays haptic-only below.
+    final firstSample = _partnerBpm == null && bpm is num;
     if (bpm is num) setState(() => _partnerBpm = bpm.toInt());
+    if (firstSample) MilesSound.cue(Cue.pulse);
     if (payload['beat'] == true) {
       _partnerPulse.forward(from: 0);
       HapticFeedback.lightImpact(); // feel their heartbeat

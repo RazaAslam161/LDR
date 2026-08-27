@@ -1,10 +1,8 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/ui/theme.dart';
 
 /// Fourth sweep at the frosted-glass look, and the first one to look at
@@ -32,25 +30,14 @@ import 'package:miles/core/ui/theme.dart';
 /// that reaches opacity some other way — AppDrawer is a transparent [Drawer]
 /// wrapping an opaque panel, and is not glass — and no rename can satisfy it.
 void main() {
-  // Building the theme builds its TextTheme, and every GoogleFonts style fires
-  // an unawaited fetch the moment it is constructed. Off the device that fetch
-  // cannot succeed, and the rejection surfaces as an unhandled async error in
-  // whichever test happens to be running. So the theme is built exactly once,
-  // here, and its pending fetches are awaited to failure where the failure
-  // belongs. Fonts are not what these tests measure; the colour of a panel is.
+  // The fonts are bundled now (assets/fonts/, pubspec `fonts:`), so building
+  // the theme fires no network fetch and needs no absorbing zone — the
+  // runZonedGuarded scaffolding that used to live here guarded google_fonts'
+  // unhandled fetch rejection, and left with the package. Bundled fonts also
+  // mean these pixel renders rasterize the real faces, not Ahem.
   late final ThemeData theme;
   setUpAll(() {
-    GoogleFonts.config.allowRuntimeFetching = false;
-    // google_fonts chains a `.then` onto each fetch with no error handler, so
-    // the rejection is unhandled by construction and cannot be awaited away.
-    // It belongs to the zone the style was built in, which is the one thing
-    // that can absorb it — so the theme is built once, inside a zone that
-    // does.
-    runZonedGuarded(
-      () => theme = milesDarkTheme(),
-      (_, __) {},
-      zoneSpecification: ZoneSpecification(print: (_, __, ___, ____) {}),
-    );
+    theme = milesDarkTheme();
   });
 
   const behindA = Color(0xFF00FF00);

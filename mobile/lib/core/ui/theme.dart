@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
+import 'package:miles/core/ui/route_motion.dart';
 
 /// Miles design system — **"Emberlight"**.
 ///
@@ -110,14 +112,83 @@ class MilesGradients {
   );
 }
 
+/// The two Emberlight faces, bundled in assets/fonts/ and declared in
+/// pubspec's `fonts:` section. These replaced google_fonts, which fetched the
+/// same faces over HTTP at first paint — fallback glyphs then a reflow on
+/// every cold start, and broken typography offline. The helpers keep the
+/// GoogleFonts call shape so the 28 call sites were a mechanical rename.
+class MilesType {
+  MilesType._();
+
+  static bool _licensed = false;
+
+  /// The OFL requires its text to travel with the font software. Called once
+  /// from [milesDarkTheme] — by the time anything renders type, the licenses
+  /// page can prove where the type came from.
+  static void registerLicenses() {
+    if (_licensed) return;
+    _licensed = true;
+    LicenseRegistry.addLicense(() async* {
+      yield LicenseEntryWithLineBreaks(
+        const ['Fraunces'],
+        await rootBundle.loadString('assets/fonts/OFL-Fraunces.txt'),
+      );
+      yield LicenseEntryWithLineBreaks(
+        const ['Inter'],
+        await rootBundle.loadString('assets/fonts/OFL-Inter.txt'),
+      );
+    });
+  }
+
+  static TextStyle fraunces({
+    double? fontSize,
+    FontWeight? fontWeight,
+    FontStyle? fontStyle,
+    double? letterSpacing,
+    double? height,
+    Color? color,
+    TextDecoration? decoration,
+  }) =>
+      TextStyle(
+        fontFamily: 'Fraunces',
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        fontStyle: fontStyle,
+        letterSpacing: letterSpacing,
+        height: height,
+        color: color,
+        decoration: decoration,
+      );
+
+  static TextStyle inter({
+    double? fontSize,
+    FontWeight? fontWeight,
+    FontStyle? fontStyle,
+    double? letterSpacing,
+    double? height,
+    Color? color,
+    TextDecoration? decoration,
+  }) =>
+      TextStyle(
+        fontFamily: 'Inter',
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        fontStyle: fontStyle,
+        letterSpacing: letterSpacing,
+        height: height,
+        color: color,
+        decoration: decoration,
+      );
+}
+
 TextTheme _buildTextTheme() {
   TextStyle f(double size, FontWeight w,
           {double ls = 0, double h = 1.2, Color c = MilesColors.cream50, FontStyle? style,}) =>
-      GoogleFonts.fraunces(
+      MilesType.fraunces(
           fontSize: size, fontWeight: w, letterSpacing: ls, height: h, color: c, fontStyle: style,);
   TextStyle i(double size, FontWeight w,
           {double ls = 0, double h = 1.4, Color c = MilesColors.cream50,}) =>
-      GoogleFonts.inter(fontSize: size, fontWeight: w, letterSpacing: ls, height: h, color: c);
+      MilesType.inter(fontSize: size, fontWeight: w, letterSpacing: ls, height: h, color: c);
 
   return TextTheme(
     displayLarge: f(56, FontWeight.w300, ls: -1, h: 1.04),
@@ -136,10 +207,30 @@ TextTheme _buildTextTheme() {
   );
 }
 
-ThemeData milesDarkTheme() {
+ThemeData? _cachedTheme;
+
+/// Memoized: the theme is a pure function of nothing, but a FRESH ThemeData
+/// per call is never == the last one (the nav bar's resolveWith closures have
+/// no value equality), so every root rebuild fed MaterialApp's AnimatedTheme
+/// a "changed" theme and ran its 200ms lerp ticker — for animations-off users
+/// too, since ImplicitlyAnimatedWidget never consults disableAnimations.
+ThemeData milesDarkTheme() => _cachedTheme ??= _milesDarkTheme();
+
+ThemeData _milesDarkTheme() {
+  MilesType.registerLicenses();
   final base = ThemeData.dark(useMaterial3: true);
 
   return base.copyWith(
+    // One line moves every route: all ~45 router entries use plain builders,
+    // so the theme's transition builder is the app's transition. DissolveIn —
+    // fade up + 14px rise in, outgoing dims — replaces Android's stock zoom.
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: DissolveInTransitionsBuilder(),
+        TargetPlatform.iOS: DissolveInTransitionsBuilder(),
+        TargetPlatform.fuchsia: DissolveInTransitionsBuilder(),
+      },
+    ),
     // Transparent so the root EmberBackground (candle glow + embers) shows
     // through where nothing is drawn over it. Panels themselves are opaque:
     // with the blur gone, a translucent card just let the animation run behind
@@ -180,7 +271,7 @@ ThemeData milesDarkTheme() {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: GoogleFonts.fraunces(
+      titleTextStyle: MilesType.fraunces(
         fontSize: 22,
         fontWeight: FontWeight.w400,
         color: MilesColors.cream50,
@@ -217,7 +308,7 @@ ThemeData milesDarkTheme() {
         foregroundColor: MilesColors.cream50,
         minimumSize: const Size.fromHeight(56),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        textStyle: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.3),
+        textStyle: MilesType.inter(fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.3),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -226,7 +317,7 @@ ThemeData milesDarkTheme() {
         minimumSize: const Size.fromHeight(56),
         side: BorderSide(color: MilesColors.gilt.withValues(alpha: 0.3)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        textStyle: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.3),
+        textStyle: MilesType.inter(fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.3),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
@@ -250,11 +341,13 @@ ThemeData milesDarkTheme() {
       // bright frames.
       backgroundColor: MilesColors.night,
       surfaceTintColor: Colors.transparent,
-      indicatorColor: MilesColors.ember.withValues(alpha: 0.18),
+      // No selection pill — GiltSelect's light does the work now (the ring
+      // and lift live in GiltNavIcon; a pill under them would double-mark).
+      indicatorColor: Colors.transparent,
       elevation: 0,
       height: 66,
       labelTextStyle: WidgetStateProperty.resolveWith(
-        (states) => GoogleFonts.inter(
+        (states) => MilesType.inter(
           fontSize: 11,
           fontWeight: states.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
           color: states.contains(WidgetState.selected) ? MilesColors.gilt : MilesColors.faint,

@@ -95,19 +95,16 @@ class PresenceRouteObserver extends NavigatorObserver {
 
   /// Publish the bottom-nav tab the user is on. The navigator cannot see a tab
   /// change, so AppShell calls this directly.
-  /// Whether the Touch tab is currently on the bar.
-  ///
-  /// Set by AppShell, which is the only thing that decides it. Held here
-  /// rather than derived: reading sessionProvider from inside the observer
-  /// built SessionNotifier, which touches SupabaseService.client — so naming a
-  /// tab came to depend on the backend being up, and every test that pushes a
-  /// route had to stand up Supabase to do it.
-  bool showTouch = false;
-
   void publishActiveTab() {
-    final tabs = visibleTabScreens(showTouch: showTouch);
-    final i = _ref.read(shellTabProvider).clamp(0, tabs.length - 1);
-    publish(tabs[i], src: 'tab');
+    // Identity maps to its label directly — no index, no flag alignment to
+    // get wrong. An unknown identity publishes Home, the shell's own answer.
+    final label = switch (_ref.read(shellTabProvider)) {
+      'chat' => 'Chat',
+      'touch' => 'Touch',
+      'closer' => 'Closer',
+      _ => 'Home',
+    };
+    publish(label, src: 'tab');
   }
 
   /// Publish [name] as the room this user is in, or null for "somewhere".
@@ -293,10 +290,6 @@ const Map<String, String> kJoinableRoutes = {
 /// index, and a clamp that happens to be correct is a bug waiting for someone
 /// to add a tab. Camera is index 2 and has no body; every index past it counts
 /// it anyway, because it is a real destination in the bar.
-Map<String, int> joinableTabs({required bool showTouch}) => {
-      for (final (i, name) in visibleTabScreens(showTouch: showTouch).indexed)
-        if (name != 'Camera') name: i,
-    };
 
 /// The route to push to join [screenName], or null if it is not joinable.
 ///
@@ -307,12 +300,19 @@ Map<String, int> joinableTabs({required bool showTouch}) => {
 String? joinableRouteFor(String? screenName) =>
     screenName == null ? null : kJoinableRoutes[screenName];
 
-/// The shell tab index to select to join [screenName], or null.
+/// The shell tab IDENTITY to select to join [screenName], or null.
 ///
-/// [showTouch] must be the same value the shell used to build the bar, or this
-/// returns an index for a tab that is not there.
-int? joinableTabIndex(String? screenName, {required bool showTouch}) =>
-    screenName == null ? null : joinableTabs(showTouch: showTouch)[screenName];
+/// Identity, not a bar index: an index is only meaningful against the exact
+/// flag set the bar was built with, and the badge asking with stale flags
+/// offered a join into the wrong room. The shell resolves identity against
+/// its own current flags, so this needs none.
+String? joinableTabIdentity(String? screenName) => switch (screenName) {
+      'Home' => 'home',
+      'Chat' => 'chat',
+      'Touch' => 'touch',
+      'Closer' => 'closer',
+      _ => null,
+    };
 
 /// Human-facing name for a route, derived from its path.
 ///

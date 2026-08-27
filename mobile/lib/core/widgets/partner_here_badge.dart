@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -238,13 +237,9 @@ class PartnerHereBadge extends ConsumerWidget {
     // and the two could disagree for a frame.
     // A partner standing IN Touch is proof the tab exists — modest mode is a
     // property of the couple, so it cannot be on the bar for one of them and
-    // not the other. That covers the case the flag is needed for; the observer
-    // answers the rest, which is only ever "where does Closer sit".
-    final joinTab = joinableTabIndex(
-      partnerScreen,
-      showTouch:
-          partnerScreen == 'Touch' || (presenceRouteObserver?.showTouch ?? false),
-    );
+    // not the other. Identity needs no flag: the shell resolves the room
+    // against its own current bar when the tap lands.
+    final joinTab = joinableTabIdentity(partnerScreen);
     final canJoin = !isHere && fresh && (joinRoute != null || joinTab != null);
 
     // Two distinct states, one widget: WITH you (breathing, warm) or ELSEWHERE
@@ -300,7 +295,7 @@ class PartnerHereBadge extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref, {
     String? route,
-    int? tab,
+    String? tab,
   }) {
     final here = GoRouter.of(context).state.uri.path;
     // Asked to go where we already are. Reachable in the moment before our own
@@ -526,7 +521,7 @@ class _PresenceAvatarState extends State<_PresenceAvatar>
               child: Center(
                 child: Text(
                   _initial,
-                  style: GoogleFonts.inter(
+                  style: MilesType.inter(
                     fontSize: 13,
                     height: 1,
                     fontWeight: FontWeight.w600,

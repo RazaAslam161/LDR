@@ -181,12 +181,14 @@ void main() {
       expect(code, contains('if (away >= _dozeRisk) _reconnectRealtime();'));
     });
 
-    test('Home is the literal 0, never a computed index', () {
-      // 3 is Closer for one account and Touch for another, and 2 (Camera) has
-      // no body at all. 0 is the only index that names the same room for
-      // everyone.
+    test("Home is the literal 'home', never a computed value", () {
+      // The provider stores room identity now (an index meant different rooms
+      // for different accounts — the reason the model changed). The invariant
+      // this pins is unchanged: landing home must be the same literal for
+      // everyone, never something computed from flags.
       final land = code.substring(code.indexOf('void _landHome('));
-      expect(land.substring(0, land.indexOf('\n  }')), contains('state = 0;'));
+      expect(land.substring(0, land.indexOf('\n  }')),
+          contains("state = 'home';"),);
     });
 
     test('presence is not announced from underneath a pushed route', () {

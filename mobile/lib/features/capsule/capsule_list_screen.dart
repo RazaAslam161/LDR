@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/widgets/ember_press.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -148,8 +151,9 @@ class _CapsuleCard extends StatelessWidget {
             ? MilesColors.emberSoft
             : MilesColors.blush;
 
-    return GestureDetector(
+    return EmberPress(
       onTap: onTap,
+      onCue: () => MilesSound.cue(Cue.tap),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

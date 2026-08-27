@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/widgets/ember_press.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -101,8 +104,9 @@ class _GamesScreenState extends ConsumerState<GamesScreen> {
   Widget _card(_Game g) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: GestureDetector(
+      child: EmberPress(
         onTap: () => context.push(g.route),
+        onCue: () => MilesSound.cue(Cue.tap),
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(

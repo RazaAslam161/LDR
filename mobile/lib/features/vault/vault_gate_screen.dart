@@ -1,4 +1,6 @@
 import 'package:flutter/services.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/main.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
@@ -100,6 +102,7 @@ class _VaultGateScreenState extends State<VaultGateScreen>
       if (mounted) {
         setState(() {
           _unlocked = true;
+          MilesSound.cue(Cue.unlock);
           // Both of these, or the next lock re-renders the SETUP pad: it asked
           // "Confirm your PIN" out of nowhere, offered no biometrics, and — the
           // real problem — accepted ANY two matching digits as a new PIN and
@@ -141,6 +144,7 @@ class _VaultGateScreenState extends State<VaultGateScreen>
       switch (result) {
         case 'ok':
           setState(() => _unlocked = true);
+          MilesSound.cue(Cue.unlock);
         case 'locked':
           setState(() {
             _message = 'Too many tries. Locked for 15 minutes.';
@@ -191,7 +195,10 @@ class _VaultGateScreenState extends State<VaultGateScreen>
         ),
       );
       MilesApp.authInProgress = false;
-      if (ok && mounted) setState(() => _unlocked = true);
+      if (ok && mounted) {
+        setState(() => _unlocked = true);
+        MilesSound.cue(Cue.unlock);
+      }
     } on PlatformException catch (e) {
       MilesApp.authInProgress = false;
       if (!mounted) return;

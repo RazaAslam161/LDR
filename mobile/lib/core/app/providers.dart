@@ -26,9 +26,15 @@ final partnerProfileProvider = Provider<Profile?>(
 /// consumed by the pairing screen to pre-fill the join field.
 final pendingInviteCodeProvider = StateProvider<String?>((ref) => null);
 
-/// The selected bottom-nav tab index in the AppShell (0 = Home). A provider so
-/// the Home screen's quick actions can switch tabs (e.g. open Chat).
-final shellTabProvider = StateProvider<int>((ref) => 0);
+/// The selected bottom-nav tab in the AppShell, stored as the ROOM's identity
+/// ('home', 'chat', 'touch', 'closer') — never as a bar index. A bar index's
+/// meaning changes when the modest/adult flags rebuild the bar, and those
+/// flags can change while NO shell exists (the disguise cover replaces the
+/// whole tree on every background), so any remap baseline held in shell
+/// State dies exactly when it is needed. Identity is flag-independent by
+/// construction: whatever room the user was in is the room the next shell
+/// mounts into, and a room that no longer exists resolves to Home.
+final shellTabProvider = StateProvider<String>((ref) => 'home');
 
 /// Set when a password-reset link opens a recovery session, so the app can
 /// route to /new-password instead of letting the onboarding funnel swallow it.

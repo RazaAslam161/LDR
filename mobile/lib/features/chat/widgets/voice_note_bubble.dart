@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
@@ -24,6 +25,17 @@ class VoiceNotePlayer extends ChangeNotifier {
       // cancel() is asynchronous, so an event already in flight when the chat
       // closes would reach a disposed ChangeNotifier and throw.
       if (_disposed) return;
+      // The ambient bed yields to a human voice: hold while a note actually
+      // plays, release on every edge out of playing (pause, completion, a
+      // swap to another note passes through here too). The edges pair by
+      // construction — one hold per true transition, one release per false.
+      final audible = s.playing && s.processingState == ProcessingState.ready;
+      if (audible != _holdingAmbient) {
+        _holdingAmbient = audible;
+        unawaited(audible
+            ? MilesSound.holdAmbient()
+            : MilesSound.releaseAmbient(),);
+      }
       // A note that has arrived is a note that can be moved. Any seek asked for
       // while it was still loading was DISCARDED by just_audio without a word —
       // it returns early on ProcessingState.loading — so it is replayed here
@@ -63,6 +75,7 @@ class VoiceNotePlayer extends ChangeNotifier {
   StreamSubscription<PlayerState>? _sub;
   StreamSubscription<Duration?>? _durationSub;
   bool _disposed = false;
+  bool _holdingAmbient = false;
 
   /// The message whose note is loaded, or null when nothing is.
   String? _currentId;

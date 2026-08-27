@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/chat/camera/camera_bake.dart';
@@ -555,7 +556,9 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MilesColors.night,
-      body: _denied
+      // The camera preview covers the app; pause the root ember field's
+      // ticker for as long as this screen exists.
+      body: Stack(children: [const EmberBackgroundHidden(), _denied
           ? _CameraUnavailable(
               onRetry: _retryBoot,
               onClose: () => Navigator.pop(context),
@@ -566,6 +569,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
               : (_state == _CamState.preview || _state == _CamState.recording)
                   ? _buildPreview()
                   : _buildCaptured(),
+      ],),
     );
   }
 

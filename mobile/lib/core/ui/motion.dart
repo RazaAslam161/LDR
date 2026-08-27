@@ -42,6 +42,30 @@ class MilesMotion {
   /// feel slow once you have seen it forty times.
   static const double rise = 14;
 
+  // ── Ambient tempos. Everything below is slower than interaction: these are
+  // the room breathing, not the interface responding. They live here so no
+  // ambient widget carries a raw Duration — one tempo copied everywhere is
+  // the anti-pattern the interaction tokens above already solved.
+
+  /// One breath of a resting glow — calm, roughly a real exhale.
+  static const Duration breath = Duration(seconds: 4);
+
+  /// One heartbeat of the Reach pulse.
+  static const Duration beat = Duration(milliseconds: 850);
+
+  /// One drift of a floating hero element.
+  static const Duration float = Duration(seconds: 6);
+
+  /// The wordmark's candle-catch flicker.
+  static const Duration flicker = Duration(milliseconds: 1100);
+
+  /// One digit turning in a countdown.
+  static const Duration tick = Duration(milliseconds: 140);
+
+  /// The curve every ambient loop breathes on: symmetric, no edge, because
+  /// these run forever and any sharpness becomes a metronome.
+  static const Curve breathe = Curves.easeInOutSine;
+
   /// True when the platform has been asked to stop animating.
   ///
   /// Checked at every call site rather than once at startup: it is a system

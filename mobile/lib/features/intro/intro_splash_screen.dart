@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 
@@ -27,7 +28,7 @@ class _IntroSplashScreenState extends State<IntroSplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 900),
+    duration: MilesMotion.flicker,
   )..forward();
 
   bool _done = false;
@@ -59,15 +60,15 @@ class _IntroSplashScreenState extends State<IntroSplashScreen>
     // animation is a stutter. Honour it by handing straight over rather than
     // playing a 900ms fade they did not ask for. Read here rather than in
     // initState because the setting can change while the app is alive.
-    if (MediaQuery.disableAnimationsOf(context) && !_done) {
+    if (MilesMotion.off(context) && !_done) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _advance());
     }
 
-    // Rise and settle: the mark lifts a little as it fades in, then holds.
-    final fade = CurvedAnimation(parent: _c, curve: const Interval(0, 0.6));
+    // FlickerWelcome: the mark catches like a wick — two brief dips on the
+    // way up — while it rises and settles.
     final rise = CurvedAnimation(
       parent: _c,
-      curve: const Interval(0, 0.75, curve: Curves.easeOutCubic),
+      curve: const Interval(0, 0.75, curve: MilesMotion.enter),
     );
 
     return Scaffold(
@@ -83,12 +84,12 @@ class _IntroSplashScreenState extends State<IntroSplashScreen>
         behavior: HitTestBehavior.opaque,
         child: EmberBackground(
           child: Center(
-            child: FadeTransition(
-              opacity: fade,
+            child: FlickerReveal(
+              drive: _c,
               child: AnimatedBuilder(
                 animation: rise,
                 builder: (context, child) => Transform.translate(
-                  offset: Offset(0, 16 * (1 - rise.value)),
+                  offset: Offset(0, MilesMotion.rise * (1 - rise.value)),
                   child: child,
                 ),
                 child: const Wordmark(size: 46, tagline: true),

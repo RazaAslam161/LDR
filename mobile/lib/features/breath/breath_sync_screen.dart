@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/breath/widgets/breath_orb.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A shared breathing pacer. When one partner taps "Begin", both phones
@@ -41,6 +44,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   @override
   void dispose() {
     _cycleTimer?.cancel();
+    unawaited(MilesSound.stopBed());
     _channel?.dispose();
     _pulse.dispose();
     super.dispose();
@@ -77,6 +81,10 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
     if (mounted && !_partnerActive) {
       setState(() => _partnerActive = true);
     }
+    // The JOINER's bed: their partner started the session, so this side never
+    // passes through _beginCycle's idle guard — without this, only the person
+    // who pressed Begin ever heard the room.
+    if (_phase == BreathPhase.idle) unawaited(MilesSound.startBed());
     final now = DateTime.now().millisecondsSinceEpoch;
     final elapsedMs = now - startedAtMs;
     // If we're more than one full cycle behind, ignore (likely a stale event).
@@ -85,6 +93,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   }
 
   Future<void> _beginCycle() async {
+    if (_phase == BreathPhase.idle) unawaited(MilesSound.startBed());
     final coupleId = ref.read(sessionProvider).couple!.id;
     _cycleStart = DateTime.now().millisecondsSinceEpoch;
     unawaited(_broadcastStart(coupleId, _cycleStart));
@@ -103,6 +112,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   void _beginCycleFromOffset(int offsetMs) {
     _cycleTimer?.cancel();
     setState(() => _phase = BreathPhase.inhale);
+    MilesSound.cue(Cue.breathIn);
     _pulse.duration =
         const Duration(seconds: BreathPattern.inhaleSeconds);
     _pulse.forward(from: (offsetMs / Breed.inhaleMs).clamp(0, 1));
@@ -114,6 +124,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
       const remainingHold = BreathPattern.holdSeconds * 1000;
       _cycleTimer = Timer(const Duration(milliseconds: remainingHold), () {
         setState(() => _phase = BreathPhase.exhale);
+        MilesSound.cue(Cue.breathOut);
         _pulse.duration =
             const Duration(seconds: BreathPattern.exhaleSeconds);
         _pulse.reverse(from: 1);
@@ -126,6 +137,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   }
 
   void _stop() {
+    unawaited(MilesSound.stopBed());
     _cycleTimer?.cancel();
     _pulse.stop();
     setState(() => _phase = BreathPhase.idle);
@@ -179,7 +191,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
                 ),
               ),
             const Spacer(),
-            _BreathOrb(
+            BreathOrb(
               controller: _pulse,
               phase: _phase,
             ),
@@ -212,53 +224,6 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
 }
 
 enum BreathPhase { idle, inhale, hold, exhale }
-
-class _BreathOrb extends StatelessWidget {
-  const _BreathOrb({required this.controller, required this.phase});
-  final AnimationController controller;
-  final BreathPhase phase;
-
-  @override
-  Widget build(BuildContext context) {
-    if (phase == BreathPhase.idle) {
-      return Container(
-        width: 120,
-        height: 120,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [
-              const Color(0xFFEF6F58).withValues(alpha: 0.3),
-              const Color(0xFFEF6F58).withValues(alpha: 0),
-            ],
-          ),
-        ),
-        child: const Center(
-          child: Icon(Icons.air, color: Color(0xFFF4937E), size: 40),
-        ),
-      );
-    }
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        final size = 120 + (controller.value * 120);
-        return Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: [
-                const Color(0xFFEF6F58).withValues(alpha: 0.5),
-                const Color(0xFFEF6F58).withValues(alpha: 0),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
 
 // Tiny helper namespace used in offset math above.
 class Breed {

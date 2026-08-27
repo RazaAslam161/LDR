@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/widgets/wordmark.dart';
@@ -38,6 +39,7 @@ import 'package:miles/features/safety/report_service.dart';
 import 'package:miles/features/safety/safety_sheets.dart';
 import 'package:miles/features/safety/severance_sheet.dart';
 import 'package:miles/features/settings/security_code_dialog.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -141,6 +143,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _fixEscrow() async {
     await EscrowPrompt.show(context);
     await _loadEscrow();
+  }
+
+  Future<void> _toggleSounds(bool v) async {
+    setState(() => MilesSound.enabled = v);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(MilesSound.prefKey, v);
+    } catch (e) {
+      // The live toggle already took effect; only persistence failed — say so
+      // rather than silently reverting on next launch.
+      debugPrint('[settings] sound pref save failed: $e');
+    }
   }
 
   Future<void> _toggleAppLock(bool v) async {
@@ -925,6 +939,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 child: Text(_error!,
                     style: const TextStyle(color: MilesColors.blush),),
               ),
+
+            const SizedBox(height: 28),
+
+            // ── Sounds ───────────────────────────────────────────
+            const _SectionHeader(label: 'Sounds'),
+            ValueListenableBuilder<int>(
+              valueListenable: ReleaseGate.revision,
+              builder: (context, _, __) {
+                final killed = ReleaseGate.uiSoundKilled;
+                return SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: !killed && MilesSound.enabled,
+                  onChanged: killed ? null : _toggleSounds,
+                  activeThumbColor: MilesColors.ember,
+                  secondary: const Icon(Icons.music_note_outlined,
+                      color: MilesColors.gilt,),
+                  title: const Text('Sounds',
+                      style: TextStyle(color: MilesColors.cream50),),
+                  subtitle: Text(
+                    killed
+                        ? 'Turned off remotely for this release.'
+                        : 'Soft sounds for moments — sending, sealing, '
+                            'breathing. Vibration is separate and stays on.',
+                    style: const TextStyle(
+                        fontSize: 12, color: MilesColors.taupe,),
+                  ),
+                );
+              },
+            ),
 
             const SizedBox(height: 28),
 

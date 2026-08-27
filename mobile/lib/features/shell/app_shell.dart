@@ -10,6 +10,8 @@ import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/partner_rewrap.dart';
+import 'package:miles/core/ui/tab_dissolve.dart';
+import 'package:miles/core/widgets/gilt_nav_icon.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
@@ -107,8 +109,34 @@ class _AppShellState extends ConsumerState<AppShell>
   final Set<String> _shownReach = {};
   CallState _lastCallState = CallState.idle;
 
-  /// Nav index of the Chat destination (Home, Chat, Camera, Touch, [Closer]).
-  static const int _chatTab = 1;
+  /// Which room a bar index means under the given flags.
+  static String _tabIdentity(int index,
+      {required bool touch, required bool closer,}) {
+    if (index <= 2) return const ['home', 'chat', 'camera'][index < 0 ? 0 : index];
+    if (touch && index == 3) return 'touch';
+    if (closer && index == (touch ? 4 : 3)) return 'closer';
+    return 'home';
+  }
+
+  /// Where a room sits under the given flags. A room that no longer exists
+  /// answers Home — never a neighbouring index that now means something else.
+  static int _tabIndex(String id, {required bool touch, required bool closer}) {
+    switch (id) {
+      case 'chat':
+        return 1;
+      case 'camera':
+        return 2;
+      case 'touch':
+        return touch ? 3 : 0;
+      case 'closer':
+        return closer ? (touch ? 4 : 3) : 0;
+      default:
+        return 0;
+    }
+  }
+
+  /// The Chat room's identity in [shellTabProvider].
+  static const String _chatTab = 'chat';
 
   @override
   void initState() {
@@ -251,8 +279,8 @@ class _AppShellState extends ConsumerState<AppShell>
   /// pop.
   void _landHome({required bool publish}) {
     final tabs = ref.read(shellTabProvider.notifier);
-    if (tabs.state == 0) return;
-    tabs.state = 0;
+    if (tabs.state == 'home') return;
+    tabs.state = 'home';
     // Published only when the shell is genuinely what the user is looking at.
     // Announcing 'Home' from underneath a pushed route tells the partner the
     // wrong room, and the observer's dedupe then keeps that lie past the pop.
@@ -634,7 +662,6 @@ class _AppShellState extends ConsumerState<AppShell>
         ref.watch(sessionProvider.select((s) => s.profile?.isAdult ?? false));
     final isModest =
         ref.watch(sessionProvider.select((s) => s.couple?.modestMode ?? true));
-    final index = ref.watch(shellTabProvider);
 
     final showCloser = isAdult;
     // Touch rides the same switch as Closer rather than being always-on. Body
@@ -642,9 +669,27 @@ class _AppShellState extends ConsumerState<AppShell>
     // module, and it was the one intimate surface reachable without either
     // partner having agreed to reveal any of it.
     final showTouch = isAdult && !isModest;
-    // The observer names tabs by index, so it needs the same answer the bar
-    // was built from — otherwise standing in Closer publishes "Touch".
-    presenceRouteObserver?.showTouch = showTouch;
+
+    // The provider stores the room's IDENTITY, so a flag flip needs no remap
+    // and no State-held baseline (a baseline died with the shell on every
+    // cover cycle, resurrecting the teleport it existed to stop). The one
+    // case to handle: the room the user is standing in ceases to exist —
+    // resolve to Home for THIS frame, persist it, and TELL THE PARTNER
+    // (every other tab write pairs with publishActiveTab; the first remap
+    // fix forgot the publish and left a live join-offer into a dead room).
+    var identity = ref.watch(shellTabProvider);
+    if ((identity == 'touch' && !showTouch) ||
+        (identity == 'closer' && !showCloser)) {
+      identity = 'home';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(shellTabProvider.notifier).state = 'home';
+        if (GoRouter.of(context).state.uri.path == '/app') {
+          presenceRouteObserver?.publishActiveTab();
+        }
+      });
+    }
+    final index = _tabIndex(identity, touch: showTouch, closer: showCloser);
     // Bottom-nav bodies (Home, Chat, [Touch], [Closer]). The Camera tab is a
     // full-screen PUSH inserted at nav index 2 — it has no body, so nav indices
     // map past it. Built rather than sliced: Touch sits in the MIDDLE, so
@@ -666,7 +711,9 @@ class _AppShellState extends ConsumerState<AppShell>
       drawer: const AppDrawer(),
       body: Column(
         children: [
-          Expanded(child: bodies[bodyIndex]),
+          Expanded(
+            child: TabDissolve(index: bodyIndex, child: bodies[bodyIndex]),
+          ),
         ],
       ),
       bottomNavigationBar: SurfaceNavBar(
@@ -678,39 +725,60 @@ class _AppShellState extends ConsumerState<AppShell>
               _openCamera(); // a push — keep the current tab selected
               return;
             }
-            ref.read(shellTabProvider.notifier).state = i;
+            ref.read(shellTabProvider.notifier).state =
+                _tabIdentity(i, touch: showTouch, closer: showCloser);
             // A tab change is a setState, not a navigation, so nothing else
             // can tell the partner the user has moved rooms.
             presenceRouteObserver?.publishActiveTab();
           },
+          // GiltSelect: each destination hands both its faces to GiltNavIcon,
+          // which cross-fades them, lifts 2px and blooms the one-shot gilt
+          // ring. The NavigationBar's own icon swap is bypassed (no
+          // selectedIcon) so the fade owns the change; the theme's indicator
+          // pill is transparent for the same reason.
           destinations: [
-            const NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home),
+            NavigationDestination(
+              icon: GiltNavIcon(
+                icon: const Icon(Icons.home_outlined),
+                selectedIcon: const Icon(Icons.home),
+                selected: selected == 0,
+              ),
               label: 'Home',
             ),
-            const NavigationDestination(
-              icon: Icon(Icons.chat_bubble_outline),
-              selectedIcon: Icon(Icons.chat_bubble),
+            NavigationDestination(
+              icon: GiltNavIcon(
+                icon: const Icon(Icons.chat_bubble_outline),
+                selectedIcon: const Icon(Icons.chat_bubble),
+                selected: selected == 1,
+              ),
               label: 'Chat',
             ),
+            // The camera is a push, never a selected tab, so it keeps its
+            // plain icon pair — a selection animation on it would promise a
+            // room the user is not in.
             const NavigationDestination(
               icon: Icon(Icons.camera_alt_outlined),
               selectedIcon: Icon(Icons.camera_alt),
               label: 'Camera',
             ),
             if (showTouch)
-              const NavigationDestination(
-                icon: Icon(Icons.touch_app_outlined),
-                selectedIcon: Icon(Icons.touch_app),
+              NavigationDestination(
+                icon: GiltNavIcon(
+                  icon: const Icon(Icons.touch_app_outlined),
+                  selectedIcon: const Icon(Icons.touch_app),
+                  selected: selected == 3,
+                ),
                 label: 'Touch',
               ),
             if (showCloser)
               NavigationDestination(
-                icon: const Icon(Icons.lock_outline),
-                selectedIcon: Icon(
-                  isModest ? Icons.lock : Icons.lock_open,
-                  color: const Color(0xFFEF6F58),
+                icon: GiltNavIcon(
+                  icon: const Icon(Icons.lock_outline),
+                  selectedIcon: Icon(
+                    isModest ? Icons.lock : Icons.lock_open,
+                    color: const Color(0xFFEF6F58),
+                  ),
+                  selected: selected == (showTouch ? 4 : 3),
                 ),
                 label: 'Closer',
               ),

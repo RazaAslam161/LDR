@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 
@@ -82,7 +81,7 @@ class LanguageToggle extends ConsumerWidget {
                           child: Center(
                             child: AnimatedDefaultTextStyle(
                               duration: const Duration(milliseconds: 220),
-                              style: GoogleFonts.inter(
+                              style: MilesType.inter(
                                 fontSize: 11,
                                 fontWeight: v == lang
                                     ? FontWeight.w700

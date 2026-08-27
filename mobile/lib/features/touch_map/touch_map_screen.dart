@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -459,7 +458,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                 const SizedBox(height: 20),
                 Text(
                   'Send a reaction',
-                  style: GoogleFonts.fraunces(
+                  style: MilesType.fraunces(
                     fontSize: 20,
                     fontStyle: FontStyle.italic,
                     color: MilesColors.cream50,
@@ -468,7 +467,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                 const SizedBox(height: 6),
                 Text(
                   'How do you want to react?',
-                  style: GoogleFonts.inter(
+                  style: MilesType.inter(
                     fontSize: 13,
                     color: MilesColors.taupe,
                   ),
@@ -1855,7 +1854,7 @@ class _SourceOption extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               label,
-              style: GoogleFonts.fraunces(
+              style: MilesType.fraunces(
                 fontSize: 15,
                 color: MilesColors.cream50,
               ),
@@ -1863,7 +1862,7 @@ class _SourceOption extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subtitle,
-              style: GoogleFonts.inter(
+              style: MilesType.inter(
                 fontSize: 11,
                 color: MilesColors.taupe,
               ),
@@ -2185,7 +2184,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
                   const SizedBox(height: 14),
                   Text(
                     'Camera access needed',
-                    style: GoogleFonts.fraunces(
+                    style: MilesType.fraunces(
                       fontSize: 18,
                       color: MilesColors.cream50,
                     ),
@@ -2194,7 +2193,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
                   Text(
                     'Allow camera access to send a reaction.',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(
+                    style: MilesType.inter(
                       fontSize: 13,
                       color: MilesColors.taupe,
                     ),
@@ -2299,7 +2298,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
             const SizedBox(width: 6),
             Text(
               _isVideoMode ? 'Video' : 'Photo',
-              style: GoogleFonts.inter(
+              style: MilesType.inter(
                 color: MilesColors.cream50,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -2327,7 +2326,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
                     '0:${_countdown.toString().padLeft(2, '0')}',
-                    style: GoogleFonts.inter(
+                    style: MilesType.inter(
                       color: MilesColors.cream50,
                       fontSize: 16,
                       fontWeight: FontWeight.w700,

@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/reach/reach_repository.dart';
+import 'package:miles/features/reach/widgets/reach_pulse.dart';
 import 'package:vibration/vibration.dart';
 
 /// Full-screen "[partner] is reaching for you 💕" alert, shown when a reach
@@ -57,21 +58,25 @@ class _ReachOverlayScreenState extends State<ReachOverlayScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // The receiver's heart carries the sender's heartbeat — the
+                // same ReachPulse lub-dub, over the breathing glow.
                 const BreathingGlow(
-                  period: Duration(milliseconds: 1100),
-                  child: Text('💗', style: TextStyle(fontSize: 96)),
+                  period: Duration(milliseconds: 1700),
+                  child: ReachPulse(
+                    child: Text('💗', style: TextStyle(fontSize: 96)),
+                  ),
                 ),
                 const SizedBox(height: 32),
-                Text('${widget.partnerName} is',
+                EntranceStagger(
+                  children: [
+                    Text('${widget.partnerName} is',
                         style: const TextStyle(
-                            color: MilesColors.taupe, fontSize: 16,),)
-                    .animate()
-                    .fadeIn(duration: 500.ms),
-                Text('reaching for you 💕',
+                            color: MilesColors.taupe, fontSize: 16,),),
+                    Text('reaching for you 💕',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.displaySmall,)
-                    .animate()
-                    .fadeIn(delay: 150.ms, duration: 600.ms),
+                        style: Theme.of(context).textTheme.displaySmall,),
+                  ],
+                ),
                 const SizedBox(height: 48),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 40),

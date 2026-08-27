@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
 
 /// The splash sits on the only way into the app. If it never calls back, the
@@ -16,7 +17,10 @@ void main() {
     await tester.pump();
     expect(completed, 0, reason: 'must not fire before it has been seen');
 
-    await tester.pump(const Duration(milliseconds: 1000));
+    // The token plus a frame, not a literal: the splash runs MilesMotion.
+    // flicker, and a hardcoded number here silently re-pins whatever the
+    // token was the day the test was written.
+    await tester.pump(MilesMotion.flicker + const Duration(milliseconds: 50));
     expect(completed, 1);
   });
 
@@ -38,7 +42,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.byType(IntroSplashScreen));
-    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump(MilesMotion.flicker + const Duration(milliseconds: 50));
     expect(completed, 1);
   });
 

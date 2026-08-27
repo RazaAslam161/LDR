@@ -18,6 +18,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/emergency_lock_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
@@ -33,6 +34,7 @@ import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
+import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/call/call_pip.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_banner.dart';
@@ -125,6 +127,31 @@ Future<void> main() async {
   // mute is the real enforcement — this copy only exists so the ring that
   // arrives over the realtime channel can be dropped too.
   unawaited(ContactPause.load());
+  // The sound layer: its toggle from prefs, and the two ambient facts its
+  // gate chain reads — handed down as functions because everything imports
+  // the facade and the facade must not import main.
+  unawaited(MilesSound.loadPref());
+  MilesSound.wireProbes(
+    coverVisible: () => !MilesApp.showRealApp.value,
+    // BOTH call shapes: PiP (a cue over the minimised conversation) and the
+    // full-screen call (the chat stays mounted beneath it and its receive
+    // cue would play into the mic path).
+    callActive: () => PipMode.active.value || CallController.liveCall.value,
+  );
+  // A recheck can flip the fleet kill mid-session; a running bed dies with it.
+  MilesSound.attachKillSwitch();
+  // Warm the pool when the real app comes up; SILENCE THE INSTANT it drops.
+  // The cover rises on the panic gesture and on sign-out with the app still
+  // foregrounded — no lifecycle event fires, so the silence must ride the
+  // same edge the cover does. One second of ceremony audio under a panic
+  // cover is the exact tell the cover exists to prevent.
+  MilesApp.showRealApp.addListener(() {
+    if (MilesApp.showRealApp.value) {
+      unawaited(MilesSound.warm());
+    } else {
+      unawaited(MilesSound.silenceAll());
+    }
+  });
   // No disguise on this channel means no door to come through: the real app is
   // the first frame, and MilesApp.raiseCover keeps it that way.
   if (!DisguiseService.enabled) MilesApp.showRealApp.value = true;
@@ -328,8 +355,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
         if (!MilesApp.systemOverlayActive && !PipMode.active.value) {
           MilesApp.raiseCover();
         }
+        // Sound goes silent on ANY real backgrounding, cover or not — a bed
+        // playing from a pocket is the tell the cover exists to prevent.
+        unawaited(MilesSound.silenceAll());
       case AppLifecycleState.detached:
         MilesApp.raiseCover();
+        unawaited(MilesSound.silenceAll());
       case AppLifecycleState.inactive:
         // Transient focus loss: a picker grabbing focus, the notification-shade
         // peek, the biometric prompt. Defer the check a beat so the overlay
@@ -887,11 +918,33 @@ class _MilesAppState extends ConsumerState<MilesApp>
           debugShowCheckedModeBanner: false,
           theme: milesDarkTheme(),
           routerConfig: router,
-          builder: (context, child) => Stack(
+          // The backdrop WRAPS the whole overlay stack rather than sitting
+          // beside it. As a Stack sibling its dedupe scope covered nothing —
+          // an InheritedWidget only reaches descendants — so all 13 screens
+          // that wrap themselves in EmberBackground were full painting
+          // instances over a root that kept burning frames under their opaque
+          // fills. As the ancestor, every one of them collapses to the
+          // pass-through the scope always promised.
+          // Both of this app's own covers — the biometric LockScreen and the
+          // long-press stealth scrim — are SIBLINGS in the stack below, not
+          // routes and not overlay entries. Flutter's own TickerMode only
+          // reaches route- and overlay-scoped subtrees, so nothing under a
+          // raised cover was ever muted: the ember field kept painting, the
+          // hero card kept breathing, and the parallax kept streaming the
+          // accelerometer at 15Hz behind a screen whose entire purpose is to
+          // show nothing. One wrapper closes it for every ambient widget at
+          // once, including the field itself.
+          builder: (context, child) => ValueListenableBuilder<bool>(
+            valueListenable: AppLock.locked,
+            builder: (context, locked, _) => ValueListenableBuilder<bool>(
+              valueListenable: stealthActive,
+              builder: (context, stealth, __) => Stack(
+                children: [
+                  TickerMode(
+                enabled: !locked && !stealth,
+                child: EmberBackground(
+            child: Stack(
             children: [
-              // Always-present candle-glow backdrop. It shows at the edges and
-              // behind transparent scaffolds; panels drawn over it are opaque.
-              const EmberBackground(child: SizedBox.shrink()),
               // The routed screen, transparent so the glow shows through — or a
               // branded loading veil while the session is still initialising.
               if (showSessionLoading)
@@ -927,18 +980,29 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // so it reaches the whole screen, above the page and below the
               // lock.
               const Positioned.fill(child: WarmthOverlay()),
-              // Biometric lock sits on top of everything.
-              RepaintBoundary(
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: AppLock.locked,
-                  builder: (context, locked, _) =>
-                      locked ? const LockScreen() : const SizedBox.shrink(),
-                ),
+                    ],
+                    ),
+                    ),
+                  ),
+                  // The covers themselves sit OUTSIDE that TickerMode — a
+                  // lock screen that muted its own animations would be the
+                  // one thing on screen and frozen.
+                  // DIRECT child of the Stack, with nothing between:
+                  // LockScreen returns a Positioned.fill of its own, and a
+                  // Positioned whose nearest ancestor render object is not
+                  // the Stack throws "Incorrect use of ParentDataWidget" —
+                  // which, as the CallPip comment above records, greys out
+                  // the whole app and swallows every touch. The
+                  // RepaintBoundary that used to sit here did exactly that;
+                  // isolation belongs INSIDE LockScreen, the way CallPip
+                  // does it.
+                  if (locked) const LockScreen(),
+                  // Stealth quick-cover: invisible top-right tap zone +
+                  // scrim, present on every screen inside the real app.
+                  const Positioned.fill(child: StealthLayer()),
+                ],
               ),
-              // Stealth quick-cover: invisible top-right tap zone + scrim,
-              // present on every screen inside the real app.
-              const Positioned.fill(child: StealthLayer()),
-            ],
+            ),
           ),
         );
       },

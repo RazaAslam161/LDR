@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/widgets/ember_press.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/partner_key_pin.dart';
@@ -498,8 +501,9 @@ class _FeatureTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return EmberPress(
       onTap: () => context.push(route),
+      onCue: () => MilesSound.cue(Cue.tap),
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

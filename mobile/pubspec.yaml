@@ -24,9 +24,6 @@ dependencies:
   intl: ^0.19.0
   timezone: ^0.11.0
 
-  # ─── Fonts ───────────────────────────────────────────────────
-  google_fonts: ^6.2.1
-
   # ─── Icons ───────────────────────────────────────────────────
   cupertino_icons: ^1.0.8
 
@@ -61,6 +58,12 @@ dependencies:
   # ─── Voice notes (record + playback in chat) ─────────────────
   record: ^7.1.0
   just_audio: ^0.10.5
+  # Direct because JustAudioEngine configures the audio session ONCE as
+  # sonification + transient-may-duck: an unconfigured session made every
+  # 200ms cue seize PERMANENT audio focus and kill the user's own music.
+  # Already resolved transitively at 0.2.4 via just_audio — same version, no
+  # new package, no new native code.
+  audio_session: ^0.2.2
 
   # ─── Misc utilities ──────────────────────────────────────────
   path_provider: ^2.1.6
@@ -128,3 +131,40 @@ flutter:
     # publish a credential to every handset if it were ever filled in.
     - .env
     - assets/emoji/
+    # 15 UI cues + one ambient bed, OGG Vorbis, ~730KB. Names are generic
+    # UI-sound vocabulary on purpose — unzip -l lists every asset path in
+    # the clear. Provenance per cue lives beside its enum in
+    # core/services/sound/cue.dart.
+    - assets/sound/
+    # The OFL texts ship because the license requires them to travel with the
+    # font software; theme.dart registers both with LicenseRegistry so they
+    # surface in the standard licenses page.
+    - assets/fonts/OFL-Fraunces.txt
+    - assets/fonts/OFL-Inter.txt
+
+  # Bundled so first paint renders the real faces — google_fonts fetched these
+  # over HTTP at runtime (PERF_PLAN hotspot #9: fallback-glyph reflow, broken
+  # typography offline). Static latin instances, 460KB total.
+  fonts:
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Fraunces-LightItalic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/Fraunces-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Fraunces-Italic.ttf
+          weight: 400
+          style: italic
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700

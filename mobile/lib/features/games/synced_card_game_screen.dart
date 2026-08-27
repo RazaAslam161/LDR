@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
@@ -145,6 +147,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     final cards = widget.deck.cards(lang);
     if (cards.isEmpty) return;
     final card = await NoRepeatBag.draw(_bagKey(lang), cards);
+    MilesSound.cue(Cue.deal);
     if (!mounted) return;
     setState(() {
       _started = true;

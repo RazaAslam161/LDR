@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/call/call_video.dart';
@@ -51,6 +52,9 @@ class CallScreen extends ConsumerWidget {
         backgroundColor: MilesColors.night,
         body: Stack(
           children: [
+            // This screen paints every pixel; the root ember field under it
+            // has no reason to keep ticking through a call.
+            const EmberBackgroundHidden(),
             // Long-press anywhere to reveal what the call is really doing.
             // Hidden by default: this is a diagnostic, not something a partner
             // should ever see mid-call.

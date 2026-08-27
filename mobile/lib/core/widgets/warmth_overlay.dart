@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 
@@ -34,7 +36,7 @@ class _WarmthOverlayState extends ConsumerState<WarmthOverlay>
   @override
   Widget build(BuildContext context) {
     ref.listen<int>(roomWarmthProvider, (_, __) {
-      HapticFeedback.lightImpact();
+      MilesSound.cue(Cue.glow);
       _c.forward(from: 0); // from: 0 so a second warmth restarts, not stacks
     });
 

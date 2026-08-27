@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
@@ -140,6 +142,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
   Future<void> _pick(TDType type) async {
     if (!_myTurn || _card != null) return;
     final card = await drawTD(ref.read(contentLanguageProvider), type, _tier);
+    MilesSound.cue(Cue.deal);
     if (!mounted) return;
     setState(() => _card = card);
     _broadcast();

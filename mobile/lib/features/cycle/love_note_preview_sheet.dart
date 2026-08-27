@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
@@ -133,7 +132,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
               // Header
               Text(
                 'Love note 💌',
-                style: GoogleFonts.fraunces(
+                style: MilesType.fraunces(
                   fontSize: 20,
                   fontStyle: FontStyle.italic,
                   color: MilesColors.cream50,
@@ -145,7 +144,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
                   Expanded(
                     child: Text(
                       'For $_name — edit before sending 😏',
-                      style: GoogleFonts.inter(
+                      style: MilesType.inter(
                         fontSize: 12,
                         color: MilesColors.taupe,
                       ),
@@ -176,7 +175,7 @@ class _LoveNotePreviewSheetState extends State<LoveNotePreviewSheet> {
                   maxLines: 8,
                   minLines: 5,
                   cursorColor: MilesColors.blush,
-                  style: GoogleFonts.inter(
+                  style: MilesType.inter(
                     fontSize: 14,
                     color: MilesColors.cream100,
                     height: 1.6,

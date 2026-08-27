@@ -2334,9 +2334,16 @@ class CallController extends ChangeNotifier {
     final live = s == CallState.calling ||
         s == CallState.ringing ||
         s == CallState.connected;
+    // Static mirror for code with no Ref: the sound layer's call gate reads
+    // this — PipMode alone missed the FULL-SCREEN call, so a chat cue could
+    // play into the conversation's mic path.
+    liveCall.value = live;
     unawaited(_setAwake(live));
     notifyListeners();
   }
+
+  /// True whenever a call is being placed, ringing or connected.
+  static final ValueNotifier<bool> liveCall = ValueNotifier<bool>(false);
 
   @override
   void dispose() {

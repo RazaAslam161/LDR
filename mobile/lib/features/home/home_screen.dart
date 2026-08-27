@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:miles/core/widgets/tilt_parallax.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
@@ -25,6 +26,9 @@ import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/core/widgets/ember_press.dart';
+import 'package:miles/core/widgets/screen_entrance.dart';
+import 'package:miles/core/widgets/gravity_float.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
@@ -177,10 +181,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: EmberBackground(
-        child: SafeArea(
+        // Home is the one screen that may wish: while it is on screen, a
+        // single shooting star crosses the ember field per ambient loop.
+        // Renders nothing — but it must NOT live inside the ListView: a list
+        // destroys the elements of children scrolled past its cache extent,
+        // so the marker would quietly release its claim (and the wishes with
+        // it) the moment someone scrolled down, then re-claim on the way
+        // back. The screen's presence is what grants the wish, not the
+        // scroll position.
+        child: Stack(
+          children: [
+            const EmberBackgroundWishes(),
+            SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             children: [
+              // One coordinated entrance for the whole page — the auth flow's
+              // stagger, as a single scrollable child.
+              ScreenEntrance(children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -240,8 +258,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ],
+              ],),
             ],
           ),
+        ),
+          ],
         ),
       ),
     );
@@ -336,7 +357,14 @@ class _PartnerStatusCard extends StatelessWidget {
         ? presence!.locationLabel!
         : 'Location sharing off';
 
-    return SurfacePanel(
+    // GravityFloat is Home's one ambient element (the avatar's BreathingGlow
+    // is presence signal, not decoration — together they are the "one or
+    // two" the motion contract allows). Nothing else on this screen floats.
+    // TiltParallax is not a third: it moves only when the PHONE moves, which
+    // is the hand's motion being answered, not the interface animating.
+    return TiltParallax(
+      child: GravityFloat(
+      child: SurfacePanel(
       glow: MilesColors.blush,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -430,6 +458,8 @@ class _PartnerStatusCard extends StatelessWidget {
           ),
         ],
       ),
+    ),
+    ),
     );
   }
 }
@@ -443,7 +473,7 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '🤍';
     final url = photoUrl;
-    return GestureDetector(
+    return EmberPress(
       onTap: url == null
           ? null
           : () => MediaViewer.openStored(context, chatBucket, url,

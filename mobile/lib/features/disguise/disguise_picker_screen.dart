@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/glow_button.dart';
@@ -164,7 +163,7 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
           child: Text(
             'This version of the app appears under its own name and icon. '
             'There is nothing to change here.',
-            style: GoogleFonts.inter(
+            style: MilesType.inter(
               fontSize: 13,
               height: 1.5,
               color: MilesColors.taupe,
@@ -188,7 +187,7 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
               child: Text(
                 'Pick what this app is called and what its icon looks like on '
                 'your phone. Anyone glancing at your home screen sees only this.',
-                style: GoogleFonts.inter(
+                style: MilesType.inter(
                   fontSize: 13,
                   height: 1.5,
                   color: MilesColors.taupe,
@@ -222,7 +221,7 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
                 '"News" whichever disguise you pick. That name is fixed when '
                 'the app is installed and no app can change it afterwards.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
+                style: MilesType.inter(
                   fontSize: 11.5,
                   color: MilesColors.taupe.withValues(alpha: 0.8),
                 ),
@@ -307,7 +306,7 @@ class _DisguiseTile extends StatelessWidget {
                   children: [
                     Text(
                       profile.label,
-                      style: GoogleFonts.inter(
+                      style: MilesType.inter(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: MilesColors.cream50,
@@ -316,7 +315,7 @@ class _DisguiseTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       profile.blurb,
-                      style: GoogleFonts.inter(
+                      style: MilesType.inter(
                         fontSize: 11.5,
                         color: MilesColors.taupe,
                       ),
@@ -326,7 +325,7 @@ class _DisguiseTile extends StatelessWidget {
                     // whose door you cannot remember is an app you cannot open.
                     Text(
                       'Way in — ${profile.entry}',
-                      style: GoogleFonts.inter(
+                      style: MilesType.inter(
                         fontSize: 11,
                         height: 1.4,
                         fontWeight: FontWeight.w500,

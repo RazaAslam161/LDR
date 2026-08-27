@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/features/auth/auth_errors.dart';
@@ -64,6 +66,7 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
         tags: _selected.toList(),
       );
       if (!mounted) return;
+      MilesSound.cue(Cue.wish);
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;

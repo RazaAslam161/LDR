@@ -2,8 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/reach/reach_repository.dart';
+import 'package:miles/features/reach/widgets/reach_pulse.dart';
 
 /// Big hold-to-reach button. Hold ~0.5s (prevents accidental taps) to send a
 /// Reach; the wait afterwards belongs to the server and is read back from it.
@@ -21,6 +25,9 @@ class _ReachButtonState extends State<ReachButton> {
   Timer? _ticker;
   bool _sending = false;
 
+  /// Bumped on a successful send; ReachPulse plays its release bloom off it.
+  final ValueNotifier<int> _bloomTick = ValueNotifier<int>(0);
+
   bool get _onCooldown =>
       _cooldownUntil != null && _cooldownUntil!.isAfter(DateTime.now());
   int get _remaining => _cooldownUntil == null
@@ -36,6 +43,7 @@ class _ReachButtonState extends State<ReachButton> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _bloomTick.dispose();
     super.dispose();
   }
 
@@ -72,9 +80,11 @@ class _ReachButtonState extends State<ReachButton> {
     if (_onCooldown || _sending) return;
     setState(() => _sending = true);
     unawaited(HapticFeedback.mediumImpact());
+    MilesSound.cue(Cue.reach);
     var sent = true;
     try {
       await ReachRepository.reach(widget.coupleId);
+      _bloomTick.value++;
     } catch (_) {
       sent = false;
     }
@@ -110,8 +120,12 @@ class _ReachButtonState extends State<ReachButton> {
           onLongPress: _reach,
           child: AnimatedScale(
             scale: disabled ? 0.94 : 1,
-            duration: const Duration(milliseconds: 200),
-            child: Container(
+            duration: MilesMotion.quick,
+            curve: MilesMotion.enter,
+            child: ReachPulse(
+              beating: !disabled,
+              bloomTick: _bloomTick,
+              child: Container(
               width: 132,
               height: 132,
               decoration: BoxDecoration(
@@ -131,6 +145,7 @@ class _ReachButtonState extends State<ReachButton> {
                         color: MilesColors.cream50,)
                     : const Icon(Icons.front_hand_outlined,
                         color: MilesColors.cream50, size: 52,),
+              ),
               ),
             ),
           ),

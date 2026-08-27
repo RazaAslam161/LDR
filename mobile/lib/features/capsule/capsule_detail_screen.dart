@@ -7,8 +7,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:miles/core/widgets/tilt_parallax.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/countdown_digits.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
@@ -65,6 +69,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   }
 
   Future<void> _revealAlreadyOpen() async {
+    MilesSound.cue(Cue.chime);
     await _loadItems();
     if (mounted) {
       setState(() {
@@ -138,6 +143,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
 
   Future<void> _runCeremony() async {
     _prox?.stop();
+    MilesSound.cue(Cue.open);
     setState(() {
       _opening = true;
       _checking = false;
@@ -291,6 +297,13 @@ class _SealedView extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(color: MilesColors.taupe, height: 1.5),),
         ),
+        // CountTick: the wait, counted — digits turn as the day approaches.
+        if (capsule.unlockMode == CapsuleUnlockMode.date &&
+            capsule.unlockDate != null &&
+            capsule.unlockDate!.isAfter(DateTime.now())) ...[
+          const SizedBox(height: 10),
+          Center(child: CountdownDigits(until: capsule.unlockDate!)),
+        ],
         const SizedBox(height: 28),
         OutlinedButton.icon(
           onPressed: onAdd,
@@ -482,7 +495,11 @@ class _CeremonyView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          BreathingGlow(
+          // The ceremony orb leans with the phone — the one place in the app
+          // where a held object should feel like it has weight.
+          TiltParallax(
+            depth: 6,
+            child: BreathingGlow(
             color: MilesColors.emberSoft,
             period: const Duration(milliseconds: 1600),
             child: Container(
@@ -498,6 +515,7 @@ class _CeremonyView extends StatelessWidget {
               ),
               child: const Center(
                   child: Text('💝', style: TextStyle(fontSize: 64)),),
+            ),
             ),
           )
               .animate(onPlay: (c) => c.forward())
