@@ -37,7 +37,8 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
         ),
         FaqEntry(
           'How much does it cost?',
-          'Nothing. No subscriptions, no ads, no in-app purchases.',
+          'Nothing. No subscriptions and no in-app purchases. There is one '
+              'banner on the Touch tab, and nowhere else in the app.',
         ),
         FaqEntry(
           'How do I connect with my partner?',

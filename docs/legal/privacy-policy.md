@@ -101,9 +101,18 @@ the reported content. Miles also records that you accepted a given version of
 the Terms and when, and any notification or contact pause you set against your
 partner.
 
-Miles contains no advertising SDK, no analytics SDK, and no third-party
-tracking. Nothing here is sold, and nothing here is used to build an
-advertising profile.
+Miles contains no analytics SDK. It does contain one advertising SDK — Google
+AdMob — which shows a single banner on the Touch tab and nowhere else in the
+app. AdMob receives your device's advertising ID and ordinary device and network
+signals, and Google may use them to choose which ad to show you. It never
+receives your messages, your photos, your location, or anything else this policy
+lists, and it is not given a way to link an ad to your Miles account. Nothing
+here is sold.
+
+The banner can be switched off for everyone from the server, and is off unless
+this policy says otherwise. In the EEA, the UK and Switzerland the app asks for
+your consent before requesting any ad, and Settings › About keeps a **Privacy
+options** entry so you can change that answer later.
 
 ---
 
@@ -212,8 +221,12 @@ Two honest consequences:
 | **Giphy** | your GIF search terms, your IP address, and a request for each GIF shown | The GIF picker in chat. Only when you open it. |
 | **YouTube and other video sites** | ordinary web requests from the embedded player | Watch Together, only for a link you paste. |
 | **Google Fonts** | a font request on first launch | Typefaces. |
+| **Google AdMob** | your device's advertising ID, and device and network signals | The one banner on the Touch tab. Only while ads are switched on, and in the EEA, the UK and Switzerland only after you consent. |
 
-We do not sell personal data and we do not share it for advertising.
+We do not sell personal data. The one thing shared for advertising is the device
+advertising ID that Google AdMob reads to select the banner described in section
+1 — nothing from your account, your messages or your media is shared with anyone
+for advertising, ever.
 
 We disclose data to anyone else only where we are legally compelled to. We
 cannot disclose what we cannot read.
