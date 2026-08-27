@@ -1,0 +1,27 @@
+when,stage,shot_id,tool,model,params,precost,planned_cum,balance_before,balance_after,actual,status,url
+2026-08-26T00:00,G0,cap,none,none,"cap=500 duration~70s webm_audio=yes hero=no (owner away; plan-approved defaults)",0,0,1800,1800,0,set,
+2026-08-26T03:27,S1-probe,actorA_c1,generate_image,nano_banana_pro,"WATERMARK PROBE: corners clean — MCP delivery unwatermarked (stills AND video)",2,2,1800,1798,2,completed,hf_c882f5ba
+2026-08-26T03:32,S1-cast,5xsheets,generate_image_batch,nano_banana_pro,"actorA_c2 actorB_c1(LOCKED him) actorB_c2 env_c1(Element a026c4c0) env_c2(Element 3d88c482)",10,12,,,10,completed,batch
+2026-08-26T03:36,S1-recast,actorA_white,generate_image,nano_banana_pro,"owner redirect 1 — superseded",2,14,,,2,completed,hf_17740484
+2026-08-26T03:39,S2-keys,keys_x11,generate_image_batch,nano_banana_pro,"11 keyframes; 7 archived after mid-flight recast; s02/s04/s05/s06 kept",22,36,,,22,completed,batch
+2026-08-26T03:40,S1-recast,actorA_cute,generate_image,nano_banana_pro,"owner redirect 2 — LOCKED her ('use this one')",2,38,,,2,completed,hf_c9130652
+2026-08-26T03:43,S1-recast,actorA_v3,generate_image,nano_banana_pro,"owner redirect 3 (ref-styled) — not chosen",2,40,,,2,completed,hf_51cfabca
+2026-08-26T03:47,unlim,test_img,generate_image,nano_banana_pro,"use_unlim REJECTED 'not supported for nano_banana_pro' — NO CHARGE",0,40,1670,1670,0,rejected_free,
+2026-08-26T03:49,S2-keys,her_keys_x7,generate_image_batch,nano_banana_pro,"s01 s03 s03end s07 s07end s08 s09 with locked lead",14,54,1670,,14,completed,batch
+2026-08-26T03:52,unlim,test_vid,generate_video,kling3_0,"use_unlim REJECTED 'not supported for kling3_0' — NO CHARGE. MCP=credits always",0,54,,,0,rejected_free,
+2026-08-26T03:53,G4-probe,s08,generate_video,kling3_0,"pro 5s sound:off (audio-off check: 8.75 vs 12.5) — PASSED kept in film",8.75,62.75,,,8.75,completed,hf_579075c4
+2026-08-26T04:02,S3-video,batch_x8,generate_video_batch,"kling3_0+veo3_1","5x kling pro 5s off (43.75) + kling 10s off (17.5) + 2x veo fast 8s basic (44); 2 preset-intercepts declined+resubmitted",105.25,168,,,105.25,completed,batch
+2026-08-26T04:04,S4-vo,v1_x12,generate_audio_batch,seed_audio,"11 Willow lines slow + 1 Isla audition. LEARNING: bills ~0.1/output-second not flat",2.4,170.4,,,6.5,completed,batch
+2026-08-26T04:33,S3-video,s09_high,generate_video,veo3_1,"fast HIGH tier = native 1080p at SAME 22cr as basic-720p — always use high",22,192.4,,,22,completed,hf_ff2cedbe
+2026-08-26T04:35,S4-vo,v2_x11,generate_audio_batch,seed_audio,"tightened script normal rate (v1 was 93s VO for 69s film)",2.2,194.6,,,4.9,completed,batch
+2026-08-26T04:39,S4-vo,discretion,generate_audio,seed_audio,"'Discretion... not invisibility.' 2.78s",0.2,194.8,,,0.3,completed,hf_a9fbd724
+2026-08-26T05:15,reconcile,final,balance+transactions,none,"SESSION TOTAL 201.7 (img 54 + video 136 + audio 11.7). Non-session: Seedance2.5 net -90 (owner web-UI 22:16-22:23) + 2x Seedream4.5 @0. 1800-201.7-90=1508.3 = balance EXACT",0,201.7,1800,1508.3,201.7,reconciled,
+2026-08-26T06:05,DEPLOY,film_one,vercel,none,"dpl_HX7PpzgqKSmWQKJh5mLyRbePUh8w target=production Ready; live Content-Length webm 9721182 poster 93429 == local",0,201.7,1508.3,1508.3,0,deployed,miles-legal.vercel.app
+2026-08-26T06:08,F2-cast,family_x3,generate_image_batch,nano_banana_pro,"Ammi 1aeead31 / Zoya 38512483 / Rabia 05f029e4",6,207.7,1508.3,,6,completed,batch
+2026-08-26T06:14,F2-keys,leads_x6,generate_image_batch,nano_banana_pro,"k01 2a072ea2 k07 03e32fcc k12 77d10952 k13 1ae2e708 k19 2222ef38 k20 b6cb2a24",12,219.7,,,12,pending,batch
+2026-08-26T06:18,F2-keys,safe_x6,generate_image_batch,nano_banana_pro,"k03 ac1f786f k04 5e840105 k05 eac33eca k11 9224f9c5 k14 97a792ca k17 a015ba7b (family-face shots held for sheet review)",12,231.7,,,12,pending,batch
+2026-08-26T07:00,F2-cast-v2,web_x4,owner_webapp,nano_banana_2,"OWNER-GENERATED FREE (web unlimited): Ayesha 355470c2 / Ammi 523919e1 / Zoya 57dc52dd / Rabia c47fb1c3 — all keepers",0,231.7,,,0,completed,owner
+2026-08-26T07:20,F2-keys-v2,web_x11,owner_webapp,nano_banana_2,"OWNER-GENERATED FREE: k01 30a7c488 k04 4d5b8230 k05 c8b94980 k06 fe7c4902 k07 e90fc970 k09 7be887cc k13 4502c3f3 k14a 7caa2d85 k14b f8c770a4(PICK) k15 d9e272a2 k16 525e2165. Missing: k17 k19 k18-redo",0,231.7,,,0,completed,owner
+2026-08-26T07:32,F2-video,urdu_probe,generate_video,veo3_1,"GATE: Urdu dialogue+lipsync probe on k16, fast/high 8s",22,253.7,,,,pending,a8af5018
+2026-08-26T07:45,F2-gate,urdu_verdict,owner,none,"OWNER VERDICT: probe voice robotic + dead screen + fake posture. DIALOGUE ROUTE DEAD at cost of one probe (22). All shots -> Kling silent 8.75; lines -> sound design / owner-recorded; screens -> real-code cutaway inserts only; rule: NO readable screen in any AI shot ever",0,253.7,,,0,decided,
+2026-08-26T07:50,F2-video,silent_x13,generate_video_batch,kling3_0,"13 shots pro 5s sound:off (5 preset-intercepts declined+resubmitted): k01 k03 k04 k05 k06 k07 k09 k11 k12 k13 k14 k15 k20",113.75,367.45,,,,pending,batch

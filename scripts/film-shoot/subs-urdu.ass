@@ -1,0 +1,32 @@
+[Script Info]
+Title: HISAAB subtitles v3
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Sub,Segoe UI Semibold,46,&H00E6EFFC,&H000000FF,&H00140A0C,&H96000000,0,0,0,0,100,100,0.4,0,1,1.6,1.2,2,120,120,72,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.50,0:00:05.78,Sub,,0,0,0,,{\i1}One swipe just saved Ayesha's biggest secret. How? Let me tell you.{\i0}
+Dialogue: 0,0:00:05.98,0:00:08.38,Sub,,0,0,0,,{\i1}It began on a mehndi night!{\i0}
+Dialogue: 0,0:00:08.60,0:00:13.88,Sub,,0,0,0,,{\i1}A plate of sweets, two hands... and their eyes met. That was it!{\i0}
+Dialogue: 0,0:00:14.08,0:00:18.16,Sub,,0,0,0,,{\i1}Rabia said: that is Saad's friend, back from Karachi!{\i0}
+Dialogue: 0,0:00:18.36,0:00:22.20,Sub,,0,0,0,,{\i1}And then! Nights of talking, hidden laughter...{\i0}
+Dialogue: 0,0:00:22.40,0:00:29.04,Sub,,0,0,0,,{\i1}And him? On the rooftop at dawn, just to hear her voice.{\i0}
+Dialogue: 0,0:00:30.30,0:00:34.22,Sub,,0,0,0,,{\i1}But in Ayesha's house... phones are opened in front of everyone.{\i0}
+Dialogue: 0,0:00:34.08,0:00:35.90,Sub,,0,0,0,,Ayesha! The guests are here!
+Dialogue: 0,0:00:36.80,0:00:41.44,Sub,,0,0,0,,{\i1}Her heart stopped! One voice, and everything could unravel.{\i0}
+Dialogue: 0,0:00:43.60,0:00:47.92,Sub,,0,0,0,,{\i1}So Bilal sent her Miles! An app for two people only.{\i0}
+Dialogue: 0,0:00:48.12,0:00:53.24,Sub,,0,0,0,,{\i1}Pick a cover: calculator, news, weather... and Miles disappears!{\i0}
+Dialogue: 0,0:00:53.44,0:00:56.88,Sub,,0,0,0,,{\i1}And his heartbeat? Straight to Ayesha's palm!{\i0}
+Dialogue: 0,0:00:57.08,0:00:59.72,Sub,,0,0,0,,{\i1}Then one night, Zoya came running in!{\i0}
+Dialogue: 0,0:00:59.92,0:01:01.84,Sub,,0,0,0,,{\i1}Just one swipe. That's all.{\i0}
+Dialogue: 0,0:01:02.04,0:01:06.76,Sub,,0,0,0,,{\i1}And on the phone? Only the weather. The secret stayed a secret!{\i0}
+Dialogue: 0,0:01:06.96,0:01:10.48,Sub,,0,0,0,,{\i1}Two sisters laughing at a meme. Nothing else.{\i0}
+Dialogue: 0,0:01:10.68,0:01:15.56,Sub,,0,0,0,,{\i1}And far away, Bilal smiled. Their story was safe.{\i0}
+Dialogue: 0,0:01:15.76,0:01:20.00,Sub,,0,0,0,,{\i1}Miles. Because some things belong to two people only.{\i0}

@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Miles — film graphics inserts</title>
+<link rel="stylesheet" href="inserts.css">
+</head>
+<body>
+<div id="stage">
+
+  <!-- g1_mark: two lights + thread draw + wordmark (5.0s) -->
+  <section class="seg" id="seg-g1_mark">
+    <div class="colwrap">
+      <svg id="g1-svg" viewBox="14 18 80 78" width="680" height="663" aria-hidden="true">
+        <defs>
+          <radialGradient id="g1near" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="g1far" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="g1thread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+            <stop offset="0" stop-color="#FFA981"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+          </linearGradient>
+        </defs>
+        <!-- blooms, then thread, then cores on top - the web hero's order, so
+             the held end state shows the line disappearing into each light -->
+        <g id="g1-near" style="transform-origin:32.5% 66.7%">
+          <circle cx="40" cy="70" r="22" fill="url(#g1near)"/>
+        </g>
+        <g id="g1-far" style="transform-origin:73.75% 25.6%">
+          <circle cx="73" cy="38" r="16" fill="url(#g1far)"/>
+        </g>
+        <path id="g1-thread" d="M 40,70 C 44,54 56,42 73,38" fill="none"
+              stroke="url(#g1thread)" stroke-width="1.7" stroke-linecap="round"/>
+        <g id="g1-near-core" style="transform-origin:32.5% 66.7%">
+          <circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/>
+        </g>
+        <g id="g1-far-core" style="transform-origin:73.75% 25.6%">
+          <circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/>
+        </g>
+      </svg>
+      <div id="g1-wordmark" class="f-wordmark">Miles</div>
+    </div>
+  </section>
+
+  <!-- g2_icons: one launcher tile cycling through real cover identities (5.0s) -->
+  <section class="seg" id="seg-g2_icons">
+    <h2 id="g2-head">Covers &mdash; optional, honest, yours.</h2>
+    <div id="g2-mid">
+      <div id="g2-tile">
+        <!-- The Miles identity ships as a vector adaptive icon
+             (drawable/ic_launcher_play_bg.xml + _fg.xml); this is that
+             drawable ported 1:1 to SVG, cropped to the launcher's 72-unit
+             mask window. mipmap-xxxhdpi/ic_launcher.png is the News cover,
+             not Miles. -->
+        <svg id="g2-i-miles" viewBox="18 18 72 72" aria-hidden="true">
+          <defs>
+            <radialGradient id="g2m-bg" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="86">
+              <stop offset="0" stop-color="#2E1418"/>
+              <stop offset="0.55" stop-color="#1C0D11"/>
+              <stop offset="1" stop-color="#120A0C"/>
+            </radialGradient>
+            <radialGradient id="g2m-near" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+              <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+              <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+              <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="g2m-far" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+              <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+              <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+              <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+            </radialGradient>
+            <linearGradient id="g2m-thread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+              <stop offset="0" stop-color="#FFA981"/>
+              <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="108" height="108" fill="url(#g2m-bg)"/>
+          <circle cx="40" cy="70" r="22" fill="url(#g2m-near)"/>
+          <circle cx="73" cy="38" r="16" fill="url(#g2m-far)"/>
+          <path d="M 40,70 C 44,54 56,42 73,38" fill="none" stroke="url(#g2m-thread)"
+                stroke-width="1.7" stroke-linecap="round"/>
+          <circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/>
+          <circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/>
+        </svg>
+        <img id="g2-i-calc"    src="/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_disguise_calculator.png" alt="">
+        <img id="g2-i-notes"   src="/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_disguise_notes.png" alt="">
+        <img id="g2-i-weather" src="/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_disguise_weather.png" alt="">
+      </div>
+      <div id="g2-labels">
+        <span id="g2-l-miles">Miles</span>
+        <span id="g2-l-calc">Calculator</span>
+        <span id="g2-l-notes">Notes</span>
+        <span id="g2-l-weather">Weather</span>
+      </div>
+    </div>
+    <p id="g2-foot">A cover changes the launcher &mdash; you choose it, you can take it off any time.</p>
+  </section>
+
+  <!-- g3_endcard: small mark + wordmark + tagline + store line, near light breathes (6.0s) -->
+  <section class="seg" id="seg-g3_endcard">
+    <div class="colwrap">
+      <svg id="g3-svg" viewBox="14 18 80 78" width="300" height="293" aria-hidden="true">
+        <defs>
+          <radialGradient id="g3near" gradientUnits="userSpaceOnUse" cx="40" cy="70" r="22">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.72"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.36"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="g3far" gradientUnits="userSpaceOnUse" cx="73" cy="38" r="16">
+            <stop offset="0" stop-color="#FF8A5E" stop-opacity="0.65"/>
+            <stop offset="0.35" stop-color="#E8674A" stop-opacity="0.30"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="g3thread" gradientUnits="userSpaceOnUse" x1="40" y1="70" x2="73" y2="38">
+            <stop offset="0" stop-color="#FFA981"/>
+            <stop offset="1" stop-color="#E8674A" stop-opacity="0.8"/>
+          </linearGradient>
+        </defs>
+        <g id="g3-near" style="transform-origin:32.5% 66.7%">
+          <circle cx="40" cy="70" r="22" fill="url(#g3near)"/>
+          <circle cx="40" cy="70" r="5.4" fill="#FFF1E8"/>
+        </g>
+        <g id="g3-far">
+          <circle cx="73" cy="38" r="16" fill="url(#g3far)"/>
+          <circle cx="73" cy="38" r="3.6" fill="#FFE4D2"/>
+        </g>
+        <path d="M 40,70 C 44,54 56,42 73,38" fill="none" stroke="url(#g3thread)"
+              stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+      <div id="g3-wordmark" class="f-wordmark">Miles</div>
+      <p id="g3-l1">Feel close, even from here.</p>
+      <p id="g3-l2">Coming to Google Play</p>
+    </div>
+  </section>
+
+  <!-- title_card: black frame, two centered lines fading up as one (2.5s) -->
+  <section class="seg" id="seg-title_card">
+    <div class="colwrap">
+      <div id="tc-group">
+        <p id="tc-l1">TEEN HAFTAY PEHLE.</p>
+        <p id="tc-l2">Three weeks earlier.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ui_chat: full-frame phone, a Miles chat in the real Emberlight theme (5.0s).
+       Strings and tokens from mobile/ source; see inserts.js CHAT_MSGS. -->
+  <section class="seg seg-phone" id="seg-ui_chat">
+    <div class="vig"></div>
+    <div class="phone-wrap"><div class="phone">
+      <div class="screen scr-dark">
+        <div class="sbar-slot" data-clock="11:47" data-ink="#FCEFE6"></div>
+        <div class="chat-appbar">
+          <svg class="back-chev" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+            <path d="M15 4 L7 12 L15 20" fill="none" stroke="#D9A86C" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="chat-title">B &#10084;&#65039;</span>
+        </div>
+        <div class="chat-msgs" id="uc-msgs"></div>
+        <div class="chat-inputbar">
+          <div class="chat-pill">Message&#8230;</div>
+          <div class="chat-mic">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+              <rect x="9" y="3.5" width="6" height="11" rx="3" fill="#FCEFE6"/>
+              <path d="M6 11.5 a6 6 0 0 0 12 0 M12 17.5 V21" fill="none"
+                    stroke="#FCEFE6" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- ui_picker: the covers picker as a launcher-icon grid + the real apply
+       dialog, strings verbatim from disguise_picker_screen.dart (4.0s). -->
+  <section class="seg seg-phone" id="seg-ui_picker">
+    <div class="vig"></div>
+    <div class="phone-wrap"><div class="phone">
+      <div class="screen scr-dark">
+        <div class="sbar-slot" data-clock="11:47" data-ink="#FCEFE6"></div>
+        <div class="pk-appbar" id="up-head">
+          <svg class="back-chev" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+            <path d="M15 4 L7 12 L15 20" fill="none" stroke="#D9A86C" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="pk-title">How this app looks</span>
+        </div>
+        <p class="pk-caption" id="up-caption">Pick what this app is called and what its
+          icon looks like on your phone. Anyone glancing at your home screen sees
+          only this.</p>
+        <div class="pk-grid" id="up-grid"></div>
+        <div class="pk-foot" id="up-foot">
+          <p class="pk-note">Your home screen may take a moment to refresh, and
+            the app can close as the icon changes. That is Android doing the
+            swap &mdash; open it again from the new icon.</p>
+          <div class="pk-btn">Use this disguise</div>
+        </div>
+        <div class="pk-scrim" id="up-scrim"></div>
+        <div class="pk-dialog" id="up-dialog">
+          <div class="dlg-title">Change how this app looks?</div>
+          <p class="dlg-p">Your launcher icon and name become &quot;Calculator&quot;.
+            Miles will not be findable by its own name until you change this back.</p>
+          <p class="dlg-p">Way back in &mdash; Hold = while the display reads 0 and
+            nothing is pending.</p>
+          <p class="dlg-p">Forgotten it later? Tap the number in the display to see
+            this again.</p>
+          <div class="dlg-actions">
+            <span class="dlg-btn">Cancel</span>
+            <span class="dlg-btn" id="up-confirm"><i class="dlg-press" id="up-press"></i>Change it</span>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- ui_save: chat, hard cut to the Calculator cover, notification shade (5.0s).
+       Calculator palette from covers/calculator_cover.dart; shade strings from
+       disguise_notification.dart. -->
+  <section class="seg seg-phone" id="seg-ui_save">
+    <div class="vig"></div>
+    <div class="phone-wrap"><div class="phone">
+      <div class="screen scr-dark" id="us-chat">
+        <div class="sbar-slot" data-clock="21:47" data-ink="#FCEFE6"></div>
+        <div class="chat-appbar">
+          <svg class="back-chev" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+            <path d="M15 4 L7 12 L15 20" fill="none" stroke="#D9A86C" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="chat-title">B &#10084;&#65039;</span>
+        </div>
+        <div class="chat-msgs" id="us-msgs"></div>
+        <div class="chat-inputbar">
+          <div class="chat-pill">Message&#8230;</div>
+          <div class="chat-mic">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+              <rect x="9" y="3.5" width="6" height="11" rx="3" fill="#FCEFE6"/>
+              <path d="M6 11.5 a6 6 0 0 0 12 0 M12 17.5 V21" fill="none"
+                    stroke="#FCEFE6" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="screen scr-light" id="us-calc">
+        <div class="sbar-slot" data-clock="21:47" data-ink="#202124"></div>
+        <div class="calc-display"><span id="us-display">0</span></div>
+        <div class="calc-keys" id="us-keys"></div>
+        <div class="calc-scrim" id="us-scrim"></div>
+        <div class="shade" id="us-shade">
+          <div class="shade-clock">21:47</div>
+          <div class="shade-row">
+            <div class="shade-icon">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <circle cx="15.5" cy="9" r="4.2" fill="#FFFFFF"/>
+                <path d="M4 17.5 a4 4 0 0 1 .6 -7.95 a5.5 5.5 0 0 1 10.6 1.2
+                         a3.4 3.4 0 0 1 .3 6.75 Z" fill="#FFFFFF" opacity="0.92"/>
+              </svg>
+            </div>
+            <div class="shade-body">
+              <div class="shade-head"><span class="shade-app">Weather</span><span class="shade-time">21:47</span></div>
+              <div class="shade-text">Forecast updated &middot; 2 areas</div>
+            </div>
+          </div>
+          <div class="shade-handle"></div>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- ui_swipe: the notification shade pulled down OVER the open Miles chat
+       (4.0s). Same settled thread as ui_save's chat variant, its own night
+       (21:46). Shade strings + tints verbatim from disguise_notification.dart
+       and disguise_profile.dart. -->
+  <section class="seg seg-phone" id="seg-ui_swipe">
+    <div class="vig"></div>
+    <div class="phone-wrap"><div class="phone">
+      <div class="screen scr-dark">
+        <div class="sbar-slot" data-clock="21:46" data-ink="#FCEFE6"></div>
+        <div class="chat-appbar">
+          <svg class="back-chev" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+            <path d="M15 4 L7 12 L15 20" fill="none" stroke="#D9A86C" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="chat-title">B &#10084;&#65039;</span>
+        </div>
+        <div class="chat-msgs" id="uw-msgs"></div>
+        <div class="chat-inputbar">
+          <div class="chat-pill">Message&#8230;</div>
+          <div class="chat-mic">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+              <rect x="9" y="3.5" width="6" height="11" rx="3" fill="#FCEFE6"/>
+              <path d="M6 11.5 a6 6 0 0 0 12 0 M12 17.5 V21" fill="none"
+                    stroke="#FCEFE6" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div id="uw-scrim"></div>
+        <div class="shade" id="uw-shade">
+          <div id="uw-pin">
+          <div class="shade-clock">21:46</div>
+          <div id="uw-rows">
+            <div class="shade-row">
+              <div class="shade-icon uw-news">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <rect x="4" y="5" width="16" height="14" rx="2" fill="none"
+                        stroke="#FFFFFF" stroke-width="1.7"/>
+                  <rect x="7" y="8" width="10" height="3.2" rx="0.8" fill="#FFFFFF"/>
+                  <path d="M7 14 h10 M7 16.5 h7" fill="none" stroke="#FFFFFF"
+                        stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div class="shade-body">
+                <div class="shade-head"><span class="shade-app">News update</span><span class="shade-time">21:46</span></div>
+                <div class="shade-text">3 new stories available</div>
+              </div>
+            </div>
+            <div class="shade-row">
+              <div class="shade-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <circle cx="15.5" cy="9" r="4.2" fill="#FFFFFF"/>
+                  <path d="M4 17.5 a4 4 0 0 1 .6 -7.95 a5.5 5.5 0 0 1 10.6 1.2
+                           a3.4 3.4 0 0 1 .3 6.75 Z" fill="#FFFFFF" opacity="0.92"/>
+                </svg>
+              </div>
+              <div class="shade-body">
+                <div class="shade-head"><span class="shade-app">Weather</span><span class="shade-time">21:32</span></div>
+                <div class="shade-text">Forecast updated &middot; 2 areas</div>
+              </div>
+            </div>
+          </div>
+          </div>
+          <div class="shade-handle"></div>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+</div>
+<script src="inserts.js"></script>
+</body>
+</html>

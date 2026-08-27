@@ -1,0 +1,386 @@
+/* Miles film graphics inserts - composition styles. Self-contained port of the
+   Emberlight tokens from /web/assets/site.css (fonts self-hosted, no CDN).
+   Every animated property is written INLINE by inserts.js's seek(t); nothing
+   here may move on its own. No blur, no backdrop-filter: opacity/transform
+   only, same as the site's hard bans. */
+
+/* ---- fonts (copied from site.css; absolute paths from the repo root) ---- */
+@font-face{font-family:Fraunces;src:url(/web/assets/fonts/fraunces-italic-400.woff2) format("woff2");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:Fraunces;src:url(/web/assets/fonts/fraunces-400.woff2) format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:Inter;src:url(/web/assets/fonts/inter-400.woff2) format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:Inter;src:url(/web/assets/fonts/inter-600.woff2) format("woff2");font-weight:600;font-style:normal;font-display:swap}
+
+/* ---- tokens (subset of site.css) ---- */
+:root{
+  --night:#120A0C; --night-deep:#0A0506; --surface-1:#221017;
+  --cream:#FCEFE6; --cream-92:rgba(252,239,230,.92); --taupe:#B8909A;
+  --gilt:#D9A86C; --ember-soft:#F2956F;
+  --edge-18:rgba(217,168,108,.18);
+  --ambient:radial-gradient(120% 90% at 38% 30%,#3A1622 0%,#1C0A10 55%,#0A0506 100%);
+  --f-display:Fraunces,Georgia,"Times New Roman",serif;
+  --f-body:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+
+/* ---- determinism kill-switch ---- */
+*, *::before, *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+/* The SVG mark groups and tile icons seek(t) transforms are promoted
+   unconditionally: Chrome's promotion heuristic counts transform updates, so
+   without this a frame's antialiasing depends on how many frames rendered
+   before it (sparse rerun vs full run differed by up to 69 px in the mark).
+   Text is deliberately NOT promoted - a composited gradient-clip wordmark
+   rasters measurably worse (4667 px divergence when it was promoted). Renders
+   of the same command are byte-identical either way; only mixing sparse and
+   full renders of one segment can differ, and then only in text AA. */
+#g1-near, #g1-far, #g1-near-core, #g1-far-core,
+#g2-tile img, #g2-tile svg, #g3-svg, #g3-near { will-change: transform; }
+/* ui_save's hard-cut screens, scrim and shade — and ui_swipe's shade + scrim —
+   take per-frame style writes; unpromoted, the same timing-based heuristic
+   re-layerized them mid-run under load and requantized the rotated phone
+   edge's AA by one step (ui_save f0064+ hashed differently across two FULL
+   renders, 71px strip at the phone's right edge). Promoted, the layer tree is
+   identical from frame 0 in every run. Grayscale text AA is already forced
+   (-webkit-font-smoothing + --disable-lcd-text), so compositing the shade's
+   text does not change its raster path. */
+#us-chat, #us-calc, #us-scrim, #us-shade,
+#uw-scrim, #uw-shade, #uw-pin { will-change: transform, opacity; }
+
+/* ---- stage ---- */
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+body { background: var(--night); }
+#stage {
+  position: relative; width: 1920px; height: 1080px;
+  background: var(--night); overflow: hidden;
+  font-family: var(--f-body);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+.seg { position: absolute; inset: 0; display: none; }
+.colwrap {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+}
+
+.f-wordmark {
+  font: italic 400 96px/1.1 var(--f-display); letter-spacing: 0.015em;
+  background: linear-gradient(180deg, #FCEFE6 0%, #D9A86C 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+}
+
+/* ---- g1_mark ---- */
+#seg-g1_mark { background: var(--ambient); }
+#g1-svg { margin-bottom: -24px; } /* glow padding in the viewBox; tuck wordmark up */
+
+/* ---- g2_icons ---- */
+#seg-g2_icons { background: var(--night); }
+#g2-head {
+  position: absolute; top: 116px; left: 0; right: 0; margin: 0;
+  text-align: center; font: italic 400 64px/1.15 var(--f-display);
+  color: var(--cream);
+}
+#g2-mid {
+  position: absolute; top: 322px; left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center;
+}
+#g2-tile {
+  position: relative; width: 380px; height: 380px;
+  border-radius: 86px; overflow: hidden;
+  background: var(--surface-1); border: 1px solid var(--edge-18);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+#g2-tile img, #g2-tile svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+#g2-labels { position: relative; width: 100%; height: 52px; margin-top: 36px; }
+#g2-labels span {
+  position: absolute; left: 0; right: 0; text-align: center;
+  font: 600 40px/1.3 var(--f-body); color: var(--cream-92);
+}
+#g2-foot {
+  position: absolute; bottom: 116px; left: 0; right: 0; margin: 0;
+  text-align: center; font: 400 30px/1.6 var(--f-body); color: var(--taupe);
+}
+
+/* ---- title_card ---- */
+#seg-title_card { background: var(--night); }
+#tc-group { text-align: center; }
+#tc-l1 {
+  margin: 0;
+  font: italic 400 64px/1.2 var(--f-display); letter-spacing: 0.06em;
+  color: var(--cream);
+}
+#tc-l2 {
+  margin: 24px 0 0;
+  font: 400 26px/1.4 var(--f-body); color: var(--taupe);
+}
+
+/* ---- ui_* full-frame phone inserts ------------------------------------
+   One phone recreated from the app's own design tokens (theme.dart) and
+   cover palettes. The phone TILT is static (set here, never animated); all
+   motion is inline styles from seek(t). Colors are the exact hex values from
+   mobile/lib/core/ui/theme.dart and covers/calculator_cover.dart. */
+.seg-phone { background: #120A0C; }
+.seg-phone .vig {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 120% at 50% 50%, rgba(10,5,6,0) 55%, rgba(10,5,6,.8) 100%),
+    radial-gradient(58% 72% at 50% 40%, rgba(58,22,34,.5) 0%, rgba(18,10,12,0) 68%);
+}
+.phone-wrap {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.phone {
+  position: relative; width: 474px; height: 1000px;
+  transform: rotate(2.4deg);
+  background: #060304; border-radius: 58px;
+  border: 1px solid rgba(217,168,108,.14);
+  box-shadow: 0 46px 130px rgba(0,0,0,.62), 0 14px 44px rgba(0,0,0,.5);
+}
+.screen {
+  position: absolute; left: 12px; top: 12px; width: 450px; height: 976px;
+  border-radius: 46px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.scr-dark { background: #120A0C; color: #FCEFE6; }
+.scr-light { background: #F1F3F4; color: #202124; }
+
+/* status bar (per screen; clock injected by inserts.js from data-clock) */
+.sbar {
+  height: 42px; flex: none; display: flex; align-items: center;
+  justify-content: space-between; padding: 6px 26px 0;
+}
+.sclock { font: 600 15px/1 var(--f-body); letter-spacing: .02em; }
+
+/* -- chat screen (Emberlight: scaffold night, surfaces 1/2, cream, ember) -- */
+.chat-appbar {
+  flex: none; height: 62px; display: flex; align-items: center;
+  gap: 14px; padding: 0 20px;
+}
+.chat-title { font: 400 24px/1.15 var(--f-display); color: #FCEFE6; }
+.chat-msgs { flex: 1; position: relative; overflow: hidden; }
+/* the column translates down by the height of not-yet-arrived rows, so each
+   new message pushes the thread up — the app's motion, as a function of t */
+.chat-col { position: absolute; left: 20px; right: 20px; bottom: 14px; }
+.brow { display: flex; margin-top: 12px; }
+/* day header: chat_screen.dart _dayHeaderFormat row (11px, faint, centered) */
+.day-head {
+  text-align: center; padding: 12px 0 2px;
+  font: 400 12px/1 var(--f-body); color: #7A5560;
+}
+.brow.his  { justify-content: flex-start; }
+.brow.hers { justify-content: flex-end; }
+.bub {
+  max-width: 76%; padding: 11px 15px 7px;
+  font: 400 17px/1.45 var(--f-body); color: #FCEFE6;
+}
+.bub.his {
+  background: #2F1620;                       /* surface-2 */
+  border-radius: 18px 18px 18px 4px;
+}
+.bub.hers {
+  background: #753530;   /* MilesColors.tint(ember,.38, over: surface2) */
+  border-radius: 18px 18px 4px 18px;
+}
+.btime {
+  display: block; text-align: right; margin-top: 3px;
+  font: 400 11px/1 var(--f-body); color: #B8909A;
+}
+.ty-slot { position: relative; height: 58px; margin-top: 12px; }
+.ty-slot .brow { position: absolute; right: 0; bottom: 0; left: 0; margin-top: 0; }
+.ty { display: flex; align-items: center; gap: 6px; height: 20px; padding: 2px 4px; }
+.ty i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #8FB48A;                       /* TypingIndicator default: sage */
+  will-change: transform;
+}
+.chat-inputbar {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 6px 16px 24px;
+}
+.chat-pill {
+  flex: 1; height: 50px; border-radius: 25px;
+  background: #2F1620; border: 1px solid rgba(217,168,108,.12);
+  display: flex; align-items: center; padding: 0 20px;
+  font: 400 17px/1 var(--f-body); color: rgba(252,239,230,.4);
+}
+.chat-mic {
+  width: 50px; height: 50px; border-radius: 50%; flex: none;
+  background: linear-gradient(135deg, #F2956F 0%, #E8674A 55%, #D24A38 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* -- picker screen -- */
+.pk-appbar {
+  flex: none; height: 62px; display: flex; align-items: center;
+  gap: 14px; padding: 0 20px;
+}
+.pk-title { font: 400 24px/1.15 var(--f-display); color: #FCEFE6; }
+.pk-caption {
+  margin: 4px 0 0; padding: 0 22px;
+  font: 400 14.5px/1.5 var(--f-body); color: #B8909A;
+}
+.pk-grid {
+  margin-top: 26px; padding: 0 26px;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  row-gap: 26px; column-gap: 18px;
+}
+.pk-tile { position: relative; display: flex; flex-direction: column; align-items: center; }
+.pk-icon {
+  width: 86px; height: 86px; border-radius: 21px; overflow: hidden;
+  background: #221017;                       /* surface-1 */
+  box-shadow: 0 8px 20px rgba(0,0,0,.4);
+}
+.pk-icon img, .pk-icon svg { display: block; width: 100%; height: 100%; }
+.pk-label {
+  margin-top: 9px; font: 400 13px/1.2 var(--f-body);
+  color: rgba(252,239,230,.92); text-align: center;
+}
+.pk-ring {
+  position: absolute; left: 50%; top: 43px; width: 100px; height: 100px;
+  margin: -50px 0 0 -50px; border-radius: 26px;
+  border: 2.5px solid #C84B6A;               /* selected state: blush */
+  box-shadow: 0 0 18px rgba(200,75,106,.45);
+  will-change: transform;
+}
+/* footer: the real screen's refresh note + GlowButton (h56/r28, blush) */
+.pk-foot { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 22px 26px; }
+.pk-note {
+  margin: 0 0 16px; text-align: center;
+  font: 400 12.5px/1.5 var(--f-body); color: rgba(184,144,154,.8);
+}
+.pk-btn {
+  height: 58px; border-radius: 29px; background: #C84B6A;
+  display: flex; align-items: center; justify-content: center;
+  font: 600 16px/1 var(--f-body); color: #FCEFE6;
+  box-shadow: 0 10px 30px rgba(200,75,106,.35);
+}
+.pk-scrim { position: absolute; inset: 0; background: #120A0C; }
+.pk-dialog {
+  position: absolute; left: 34px; right: 34px; top: 50%;
+  padding: 26px 26px 14px;
+  background: #221017; border-radius: 28px;  /* dialogTheme: surface-1 */
+  border: 1px solid rgba(217,168,108,.14);
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+}
+.dlg-title {
+  font: italic 400 22px/1.25 var(--f-display);
+  color: #F2956F;                            /* headlineSmall: emberSoft italic */
+  margin-bottom: 14px;
+}
+.dlg-p {
+  margin: 0 0 13px;
+  font: 400 15px/1.5 var(--f-body); color: #B8909A;
+}
+.dlg-actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding-top: 6px;
+}
+.dlg-btn {
+  position: relative; padding: 10px 14px; border-radius: 20px;
+  font: 600 15px/1 var(--f-body); letter-spacing: .02em;
+  color: #F2956F;                            /* textButtonTheme: emberSoft */
+}
+.dlg-press {
+  position: absolute; inset: 0; border-radius: 20px;
+  background: rgba(242,149,111,.16);
+}
+
+/* -- calculator cover (palette verbatim from calculator_cover.dart) -- */
+#us-calc { position: absolute; }
+.calc-display {
+  flex: 2; display: flex; align-items: flex-end; justify-content: flex-end;
+  padding: 26px 28px 18px;
+}
+.calc-display span {
+  font: 300 72px/1.05 var(--f-body); color: #202124;
+}
+.calc-keys {
+  flex: 5; display: flex; flex-direction: column; padding: 13px;
+}
+.calc-row { flex: 1; display: flex; }
+.calc-key { flex: 1; position: relative; margin: 5px; border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  font: 400 26px/1 var(--f-body);
+}
+.calc-key.wide { flex: 2; }
+/* key palette verbatim from calculator_cover.dart _Key.build */
+.calc-key.k-num { background: #FFFFFF; color: #202124; }
+.calc-key.k-fn  { background: #E0E3E7; color: #202124; }
+.calc-key.k-op  { background: #E8F0FE; color: #1A73E8; }
+.calc-key.k-eq  { background: #1A73E8; color: #FFFFFF; }
+.calc-key .kov {
+  position: absolute; inset: 0; border-radius: 18px;
+  background: rgba(32,33,36,.12); opacity: 0; /* seek drives pressed keys */
+  /* promoted like the other animated non-text nodes: unpromoted, this
+     mid-fade overlay rasterized differently run to run (f0060 hashed three
+     ways across three renders); the heuristic decides from timing, not t */
+  will-change: opacity;
+}
+.calc-key.k-eq .kov { background: rgba(255,255,255,.28); }
+
+/* -- notification shade over the calculator -- */
+.calc-scrim { position: absolute; inset: 0; background: #000; }
+.shade {
+  position: absolute; left: 0; right: 0; top: 0; height: 270px;
+  background: #F0EDF1; border-radius: 0 0 30px 30px;
+  box-shadow: 0 18px 44px rgba(0,0,0,.3);
+}
+.shade-clock {
+  position: absolute; left: 24px; top: 16px;
+  font: 600 17px/1 var(--f-body); color: #1C1B1F;
+}
+.shade-row {
+  position: absolute; left: 14px; right: 14px; top: 52px;
+  background: #E3E0E6; border-radius: 22px;
+  display: flex; gap: 14px; padding: 16px 18px;
+}
+.shade-icon {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  background: #1565C0;                       /* Weather profile tint */
+  display: flex; align-items: center; justify-content: center;
+}
+.shade-body { flex: 1; min-width: 0; }
+.shade-head { display: flex; align-items: baseline; justify-content: space-between; }
+.shade-app  { font: 600 15px/1.3 var(--f-body); color: #1C1B1F; }
+.shade-time { font: 400 12px/1.3 var(--f-body); color: #49454F; }
+.shade-text { margin-top: 3px; font: 400 14px/1.4 var(--f-body); color: #49454F; }
+.shade-handle {
+  position: absolute; left: 50%; bottom: 10px; width: 44px; height: 4px;
+  margin-left: -22px; border-radius: 2px; background: rgba(28,27,31,.35);
+}
+
+/* -- ui_swipe: the full shade over the chat -- */
+#uw-scrim { position: absolute; inset: 0; background: #000; }
+/* Built at full size, only ever translated. 30px taller than the screen so
+   the rounded corners come to rest below the clip and the chat is fully
+   hidden; the handle moves up by the same 30px to stay on screen.
+   The panel translates down; #uw-pin counter-translates by the same amount,
+   so clock + rows stay glued to screen coordinates and the descending edge
+   REVEALS them (Android's expand) instead of dragging them through frame.
+   overflow clips the pinned content to the panel; the handle stays on the
+   panel and rides the edge. */
+#uw-shade { height: 1006px; overflow: hidden; }
+#uw-pin { position: absolute; inset: 0; }
+#uw-shade .shade-handle { bottom: 40px; }
+#uw-rows {
+  position: absolute; left: 14px; right: 14px; top: 52px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+#uw-rows .shade-row { position: static; }
+.shade-icon.uw-news { background: #B3261E; }  /* News profile tint */
+
+/* ---- g3_endcard ---- */
+#seg-g3_endcard { background: var(--ambient); }
+#g3-svg { margin-bottom: 16px; }
+#g3-wordmark { margin-bottom: 22px; }
+#g3-l1 {
+  margin: 0 0 30px;
+  font: italic 400 44px/1.4 var(--f-display); color: var(--ember-soft);
+}
+#g3-l2 {
+  margin: 0;
+  font: 600 26px/1 var(--f-body); letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--gilt);
+}
