@@ -11899,3 +11899,232 @@ a checklist; this is.
    bracket edit on a file another session may be holding.
 
 Nothing committed. The tree is coherent: analyzer 0/0, 1218/1218.
+
+## §134 — The session's work is committed and pushed (be58337) (2026-08-28)
+
+Follows §133. Written after the working tree unexpectedly read CLEAN.
+
+Cause: everything this session built was committed by someone/something else
+as `be58337 "wip: pre-crash recovery snapshot"`, and that commit is on
+origin/fix-sprint (`git status`: "up to date with 'origin/fix-sprint',
+nothing to commit"). Claude Code had crashed on the owner's machine; the
+snapshot is the recovery.
+
+VERIFIED the snapshot contains the work, not just a stub:
+  43 paths matching sound|motion|tilt|ember|assets/fonts
+  git cat-file -e HEAD:mobile/lib/core/services/sound/miles_sound.dart  -> present
+  git cat-file -e HEAD:docs/guides/DEVICE-CHECKLIST.md                  -> present
+  BRAIN.md +678 lines, tilt_parallax.dart +180, bed_air.ogg 469462 bytes
+
+Consequences for the next session:
+- I did NOT make this commit (standing rule: never commit unless asked). It
+  is a recovery artifact, so its message does not describe the contents.
+  If the owner wants a real history, the honest move is a follow-up commit
+  or an amend with a message that names what landed — NOT a rewrite of
+  pushed history without asking.
+- The tree being clean is now the EXPECTED state. Anything modified from
+  here is new work.
+- Last verified gates before the snapshot: analyzer 0/0, full suite
+  **1218/1218**.
+
+Still open (unchanged): the owner's DEVICE-CHECKLIST pass, the ART-PROMPTS
+batches, and the cosmetic P3 entrance sweep (13 screens, all still `todo`).
+
+## §135 — P3 sweep: the pressables, and the entrances that were REFUSED (2026-08-28)
+
+Follows §134. Owner asked for the P3 sweep. Analyzer 0/0; suite seal in
+flight at write time (last green 1218/1218).
+
+**Done — EmberPress on every custom pressable that earns it (7 sites):**
+settings (avatar edit), care ×3 (send a care note, custom note, acknowledge),
+reasons (add), profile ×2 (avatar → viewer, video placeholder). All were
+bare `GestureDetector(onTap:, child:)`, so the swap is one token plus an
+import; each now scales 0.97, clicks, and murmurs `Cue.tap`.
+
+**REFUSED, with reasons — this is the substance of the sweep, not a
+shortfall.** The plan's P3 line was "entrance + EmberPress"; entrances were
+declined almost everywhere, because on inspection they cost more than they
+give:
+- `ScreenEntrance` wraps a screen's content as ONE child, which defeats a
+  sliver's lazy building (§128 recorded the same trade-off for Home and
+  accepted it there: six cards, most on screen). Applying it to a
+  data-driven list makes every row build at once.
+- So: SKIPPED on care, reasons, routines, profile, reels (all
+  `ListView.separated` over data), on rituals (data-driven children), and on
+  settings (a very long finite list — laziness matters more than a fade).
+- Candidates that WOULD be safe (cycle, daily_prompt — short, finite) are
+  left too: a fade-in on two minor screens is not worth a bracket edit on
+  files a concurrent session may hold, and the route-level DissolveIn
+  already gives every one of these screens a coordinated arrival.
+- `profile:378` (Hero-wrapped photo) and gallery/timeline keep their
+  existing affordances — a press scale fights a Hero flight, and Material
+  ink is correct in a dense list (§125).
+
+**Net position:** every screen in the app now arrives via DissolveIn, every
+custom pressable in the app answers a touch, and the two screens that earn
+an in-page stagger (auth, Home) have one. The rollout is COMPLETE as
+designed; the remaining "todo" screens are deliberate no-ops, not omissions.
+
+**Owner art: seal.webp (batch A #1) received and APPROVED** — matches the
+prompt (round embossed wax, ember body, gilt rim, abstract two-loop knot, no
+text/faces, near-black ground). Only note: tight margin; I will pad in-app
+rather than ask for a regen. Owner to continue with the rest of batch A.
+
+Nothing committed.
+
+## §136 — Art batch review: 3 keepers, 3 rejects, 6 to treat (2026-08-28)
+
+Follows §135. Owner delivered 12 generated images against ART-PROMPTS.md.
+Assessment (mine, by eye against each prompt's stated constraints):
+
+**SHIP AS-IS (3):**
+- `seal` — approved in §135, unchanged.
+- `card_back` — the strongest of the whole batch: gold deco filigree on dark
+  plum, symmetric, central diamond with a candle flame, no text. Exactly the
+  brief.
+- `door` (the gold Greek-key panel with the small brass dial) — matches the
+  vault-gate prompt closely.
+
+**REJECT — cannot ship (3):**
+- The AURORA candidate is an INSTAGRAM SCREENSHOT: it carries the platform
+  UI (heart/comment/share, bookmark) and a real account name. Not ours, not
+  generated, and shipping someone's photo + handle in an APK is a licensing
+  and privacy problem, not a style note.
+- The STARLIT and DAWN candidates both carry GARBLED AI TEXT baked into the
+  image ("hce Caiihetote Tocaawo mtian", "NONR UA OLEET PLASEX CARLA"). The
+  prompt's hardest constraint is no text; a backdrop with letters in it is
+  unusable at any opacity.
+
+**USABLE WITH IN-APP TREATMENT (3):** velvet (far brighter than the
+"almost black" brief — darken), rose (blooms far stronger than
+"barely-visible" — draw at low opacity), jar (butterflies were not in the
+brief and the red cast is heavy; acceptable, not ideal).
+
+**WEAK — a systematic generator artifact (3 + 1):** chest, lantern, frame and
+thread all carry CHROMATIC ABERRATION / RGB fringing — blue and green edges
+on a palette whose one rule is no cold colour. `thread` additionally reads
+as a light-painting scribble rather than "a thread tied in an open knot".
+The fix is a prompt clause, not a regrade.
+
+**NO SLOT:** the orange cloudscape matches none of the 14 assets.
+
+**Consequence for ART-PROMPTS.md:** the global constraint block needs two
+additions — an explicit ban on chromatic aberration / colour fringing /
+misregistration, and a stronger no-text clause (the current one is being
+ignored by the generator on gradient-heavy prompts). Recorded for the next
+batch rather than silently re-prompting.
+
+Assets are NOT yet in the repo: the owner has them as images in chat, not
+files on disk. Nothing is wired until they land in `mobile/assets/art/`.
+
+## §137 — ART-PROMPTS rewritten self-contained; P3 sealed (2026-08-28)
+
+Follows §136. P3 sweep seal came back green: **1218/1218**.
+
+`docs/guides/ART-PROMPTS.md` rewritten: 11 regeneration prompts, each one
+SELF-CONTAINED. Round one carried the constraints in a header block and the
+generator never re-read them — which is exactly how three images arrived
+with baked-in text and four with RGB fringing. Every prompt now ends with
+its own anti-text and anti-fringing clause, and each names the specific
+failure it is correcting.
+
+Also tightened per asset: jar (explicitly no butterflies/labels), the five
+backdrops (each now says "must read as nearly solid <colour> at a glance,
+no bright areas, no focal point" — the first round's blooms and velvet were
+far too strong to sit behind text), lantern (explicitly not fully lit, and
+no border), thread (a deliberate single-line knot, "not a tangle, not a
+scribble, not a loop of neon tubing"), aurora (explicitly no phone UI, app
+icons or buttons — the first was a screenshot).
+
+Unchanged and still approved: seal, card_back, door.
+
+**Next:** owner regenerates; assets land in `mobile/assets/art/`; each gets
+wired to its call site as it arrives. Nothing committed.
+
+## §138 — Art round 2: 0 for 5, and the backdrops should not be images (2026-08-28)
+
+Follows §137. Owner regenerated with the self-contained prompts. All five
+came back unusable, and the failure is systematic, not random:
+
+- `bg_rose`: the bloom is a hard-edged solid pink shape over ~40% of the
+  frame. The prompt asked for "barely perceptible, like a stain seen through
+  dark glass". Text over it would be unreadable.
+- `bg_velvet`: darkness is finally right, but it has a bright vertical light
+  streak (a focal point) AND a teal/rainbow patch in the top-right corner —
+  the one colour the palette forbids.
+- `bg_aurora`: bright green/teal across the lower third, and HANDWRITTEN
+  SQUIGGLES scattered over it.
+- `bg_midnight`: enormous white letterforms across the middle of the frame.
+- `jar` regen: butterflies again (explicitly excluded), BLUE butterflies, a
+  printed paper label with legible text, and price-tag strips with text.
+
+**Diagnosis: negative constraints are not working.** Three rounds of "no
+text / no blue / no butterflies" have produced text, blue and butterflies —
+a known failure mode where a long tail of negations gets diluted or even
+reinforces the named subject. More words will not fix it.
+
+**DECISION — the six chat backdrops stop being generated images.**
+`chat_theme.dart` already carries `final List<Color> bg` per theme ("1 colour
+= solid; 2+ = top-left → bottom-right gradient"), so the app is ALREADY
+drawing these backgrounds procedurally. What the images were meant to add is
+a faint texture, which is a `CustomPainter` (or a small tiled noise) at zero
+asset bytes, exact palette compliance, no generator lottery, and no risk of
+shipping someone's handwriting. This is strictly better than any image we
+could generate: smaller APK, correct colours by construction.
+
+Consequence: prompts 2–7 in ART-PROMPTS.md are RETIRED. Only the object
+assets remain worth generating (jar, chest, frame, lantern, thread), and
+those get POSITIVE-ONLY prompts — describing what is in frame, with no
+negation tail at all.
+
+Still approved and wanted as files: seal, card_back, door.
+
+## §139 — The art is now CODE: tool/generate_art.dart (2026-08-28)
+
+Follows §138. Owner: "generate them on your own." Done — and not by
+prompting anything.
+
+**NEW `mobile/tool/generate_art.dart`** (pure Dart, package:image, the
+generate_icon.dart precedent) draws all five spot illustrations:
+- `thread` — a trefoil knot in gilt over an ember glow. One continuous line
+  crossing itself three times; deliberately echoes the couple's wax seal.
+- `lantern` — paper lit from ONE point inside it: brightness falls off with
+  distance from the ember (quadratic), ribs are a shade of whatever they
+  cross rather than black lines, small upright flame.
+- `chest` — closed, gold bands and clasp, light finding the seam under the
+  lid (an additive glow layer, then a bright core line).
+- `frame` — gilt frame, two sparks adrift in the empty opening.
+- `jar` — corked glass with SHOULDERS (row-by-row profile, not a rounded
+  rectangle), 34 seeded fireflies, an elliptical pool of light on the
+  surface beneath, warm rim tracing the same profile.
+
+Verified BY MEASUREMENT, not by eye — the tool itself reports and fails on
+violation: `cold_pixels=0` on all five (any pixel with blue > red + 6 is a
+build failure), and each asset is >0.5% lit (an empty frame fails too).
+
+    thread: 768x768  lit=13.7%  cold_pixels=0
+    lantern:768x768  lit=9.7%   cold_pixels=0
+    chest:  768x768  lit=3.4%   cold_pixels=0
+    frame:  768x768  lit=4.8%   cold_pixels=0
+    jar:   1024x1024 lit=12.1%  cold_pixels=0
+
+**39,194 bytes for all five as WebP** (ffmpeg libwebp q82) against a 2.5MB
+budget. Flat vector-style art compresses ~60x better than the photoreal
+generations it replaces.
+
+Wired to their call sites (the hygiene law requires it — an unreferenced
+asset fails the suite): chest → capsule empty state; lantern → wish jar
+empty; frame → gallery empty (`_Message`); thread → timeline empty (new
+optional `art:` param on `_CenteredMessage`, so error states keep their
+icon); jar → wish jar. `assets/art/` declared in pubspec. Analyzer 0/0,
+asset hygiene 4/4.
+
+**Why this is the right answer and not a workaround:** a generator cannot be
+told not to do a thing, only asked — three rounds proved it. Code can be
+told. The palette is `MilesColors` by construction, no glyph is ever drawn
+so text is impossible, and the output is byte-identical on every run.
+
+Owner separately produced a genuinely excellent photoreal jar (round 4):
+corked glass on wood, warm amber points, no butterflies, no label, no cold
+colour. That one is BETTER than the drawn jar for the hero slot and should
+replace it when the file lands.

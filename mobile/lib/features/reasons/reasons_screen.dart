@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -257,7 +258,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              GestureDetector(
+              EmberPress(
                 onTap: _adding ? null : _add,
                 child: Container(
                   width: 46,

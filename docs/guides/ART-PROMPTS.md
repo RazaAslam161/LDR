@@ -1,86 +1,85 @@
-# ART-PROMPTS — the Sensory Overhaul's generated art, one prompt per asset
+# ART-PROMPTS — copy-paste, one prompt per asset
 
-Run each prompt in Nano Banana Pro, save the PNG, then convert and drop it at
-the listed path. Every asset lands in the repo **together with the code that
-uses it** — batches below match the wiring order.
+Every prompt below is SELF-CONTAINED. The constraints are repeated inside
+each one on purpose: round one put them in a header, the generator never
+re-read them, and three images came back with baked-in text while four came
+back with blue/green colour fringing.
 
-**Convert:** `cwebp -q 80 in.png -o <name>.webp` (backdrops: `-q 75`).
-**Global constraints — part of every prompt, never skip:** no faces, no human
-figures, no text, no letters, no numbers, no watermark, no signature. No cold
-blue anywhere except the Starlit backdrop. Nothing suggestive.
-**Palette anchors:** night `#120A0C` · surface `#221017` · cream `#FCEFE6` ·
-ember `#E8674A` · gilt `#D9A86C` · star violet `#8B7CF0`.
+**Per asset:** generate → save PNG → `cwebp -q 80 in.png -o <name>.webp`
+(backdrops: `-q 75`) → put it in `mobile/assets/art/` → say so, and it gets
+wired to its call site.
+
+**Approved already — do NOT regenerate:** `seal.webp`, `card_back.webp`,
+`door.webp`.
 
 ---
 
-## Batch A — seal, card back, empty states
+## 1. `jar.webp` — wish jar hero · square 1024×1024 · ≤120KB
+*(optional — the first is usable; this drops the butterflies and the heavy red)*
 
-### 1. `mobile/assets/art/seal.webp` — capsule wax seal · 1:1 · 1024px · ≤120KB
-> A round embossed wax seal photographed straight-on, deep ember-red wax with
-> highlights of #E8674A over a dark #221017 body, embossed with an abstract
-> interlocking double-loop knot motif — two closed loops linked, purely
-> geometric, no letters, no symbols, no text. Warm gilt rim lighting in
-> #D9A86C, candlelit mood, resting on a near-black #120A0C background, soft
-> shadow, subtle antique grain, perfectly centered with generous dark margin.
-> No faces, no text, no watermark.
+A corked clear glass jar standing on a dark surface, photographed slightly from below eye level. Inside the jar float dozens of tiny warm points of light like fireflies, in soft ember orange #E8674A and antique gold #D9A86C, some drifting near the top, some settled at the bottom. The glass rim catches warm candlelight. Background is pure near-black #120A0C. A gentle warm glow spills from the jar onto the surface beneath it. Cosy, intimate, candlelit night mood. The jar is centred with a generous dark margin all around it. Nothing inside the jar except the lights — no insects, no butterflies, no flowers, no paper, no labels. Absolutely no text, letters, words, numbers, captions, signatures, watermarks or interface elements of any kind — not even illegible or decorative lettering. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration, no risograph offset. Warm palette only — no blue, cyan, teal or green anywhere.
 
-### 2. `mobile/assets/art/card_back.webp` — game card back · 2:3 · 832×1248 · ≤100KB
-> An ornate playing-card back design, flat vector style, portrait orientation.
-> Symmetrical art-deco filigree border in warm gold #D9A86C on a near-black
-> plum background #120A0C, with a small central diamond-shaped ember glow
-> motif in #E8674A radiating faint warm light. Elegant, quiet, luxurious,
-> candlelit mood. Perfectly symmetrical top-to-bottom and left-to-right. No
-> letters, no numbers, no faces, no text, no watermark.
+## 2. `bg_midnight.webp` — Starlit chat backdrop · portrait 1024×2048 · q75 · ≤180KB
+*(regen — the first had garbled lettering across the bottom)*
 
-### 3–6. Empty-state spot illustrations · 1:1 · 768px · ≤80KB each
-Shared frame (prepend to each): *"Minimal spot illustration, flat style with
-soft warm gradients, on a #120A0C background, palette limited to #E8674A
-#D9A86C #FCEFE6 #8B7CF0 over #120A0C, candlelit mood, small centered subject
-with large empty margin, no faces, no text, no watermark."*
+A deep navy night sky, extremely simple and almost empty, as a vertical portrait image. Smooth gradient from #0E1A3A at the top to #0A0F22 at the bottom, with a light scatter of very small faint stars in pale #9DA8C8 and one whisper-faint line of three or four stars suggesting a constellation. No moon, no clouds, no horizon, no landscape. The whole image must read as nearly solid dark navy at a glance — nothing in it larger than a tenth of the frame, no bright areas, no focal point. Slightly darker vignette toward the top and bottom edges. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders, frames or interface elements of any kind — not even illegible or decorative lettering. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration.
 
-| File | Subject line |
+## 3. `bg_dawn.webp` — Dawn chat backdrop · portrait 1024×2048 · q75 · ≤180KB
+*(regen — the first had garbled lettering across the middle)*
+
+A soft warm cream paper texture filling the entire frame as a vertical portrait image, colour running from #F5E6DC at the top to #EAD3CB at the bottom, lit by a gentle diffuse morning light from above. Extremely subtle linen grain in the paper. Completely empty and even — no objects, no shapes, no shadows, no focal point, nothing larger than a tenth of the frame. The whole image must read as nearly solid warm cream at a glance. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders, frames or interface elements of any kind — not even illegible or decorative lettering. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration.
+
+## 4. `bg_aurora.webp` — Aurora chat backdrop · portrait 1024×2048 · q75 · ≤180KB
+*(regen — the first was a screenshot of an Instagram story, with the app's buttons and a real account name on it. Cannot ship.)*
+
+A near-black night sky as a vertical portrait image, gradient from #241640 at the top to #103A3E at the bottom, with one extremely faint aurora ribbon in muted violet #7A57C9 drifting low in the frame at very low opacity, and five or six tiny soft stars. Everything very dim and understated — the whole image must read as nearly solid dark at a glance, with no bright areas and no focal point. Slightly darker vignette toward the top and bottom edges. A clean full-bleed image with nothing overlaid on it. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders, frames, phone UI, app icons, buttons or interface elements of any kind — not even illegible or decorative lettering. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration.
+
+## 5. `bg_velvet.webp` — Midnight Boudoir backdrop · portrait 1024×2048 · q75 · ≤180KB
+*(regen — the first was far too bright; this must be almost black)*
+
+Deep plum velvet fabric in near-total darkness, filling the entire frame as a vertical portrait image. The colour range is only #1A0E16 to #2A1320 — almost black throughout, never bright, never saturated purple. A faint fabric weave catches one soft candlelight sheen, barely visible. The whole image must read as nearly solid black at a glance, with no bright areas and no focal point. Slightly darker vignette toward the top and bottom edges. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders, frames or interface elements of any kind. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration. No blue, cyan, teal or green anywhere.
+
+## 6. `bg_rose.webp` — Blush backdrop · portrait 1024×2048 · q75 · ≤180KB
+*(regen — the first's blooms were far too strong; these must be ghost-faint)*
+
+A deep dark rose gradient filling the entire frame as a vertical portrait image, from #3A1A28 at the top to #2A1320 at the bottom, dark throughout. One very large, very soft watercolour bloom in dusty pink #E08AA0 sits in a single corner at extremely low opacity — barely perceptible, like a stain seen through dark glass, never bright and never pink-dominant. The whole image must read as nearly solid dark plum at a glance, with no bright areas and no focal point. Slightly darker vignette toward the top and bottom edges. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders, frames or interface elements of any kind. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration.
+
+## 7. `bg_ember.webp` — Candlelit backdrop · portrait 1024×2048 · q75 · ≤180KB
+*(not yet attempted)*
+
+A very dark warm brown gradient filling the entire frame as a vertical portrait image, from #2A160E at the top to #4A2614 at the bottom. A faint candlelight glow sits low at the bottom edge, and a few subtle floating warm dust motes in #D9763E drift at very low opacity. Dark and even throughout — the whole image must read as nearly solid dark brown at a glance, with no bright areas and no focal point. Slightly darker vignette toward the top edge. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders, frames or interface elements of any kind. No faces, no people, no animals, no candles or objects. No chromatic aberration, no colour fringing, no RGB misregistration. Warm palette only — no blue, cyan, teal or green anywhere.
+
+## 8. `chest.webp` — capsule empty state · square 768×768 · ≤80KB
+*(regen — the first had blue/cyan fringing on every edge)*
+
+A minimal spot illustration of a small closed keepsake chest, flat illustration style with soft warm gradients, on a solid #120A0C background. A faint warm glow leaks from the seam under its lid. The palette is strictly ember orange #E8674A, antique gold #D9A86C, cream #FCEFE6 and deep plum-black #120A0C — nothing else. The chest is small and centred with a large empty margin around it. Clean flat edges throughout. Absolutely no text, letters, words, numbers, captions, signatures or watermarks. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration, no risograph offset, no misaligned colour layers. Warm palette only — no blue, cyan, teal or green anywhere, including on edges and highlights.
+
+## 9. `frame.webp` — gallery empty state · square 768×768 · ≤80KB
+*(regen — the first had rainbow fringing across the whole frame)*
+
+A minimal spot illustration of an empty ornate gilt picture frame, flat illustration style with soft warm gradients, on a solid #120A0C background. Two tiny ember sparks drift inside the empty opening. The palette is strictly antique gold #D9A86C, ember orange #E8674A, cream #FCEFE6 and deep plum-black #120A0C — nothing else. The frame is small and centred with a large empty margin around it. Clean flat edges throughout. Absolutely no text, letters, words, numbers, captions, signatures or watermarks. No faces, no people, no animals, no picture inside the frame. No chromatic aberration, no colour fringing, no RGB misregistration, no risograph offset, no misaligned colour layers, no rainbow edges. Warm palette only — no blue, cyan, teal or green anywhere.
+
+## 10. `lantern.webp` — wish jar empty state · square 768×768 · ≤80KB
+*(regen — the first had a blue border and was fully lit)*
+
+A minimal spot illustration of a small round paper lantern hanging still, flat illustration style with soft warm gradients, on a solid #120A0C background that fills the entire frame edge to edge. The lantern is mostly dark, with one tiny ember just beginning to glow inside it — a small point of warm light, not a fully lit lantern. The palette is strictly ember orange #E8674A, antique gold #D9A86C, cream #FCEFE6 and deep plum-black #120A0C — nothing else. The lantern is small and centred with a large empty margin around it. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders or frames of any kind. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration. Warm palette only — no blue, cyan, teal or green anywhere, including borders and edges.
+
+## 11. `thread.webp` — timeline empty state · square 768×768 · ≤80KB
+*(regen — the first read as a scribble of light, not a thread in a knot)*
+
+A minimal spot illustration of a single fine thread of warm golden light, tied once in a small simple open knot near the centre, its two loose ends trailing away and fading into darkness. Flat illustration style with a soft warm glow along the thread, on a solid #120A0C background filling the frame. One continuous clean line only — a deliberate, elegant knot, not a tangle, not a scribble, not a loop of neon tubing. The palette is strictly antique gold #D9A86C, cream #FCEFE6 and deep plum-black #120A0C. Small and centred with a large empty margin. Absolutely no text, letters, words, numbers, captions, signatures, watermarks, borders or frames of any kind. No faces, no people, no animals. No chromatic aberration, no colour fringing, no RGB misregistration. Warm palette only — no blue, cyan, teal or green anywhere, including borders and edges.
+
+---
+
+## Wiring status
+
+| Asset | State |
 |---|---|
-| `chest.webp` (capsule list) | a small closed keepsake chest with a faint warm glow leaking from its seam |
-| `frame.webp` (gallery) | an empty ornate gilt picture frame with two tiny ember sparks drifting inside it |
-| `thread.webp` (timeline) | a single loose thread of warm golden light tied in a small open knot, ends trailing into darkness |
-| `lantern.webp` (wish jar) | a small unlit paper lantern with one tiny ember beginning to glow inside |
+| `seal.webp` | approved — awaiting the file |
+| `card_back.webp` | approved — awaiting the file |
+| `door.webp` | approved — awaiting the file |
+| `jar.webp` | usable as-is; optional regen (prompt 1) |
+| 6 chat backdrops | regen (prompts 2–7) |
+| 4 empty states | regen (prompts 8–11) |
 
-## Batch B — backdrops, vault door, jar
-
-### 7–12. Chat theme backdrops · 1:2 portrait · 1024×2048 · `-q 75` · ≤180KB each
-Shared constraint (prepend to each): *"Extremely subtle, barely-visible
-texture — must read as nearly solid color at a glance; no shapes larger than
-a tenth of the frame; slightly darker vignette toward top and bottom edges."*
-
-| File | Theme | Prompt core |
-|---|---|---|
-| `bg_velvet.webp` | Midnight Boudoir | deep plum velvet fabric texture in near-darkness, colors only #1A0E16 to #2A1320, faint fabric weave catching a candlelight sheen, almost black |
-| `bg_ember.webp` | Candlelit | very dark warm brown gradient #2A160E to #4A2614 with faint drifting candlelight glow at the bottom edge and subtle floating warm dust motes in #D9763E at low opacity |
-| `bg_aurora.webp` | Aurora | near-black night sky gradient #241640 to #103A3E with an extremely faint aurora ribbon in muted violet #7A57C9 and teal, plus five tiny soft stars, all at low opacity |
-| `bg_rose.webp` | Blush | deep rose-dark gradient #3A1A28 to #2A1320 with a barely-visible large watercolor bloom of #E08AA0 in one corner |
-| `bg_midnight.webp` | Starlit *(the one blue exception)* | deep navy night sky #0E1A3A to #0A0F22, a scatter of faint tiny stars in #9DA8C8, one whisper-subtle constellation line, no moon |
-| `bg_dawn.webp` | Dawn *(the one light theme)* | soft warm cream paper texture #F5E6DC to #EAD3CB, gentle morning light gradient from the top, extremely subtle linen grain |
-
-### 13. `mobile/assets/art/door.webp` — vault gate texture · 3:4 · 960×1280 · ≤150KB
-> A dark lacquered panel texture, deep plum-black #221017, with a thin inlaid
-> geometric border frame in antique gold #D9A86C and a small round brass dial
-> ornament at center — abstract, no numbers, no letters. Warm low
-> side-lighting, candlelit mood, subtle wood lacquer grain, mostly dark and
-> empty. No faces, no text, no watermark.
-
-### 14. `mobile/assets/art/jar.webp` — wish jar hero · 1:1 · 1024px · ≤120KB
-*(Also the source image for the Higgsfield turntable — generate this one
-first and best.)*
-> A corked glass jar on a dark surface, seen slightly from below eye level,
-> filled with dozens of tiny floating warm ember-orange lights like fireflies
-> in #E8674A and #D9A86C, glass rim catching gilt candlelight, background
-> pure near-black #120A0C, gentle glow spilling from the jar onto the
-> surface, cozy candlelit night mood, centered, generous margin. No faces,
-> no text, no labels on the jar, no watermark.
-
----
-
-Budgets are enforced by `test/unit/hygiene/asset_hygiene_test.dart` (art
-ceiling lands with the first art batch). Drop finished files in
-`mobile/assets/art/` and say so — wiring lands the same day, each asset with
-its call site.
+Size budgets are enforced by `mobile/test/unit/hygiene/asset_hygiene_test.dart`.

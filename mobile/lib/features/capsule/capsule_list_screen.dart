@@ -216,7 +216,7 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('🎁', style: TextStyle(fontSize: 52)),
+            Image.asset('assets/art/chest.webp', width: 148, height: 148),
             const SizedBox(height: 16),
             Text('Start a capsule',
                 style: Theme.of(context).textTheme.displaySmall,

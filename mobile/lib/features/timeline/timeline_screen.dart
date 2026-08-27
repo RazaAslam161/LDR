@@ -114,6 +114,7 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
     if (visits.isEmpty) {
       return _CenteredMessage(
         icon: Icons.timeline,
+        art: 'assets/art/thread.webp',
         message:
             'No visits yet. Add a past trip to start building the story of '
             'the distance — every visit matters.',
@@ -644,7 +645,12 @@ class _CenteredMessage extends StatelessWidget {
     required this.message,
     this.action,
     this.actionLabel,
+    this.art,
   });
+
+  /// An illustration to show INSTEAD of [icon] — used where the message is
+  /// "there is nothing here yet" rather than "something went wrong".
+  final String? art;
   final IconData icon;
   final String message;
   final VoidCallback? action;
@@ -658,7 +664,10 @@ class _CenteredMessage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 40, color: const Color(0x80F5EFE6)),
+            if (art != null)
+              Image.asset(art!, width: 132, height: 132)
+            else
+              Icon(icon, size: 40, color: const Color(0x80F5EFE6)),
             const SizedBox(height: 16),
             Text(
               message,

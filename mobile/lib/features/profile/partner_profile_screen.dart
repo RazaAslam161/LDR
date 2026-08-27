@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
@@ -95,7 +96,7 @@ class _Header extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
       child: Row(
         children: [
-          GestureDetector(
+          EmberPress(
             // Their photo, full size, through the viewer every other image in
             // the app opens in — including its save-to-vault button.
             onTap: avatar == null
@@ -363,7 +364,7 @@ class _MediaTile extends StatelessWidget {
     // square is exactly the download this screen must not do. Ones sent since
     // carry a thumbnail and render like any other tile.
     if (item.isVideo && item.thumbPath == null) {
-      return GestureDetector(
+      return EmberPress(
         onTap: onTap,
         child: const ColoredBox(
           color: MilesColors.night,

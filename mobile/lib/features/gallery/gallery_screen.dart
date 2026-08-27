@@ -624,10 +624,17 @@ class _Message extends StatelessWidget {
   Widget build(BuildContext context) => Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Text(
-            text,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0x99F5EFE6), height: 1.5),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset('assets/art/frame.webp', width: 132, height: 132),
+              const SizedBox(height: 12),
+              Text(
+                text,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0x99F5EFE6), height: 1.5),
+              ),
+            ],
           ),
         ),
       );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -183,7 +184,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                   alignment: WrapAlignment.center,
                   children: [
                     for (final p in _presets)
-                      GestureDetector(
+                      EmberPress(
                         onTap: () => _send(p.kind, p.message),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -199,7 +200,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                                   color: MilesColors.cream50, fontSize: 13,),),
                         ),
                       ),
-                    GestureDetector(
+                    EmberPress(
                       onTap: _custom,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -295,7 +296,7 @@ class _CareScreenState extends ConsumerState<CareScreen> {
           ),
           // The recipient (not me) can mark it done.
           if (!mine && !n.acknowledged)
-            GestureDetector(
+            EmberPress(
               onTap: () async {
                 await CareRepository.acknowledge(n.id);
                 await _load();

@@ -136,6 +136,9 @@ flutter:
     # the clear. Provenance per cue lives beside its enum in
     # core/services/sound/cue.dart.
     - assets/sound/
+    # Spot illustrations, DRAWN BY tool/generate_art.dart — not generated
+    # images. 39KB for five, exact palette, no text possible.
+    - assets/art/
     # The OFL texts ship because the license requires them to travel with the
     # font software; theme.dart registers both with LicenseRegistry so they
     # surface in the standard licenses page.
