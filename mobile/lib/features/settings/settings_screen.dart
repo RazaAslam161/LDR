@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/ads/ads_service.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/widgets/wordmark.dart';
@@ -1321,6 +1324,7 @@ class _AboutCard extends StatelessWidget {
                       label: 'Report a security issue',
                       onTap: () => _openLegalPage(context, milesSecurityUrl),
                     ),
+                    const _AdPrivacyOptionsLink(),
                   ],
                 ),
               ],
@@ -1358,6 +1362,44 @@ class _AboutCard extends StatelessWidget {
         );
       }
     }
+  }
+}
+
+/// Reopens the ad consent form, and draws nothing at all where reopening it is
+/// not a right the user has.
+///
+/// Stateful rather than a FutureBuilder because the question is asked once per
+/// visit: a FutureBuilder rebuilt in `build` starts a new lookup on every
+/// setState this screen does, and this one crosses a platform channel.
+class _AdPrivacyOptionsLink extends StatefulWidget {
+  const _AdPrivacyOptionsLink();
+
+  @override
+  State<_AdPrivacyOptionsLink> createState() => _AdPrivacyOptionsLinkState();
+}
+
+class _AdPrivacyOptionsLinkState extends State<_AdPrivacyOptionsLink> {
+  bool _show = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_ask());
+  }
+
+  Future<void> _ask() async {
+    final required = await AdsService.privacyOptionsRequired();
+    if (!mounted || !required) return;
+    setState(() => _show = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_show) return const SizedBox.shrink();
+    return const _AboutLink(
+      label: 'Privacy options',
+      onTap: AdsService.showPrivacyOptions,
+    );
   }
 }
 

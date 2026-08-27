@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/core/ads/anchored_banner.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
@@ -1028,6 +1029,17 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                   style: TextStyle(color: MilesColors.taupe),),)
           : Column(
               children: [
+                // FIRST child on purpose. Everything else on this screen is
+                // something you touch — the type chips, the two bodies, the
+                // whisper strip — and the only non-interactive neighbour on
+                // the whole layout is the instruction text directly below.
+                // Its own gap and rule keep it off the chips.
+                AnchoredBannerBand(
+                  suppressed: _reactionModeActive ||
+                      _drawing ||
+                      _adjusting != null ||
+                      _uploadingPhoto,
+                ),
                 const SizedBox(height: 8),
                 const Text(
                   'Tap anywhere on their photo. A glow lands in the same\n'
