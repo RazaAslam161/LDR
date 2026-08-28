@@ -12371,3 +12371,2002 @@ settles it — and the knob if it reads wrong is `_spread` in
 **Open, unchanged:** owner device pass; rotate the Maps key (5403769, three
 remote branches); apply `ui_sound_kill` to production before a sound build
 ships; generate_art.dart's stray intermediate PNGs.
+
+## §145 — Build 53, and the ABI lever that only half works (2026-08-28)
+
+Owner asked for a clean APK "for real users… a fresh use of Miles". Built with
+`bash tool/release.sh --bump` (no --upload/--verify/--publish, so nothing was
+published). **Machine note: `CLAUDE.md`'s "Android SDK is not installed" is
+STALE** — SDK 36.0.0, JDK 17 and adb are all present now.
+
+    bumped 52 -> 53
+    sha256 f22be8305ef41de44cf0bd8688890d0a4c844c4aed43034ca3e3e8daf3a71d62
+    size   170 MB
+    checked 1 libapp.so: stamped miles-build-53, updater present
+    package: name='com.miles.miles' versionCode='53' versionName='0.1.0'
+    minSdkVersion:'24'  targetSdkVersion:'36'
+    EXIT=0
+
+**Why 53 and not 49.** The tree was at 48; builds 49/51/52 shipped to phones
+(82 crash reports come from 52). Android refuses to install a LOWER
+versionCode, so an APK at 48 would have failed with "App not installed" on the
+owner's own handset. Set both version fields to 52 by hand, then let
+`release.sh --bump` take it to 53 through its cache-purge path.
+
+**THE FINDING — `--target-platform android-arm64` only filters HALF the APK.**
+release.sh's comment calls it "the ONLY lever that works". Measured inside the
+finished artifact, it is not:
+
+    ABIs: arm64-v8a   11 files, 67.6 MB
+          armeabi-v7a  9 files, 27.0 MB
+          x86_64       9 files, 48.7 MB
+
+`--target-platform` filters FLUTTER's own libs — hence 11 files for arm64
+(libflutter.so + libapp.so extra) against 9 for the others, and hence
+`checked 1 libapp.so`. It does NOT filter the PLUGIN native libraries
+(WebRTC, ML Kit, Mapbox), which Gradle still packages for all three. So:
+
+1. **75.7 MB of the 170 MB download can never execute.** x86_64 is emulators
+   only; armeabi-v7a has no Flutter engine to pair with.
+2. **Worse than dead weight — a 32-bit phone can INSTALL this and crash.**
+   Android sees an `armeabi-v7a` lib dir, selects it, extracts plugin libs,
+   then finds no `libflutter.so` and dies at launch. A clean "not compatible"
+   refusal would be better than a crash on first open.
+
+release.sh's own note says an `ndk { abiFilters }` block "changed nothing at
+all" on build 47 — but that was measured on a UNIVERSAL apk, where Flutter's
+libs dominated the number and hid the plugin libs underneath. The two levers
+are COMPLEMENTARY, not redundant: `--target-platform` for Flutter's libs,
+`abiFilters`/`packaging.jniLibs` for the plugins'. **found, not fixed** —
+it is a build-config change and the owner may want to ship this artifact now.
+Expected result if applied: ~170 MB -> ~103 MB, and 32-bit refuses cleanly.
+
+**Shipped knowingly, and it is the right call:** the manifest carries
+`com.google.android.geo.API_KEY = "MISSING_MAPS_API_KEY"` (verified by
+`aapt2 dump xmltree`). The only Google Maps key in existence is the
+COMPROMISED one in git history at 5403769, on three remote branches. Baking a
+leaked key into an APK handed to real users is quota theft and billing
+exposure on the owner's account — strictly worse than a blank screen. Two
+surfaces degrade (`location_map_screen.dart`, `partner_location_card.dart`);
+`world_map_screen.dart` is Mapbox and works, its token coming from
+`app_secrets` at runtime. A FRESH user reaches neither Google surface in a
+first session — `partner_location_card.dart:213` falls back unless the partner
+is sharing live location.
+
+Signature `META-INF/CERT.RSA` — debug-signed, which is the sideload channel's
+DELIBERATE design so the installed base can keep updating. 15 sound assets and
+all 5 art assets are in the APK; `.env` present as designed.
+
+**Observed during the gate, not chased:** `flutter test` printed
+`media-sign error: LateInitializationError: Field 'client' has not been
+initialized.` many times. Tests passed (release.sh refuses to build on red),
+so this is a test-double talking, not a product failure — but it is an error
+being printed and ignored, which this repo's own law dislikes.
+**found, not fixed.**
+
+**STILL NOT DONE, and it is the headline for a real-user build:** nothing in
+build 53 has run on a handset. The whole sensory layer — sound, the ember-field
+rewrite, parallax, motion — is gate-green and hardware-unproven, and chat
+decryption is still failing in the field. `DEVICE-CHECKLIST.md` is the gate,
+and §1 comes first because it verifies two defects that are ALREADY on users'
+phones.
+
+**Also still open:** `ui_sound_kill` is staging-only. The checklist says apply
+it to prod AFTER a sound build ships — **that order is backwards.** The column
+is additive and old clients ignore it, so applying it BEFORE build 53 reaches
+anyone is strictly safer: otherwise the sound layer is live on real phones with
+no remote lever.
+
+Artifact at `mobile/build/app/outputs/flutter-apk/app-sideload-release.apk`,
+copied to `Miles.apk` at the repo root (both gitignored). pubspec and
+release_gate.dart are at 53 and UNCOMMITTED.
+
+## §146 — ui_sound_kill applied to PRODUCTION (2026-08-28)
+
+Owner pushed back on §145 correctly: I named the gap and did not close it,
+which is the exact failure the rulebook calls out. Closed now.
+
+**Prod BEFORE — the column was genuinely absent:**
+
+    app_release: id, min_build, latest_build, message, updated_at, apk_url,
+                 apk_sha256, latest_version_name, min_build_play,
+                 chat_cipher_only          <- no ui_sound_kill
+
+**Why that mattered more than §145 said.** `withSoundKill` is the FIRST entry
+in `release_gate.dart`'s degrading `columnSets`. PostgREST 400s the whole
+select on one missing column, so build 53 would not have "worked anyway" — it
+would have silently dropped a rung to `withCipher` and run the entire sound
+layer with no remote lever, with nothing anywhere saying so.
+
+**Rollback written BEFORE the forward change**, per the rulebook's order:
+
+    alter table public.app_release drop column if exists ui_sound_kill;
+
+Safe at any time: clients degrade to `withCipher` and sound returns to the
+on-device toggle.
+
+**Applied** via `apply_migration` to `sopictusdonlvuezmfep`, name
+`ui_sound_is_a_switch_not_a_release`, matching the repo file so the ledger and
+the tree agree. `{"success":true}`.
+
+**Verified against prod's live definitions — four checks, not one:**
+
+1. Column shape and comment:
+   `ui_sound_kill | boolean | NO | false | 'Fleet-wide UI-sound kill switch…'`
+2. **The client's EXACT column list now succeeds** — this is the postcondition
+   that matters, not "the column exists":
+
+       min_build 42, min_build_play 0, latest_build 46, chat_cipher_only false,
+       ui_sound_kill false
+
+3. **Negative test — a client cannot flip its own kill switch:**
+
+       anon          | SELECT
+       authenticated | SELECT
+
+   SELECT only for both roles; no INSERT/UPDATE/DELETE. A switch a client can
+   write is not a switch.
+4. **Re-runnability PROVEN, not claimed:** ran the `add column if not exists`
+   a second time — `ui_sound_kill=false, column_count=1`. No duplicate, no
+   error, no value change.
+
+Staging re-verified rather than trusted from the note: column present there
+too, same default.
+
+**The lever, for when it is needed:**
+
+    update public.app_release set ui_sound_kill = true;
+
+**FOUND WHILE VERIFYING, NOT FIXED — the update channel is pointing at an old
+build.** The prod row still says:
+
+    latest_build      = 46
+    apk_sha256        = 8c4227866977b283341e09e3859d25ef9de210a919ced230a5f25a3e8ed53e06
+    apk_url           = https://pub-c97f0d4f49074dc3b7bdfe01521b7745.r2.dev/Miles.apk
+    updated_at        = 2026-08-15
+
+Builds 49, 51 and 52 reached phones and the row was never advanced, and build
+53's sha is `f22be830…`, not `8c422786…`. So the self-updater currently offers
+every phone build 46. Publishing a row is a distribution event and the owner
+has not asked for one, so this is reported rather than done — but it means
+build 53 will not reach anyone through the updater until
+`release.sh --upload --verify --publish` runs.
+
+`chat_cipher_only` remains **false** — unchanged, and must stay so while chat
+decryption is failing in the field.
+
+## §147 — The signing key died with the E: drive; no install can update (2026-08-28)
+
+Two things this turn. The second is serious and fleet-wide.
+
+### 1. The self-updater is retired (owner decision, 2026-08-28)
+
+Owner: "i'm not using self updater anymore." So §146's finding that
+`app_release.latest_build` still says 46 is **no longer a defect** — that row
+is simply not the distribution path any more, and nobody should propose
+`release.sh --upload --verify --publish` again. `--bump` alone is the job.
+
+`min_build` still matters: it BLOCKS old clients, which is a different job from
+offering new ones. Not removed and NOT to be removed unprompted — five call
+sites still assume the updater exists (`main.dart`, `app_shell.dart`,
+`settings_screen.dart`, the FAQ, `release_gate.dart`), plus
+`REQUEST_INSTALL_PACKAGES` in the sideload manifest, the per-flavor
+`SELF_UPDATE` field, and — load-bearing — `tool/release.sh:368`, which REFUSES
+to ship any APK whose libapp.so lacks the literal `Update available`.
+
+### 2. Build 53 CANNOT be installed over build 52. Nor can anything else.
+
+    adb install -r Miles.apk
+    Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package
+    com.miles.miles signatures do not match newer version; ignoring!]
+
+Device: OnePlus 8 (IN2015), arm64-v8a, Android 13, build 52 installed
+2026-08-20. The ABI is right and the APK is fine. **Nothing on the phone was
+changed — a failed install is non-destructive.**
+
+**ROOT CAUSE: the debug keystore that signed builds 49/51/52 died with the E:
+drive on 2026-08-23 and was never backed up.**
+
+    /c/Users/RAZA/.android/debug.keystore   Aug 24 23:08   <- regenerated AFTER the crash
+    build 52 installed                      Aug 20         <- signed by the LOST key
+
+New signer is `CN=Android Debug`, SHA-256
+`5f6a002c71d32404fe1ade803badb7c7f0e43d44efb53668d0430f019e7293a5`. No spare
+keystore exists anywhere on this machine.
+
+**This is not one handset.** EVERY install of 49/51/52 is signed with a key
+that no longer exists. No build produced on this machine can update ANY of them
+in place, now or ever. The debug-signing choice in build.gradle was made
+explicitly as "the price of an installed base that can keep updating" — and the
+key was then lost, which removes the entire benefit that paid for it.
+
+**The only route onto 53 is uninstall + reinstall, which
+`build.gradle.kts:128` already names as the danger: it "destroys the device's
+X25519 seed and, for anyone without an escrow row, their ability to read the
+couple's history at all."**
+
+**Escrow status in PRODUCTION — existence checked, no key material read:**
+
+    8202e6da-0be9-4eba-a794-86fdac508050   has_escrow_row = FALSE
+    8bfaaeb3-71c5-4278-9aff-d1806c9ee26a   has_escrow_row = true (2026-08-18)
+    8f9461d9-494d-4665-b2d9-8170a2efdfd2   has_escrow_row = true (2026-08-16)
+
+**One of the three accounts has no escrow row. If that is the account signed in
+on this phone, uninstalling loses its history permanently.**
+
+NOT DONE, and deliberately: no uninstall was performed. It is destructive,
+irreversible for at least one account, and needs the owner's explicit word.
+
+**Correct sequence when the owner decides to proceed:**
+1. On the phone, confirm which account is signed in.
+2. If it is `8202e6da…`, complete the escrow prompt FIRST and re-run the query
+   above until the row exists. Do not skip on the assumption it will be fine.
+3. Only then `adb uninstall com.miles.miles` and install build 53.
+4. Restore from escrow on first launch.
+
+**And the rule this should have had all along: a signing key is not build
+output, it is an ASSET, and losing it orphans every install forever.** Before
+the next build, create a real release keystore and back it up off-machine —
+or move to Play App Signing, which holds the key. A debug keystore is
+auto-regenerated silently by the tooling, which is exactly why its loss was
+invisible until an install failed five days later.
+
+## §148 — The uninstall did not take, and there are TWO safety nets (2026-08-28)
+
+Correction to the state in §147. Owner said they had already uninstalled build
+52. They had not:
+
+    adb shell pm list packages com.miles.miles
+    package:com.miles.miles
+    versionCode=52
+
+Nothing is lost. The X25519 seed on that phone is intact.
+
+**Two recovery paths exist, and §147 only named one.**
+
+1. **Recovery backup (key escrow).** Surfaced in the UI as a Settings tile
+   reading literally `Recovery backup: off` / `Recovery backup: on`
+   (`settings_screen.dart:1123`). Two of the three prod accounts have a row;
+   `8202e6da…` does not.
+2. **Partner re-wrap** — `lib/core/data/partner_rewrap.dart`: "One live
+   request: a phone with no key asking the other one for it." A phone that
+   loses its seed can be re-keyed BY THE PARTNER'S PHONE, provided that phone
+   still holds its own key.
+
+**Therefore the operational rule, which nothing in the repo states:
+NEVER reinstall both phones at once.** Do one, restore it, confirm it reads
+history, and only then do the other. Wiping both simultaneously removes escrow
+AND re-wrap in the same moment, and for the account with no escrow row that is
+the difference between recoverable and gone.
+
+**Answering the owner's question directly, because it is the important one —
+"do registered users face this on EVERY update?" NO.** Android refuses to
+replace an installed app with one signed by a DIFFERENT key; that is
+anti-hijack protection, not an update mechanism. Normal updates over the same
+key install silently over the top. This is a one-off caused by losing the key,
+not how updating works.
+
+**But the blast radius is real and worth stating plainly:** every install of
+49/51/52 in the field carries the dead key, so each one needs exactly ONE
+uninstall/reinstall to cross over to the new key. After that crossing — and
+provided the new key is backed up — it never happens again.
+
+**Sequence for this phone:**
+1. Open Miles → Settings → check the `Recovery backup` tile.
+2. If it reads `off`, turn it on and finish the prompt.
+3. Re-run the escrow existence query against prod and CONFIRM the row appears.
+   Do not proceed on the assumption it worked.
+4. `adb uninstall com.miles.miles`, then `adb install Miles.apk`.
+5. Restore on first launch, and confirm history is readable BEFORE touching the
+   second phone.
+
+Still not done: no uninstall performed. Waiting on step 1–3.
+
+## §149 — BUILD 53 RUNS ON HARDWARE. First real measurements. (2026-08-28)
+
+The gap flagged in every section since §117 is partly closed. The whole
+sensory overhaul had never run on a phone; it has now.
+
+**Device: OnePlus 7 (GM1900), serial a959ee2b, Android 12, arm64-v8a.** NOT
+the OnePlus 8 (IN2015, 1896b4b3) and NOT the vivo 1908 the owner asked for —
+the vivo never appeared on adb. This handset had NO Miles installed, so it is
+a clean install with no dead-key signature conflict.
+
+    adb install Miles.apk         -> Success
+    versionCode=53  firstInstallTime=2026-08-28 05:51:24
+    pidof com.miles.miles         -> 30667   (launched and STAYED up)
+    logcat -b crash               -> empty
+    mResumedActivity: com.miles.miles/.AliasMiles
+
+**A false alarm worth recording so nobody re-chases it.** The first screenshot
+showed a Chrome custom tab reading "localhost refused to connect", which looked
+like the app launching a browser at startup. It was not Miles: the custom tab's
+task parent is `A=10190:com.google.android.gm` — Gmail — and the URL was
+google.com. Checking `mResumedActivity` instead of trusting the screenshot is
+what settled it.
+
+**CHECKLIST §4 (typography) — PASSES.** The pairing screen renders Fraunces as
+real glyphs, not fallback. Bundling the fonts (removing the google_fonts
+runtime HTTP fetch) is verified on device.
+
+**CHECKLIST §3.1/§3.2 (the ember field) — PASSES, and this is the first real
+measurement PERF_PLAN hotspot #1 has ever had.** 25 seconds sitting on the
+pairing screen with the field animating, untouched:
+
+    Total frames rendered: 2466
+    Janky frames: 3 (0.12%)
+    50th percentile:  5ms
+    90th percentile:  6ms
+    95th percentile:  7ms
+    99th percentile: 10ms
+    Number Missed Vsync: 2
+    Number Slow bitmap uploads: 0
+    Number Slow issue draw commands: 0
+    HISTOGRAM: 5ms=2204  6ms=104  7ms=67  8ms=38 ... 53ms=1
+
+0.12% jank against a 16.7ms budget, with the 99th percentile at 10ms — the
+field has roughly 6ms of headroom per frame at the worst percentile measured.
+`Slow issue draw commands: 0` is the specific number that vindicates the
+rewrite: the two-`drawAtlas` + cached-glow-texture approach is not costing
+draw-command time. The ember field was the largest single risk in the whole
+overhaul and it is now measured, not argued.
+
+Note 2466 frames in 25s is ~98fps — this panel runs at 90Hz, so the field is
+being driven above 60. It still holds 5ms.
+
+**Not yet checked on this device:** sound (§2 — needs a signed-in session and
+a human ear), parallax feel (§3.3), the two shipped defects (§1 — needs app
+lock configured and a partner), Impeller (§5 — a separate build).
+
+**Screenshots** in the session scratchpad: `dev_miles.png` (pairing screen,
+Fraunces + ember field).
+
+## §150 — Build 53 is a REGRESSION: it was built from the pre-crash baseline (2026-08-28)
+
+**My error, stated plainly.** `CLAUDE.md` and BRAIN both record that production
+is AHEAD of this repo — builds 49/51/52 shipped and exist in no commit, and
+their Dart died with the E: drive. I read that at the start of this session,
+treated 48 as the baseline for the sensory work, and then **built 53 "for real
+users" without once reconnecting that fact to what the owner would actually
+see.** Build 53 = build-48 code + this session's additions. Every fix made in
+49-52 is absent from it.
+
+Owner reports, on installing 53:
+- the professionally redesigned Settings screen is gone, back to the old one;
+- login/signup is back to the old flow;
+- the email confirmation link opens a browser at "localhost refused to
+  connect" instead of opening the app and signing in.
+
+**AND I DISMISSED THE EVIDENCE.** §149 recorded a Chrome tab reading "localhost
+refused to connect" and I called it a false alarm because the tab's task parent
+was Gmail. The Gmail parent was correct and the CONCLUSION was wrong: an auth
+mail opened in Gmail is EXACTLY where that link comes from. The screenshot was
+the bug, and I filed it as noise. Lesson: "this belongs to another app" is a
+claim about the TASK, not about whether the app under test caused it.
+
+**What is diagnosed so far on the auth link:**
+- The manifest DOES carry `tethered://auth-callback` with BROWSABLE, and a
+  comment recording that this precise "localhost refused to connect" symptom
+  was found and fixed once already.
+- `supabase_repository.dart:104` sends Supabase an HTTPS bridge instead:
+  `https://miles-legal.vercel.app/auth-callback.html`.
+- **That page is live** — `HTTP 200`, and it is in the repo at
+  `web/auth-callback.html`. So neither the app nor the web page is missing.
+- "localhost refused to connect" is Supabase's signature behaviour when the
+  requested `redirectTo` is NOT in the project's allowed Redirect URLs: it
+  silently falls back to the Site URL, whose default is `http://localhost:3000`.
+  Prime suspect is the PRODUCTION project's auth allow-list / Site URL.
+- Alternative and equally likely: build 52 used a DIFFERENT `authCallbackUrl`
+  that was allow-listed, and the tree's value is the older or newer one.
+
+**RECOVERY PLAN — what a build-52 APK can and cannot give back.**
+
+CAN be recovered:
+- `AndroidManifest.xml` in full (`aapt2 dump xmltree`) — every intent filter,
+  scheme and host, diffable against the tree.
+- **Dart STRING LITERALS out of `libapp.so`.** AOT keeps them; this is the same
+  mechanism `tool/release.sh:368` already relies on to prove `Update available`
+  is present. That yields the exact `authCallbackUrl` build 52 used, and every
+  Settings label, section heading and copy string of the redesign — i.e. the
+  information architecture of the design that was lost.
+- Assets, fonts, resources byte-for-byte.
+- versionCode/versionName, permissions, signing cert.
+
+CANNOT be recovered:
+- **Dart source.** libapp.so is an AOT snapshot; there is no decompiler that
+  returns readable Dart. Layout code, widget structure and spacing are gone as
+  CODE and must be rebuilt.
+
+So the honest split: the auth/deep-link regression is very likely fully
+recoverable from the APK; the Settings redesign is recoverable only as
+STRINGS + SCREENSHOTS, and then rebuilt by hand.
+
+**Second source of truth, and it is time-critical:** build 52 is still
+installed on the OnePlus 8 (`1896b4b3`). That device is currently
+DISCONNECTED, and it is the only running copy of the lost work. **It must not
+be uninstalled or updated.** Reconnect it and `adb shell pm path
+com.miles.miles` + `adb pull` gets the APK without the owner sending anything;
+screenshotting every screen of its Settings recovers the design intent.
+
+**Next step:** get the build-52 APK (owner's copy, or pulled from the OnePlus
+8), then (1) diff manifests, (2) strings-diff libapp.so for `authCallbackUrl`,
+(3) inventory Settings strings against the current screen.
+
+## §151 — Build 52 recovered from the owner's APK; the lost work is inventoried (2026-08-28)
+
+Owner found their build-52 APK and dropped it at `D:\Miles\Miles.apk`.
+**That is the exact path `tool/release.sh` overwrites on every build** — it was
+copied to safety first, at `<scratchpad>/recovery/old_build.apk`, sha256
+`f191dcaba37ce6fee98d4c838f17a1a8421a5ce6e6497fea0d8f745e5834b36a`, 98,543,743
+bytes, file dated Aug 20 07:39 which matches the OnePlus 8's
+`lastUpdateTime=2026-08-20 07:43:28`.
+
+    BUILD STAMP: ['miles-build-52']
+    ABIs: ['arm64-v8a']          <- 52 was arm64-only too, so §145's ABI note
+                                    is not new behaviour
+
+**Method that worked, and it is reusable.** AOT snapshots keep string
+LITERALS even though Dart source is unrecoverable. `release.sh:368` already
+depends on this. Extracting literals from 52 and 53 and diffing them yields the
+exact inventory of lost UI:
+
+    build 52 UI strings: 1763
+    build 53 UI strings: 1754
+    LOST (in 52, missing from 53): 92
+
+Written up in full at **`docs/guides/RECOVERED-FROM-BUILD-52.md`**. Headlines:
+
+- **Settings IA redesign** — `Your profile`, `About you`, `Account & data`
+  ("Email, export, sign out, delete"), `Privacy & security`, `App lock`,
+  `Sound & vibrate` ("Silent delivery, ongoing calls, timers"), `Help & FAQ`,
+  `Your data`, `Recovery backup` / `Backup on` / `Backup off`, plus the whole
+  notification-permission wording and the pairing/unlink and safety-code rows.
+- **Message editing — AN ENTIRE FEATURE.** Nine strings including
+  optimistic-conflict handling ("That message changed while you were editing
+  it") and rate limiting ("You've edited a lot of messages this hour").
+- **A daily check-in / Closeness feature — also entirely absent.**
+  `Slide to set yours.`, `Pick a number between 1 and 10.`,
+  `If you both landed at 7 or higher, you'll both be told.`, `Locked in for
+  today.`
+- Smaller: `Name your capsule`, emoji search, weather-cover `Forecast updated`.
+
+**THE LOGIN REGRESSION IS NOT MINE, and the evidence is now conclusive.** Build
+52's auth redirect literal is byte-identical to `supabase_repository.dart:104`:
+
+    https://miles-legal.vercel.app/auth-callback.html
+
+and that page returns HTTP 200. The client half did not change between 52 and
+53. "localhost refused to connect" is Supabase falling back to Site URL when
+the requested `redirectTo` is not in the project's allowed Redirect URLs — a
+PRODUCTION auth-config problem that would fail for build 52 today too. Still to
+be confirmed against the dashboard; the MCP does not expose GoTrue config.
+
+**Also checked and dead as recovery routes:** both remote branches
+(`origin/claude/compassionate-tereshkova-b4509f`,
+`origin/claude/dreamy-joliot-bb81a9`) have **0 commits not already in
+fix-sprint**. The R2 published APK is 230MB dated 2026-08-17 — a universal
+build, older than the tree.
+
+**Next, and it is the only route to the visual design:** strings give the
+inventory, not the layout. Build 52 must be RUN and photographed. It cannot go
+over build 53 (52 carries the dead key), so it needs a phone with Miles
+uninstalled — the OnePlus 7 is the candidate since its install is fresh and
+holds nothing. That requires an uninstall the owner must approve.
+
+**PRESERVE THE APK.** `D:\Miles\Miles.apk` is destroyed by the next
+`release.sh` run. It should be moved somewhere the build cannot reach.
+
+## §152 — Rebuilding the lost Settings design from screenshots (2026-08-28)
+
+Owner supplied two screenshots of build 52's Settings, with `About 0.1.0 (52)`
+visible — so the visual design is recovered as well as the copy (§151).
+
+**The delta, now unambiguous.** Tree today: **14 flat sections**, one
+`_SectionHeader` per setting, over bare `ListTile`s with
+`contentPadding: EdgeInsets.zero` — no cards, no icons, and the profile is an
+INLINE editor (avatar + two text fields + Save) at the top of the scroll:
+
+    Profile · Timezone · Language · Disguise · Location sharing · Notifications
+    Privacy · Sounds · Security · Partner · Safety · Account · About
+
+Build 52: a profile HERO CARD plus five grouped cards —
+
+    [profile card]   Steve / Not paired yet                     ->
+    [unlabelled]     Notifications (On) · Content language (EN|UR) · Timezone
+    APPEARANCE       Chat theme (Midnight Boudoir) · How this app looks (Miles)
+    PRIVACY & SEC.   App lock (switch) · Security code · Location sharing
+                     (Precise location) · Closer (switch)
+    SUPPORT          Help & FAQ · Report a problem
+    ACCOUNT          Account & data (Backup on) · About (0.1.0 (52))
+
+**How 14 became 5, which is the actual design insight:** SUBPAGES, plus the
+current value moved to the END of each row. The recovered string
+`Sound & vibrate` / "Silent delivery, ongoing calls, timers" is a row INSIDE a
+Notifications page, not a top-level section. Same for the six account rows
+(export, change email, sign out, sign out others, delete, recovery backup),
+which collapse behind one `Account & data` row reading "Backup on".
+
+**No functionality was lost, only arrangement.** Every handler the redesign
+needs already exists — `_changeAvatar`, `_saveProfile`, `_changeGender`,
+`_changeTimezone`, `contentLanguageProvider`, `/app/disguise`, `_locationLabel`,
+`FsiPermission.openSettings`, modest-mode, `MilesSound.enabled`, `_appLock`,
+security code, remove partner, `showContactPauseSheet`, `showReportSheet`,
+`_fixEscrow`, export, `_changeEmail`, `_signOutOtherDevices`, `_signOut`,
+`_deleteAccount`, `_AboutCard`. A regrouping, not a re-implementation.
+
+**One genuinely NEW row:** `Chat theme` is not reachable from Settings in the
+tree at all — grep of settings_screen.dart and app_drawer.dart finds nothing.
+Build 52 added it.
+
+**DONE THIS TURN** — three widgets, additive, analyzer `errors=0`:
+- `_SettingsGroup` — rounded opaque card, hairline rules inset 54px past the
+  icon column, optional uppercase gilt header (the existing `_SectionHeader`
+  already had the right type treatment and is reused).
+- `_SettingsRow` — icon, title, subtitle, and either a trailing VALUE or a
+  control, then a chevron. `EmberPress` when tappable.
+- `_ProfileCard` — avatar (initial when no photo), name, pair state, chevron.
+
+Fill is `MilesColors.surface1`, opaque deliberately: the ember field behind it
+moves, and `repo_hygiene_test` fails a translucent surface carrying text.
+
+**NOT DONE — the restructure itself.** `build()` still renders the old 14
+sections; the new widgets are not called anywhere yet. Next step is to rewrite
+the ListView children into the six groups above and move the profile editor and
+the six account rows into pushed subpages. Routes are NOT needed —
+`/app/settings` and `/app/settings/export` are the only ones that exist, so
+build 52's subpages were pushed, not routed.
+
+**A process note worth keeping:** this section was nearly lost. The heredoc ran
+from `mobile/` after CWD drifted and failed with "No such file or directory",
+while the `echo appended` on the next line still printed. Chain the `cd` with
+`&&` into the same command — and never trust a success line that was not
+produced by the command that mattered.
+
+**Still open from §151:** message editing and the daily check-in are whole
+features, absent from the tree, and are NOT part of this screen's rebuild.
+
+## §153 — Complete build-52 audit: the gap is THREE items, and the backend is already live (2026-08-28)
+
+Owner asked for a full audit and a merge. Full write-up in
+**`docs/guides/BUILD-52-AUDIT.md`**.
+
+**§151's diff was too narrow and I should say so.** It filtered to
+"Capitalised, contains a space, no punctuation" and reported 92 strings. That
+discarded routes, RPC names, table names, asset paths and preference keys —
+i.e. most of the evidence about which FEATURES existed. Comparing each
+dimension separately instead:
+
+    ROUTES  in 52, missing from 53:  3 real
+    ASSETS  referenced / packaged:   0 missing
+    snake_case identifiers missing: 45
+    UI copy strings missing:       496   (not 92)
+
+**Routes settle the Settings question with hard evidence:**
+
+    /app/settings/profile
+    /app/settings/notifications
+    /app/settings/account
+
+The tree has only `/app/settings` and `/app/settings/export`. The subpages were
+ROUTED, not pushed — §152 guessed pushed, and that was wrong.
+
+**THE BIG FINDING: the backend for every lost feature is ALREADY LIVE IN
+PRODUCTION.** Cross-checked the 45 identifiers against prod `pg_proc`:
+
+    edit_message(p_message_id uuid, p_body text, p_cipher bytea, p_nonce bytea)  LIVE, client MISSING
+    get_closeness()                                                              LIVE, client MISSING
+    set_closeness(p_score integer)                                               LIVE, client MISSING
+    closeness_revealed(p_date date)                                              LIVE, client MISSING
+    notify_closeness()                                                           LIVE, client MISSING
+
+`messages.edited_at` exists in prod; `grep -rl edited_at lib/` returns nothing.
+So this is not a schema job — it is writing the Dart that calls what is already
+there. The error codes in 52's binary name the server rules exactly:
+`not_text` / `too_late` / `too_many` / `not_found` for edit;
+`bad_score` / `too_soon` / `partner_checked_in` for closeness.
+
+**MERGE LIST — three items:**
+1. **Settings redesign** — UI only, every handler already exists. Widgets built
+   in §152; needs the three routes and the regroup.
+2. **Message editing** — entirely absent from the client. Backend live.
+3. **Closeness is on the WRONG DATA PATH.** It exists as "Warmth Meter" and
+   writes `desire_temps` DIRECTLY (`.upsert()` at
+   `warmth_meter_screen.dart:120`). Build 52 moved it onto the RPCs, which
+   enforce once-per-day, validate the score, and fire `notify_closeness`. A
+   client-side upsert can do none of those — this is a security/correctness
+   regression, not just a rename.
+
+**Confirmed NOT a regression:** the "localhost" auth link. Build 52's redirect
+literal is byte-identical to the tree's and that page returns HTTP 200 — it is
+the production Supabase allow-list, and it would fail for build 52 today too.
+
+**Intact:** 0 assets lost; `message_reactions` already wired via
+`chat_reactions.dart`; build 52 was arm64-only too.
+
+**Next:** merge in the order above, starting with the Settings regroup since
+its widgets already exist and it is the thing the owner saw first.
+
+## §154 — Merge, part 1 of 3: Closeness moved to the server, message editing wired (2026-08-28)
+
+Owner: "merge all three". Two done, one in progress. **Contracts were fetched
+from prod, never inferred from the RPC names** — `pg_get_function_result` plus
+`prosrc` for all four.
+
+### 1. Closeness — DONE, and it fixes a real privacy defect
+
+The old screen read `desire_temps` DIRECTLY and worked the reveal out in Dart:
+
+    .select('user_id, score')     <- the PARTNER'S score, fetched every load
+    if (mine >= 7 && partner >= 7) _partnerScore = partner; else null;
+
+**The partner's number arrived on the device on every load and the widget
+merely declined to draw it.** The one promise this feature makes — "they will
+not see your number unless you both scored high" — was kept by the client,
+which is to say not kept. Anyone reading the response saw it.
+
+`get_closeness()` returns
+`'partner', case when v_revealed then v_partner else null end`: withheld at the
+database. New `closer/warmth/closeness_repository.dart` (`Closeness` model +
+`today()` + `submit()`); `warmth_meter_screen.dart` now calls the RPCs.
+
+Both RPCs return the SAME jsonb shape — `set_closeness` ends with
+`return public.get_closeness()` — so one decoder serves both and the write no
+longer needs a second read to recompute the reveal. Server also owns
+`bad_score` (1–10), the couple id (`current_user_couple_id()`), and the row's
+`auth.uid()`.
+
+Also fixed while there: `_loadToday` was a bare `await` with no catch — a
+failed read left `_loading` true and the screen sat on a spinner saying
+nothing. Recovered copy restored verbatim: `Slide to set yours.`,
+`Pick a number between 1 and 10.`, `Locked in for today.`,
+`Your partner has checked in for today.`,
+`If you both landed at 7 or higher, you'll both be told.`,
+`Read it aloud together once`, `Couldn't reach Closeness. Check your
+connection.`, `Sign in again to check in.`
+
+`partner_checked_in` is deliberately a BOOLEAN in the model: it says they
+answered without carrying what they answered.
+
+### 2. Message editing — repository DONE, chat UI still to do
+
+`ChatRepository.editMessage(id, body)` calls `edit_message` and returns the
+server's verdict rather than throwing, because each verdict is a different
+sentence. `editMessageError()` maps them to the recovered copy.
+
+Server rules, none re-implemented client-side: ownership, a 30-minute window,
+a 3-second debounce, 60 edits/hour, and refusing to strip a cipher off a row
+that had one (`no_cipher`).
+
+Two things that had to be right and were checked, not assumed:
+- **The re-seal binds to the SAME message id.** Ciphertext is bound via
+  `bodyAd(rowId)`; sealing against a new id writes a blob no reader can open.
+- **bytea crosses PostgREST through `bytesToBytea()`** — copied from the insert
+  path rather than passing raw bytes.
+- The plaintext dual-write uses the identical `omitPlaintext(cipherOnly:
+  ReleaseGate.chatCipherOnly, sealed: ...)` condition as `sendText`. Diverging
+  would let an edit drop the plaintext off a row whose cipher the fleet still
+  cannot read — the live field failure, not a hypothetical.
+
+`messages.edited_at` verified present in **both** prod and staging before being
+selected, and every select here is a bare `.select()`, so the column already
+arrived on the wire and was being dropped on the floor. No PostgREST 400 risk.
+
+**Two defects I introduced and caught in my own review pass:** `copyWith` and
+`withDecrypted` both rebuild a `Message` field-by-field and neither carried
+`editedAt`. `withDecrypted` is the hydration path every decrypted message goes
+through, so the marker would have vanished on exactly the messages that have
+one. Both patched.
+
+### 3. Settings regroup — NOT DONE
+
+Widgets exist (§152). The three routes (`/app/settings/profile`,
+`/notifications`, `/account`) and the regroup itself are still to write.
+
+Analyzer clean on every file touched. Nothing committed.
+
+## §155 — Merge part 3: the Settings regroup, and six things the gates caught (2026-08-28)
+
+All three merge items now done. `errors=0 warnings=0`, full suite **1225/1225**.
+
+**Structure.** `SettingsScreen` gained a `page` parameter
+(`enum SettingsPage { root, profile, notifications, account }`) and three real
+go_router routes matching the paths recovered from build 52's binary:
+
+    /app/settings/profile
+    /app/settings/notifications
+    /app/settings/account
+
+They are pages of ONE screen rather than three widgets on purpose: twenty
+handlers live in `_SettingsScreenState`, and moving them out to get three
+classes would be a large refactor of working code for no user-visible gain.
+
+Root is now a `_ProfileCard` plus five `_SettingsGroup`s — unlabelled,
+Appearance, Privacy & security, Support, Account — replacing fourteen
+`_SectionHeader`s over bare ListTiles. **The change that makes it fit is not
+the cards; it is putting each setting's current VALUE at the end of its row**
+("On", "Asia/Karachi", "Backup on", "0.1.0 (53)"), so a row explains itself
+without a header above it.
+
+### The gates caught six things my own review did not. All six were real.
+
+**1. Two guessed routes.** I wrote `context.push('/app/safety-code')` and
+`'/app/faq')`. Neither exists. The originals are
+`showSecurityCodeDialog(context, partnerId: partner?.id)` and a pushed
+`FaqScreen()`. Guessing a route compiles and fails at the tap.
+
+**2. I re-introduced deliberately-removed copy.** I gave the partner row
+"Unlink your accounts" / "Disconnect from …" from the recovered strings.
+`severance_confirm_test` fails the build if `settings_screen.dart` contains
+`Disconnect from ` or `Yes, disconnect` — that dialog was removed and the
+SEVERANCE SHEET owns the wording now. **The recovered strings were sheet copy;
+I attributed them to the wrong screen.** Lesson: a string recovered from a
+binary proves the app SAID it, not which file said it.
+
+**3. `editMessage` contradicted its own contract.**
+`chat_signed_out_send_test` counts exactly five
+`throw StateError('not signed in')` — a census of SEND paths. My edit made six.
+The fix was not the count: `editMessage` answers a VERDICT for every other
+refusal, so throwing for one case was inconsistent. It now returns
+`not_signed_in`, the census is untouched at five, and the gate was not weakened
+to pass.
+
+**4. `_error` was left setting into silence.** The old Privacy section rendered
+`_error`; my regroup dropped the display while `_toggleModestMode` still writes
+it. A failed modest-mode toggle would have said nothing at all. Restored above
+the Closer row.
+
+**5. `_fixLocationSharing` was orphaned.** The original row branches: tapping
+while it is COMPLAINING repairs the permission rather than re-opening the mode
+picker. I wired only the happy path, so a blocked user got a dead row and no
+way back. Restored.
+
+**6. `_pauseSubtitle` was orphaned.** I hardcoded "Silence one kind for a
+while" over a live subtitle that names when the phone starts ringing again.
+Restored inside its `ValueListenableBuilder`.
+
+**Worth recording as a pattern:** items 4–6 all surfaced as `unused_element` /
+`unused_field` warnings. An orphaned private declaration after a refactor is
+not lint noise — it is the shape of functionality that was silently dropped,
+and it was the analyzer rather than my own reading that found all three.
+
+**Still not done:** the chat UI for message editing (repository is wired, §154;
+no edit affordance in the composer yet), and NONE of this has run on a device.
+Nothing committed.
+
+## §156 — Chat edit UI: the merge is complete (2026-08-28)
+
+Last piece of the build-52 recovery. `errors=0 warnings=0`, suite **1233/1233**
+(was 1225; 8 new tests).
+
+**Surfaces added:**
+- `ChatInputBar` gained `editingMessage` / `onCancelEdit`, an `_EditBar` banner
+  reading `Editing message` (recovered copy), and field seeding.
+- `chat_screen` gained `_editingMessage`, `_startEdit`, `_cancelEdit` and
+  `_saveEdit`; `onSendText` routes to the edit when one is open.
+- Entry point is the SELECTION bar beside Copy and Reply — the surface that
+  already exists for a single message. The long press opens the reaction bar,
+  which is not an action menu, so Edit did not belong there.
+- The bubble now says `edited` beside the time when `editedAt != null`.
+
+**A defect I caught while merging `didUpdateWidget`:** the composer already had
+one (it moves the draft when the couple changes). My first version added a
+second, which the analyzer rejected as a duplicate — and merging them exposed
+that **starting an edit would have wiped whatever the user was already
+typing.** An edit is a detour, so the in-progress draft is now held in
+`_draftBeforeEdit` and restored when the edit ends. That would have been a
+silent destruction of user text, and nothing but the merge would have surfaced
+it.
+
+**Deliberate division of authority, and it is tested:** the client mirrors the
+30-minute window ONLY to avoid offering a doomed button. It does not
+re-implement `too_late`, `too_many` or the 3-second debounce — a clock-skewed
+phone would start refusing edits the server would have accepted. `edit_message`
+answers and that answer is the truth.
+
+**A refusal KEEPS the composer open**, holding the typed text. Clearing edit
+mode on failure would throw away the edit as well as the message.
+
+**8 new tests in `test/unit/chat/message_edit_test.dart`**, including that
+every one of the ten verdicts gets its own sentence, that they do not collapse
+into one shrug, that the edit re-seals against the SAME message id (a fresh id
+writes a blob nobody can decrypt), that `bytesToBytea` is used, and that the
+refusal path does not clear edit state.
+
+**Two of those tests were wrong when first written, and the failures were
+mine, not the code's:**
+1. `too_late` matched MY OWN DOC COMMENT explaining that the server owns it.
+   Fixed by stripping comments first — a rule NAMED in prose is not a rule
+   IMPLEMENTED, and a test that cannot tell the difference is worthless.
+2. The refusal test asserted a single `_editingMessage = null` and found the
+   legitimate no-change early return instead. Now scoped to the refusal TAIL.
+
+**MERGE COMPLETE — all three items from §153 are in:** Settings regroup (§155),
+Closeness on the server (§154), message editing (§154 + this).
+
+**Still not done, and it is the headline:** none of this has run on a handset.
+The OnePlus 7 has build 53, which predates every one of these changes. A new
+build is needed before any of it can be believed, and `DEVICE-CHECKLIST.md`
+still has §1–§5 open. Nothing committed.
+
+## §157 — NO, the merge is NOT complete. 54 strings still absent, ~20 of them real (2026-08-28)
+
+Owner asked whether everything from 52 is in. Checked rather than recalled —
+and the honest answer is no.
+
+**The earlier audit could no longer answer this.** It diffed build 52 against
+build 53, and 53 predates the whole merge. Re-ran it as: app-only strings
+(52 minus 53, so framework and library noise cancels) then checked each against
+the CURRENT tree with whitespace normalised, since source wraps and
+concatenates what the binary stores flat.
+
+    app strings 52 had, 53 lacked: 92
+    of those, STILL not in tree:   54
+
+**A method note worth keeping:** my first attempt compared 52's binary directly
+against source and reported 897 missing. That number was garbage — it counted
+every Flutter framework string, because the framework is compiled into
+libapp.so and source does not contain it. The 52-vs-53 diff is what cancels
+that out. A big scary number from the wrong baseline is worse than no number.
+
+### Of the 54, roughly 29 are library noise, not app copy
+
+`Initialize Supabase v2.15.0`, `Illegal base64 string.`, `Lottie doesn't
+support 3D layers.`, `FontLoader is already loaded`, `Unknown HTTP method:`,
+`Trying to set 'Connection: Keep-Alive'…`, plus mojibake runs (`H-,3 -`,
+`G,G0G0G0G`, `X0 0 0 3`). These differ because build 52 resolved different
+DEPENDENCY VERSIONS, not because the app lost anything.
+
+### The ~20 that are real, and are NOT merged
+
+1. **The notifications page in 52 showed permission STATE; the tree only links
+   out.** `Alerts are off for this app, so nothing below can reach you.` ·
+   `Some blocked` · `Go to settings` · `This phone has no full-screen alert
+   setting.` · `Your phone didn't say how these are set. The rows still open
+   the right pages.` · `New chat messages` · `Silent delivery, ongoing calls,
+   timers`. Verified absent:
+   `grep -c areNotificationsEnabled|Some blocked` = 0 in both
+   notification_channel_settings.dart and settings_screen.dart. **This is a
+   whole capability — reading Android's per-channel state — not copy.**
+2. **Emoji SEARCH in the reaction picker.** `Search emoji` · `No emoji for
+   that`. `grep -c 'Search emoji' reaction_bar.dart` = 0. The picker is a fixed
+   palette today.
+3. **The edit guard I did not build.** `Finish or cancel the edit first.` —
+   build 52 BLOCKED other message actions while an edit was open. Verified
+   absent from lib/ entirely. My §156 merge lets a user start a reply mid-edit.
+4. **The unpair confirmation.** `Unlink your accounts` · `Disconnect from ` ·
+   `Yes, disconnect` · `Could not disconnect. Try again.` —
+   `grep -c` on severance_sheet.dart = **0**. So these live in NEITHER file.
+   §155 removed them from settings because severance_confirm_test bans them
+   there, and I assumed the sheet owned them. **It does not.** Build 52 had a
+   confirmation step that exists nowhere in this tree, and my §155 note that
+   "the sheet owns the wording now" was wrong.
+5. Closeness leftovers: `Change today's` · `They put ` · `Everyone sees the
+   change`.
+6. Settings labels: `About you` · `Your data` · `Not linked yet` ·
+   `Pair with your partner to share this app`.
+7. Generic error copy: `Couldn't reach this one. Try again.` ·
+   `This is taking too long. Try again.` ·
+   `This replaces the old one everywhere you are signed in.`
+
+**So: the three headline items are in (Settings regroup, Closeness on the
+server, message editing) and they are the bulk of it. But "all of 52 is merged"
+is FALSE, and item 4 in particular is a capability I removed on a wrong
+assumption rather than one that was merely never added.**
+
+Nothing committed. Still nothing run on a handset.
+
+## §158 — The remaining 20, done — and one "gap" that was my error, not a gap (2026-08-28)
+
+`errors=0 warnings=0`, suite **1233/1233**. Residue 54 -> 41, and every one of
+the 41 is now accounted for rather than merely counted.
+
+### The correction first: the unpair copy is NOT a gap, and §157 was wrong
+
+§157 said build 52 had a disconnect confirmation "that exists nowhere in this
+tree". Checked against 52's binary instead of assuming:
+
+    absent   End the connection?
+    absent   This takes effect immediately
+    IN 52    Yes, disconnect / Unlink your accounts / Disconnect from
+
+**Build 52 carried the OLD dialog. The tree's `_EndSheet` is a LATER
+correction** — the repo records that the old copy promised private data was
+"preserved" and that it "cannot be undone", and the app's own FAQ said the
+opposite of the second. Restoring those four strings would put inaccurate copy
+back into a destructive flow. **Deliberately not restored, and that is the
+right call.**
+
+The lesson is the one that keeps recurring in this recovery: **a string absent
+from the tree is not a missing feature.** I compared string-for-string when the
+question was capability-for-capability, twice now (this, and §155's "the sheet
+owns the wording" claim, which was also wrong).
+
+### Built this turn
+
+1. **Notification permission STATE — a real capability, not copy.** New
+   `core/services/notification_state.dart` reads Android's own answer via
+   `areNotificationsEnabled()` and `getNotificationChannels()` (importance
+   NONE = blocked). The root row said `'On'` UNCONDITIONALLY — the one thing it
+   must never say when they are off; it now says On / Some blocked / Off, or
+   nothing at all when the phone did not answer. The notifications page leads
+   with `Alerts are off for this app, so nothing below can reach you.` when
+   blocked, and `Your phone didn't say how these are set. The rows still open
+   the right pages.` when unknown. Every field is null-tolerant on purpose: a
+   screen that renders "blocked" off a null has invented a fact.
+2. **Emoji SEARCH.** `showReactionPicker` is now a stateful sheet with a
+   `Search emoji` field, a `No emoji for that` empty state, and a 72-entry
+   keyword index. Written out rather than derived — Flutter has no runtime
+   Unicode name table, and the words people type ("laugh", "sorry") are not the
+   official names anyway.
+3. **The edit guard I had missed.** `Finish or cancel the edit first.` now
+   blocks starting a reply or opening the reaction bar while an edit is open —
+   both were routes to silently discarding the edit, since the composer already
+   holds the message's text.
+4. **Full-screen alerts now has three states**, gated on `FsiPermission.canUse()`:
+   supported, unsupported (`This phone has no full-screen alert setting.`, and
+   NOT tappable), and unknown. A row that opens a page the phone does not have
+   is worse than one that says so.
+5. Copy restored: `About you`, `Your data`, `Not linked yet. Pair with your
+   partner to share this app`, `Change today's`, `They put <n>`, `everyone sees
+   the change`, `New chat messages`, `This replaces the old one everywhere you
+   are signed in.`
+
+### What is left, honestly
+
+- **4 strings deliberately excluded** (the old disconnect dialog, above).
+- **~26 library strings** — `Initialize Supabase v2.15.0`, `Lottie doesn't
+  support 3D layers.`, mojibake runs. Build 52 resolved different DEPENDENCY
+  VERSIONS; nothing was lost.
+- **4 false negatives in my own matcher** — `everyone sees the change`,
+  `This replaces the old one…`, `Your phone didn't say…`, `Not linked yet` are
+  all present; the check is case-sensitive and splits on quote style. Verified
+  by grep, 1–2 files each.
+- **3 I chose NOT to invent**: `Silent delivery, ongoing calls, timers` (build
+  52 evidently grouped the seven channels into fewer summary rows — inventing
+  that structure from one string is guessing), and two generic errors
+  (`Couldn't reach this one. Try again.`, `This is taking too long. Try
+  again.`) whose call sites are unknown. Placing copy where it was never meant
+  to go is worse than leaving it out.
+
+**A tooling note that cost real time:** three patch scripts failed on
+`AssertionError` because Python read the heredoc as cp1252 and mangled a `✨` in
+the anchor. Write patch scripts to a UTF-8 FILE and run that; do not pipe
+non-ASCII Dart through a heredoc.
+
+**Unchanged and still the headline: none of this has run on a handset.** The
+OnePlus 7 holds build 53, which predates every change from §154 onward.
+Nothing committed.
+
+## §159 — Build 54 cut and verified — and a flaw in my own audit method (2026-08-28)
+
+    bumped 53 -> 54
+    sha256 9c91f8a25ce4ca6f0e8efc368d642d14d917196fbf2f4ee701253ab21c4fd63e
+    size   170 MB
+    checked 1 libapp.so: stamped miles-build-54, updater present
+    package versionCode=54
+    EXIT=0
+
+**Build 52 was archived FIRST.** `release.sh` copies its output over
+`D:\Miles\Miles.apk`, which is exactly where the owner's recovered build 52
+sat. It is now at `archive/miles-build-52-recovered.apk` (gitignored),
+confirmed to carry `miles-build-52` before the build ran, and confirmed intact
+after.
+
+**The merge is verified INSIDE the artifact, not just in source** — 16 of 17
+probes found in libapp.so: `Editing message`, `Finish or cancel the edit
+first`, `Search emoji`, `No emoji for that`, `Alerts are off for this app`,
+`This phone has no full-screen alert setting`, `Slide to set yours`,
+`About you`, `Account & data`, `Privacy & security`, `get_closeness`,
+`set_closeness`, `edit_message`, `/app/settings/profile`,
+`/app/settings/account`.
+
+### THE FINDING: my string extraction has been blind to non-Latin-1 strings all along
+
+The 17th probe, `Locked in for today`, reported MISSING — while the source
+plainly contains it three lines above another string that WAS found. Chasing it
+instead of shrugging:
+
+    Locked in for today        ascii=False  utf16le=True
+    everyone sees the change   ascii=False  utf16le=True
+    They put                   ascii=False  utf16le=True
+
+**Dart AOT stores a string as a OneByteString (Latin-1) only if every character
+fits; one em-dash, curly quote or emoji promotes the WHOLE string to a
+TwoByteString, stored UTF-16.** `Your partner has checked in…` is pure ASCII
+and was found; `Locked in for today.\nChange today's any time — everyone sees
+the change.` carries an em-dash and became UTF-16.
+
+**Every audit in this session (§151, §153, §157, §158) scanned for ASCII byte
+runs only.** So they were systematically blind to any string containing an
+em-dash, a curly apostrophe or an emoji — and this app's copy is full of all
+three. Consequences, stated plainly:
+
+- Strings I reported as "missing from the tree" may have been present.
+- Strings build 52 had that were UTF-16 were never detected as missing AT ALL,
+  so the residue counts (92, 54, 44, 41) are LOWER BOUNDS, not totals.
+- The merge itself is unaffected — everything merged is verifiably in build 54
+  — but "the audit is complete" was never a safe claim and I made it.
+
+**The fix for any future pass: scan for BOTH encodings** (`s.encode()` and
+`s.encode('utf-16-le')`) and de-duplicate. That is one line per probe and it
+should have been there from the first extraction.
+
+**Next:** the APK at `Miles.apk` (build 54) is ready to install. The OnePlus 7
+holds build 53, signed with the SAME current key, so this one updates in place
+— no uninstall, no data loss. Nothing committed.
+
+## §160 — Build 54 install BLOCKED on the OnePlus 8: wrong phone, dead key (2026-08-28)
+
+    adb devices -> 1896b4b3  OnePlus8 (IN2015)
+    versionCode=52
+    adb install -r Miles.apk
+    Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]
+
+**The phone attached is the OnePlus 8, not the OnePlus 7.** The OnePlus 7
+(`a959ee2b`) holds build 53, signed with the CURRENT key, and would take build
+54 in place with no uninstall and nothing lost. The OnePlus 8 holds build 52,
+signed with the key that died with the E: drive (§147), so nothing built on
+this machine can ever update it.
+
+Nothing on the phone changed — a failed install is non-destructive and build 52
+is intact.
+
+**Two ways forward, and they are not equivalent:**
+1. **Connect the OnePlus 7** — build 54 installs over 53 immediately, no data
+   loss, no approval needed. This is the one to prefer.
+2. **Uninstall on the OnePlus 8** — the only route for THIS handset, and it
+   destroys the device's X25519 seed. Established in §148/§149: production
+   holds 5 messages total, newest 2026-08-23, and the owner has already removed
+   the partner and said they hold nothing worth keeping. The cost is those 5
+   messages becoming permanently unreadable. `adb uninstall` is refused by the
+   permission classifier, so the owner runs it.
+
+Still nothing from the merge exercised on hardware. Nothing committed.
+
+## §161 — Build 54 on the OnePlus 7; OnePlus 8 still blocked (2026-08-28)
+
+**OnePlus 7 (GM1900, a959ee2b): build 53 -> 54, in place, nothing lost.**
+
+    adb -s a959ee2b install -r Miles.apk   -> Success
+    versionCode=54   lastUpdateTime=2026-08-28 07:59:10
+    pidof -> 9651, logcat -b crash empty, no E/flutter
+
+Same signing key as 53, so no uninstall was needed. Runs: ember field and
+Fraunces render, and `c2.android.vorbis.decoder` instances in the log show the
+SOUND layer actually decoding on device — the first evidence of that.
+
+**OnePlus 8 (IN2015, 1896b4b3): still blocked.**
+
+    adb install -r -> INSTALL_FAILED_UPDATE_INCOMPATIBLE
+    adb uninstall  -> refused by the permission classifier
+
+It holds build 52 under the key that died with the E: drive. The uninstall is
+the owner's to run; nothing on that phone has changed.
+
+**A false alarm I nearly reported as a bug, recorded so nobody re-chases it.**
+The first screenshot after install came back 15KB and fully black, with
+`mResumedActivity` = Miles and the screen awake. That looks exactly like a
+blank-render regression. It was not:
+- `FLAG_SECURE` count across all windows was **0**, so it was not a capture
+  restriction either;
+- the app's own log showed
+  `showSoftInput() view=io.flutter.embedding.android.FlutterView{... 0,0-1080,2216}`
+  — a focused text field and a real, sized FlutterView;
+- a second capture 90 seconds later was 573KB and showed the sign-up screen
+  rendering correctly.
+
+It was a frame captured BEFORE first paint. Lesson: a black `screencap` is not
+evidence of a black app — check the window flags and the app's own log before
+concluding, and take a second capture.
+
+**PRIVACY — acted on, not just noted.** That second screenshot caught the
+sign-up form with an email and a PASSWORD IN PLAINTEXT. Both PNGs were deleted
+from the scratchpad immediately and the password is not written anywhere in
+this doc or in the session output. Any future capture of an auth screen gets
+the same treatment: screenshotting a live app can photograph a credential, and
+a scratchpad is not a safe place for one.
+
+**Now testable on the OnePlus 7, none of it done yet:** the regrouped Settings
+and its three subpages, notification permission state, emoji search, message
+editing, Closeness against the live RPCs — plus DEVICE-CHECKLIST §1-§5.
+Nothing committed.
+
+## §162 — The auth redirect is a SERVER config problem; the code fix was never lost (2026-08-28)
+
+Owner: "confirmation link again opening localhost 3000" and "i fixed this
+already in 52 so why is this still unfixed?" Answered from the server's own
+logs rather than from inference.
+
+**The code was never the problem, and the owner's build-52 fix IS in the app.**
+Probed both binaries directly:
+
+    build 52:  https://miles-legal.vercel.app/auth-callback.html   PRESENT
+               tethered://auth-callback                            ABSENT
+    build 54:  https://miles-legal.vercel.app/auth-callback.html   PRESENT
+               tethered://auth-callback                            ABSENT
+
+`grep -rn "tethered://auth-callback" lib/` finds only COMMENTS, and
+`Supabase.initialize` sets no global redirect. So every build since 52 asks for
+the https bridge.
+
+**But the email that actually went out asked for something else:**
+
+    GET | 303 | .../auth/v1/verify?token=...&type=recovery
+                 &redirect_to=tethered%3A%2F%2Fauth-callback
+
+**A server can only substitute a redirect it refuses to honour.** GoTrue drops
+a `redirectTo` that is not in the project's allow-list and falls back to the
+Site URL. The app asked for the vercel bridge; the mail carried the old scheme.
+That is the override, and no build can change it — which is exactly why
+rebuilding never fixed it and why it survived the disk crash: **it was never in
+the code.**
+
+Fix is Dashboard -> Authentication -> URL Configuration: Site URL
+`https://miles-legal.vercel.app`, and BOTH
+`https://miles-legal.vercel.app/auth-callback.html` and
+`tethered://auth-callback` in Redirect URLs. The second stays because
+`supabase_repository.dart:102` records that mails already sent carry the old
+scheme and shipped builds still redeem it. The Supabase MCP exposes SQL and
+migrations, not GoTrue config, so this is owner-only.
+
+### Owner then said "i fixed it, check the logs" — NOT YET VERIFIABLE
+
+    newest edge_logs   2026-08-28T03:01:53Z   <- the OLD link, old scheme
+    newest auth_logs   2026-08-28T03:08:00Z
+    now                2026-08-28T03:09:09Z UTC  (08:09 local, UTC+5)
+
+**The log stream is live, not stale** — every source is current to within a
+minute. There is simply no new `/verify` link since the change. The most recent
+one, at 03:01:53Z, is 08:01 LOCAL — minutes before the fix — so it is
+pre-change evidence, not post-change failure.
+
+**Timezone reconciliation matters here and nearly misled me:** the phone's
+screenshot read 8:02 while the logs read 03:01. Those are the same instant
+(UTC+5). Reading the log timestamps as "hours old" would have made a live
+stream look dead.
+
+**BLOCKED: needs one fresh signup or password reset, then re-read the logs.**
+The pass condition is a new `/verify` URL whose `redirect_to` is
+`https%3A%2F%2Fmiles-legal.vercel.app%2Fauth-callback.html` rather than the
+scheme. Nothing else proves it.
+
+## §163 — Build 54 on BOTH phones (2026-08-28)
+
+Owner uninstalled build 52 on the OnePlus 8; `pm list packages com.miles.miles`
+came back blank, so the dead-key obstacle was gone.
+
+    adb -s 1896b4b3 install Miles.apk   -> Success (11.4s)
+    versionCode=54   firstInstallTime=2026-08-28 08:11:43
+    pid 21642, logcat -b crash empty, no E/flutter
+
+**Both handsets now run build 54:**
+
+    OnePlus 7  GM1900  a959ee2b  build 54 (updated in place from 53)
+    OnePlus 8  IN2015  1896b4b3  build 54 (fresh install after uninstall)
+
+Both are signed with the CURRENT key, so from here every future build updates
+in place on both — the §147 signature wall is behind us, permanently, as long
+as `~/.android/debug.keystore` is backed up. **It still is not.** That backup is
+the one action that stops this recurring, and losing that file again orphans
+both phones exactly as before.
+
+The OnePlus 8 lost its X25519 seed with the uninstall, as designed and as
+accepted: production held 5 messages, newest 2026-08-23, and the couple was
+already dissolved. Those 5 are now unreadable. Nothing else was lost.
+
+**Now testable, and none of it done:** the regrouped Settings + three subpages,
+notification permission state, emoji search, message editing, Closeness against
+the live RPCs, and DEVICE-CHECKLIST §1-§5 — plus the auth redirect, which needs
+ONE fresh confirmation link before the logs can prove the owner's dashboard fix
+(§162). Nothing committed.
+
+## §164 — The reset link: three separate faults, and the test method is one of them (2026-08-28)
+
+Owner: "reset link still opening localhost". Checked the logs rather than
+assuming, and there are THREE distinct problems layered on top of each other.
+
+**1. There is no post-fix link to judge.** Newest `/verify` in the logs is
+still `2026-08-28T03:01:53Z`, the same one from before the dashboard change.
+Every log source is current to the minute, so the stream is live — no new
+recovery or signup mail has been generated since. **The link the owner is
+clicking is the OLD one**, baked with the old `redirect_to`. A link carries its
+redirect at SEND time; fixing config never repairs a mail already sent.
+
+**2. That old link is also already spent.** At 03:01:54, one second after the
+303:
+
+    "error":"One-time token not found"
+    "msg":"403: Email link is invalid or has expired"
+
+So the click being tested is a re-click of a consumed link, which fails for a
+reason that has nothing to do with redirects.
+
+**3. THE ONE THAT MATTERS — the mail was sent by the DASHBOARD, not the app:**
+
+    POST | 200 | .../auth/v1/recover | @supabase-infra/mgmt-api/2b67440
+
+`@supabase-infra/mgmt-api` is Supabase's own management API — i.e. the "send
+recovery email" button in the dashboard. **A dashboard-sent recovery never sees
+the app's `redirectTo`; it uses the project's Site URL.** That is exactly why
+the mail carried `tethered://auth-callback` while both binaries ask for the
+vercel bridge. The app's own forgot-password path does not appear anywhere in
+the last 24h of logs — it may never have been exercised.
+
+**The web half is verified working.** `curl` of the bridge shows it reads
+`location.hash` / `location.search` and forwards to `tethered://auth-callback`:
+
+    location.hash · location.href · location.search · tethered://auth-callback
+
+So the intended chain is sound: app asks for the https bridge -> Supabase mails
+that -> browser opens https (which it will follow, unlike a custom scheme) ->
+page JS hands off to `tethered://auth-callback` -> Android opens Miles.
+
+**NOT VERIFIED — the app's intent handling.** I fired
+`am start -a android.intent.action.VIEW -d 'tethered://auth-callback#...&type=recovery'`
+at the OnePlus 8 to prove the app catches it and lands on the new-password
+screen. The device disconnected mid-test and `adb devices` is empty, so this is
+outstanding. It is the one remaining unknown on the client side.
+
+**Exact next step: send the reset FROM INSIDE THE APP** — Sign in ->
+Forgot password — not from the dashboard, and open the NEW mail, not an old
+one. Then the log's `redirect_to` should read
+`https%3A%2F%2Fmiles-legal.vercel.app%2Fauth-callback.html`. Anything else and
+the allow-list entry did not take.
+
+## §165 — The app side of the reset link is CORRECT BY DESIGN, and my planned test was wrong (2026-08-28)
+
+No device and no fresh link, so I verified the remaining client-side unknown
+statically instead — whether the app lands on the new-password screen.
+
+**It does, and the design is deliberately not what I was about to test for.**
+`main.dart:_handleLink` IGNORES `tethered://auth-callback` on purpose:
+
+    // The intent is not evidence, and no test of its contents can make it
+    // evidence. MainActivity is exported and this filter carries BROWSABLE,
+    // so any installed app — or any web page — can send
+    // Intent(ACTION_VIEW, "tethered://auth-callback").
+
+Routing happens off the AUTH STREAM instead (`_watchAuthLinkRedemption` ->
+`passwordRecovery` -> `_routeToNewPassword` -> `go('/new-password')`), because
+what cannot be forged is gotrue redeeming a real token against the real server.
+The listener is narrowed to `signedIn` and `passwordRecovery` only — reacting
+to "there is a session" would lift the disguise on every ordinary launch and
+every silent token refresh.
+
+**MY PLANNED DEVICE TEST WAS INVALID AND WOULD HAVE PRODUCED A FALSE BUG.**
+I fired `am start -d 'tethered://auth-callback#access_token=TEST...&type=recovery'`
+expecting the new-password screen. By design that does nothing: a fabricated
+token is exactly what this code refuses to trust. Had the device stayed
+connected I would have seen "nothing happened" and had every reason to report a
+broken deep link. The disconnection was luck, not diligence.
+
+**The rule this earns: before testing a path, read what it is supposed to do.**
+A test written from an assumed design measures the assumption, not the code —
+and a security control doing its job looks identical to a feature that is
+broken.
+
+**So the client is sound end to end, and the ONLY open dependency is the mail
+carrying a redirect that reaches the app at all:**
+- app requests `https://miles-legal.vercel.app/auth-callback.html` (verified in
+  both binaries);
+- the bridge page forwards to `tethered://auth-callback` (verified by curl);
+- Android opens Miles; gotrue redeems the token; the auth stream raises
+  `passwordRecovery`; the app routes to `/new-password`.
+
+Error handling on that stream is already right too: a dead or spent link throws
+inside `getSessionFromUrl` and arrives as a stream ERROR, which is caught,
+reported, and used to raise the cover — recorded as the fix for a user who
+"saw a calculator and nothing else, forever".
+
+**Still BLOCKED on exactly one thing: a reset requested FROM INSIDE THE APP,
+not the dashboard.** Pass condition unchanged — the log's `redirect_to` must
+read `https%3A%2F%2Fmiles-legal.vercel.app%2Fauth-callback.html`.
+
+## §166 — Ember field measured on a SECOND device; build 54 healthy on both (2026-08-28)
+
+OnePlus 8 reconnected. Build 54 launches and holds focus:
+
+    am start -n com.miles.miles/.AliasMiles -> Starting
+    pid 19628
+    mCurrentFocus=Window{... com.miles.miles/com.miles.miles.AliasMiles}
+
+**DEVICE-CHECKLIST §3.2 on the OnePlus 8 — 25s on the sign-in screen with the
+ember field running:**
+
+    Total frames rendered: 3036
+    Janky frames: 1 (0.03%)
+    50th percentile:  5ms
+    90th percentile:  5ms
+    95th percentile:  5ms
+    99th percentile:  6ms
+    Number Missed Vsync: 0
+    Number Slow issue draw commands: 0
+
+**Better than the OnePlus 7 (§149), and on a newer chip as expected:**
+
+    OnePlus 7 (build 53): 2466 frames, 3 janky (0.12%), 99th = 10ms, 2 missed vsync
+    OnePlus 8 (build 54): 3036 frames, 1 janky (0.03%), 99th =  6ms, 0 missed vsync
+
+3036 frames in 25s is ~121fps — this panel runs above 90Hz and the field still
+holds 5ms at the 95th percentile with SIX times the budget spare. `Slow issue
+draw commands: 0` again: the drawAtlas + cached-glow rewrite costs no
+draw-command time on either device. **PERF_PLAN hotspot #1 is now measured on
+two handsets and is not a hotspot.**
+
+Note `High input latency: 83` on both — that is the owner touching the phone
+while sampling, not a rendering fault.
+
+**What could NOT be checked here, and why:** the OnePlus 8 is a fresh install
+so it is signed out, and Settings, chat, emoji search and message editing all
+sit behind sign-in. Entering credentials is not something I do. Those need
+either the owner signed in on this handset, or the OnePlus 7 (which still has a
+session) reconnected.
+
+**Unchanged blocker:** the auth-redirect fix still needs ONE reset requested
+FROM INSIDE THE APP, then the log's `redirect_to` read back.
+
+## §167 — Build 54 regression triage: the full re-audit, and the honest ceiling (2026-08-28)
+
+Owner reported build 54 broken across the board: vault adds, watch-list adds,
+both maps, screen-share quality/echo, a blocking "Your history" ceremony loop
+after pairing, and auth links. Full triage ran: three Explore agents over every
+failing path, one Plan agent on the ceremony fix, live prod queries. Plan
+approved and saved (plan file). Findings that matter:
+
+**THE CEILING, stated once and plainly: string recovery cannot return logic.**
+Builds 49–52's Dart died with the E: drive. The APK gave back strings, assets
+and routes; every LOGIC fix in those builds (vault behaviour, previews,
+scrolling, screen-share quality, key verification) left no string trace and is
+gone. Build 54 = build-48 logic + this session's work. Those fixes are
+RE-DIAGNOSED FORWARD from live evidence now — not restored. Calling the merge
+"complete" without saying this was my error.
+
+**Live-evidence facts (prod queries, §-anchors in the plan):**
+- `client_errors` has ZERO `kind='vault'` rows ever → vault failures die
+  before/at the reporter. Schema NOT drifted; buckets exist; `storage_quota_ok`
+  passes missing rows.
+- `partner_rewrap_requests`: 1 row ever (Aug 17) — today's rows purged by the
+  dissolve/re-pair cycles.
+- `media-sign storage.404` this morning = the broken previews.
+- `shared_reels` insert path worked historically (3 rows); today's failure is
+  masked by a bare `catch (_)` that destroys its own evidence.
+- Rewrap loop root cause CONFIRMED in code: `partner_rewrap.dart:326` is the
+  only `AppLock.authenticate()` call site not guarded by `authInProgress`; the
+  OS prompt backgrounds the app, the cover swap tears down the whole tree, the
+  typed code dies with the State, and `!mounted` guards swallow the outcome.
+- Google Maps billing is dead (§4b). OWNER DECIDED: migrate both Google
+  surfaces to Mapbox.
+
+Executing: P0-A ceremony → P0-B observability → build 55 → guided repro with
+the owner while tailing server logs → maps migration → share fixes → auth-link
+verification. Every silent catch touched becomes a reporting catch.
+
+## §168 — P0 fixes built: the ceremony loop and the evidence-destroying catches (2026-08-28)
+
+Analyzer 0/0, suite **1244/1244** (was 1233; 11 new). Build 55 compiling.
+
+### P0-A — the "Your history" loop (plan §P0-A, all six landed)
+
+- **A1** `app_lock.dart`: `authInProgress` now lives ON AppLock and is set
+  inside `authenticate()` itself (before the await, cleared in a `finally`) —
+  the unguarded call site class can no longer exist. `MilesApp.authInProgress`
+  is a delegating getter/setter; all five manual guard sites compile unchanged.
+- **A2** `main.dart`: the `paused/hidden` branch and `lockIfEnabled` both honor
+  the flag. The PIN/pattern credential Activity reports `paused`, which is why
+  guarding `inactive` alone could never fix the reported symptom.
+- **B1** `rewrap_screen.dart`: **Start fresh** on both faces — the designed
+  exit for a both-keyless couple. Cost stated first; escrow-restore suggested
+  first when a backup row exists; `releasePublication()` BEFORE `clearKeyless()`
+  (a stale hold re-arms keyless at the next bindAccount).
+- **B2** `partner_rewrap.dart`: a `readableConfirmed` answer clears the false
+  keyless mark — a working phone stops being bounced back to the ceremony.
+- **C**: `RewrapAnswerStatus` statics record the answer's outcome BEFORE the
+  `!mounted` checks; `_load`/`_onRowChange` consume first. A teardown mid-answer
+  can no longer swallow a success into a loop.
+- **D**: screen channel renamed `rewrap:screen:` (duplicate-topic
+  joined-but-dead); shell offer guard is route-aware (`_rewrapRouteUp()`).
+- Hardening: the ceremony screen sets FLAG_SECURE for its lifetime.
+
+### P0-B — observability (plan §P0-B 1–5)
+
+- reels add: bare `catch (_)` now reports `kind:'reels'`; silent no-couple
+  return says "Still loading"; pasted links without a scheme get upgraded
+  (bare-host) or refused OUT LOUD ("That doesn't look like a link.").
+- reels stream: a failed FIRST load now fails the stream (`addError`) instead
+  of an infinite spinner; later failures keep the last good list. Reported.
+- **Share-intent gap closed**: the shell drains `ACTION_SEND` at `_onReady` and
+  on resume, hands the URL across `ShareIntake.handedOff`, and routes to the
+  watch list. Sharing from Instagram while Miles was closed used to evaporate.
+- vault: null-uid writes THROW (were silent successes); `_saveNote` failures
+  report; the vault picker finally sets the system-Photo-Picker flag — it was
+  the one picker opening the file manager. `picked_media_kind_test` census
+  EXTENDED to cover it (gate strengthened, not weakened — my public delegator
+  initially tripped the 3-count and the fix was restructuring the code, not
+  raising the count).
+- New `cover_auth_guard_test.dart`: 11 assertions pinning every piece above.
+  Three of its first drafts were TEST bugs (unclamped substrings, a lookback
+  window) — fixed in the test, gates untouched.
+
+**Diagnostic fact from the window the owner was testing (08:15–08:30 local):
+zero rows landed in client_errors.** The failing paths were exactly the
+unreported ones this section instruments. The guided repro on build 55 is
+where the real vault/reels errors finally get names.
+
+Next: build 55 → both phones → guided repro (owner) while tailing server logs
+→ then P1-A (Mapbox migration) + P1-B (share stats/bitrate/PiP).
+
+## §169 — THE ROOT CAUSE OF THE WHOLE DAY: builds 53–55 shipped pointing at STAGING (2026-08-28)
+
+Owner, on build 55: "nothing is working still. vault. gallery. watch list.
+today." — caught in a minute. Prod showed ZERO client_errors and ZERO HTTP
+traffic from the phones in the window. The reports were not failing to send;
+**they were landing on a different project.**
+
+    mobile/.env -> NEXT_PUBLIC_SUPABASE_URL = https://zqltaobarpcuantrqxha.supabase.co   (STAGING)
+    staging edge_logs: 2,901 requests, newest seconds old — the phones, live
+
+`.env` is gitignored and was hand-recreated after the 2026-08-23 disk crash —
+against the WRONG project. Every APK built from this tree since (53, 54, 55)
+bundled it. Build 52, built pre-crash from E:, pointed at production.
+
+**One line explains every symptom reported today:**
+- vault / gallery / watch list / today "broken": the app was running against
+  the drifted staging project — CLAUDE.md's own words: "Staging is drifted and
+  is not a faithful rehearsal". Missing buckets/policies/data, not lost code.
+- The rewrap loop: staging held STALE partner_keys rows for accounts last used
+  there long ago → both fresh phones marked keyless against ghosts.
+- Reset/confirmation links opening localhost:3000: the mails came from
+  STAGING, whose Site URL/allow-list nobody fixed — the owner fixed PROD's
+  dashboard this morning, correctly, for the project the phones were not on.
+- My §162/§164/§165 analyses of prod auth logs: correct about prod, irrelevant
+  to the phones. The 01:0x-03:0x prod events were the OLD build-52 install.
+- Today's signups/pairing/content live on STAGING and will vanish from the
+  app's view after the switch — the owner re-signs-in on prod accounts.
+
+**FIXED:**
+1. `.env` -> production URL + prod anon key (fetched via MCP; staging copy
+   backed up in the session scratchpad).
+2. `tool/release.sh` now REFUSES to build unless `.env` names the production
+   project (`MILES_ALLOW_NONPROD=1` to override deliberately). The class —
+   "shipped artifact silently pointing at the wrong backend" — now has a gate,
+   in the same spirit as the stale-snapshot stamp check.
+3. Build 56 compiling; will be verified by probing the APK's bundled .env for
+   the prod host before install.
+
+**What stands regardless of this discovery:** every fix in builds 54–55 (the
+ceremony loop, the reporting catches, Settings/editing/Closeness merges) is
+real and applies identically on prod. The P0-A loop fixes matter on prod too —
+prod also holds old partner_keys rows for these accounts.
+
+**The lesson, stated as the class:** when EVERYTHING fails at once, suspect
+the environment pointer before any feature code — and a gitignored config
+that decides which universe the artifact lives in must be gated, not trusted.
+
+## §170 — Owner confirms prod fix; vault made fast; Google Maps is GONE (2026-08-28)
+
+**Owner, on build 56: "gallery and watch list are now perfect."** §169's staging
+pointer was the day's root cause, confirmed from the device. And the build-55
+client_errors rows that arrived late are the receipts: `PGRST205` (shared_reels
+did not even exist in staging's schema cache) and vault/gallery `storage.404`
+(staging's empty buckets).
+
+Remaining owner report, all vault, all performance: slow upload, no grid
+previews on open, tap -> long black screen with a wheel. Fixed, root-caused:
+
+1. **The grid never batch-signed.** `personal_vault` is private, and each tile
+   paid its own `MediaUrls.sign` round-trip before its download — the gallery
+   has always used `MediaUrls.warm` (one batched createSignedUrls); the vault
+   never did. `_load()` now warms every thumb AND every original in one call,
+   so the grid fills from the disk-ciphertext cache or one batch, and the
+   viewer's original is pre-signed before the tap.
+2. **The viewer ignored the tile it already had.** Tap -> sign+download+decrypt
+   of a multi-MB original with only a spinner, while the 400px tile sat
+   decrypted in L2. The viewer now paints the tile IMMEDIATELY and the
+   original swaps in over it (`gaplessPlayback: true`); a failed full load no
+   longer replaces a visible picture with an error sentence.
+3. **Upload was fully serial.** encrypt(full) -> encrypt(tile) -> upload(tile)
+   -> upload(full). Now `Future.wait` twice: both encrypts at once, both
+   uploads at once.
+
+**P1-A complete — both Google surfaces are Mapbox, and Google Maps is out of
+the app.** `partner_location_card.dart` rewritten (dark style, PointAnnotation
+with the same canvas-drawn avatar/dot PNGs, solid 0.55 thread instead of dots —
+no per-annotation dasharray in this SDK, token-missing fallback keeps the card
+useful). `location_map_screen.dart` ported by anchor (same markers,
+`cameraForCoordinateBounds` fit-both, `getCameraState` north-up reset,
+follow-cam now only when she MOVED — the Google version re-centred every
+rebuild and fought the user's pan). Removed: `google_maps_flutter` from
+pubspec, the `com.google.android.geo.API_KEY` manifest block, the whole
+`maps.properties` gradle plumbing. The `MISSING_MAPS_API_KEY` class is dead,
+and the leaked key in git history is demoted from urgent to hygiene — nothing
+consumes it any more. Two ambiguity traps for the record: geolocator's
+`Position` and `LocationSettings` both collide with Mapbox's — `show`/`hide`
+at the imports.
+
+**P1-B landed earlier this stretch:** stats pinned to the screen sender via
+`CallStatsMonitor.screenTrackId` (last-wins was feeding the ladder the CAMERA's
+report), 2.5Mbps `maxBitrate` on the dedicated screen sender only (a parameter
+cannot be un-set, so never on a shared line), CallPip hidden while
+sharing+minimized (the floating window was inside the capture), the
+`_SharingCard` says "they see exactly what this screen shows", and MapToken no
+longer pins "not set up" for the whole run off one dead socket. `contentHint`
+does not exist in flutter_webrtc — noted, skipped.
+
+Gates: analyzer 0/0, suite 1244/1244. Building 57.
+
+**Still open:** ceremony + Start-fresh on hardware; in-app reset link check
+(prod dashboard fix now actually reachable); vivo never enumerated (watcher
+armed, ABI-gated); chat-decrypt (`ArgumentError`/`cipher column unreadable` now
+visible from build 56 on prod — the §75 investigation has fresh evidence);
+build-56 `MissingPluginException` under kind:flutter worth one look.
+
+## §171 — Build 57 everywhere it can be; the vivo finally appears (2026-08-28)
+
+    build 57  sha256 5ee507af…  prod backend verified inside the APK
+    google-maps meta-data verified GONE from the built manifest
+
+**The vivo 1908 enumerated for the first time** — and it is the checklist's
+MTK-class device: Android 8.1, arm64-v8a (ABI checked BEFORE install; the
+watcher refuses 32-bit rather than installing an APK that would crash).
+
+    vivo 1908: install Success, versionCode=57
+    pid alive, crash buffer empty, no E/flutter
+
+**A measurement that looked like a disaster and was not:** 25s of gfxinfo on
+the vivo returned `Total frames rendered: 0`. The phone was LOCKED —
+`mWakefulness=Asleep`, `mCurrentFocus=StatusBar` — and a secure keyguard
+ignores `wm dismiss-keyguard`. Zero frames from a locked handset is the
+expected value. The §3.2 measurement on this device still needs the owner to
+unlock it; not a defect.
+
+Watcher armed to bring both OnePlus phones (currently 56 and 55) to 57 on
+reconnect. The vivo's Android 8.1 is also the platform where the sound layer's
+software-Vorbis assumption and the ember field's cost matter most — checklist
+§2.6/§3.2 on THIS device are the highest-value remaining hardware checks.
+
+## §172 — The vault tiles: write proven healthy, read instrumented (2026-08-28)
+
+Owner on build 57: everything works EXCEPT the vault grid previews — "black
+previews with photo frame icon", same as 56.
+
+**Established from evidence before touching code:**
+- Thumb OBJECTS exist for every row, at the right sizes (11–22KB — a 400px q72
+  jpeg + AEAD overhead). The write side, serial and parallel both, is healthy.
+- Build-56 edge logs show thumb sign + GET all 200 — the bytes REACHED the
+  phone and still rendered black. Not the network.
+- Build-57 latest session shows NO thumb requests at all — consistent with the
+  seed path serving fresh uploads from local ciphertext and failing the same
+  way. The failure is after the bytes are in hand: decrypt or image decode.
+- `gridPath` (thumbPath ?? …) and `seed()` (putFile keyed '$bucket/$path')
+  both verified correct by reading.
+
+**Desk analysis is exhausted; the tile's TWO failure paths were both silent:**
+its `catch (e)` set `_failed` and said nothing anywhere, and the Image
+errorBuilder (decode-of-decrypted-bytes failure — a DIFFERENT disease) rendered
+the identical glyph. Instrumented both — `kind:'vault-tile'` (with the real
+exception type) and `kind:'vault-tile-decode'` (one report per tile, or a
+failing decode re-reports on every rebuild).
+
+Build 58 (`373d16b9…`) installed on the OnePlus 8. Next: the owner opens the
+vault ONCE; client_errors then names the stage, and the fix follows the name.
+The vivo and OnePlus 7 get 58 from the watcher when they reappear.
+
+## §173 — ON HOLD, by the owner (2026-08-28)
+
+Owner: "hold this one." The vault-tile investigation (§172) is PAUSED at the
+owner's request — do not resume it, do not prompt for the vault-open repro,
+and do not install anything on a phone until the owner says so. The install
+watcher was killed for the same reason: machinery that acts on their handsets
+has no business running during a hold.
+
+**Parked state, exact:**
+- Build 58 (vault-tile instrumentation) on the OnePlus 8 only; OnePlus 7 and
+  vivo on 57. `Miles.apk` at repo root = 58.
+- The repro that unblocks §172 is still: open the vault once on a build-58
+  phone, then read `client_errors` for kind `vault-tile` / `vault-tile-decode`.
+- Everything else the owner confirmed working on-device; remaining checklist
+  items unchanged from §171/§172.
+- Large uncommitted tree (all of today's fixes) awaiting a commit decision.
+- `~/.android/debug.keystore` still has no off-machine backup.
+
+Resume trigger: the owner's word, nothing else.
+
+## §174 — The screen-share masterplan (2026-08-28)
+
+Owner asked whether screen share is finished (answer: NO — build 57 shipped
+repairs, not architecture, and none of it is two-phone-verified) and for a
+top-class masterplan, "without dropping any single quality anywhere".
+
+Researched Zoom/Meet architecture notes, the W3C content-hint spec, Multi.app's
+legibility engineering, Android 14 app-sharing docs, and flutter_webrtc 1.6.0
+source. Full plan: **docs/guides/SCREEN-SHARE-MASTERPLAN.md**. The spine:
+
+- Governing law: LEGIBILITY IS NEVER TRADED. Screen content loses fps first,
+  latency headroom second, resolution only in collapse — the exact inverse of
+  the camera policy, and how every leader encodes screen content (1080p @
+  5–15fps, maintain-resolution, contentHint detail/text).
+- **The discovery: Miles OPTS OUT of Android 14 single-app sharing** —
+  `fullScreenOnly: true` at call_controller.dart:1119 forces whole-display,
+  which is the echo/notification/launcher-in-frame class the owner
+  photographed. Since A14 QPR2 the DEFAULT picker offers "One app", excluding
+  system UI and Miles's own PiP from the frames. One argument.
+- Phase 1 (Dart-only): drop fullScreenOnly; MAINTAIN_RESOLUTION + fps-only
+  ladder (15→10→5, scale locked 1.0); long edge 1280→1920; cap 2.5→4Mbps plus
+  a 250kbps floor; VP9 via setCodecPreferences on the SCREEN transceiver only
+  (1.6.0 has the API); live self-preview when capture is app-scoped (no
+  recursion unless Miles itself is shared); stats HUD gains
+  `share WxH @fps · codec` as the on-device proof §78 never had.
+- Phase 2 (one flutter_webrtc patchset): contentHint plumb, **max-QP clamp 36**
+  (Multi's single biggest legibility win), playout-delay minimisation (~90ms),
+  plumb onStop/onCapturedContentResize (kills the stall-watchdog workaround),
+  internal audio via AudioPlaybackCapture (API 29+) for Watch-Together sound.
+- Phase 3 (guarded frontier): AV1 SCC dynamically enabled Zoom-style (HW/CPU
+  gate, mid-call fallback); receiver-measured ladder tuning off freezeCount.
+- Deliberately not chased: DRM black (platform law), whole-screen echo on
+  A<14 (physics; 57's mitigations stand), simulcast/SVC (two people, one link).
+- Verification: legibility test (photograph small text at every rung), silk
+  test (freezeCount delta while scrolling), stop test (<2s), privacy test
+  (notification must not reach the frames on single-app).
+
+NOTHING implemented — the owner's hold (§173) stands; this is the plan they
+asked for. Phase 1 is one sitting when un-held.
+
+## §175 — Screen share Phase 1: WIRED, source-verified first (2026-08-28)
+
+Owner demanded depth and no failure. The method that answers that demand:
+every load-bearing claim was verified against flutter_webrtc 1.6.0's OWN
+SOURCE before a line changed — the class of failure that has cost this project
+the most is the unverified assumption, and this feature got none.
+
+**Verified at source (file:line in the plugin):**
+1. `fullScreenOnly:false` (default) → plain `createScreenCaptureIntent()` →
+   Android 14's user-choice picker with "One app"
+   (GetUserMediaImpl.java:207-215). `true` forces
+   `createConfigForDefaultDisplay` — whole display. CONFIRMED.
+2. `setCodecPreferences` natively implemented
+   (MethodCallHandlerImpl.java:1092 → PeerConnectionObserver.java:1104).
+3. `degradationPreference` + `minBitrate`/`maxBitrate` genuinely mapped in
+   setParameters (PeerConnectionObserver.java:719-819).
+4. Display capture uses `createVideoSource(true)` — isScreencast, so
+   libwebrtc's screenshare handling is already active
+   (GetUserMediaImpl.java:553; camera :796 = false).
+5. NO AudioPlaybackCapture anywhere — internal audio stays Phase 2. CONFIRMED
+   ABSENT.
+Plan amendment forced by evidence: live self-preview DEFERRED to Phase 2 — the
+app cannot know the user picked app-scope (onCapturedContentResize unplumbed),
+and previewing blind recreates the mirror recursion on whole-screen shares.
+
+**Wired (all call_controller.dart + one line in call_stats.dart):**
+- `fullScreenOnly: true` REMOVED — on Android 14+ the user can share one app;
+  status bar, notifications, launcher, cover and CallPip leave the frames.
+- `_screenTargetLongEdge` 1280 → **1920**; ladder rebuilt frames-first:
+  `(1.0,24)(1.0,15)(1.0,10)(1.0,5)(1.5,5)` — scale locked 1.0 everywhere but
+  the single collapse rung, which `_adaptScreenProfile` only enters after TWO
+  consecutive bad samples (`_screenBadStreak`).
+- `MAINTAIN_RESOLUTION` on the screen sender (the W3C text-content guidance;
+  the old freeze came from pairing it with an unfunded pixel rate — the
+  ladder now funds pixels first).
+- Bitrate **4Mbps ceiling + 250kbps floor**, both `_shareOnSecondLine`-gated
+  (a parameter cannot be unset; the camera line is never touched).
+- **VP9 first on the SCREEN transceiver only**, set before createOffer via
+  `getRtpSenderCapabilities` — a preference with H.264 fallback, and the law
+  test asserts exactly ONE setCodecPreferences call site in the file (the
+  H264-promotion regression cannot quietly return).
+- HUD: the stats line reads `share WxH@fps …` instead of `tx …` while a share
+  is live — on-device proof of which sender the numbers describe.
+
+**Gates:** analyzer 0/0, suite **1250/1250** (6 new law tests in
+`screen_share_law_test.dart` pinning: frames-first ladder shape, collapse rung
+gated by 2 samples, MAINTAIN_RESOLUTION present, floor+ceiling present,
+fullScreenOnly absent, single codec-preference call site). The old
+profile-arithmetic tests were updated to the NEW constants — a deliberate
+design change to a tested constant, not a gate weakened to pass.
+
+**NOT yet proven, and it is the headline until a two-phone call runs:** every
+number above is host-verified only. The hardware pass is the masterplan's
+verification protocol — legibility photograph per rung, freezeCount silk test,
+sub-2s stop, notification-privacy on single-app. No build cut; the vault hold
+(§173) still governs installs.
+
+## §176 — Screen share Phase 2: the vendored fork, compiled and proven in the artifact (2026-08-28)
+
+Owner: "finish screen sharing first completely, then I'll test everything at
+once." Done to the reachable maximum, with the unreachable named.
+
+**The fork.** flutter_webrtc 1.6.0 vendored at `mobile/third_party/
+flutter_webrtc` (2.8MB, example/ stripped), pinned via `dependency_overrides`
+with the why in pubspec. ONE file patched — `GetUserMediaImpl.java`, both
+edits marked "Miles patch":
+1. `MediaProjection.Callback.onStop` (upstream leaves it EMPTY, with a Huawei
+   note) now forwards `miles.screenCaptureStop` through the plugin's existing
+   public event channel — posted to the main looper, because the callback
+   arrives on the capturer's texture-helper thread
+   (OrientationAwareScreenCapturer.java:135) and the sink is @UiThread.
+2. `onCapturedContentResize(w,h)` (Android 14+) forwards
+   `miles.screenCaptureContentResize` — the ONLY signal that the user picked
+   "One app" in the picker.
+
+**Miles wiring (call_controller + one branch in call_screen):**
+- The system cast-notification "Stop sharing" now ends the share the moment it
+  is pressed; the 3-sample stall watchdog demotes to backup.
+- `appScopedShare` set from the resize event by size comparison (<90% of the
+  panel on either axis — exact equality deliberately not used; OEM insets make
+  full-display captures a few px short). The encoder re-aims at the CONTENT
+  size, so an app window is not scaled as if it were the panel.
+- **Live self-preview** (`screenSelfRenderer`, bound at share start) drawn
+  ONLY when appScopedShare — a whole-display preview is a mirror inside the
+  captured pixels. The `_SharingCard` stays for whole-screen and pre-A14.
+- Every share exit (drop, stop, teardown) clears the preview, the flag, the
+  content size and the stats pin.
+- Consumed via a deliberate `src/` import of the plugin's
+  `FlutterWebRTCEventChannel` (public in behaviour, not re-exported; the fork
+  pins the path).
+
+**A bug of MY OWN found and fixed while wiring:** the P1 patch's Python
+substring replace collided — `"    _screenStream = null;"` (4 spaces) matched
+INSIDE the 8-space drop-site line, so the stop path never got its
+`screenTrackId` clear and the drop site got a duplicate. After the first share
+ended, the HUD would have read `share` forever. Both sites repaired; the law
+test now COUNTS the clears (≥3). Lesson for the file: anchor patches on
+unique multi-line context, never on a short line that indentation can echo.
+
+**Honest unreachable list (libwebrtc BINARY rebuilds, not plugin patches):**
+contentHint, the max-QP clamp, playout-delay zeroing. Named in the masterplan
+as the true Phase-3 frontier; compensated meanwhile by isScreencast (verified
+already set, GetUserMediaImpl.java:553), MAINTAIN_RESOLUTION, and the bitrate
+floor. Internal audio (AudioPlaybackCapture) is plugin-reachable but is
+multi-day ADM surgery — deferred with its name on it, not silently.
+
+**Proof chain:** analyzer 0/0 · suite **1254/1254** (4 new Phase-2 law tests)
+· build 59 EXIT=0 — gradle COMPILED the patched Java — and the DEX probe finds
+both event literals inside the APK, so the artifact runs the fork, not the
+hosted plugin:
+
+    IN DEX  miles.screenCaptureStop
+    IN DEX  miles.screenCaptureContentResize
+    prod backend: True    sha256 d750420c…
+
+Build 59 = everything: Phase 1+2 screen share, vault-tile instrumentation,
+vault speed, Mapbox everywhere, P0 ceremony fixes. NOT installed — the owner
+tests everything at once, on their word. Hardware acceptance list unchanged
+from the masterplan §Verification.
+
+## §177 — Build 59 on both OnePlus phones; everything is in the owner's hands (2026-08-28)
+
+    1896b4b3 (OnePlus 8): Success, versionCode=59, pid 11333, crash buffer empty
+    a959ee2b (OnePlus 7): Success, versionCode=59, pid 20797, crash buffer empty
+
+Both launched clean. The vivo stays on 57 until it reappears (57→59 is an
+in-place install, same key).
+
+Build 59 carries the WHOLE backlog: screen share Phase 1+2 (fork included and
+DEX-proven), vault-tile instrumentation (§172) + vault speed (§170), Mapbox on
+all three map surfaces, the P0 ceremony fixes and observability, Settings/
+editing/Closeness merges, and the sensory overhaul. Owner tests everything at
+once now — their stated plan.
+
+**What each test tells us, so the readback is fast:**
+- Vault open → `client_errors` kind `vault-tile`/`vault-tile-decode` names the
+  black-tile stage.
+- Two-phone call + share → the four masterplan checks; the HUD line saying
+  `share 1920x…` is the on-device proof of Phase 1; the system Stop button and
+  (on the A14 phone, choosing "One app") the live self-preview prove Phase 2's
+  fork is alive at runtime, not just in the DEX.
+- Pairing → the ceremony survives the fingerprint; Start fresh exits.
+- In-app password reset → the prod redirect fix, read from edge logs.
+
+Uncommitted tree = the entire day. Keystore backup still outstanding.
+
+## §178 — Build 60: the share regression named and fixed; the vault goes gallery-plaintext (2026-08-28)
+
+Owner on 59: vault tiles still black; screen sharing NOW BROKEN (a regression);
+everything else works.
+
+**The share regression was MINE, and upstream had warned me in the very
+comment I preserved.** The patched `onStop` forwards the event; the upstream
+note says onStop fires SPURIOUSLY on some OEMs right after capture starts —
+the reason the body was empty. Build 59 wired it straight to
+`stopScreenShare()`, so on affected handsets every share died at birth. FIX:
+the event is a HINT, never a kill — ignored entirely inside a 3s just-started
+window, and outside it it fast-tracks the stall watchdog to ONE zero-fps
+sample (from three). The share still ends within ~2-4s of a real system Stop,
+and a spurious event can no longer kill a healthy share. Law test rewritten to
+assert the ABSENCE of the direct kill.
+
+**The vault, by the owner's explicit decision, drops its E2EE media pipeline
+and clones the gallery mechanism** — plaintext in the PRIVATE `personal_vault`
+bucket, read by signed URL. What it keeps is what actually guards it: the PIN
+gate, FLAG_SECURE, owner-only RLS — the same protection level every
+couple_intimate photo already lives at. (CLAUDE.md's "no plaintext at rest"
+yields to the owner's direct instruction, and the gallery precedent means the
+app already accepted this level for couple media.) Implementation surgical:
+- writes: `_uploadPlain` with real contentType (bucket allow-list VERIFIED
+  live to carry image/video/audio mimes already — no migration needed); paths
+  without `.enc`; parallel full+thumb.
+- tile + viewer route by `path.endsWith('.enc')`: plaintext rows take
+  `MediaUrls.cached ?? sign` → NetworkImage (the screen's batch-warm makes it
+  a cache hit); videos stream a signed URL straight into the player — no
+  decrypt, no loopback server. Legacy `.enc` rows keep the ENTIRE old decrypt
+  read-path, so nothing old breaks harder.
+- dead write-path code DELETED (_upload, _refuseCleartext, _fullPath,
+  _thumbPath, three imports) — delete-what-you-replace.
+
+**Also fixed: my §152 avatar bug**, named by build-59 client_errors
+(`ArgumentError` in NetworkImage._openUrl): `_ProfileCard` handed a storage
+PATH to NetworkImage; avatars are signed. Now `SignedImage('couple_media')`.
+
+**THE PATCH-SCRIPT LESSON, third strike, now a law for this repo: a Python
+`str.replace` on a SHORT single line is forbidden in patch scripts.** This
+session it (1) mis-nested the stop-path clear (§176), and (2) today injected
+statements into the FIELD DECLARATION `bool appScopedShare = false;` — class-
+level garbage that only the analyzer caught. Anchors must be multi-line and
+unique, or use the Edit tool.
+
+**Recorded from build-59 client_errors, for §75's file:** chat-decrypt now has
+real names on prod — `SecretBoxAuthenticationError` (old rows under the
+pre-reset couple key) and `unreadable reaction` 0/4. Masked by the plaintext
+dual-write; not today's fire.
+
+Gates: analyzer 0/0, suite 1254/1254. Build 60 compiling.
+
+## §179 — Vault CONFIRMED working on build 60 (2026-08-28)
+
+Owner: "vault is working now." The gallery-mechanism rewrite (§178) closed the
+black-tile saga on the owner's device. Screen share on 60 (the hint fix) is
+NOT yet confirmed — the owner has not reported the two-phone retest; it is the
+top open verification.
+
+Priority stack as of this line:
+1. Share retest on 60 (both directions; system Stop; A14 "One app" preview).
+2. THE UNCOMMITTED TREE — two days of work, no commit: ceremony fixes,
+   observability, Mapbox migration, vendored fork, vault rewrite, settings/
+   editing/closeness merges, the sensory overhaul repairs. Largest single
+   risk in the project right now. Owner's call, strongly recommended.
+3. Keystore off-machine backup (2.6KB; §147 recurrence guard). Still not done.
+4. In-app password reset → read edge logs (prod dashboard fix never verified
+   end-to-end).
+5. vivo: unlock once for the §3.2 measurement; also still on 57 — bring to 60.
+6. §75 chat-decrypt: now has NAMED evidence (SecretBoxAuthenticationError =
+   old rows under the pre-reset key). Old messages only; dual-write masks.
+
+## §180 — Reset link CLOSED; the share post-mortem convicts MY Phase 1; owner orders the redesign (2026-08-28)
+
+- **Auth links: DONE.** Owner: "reset link is working." The §162-§165 saga
+  closes — the fix was prod dashboard config; client was always right.
+- **vivo: dropped from scope** at the owner's word.
+- **Screen share on 60: still dead — "not even 1 percent".** The timeline
+  convicts Phase 1, not the fork: shares WORKED on 56 (the echo screenshots
+  are working shares), died at 59, unchanged at 60 after the stop-hint fix.
+  And call_controller's own older comment names the disease I reintroduced:
+  screencast + MAINTAIN_RESOLUTION had been tried and produced "a viewer
+  watching a picture that sticks" — the repo chose BALANCED for that reason,
+  and I overrode a documented lesson with an UNFUNDED start (1920 long edge,
+  maintain-resolution, on a mobile uplink): the encoder can never fund frame
+  one, so the receiver gets literally nothing. The W3C ideal without Meet's
+  ramp is a freeze.
+- **Owner's order: discard the mechanism, rebuild like the leaders.** The
+  research already named the architecture (Meet: screen share on a SEPARATE
+  RTCPeerConnection): own bandwidth estimation that cannot fight the camera,
+  own negotiation, own lifecycle, a share failure that can never poison the
+  call — and the piece I omitted, the CLIMB: first frame at a fundable rate
+  within a second, then up 960→1280→1920 on clean samples. Sharpness is
+  REACHED, never gambled on the opening estimate.
+- Being discarded with it: the pre-negotiated second m-line, replaceTrack
+  machinery, _shareOnSecondLine, the msid-less compat trick (its target —
+  uncommitted prod builds 49-52 — died with the reinstalls; noted, deliberate).
+
+## §181 — The redesign is in: a dedicated connection per share, and a climb instead of a gamble (2026-08-29)
+
+The owner's order from §180 is implemented. The shared-connection mechanism is
+GONE — not tuned, removed.
+
+- NEW `mobile/lib/features/call/screen_share_session.dart`: one share = one
+  RTCPeerConnection (Meet's model). Own bandwidth estimate, own negotiation,
+  dies alone. Signalling kinds `share-offer` / `share-answer` / `share-ice` on
+  the existing call channel, with a pending-ICE queue. VP9 preference set on
+  the DEDICATED connection only. Encoder walked up a CLIMB ladder —
+  (960,15,800k)→(1280,15,1.5M)→(1920,15,3M)→(1920,24,4M), BALANCED, 150k
+  floor — up on 3 clean samples, down one rung on cpu/bandwidth, stall-stop
+  on zero-fps evidence with the onStop HINT fast-tracking 3→1 samples.
+  Critically: the rung is re-asserted in onAnswer, because before negotiation
+  the sender reports no encodings and the initial apply can no-op — that
+  silent no-op would have recreated the unfunded start.
+- REMOVED from call_controller.dart: second m-line + transceiver, the
+  replaceTrack swap, _shareOnSecondLine, cameraLive, sdpHasSecondVideoLine,
+  _attachRemoteScreen, the whole MAINTAIN_RESOLUTION rung ladder and
+  _adaptScreenProfile, CallStatsMonitor.screenTrackId (stats revert to plain
+  'tx' — one video sender again). Camera controls in call_screen are now
+  unconditional; self-tile gates on !sharingScreen (appScopedShare preview
+  kept).
+- Race hardening (found in the adversarial pass over my own fixes): a
+  share-offer arriving while sharing yields cleanly (stop own share first); a
+  stray 'screen off' cannot close the sharer's own send session; 'screen off'
+  clears screenRenderer so the next share never letterboxes a stale frame.
+- Cross-version note: a build ≤60 receiving 'share-offer' ignores it (switch
+  falls through, no crash) — it would just see a black share. Both phones get
+  61 together, so this is a note, not a hazard.
+- Tests: screen_share_second_line_test.dart DELETED with its mechanism;
+  law + profile tests rewritten against the session (dedicated-connection
+  law, MAINTAIN_RESOLUTION banned, VP9-only-in-session, fundable first rung,
+  strictly-richer climb, stop-hint law, session-release count).
+- Gates (pasted in session): flutter analyze 0 errors / 0 warnings (550
+  pre-existing infos); full suite 1246/1246 passed.
+- NOT verified: frames on real hardware. That needs build 61 on both OnePlus
+  phones — the very next step. Never call this fixed until the owner sees a
+  moving picture on the far phone.
+
+Next: release.sh --bump → build 61 → install both OnePlus → owner tests
+everything at once (their §176 instruction).
+
+## §182 — Build 61 shipped to both phones (2026-08-29)
+
+- `tool/release.sh --bump`: gates green, clean build, `checked 1 libapp.so:
+  stamped miles-build-61`, sha256 eaf382e2…c7b77e, copied to D:\Miles\Miles.apk.
+- Installed via adb, POSTCONDITION read back from dumpsys on both:
+  OnePlus 8 (1896b4b3) versionCode=61, OnePlus 7 (a959ee2b) versionCode=61.
+- app_release row NOT updated — self-updater retired by the owner (§ MEMORY).
+- Owner now tests everything at once, screen share first. The share is dead
+  until a real call shows a moving picture on the far phone — no claim made.
+
+## §183 — Build 62: the climb made real, and the share layout goes Meet-class (2026-08-29)
+
+Owner's build-61 report: picture arrives but "too low, too blurry, too laggy";
+sharer sees no faces in miniature; receiver's two fixed tiles; both faces janky.
+Root causes CONVICTED before fixing:
+
+- **VP9 preference = software encode.** Both phones' vendor media_codecs.xml
+  (read over adb, pasted in session): HW encoders for AVC/VP8/HEVC only — NO
+  VP9 encoder exists on either handset. Build 61's VP9 preference put libvpx
+  software encode under the whole display → 'cpu' limitation forever → climb
+  pinned at rung 0 + latency. FIX: H.264-first preference (universal HW).
+- Climb required the literal 'none' and had no BWE input; 2s×3-clean = ≥18s to
+  top. FIX: 1s sampling; capture-aware clean gate (media-source fps — a STATIC
+  page produces near-zero encoded fps while healthy, and an fps-only gate would
+  have re-shipped "too blurry" for exactly the content that needs sharpness
+  most); BWE fast path (1 clean sample when availableOutgoingBitrate ≥ 1.3×
+  next rung, suppressed 10s after any fall). Ladder resized for H.264:
+  (960,15,1200k)→(1280,20,2000k)→(1920,24,3500k)→(1920,30,5000k), floor 300k.
+  Stall watchdog RESCALED not shrunk: (stopHinted ? 2 : 6) at 1s = same 2s/6s
+  wall clock as 61.
+- Camera contention = the janky faces. FIX: _setCameraShareProfile — during a
+  share the camera sender runs scaleResolutionDownBy 2.0 / maxFramerate 15
+  (both reversible fields; bitrate NEVER touched — the plugin cannot unset a
+  set field), restored in stopScreenShare; deliberately NOT in _teardown (PC
+  disposed anyway).
+- Layout: during any share the share holds the big view (sharer: live
+  self-preview when app-scoped, full-size sharing panel behind IgnorePointer
+  otherwise — ColoredBox would have eaten the stats long-press) and BOTH faces
+  live in new FaceStrip (call_face_strip.dart): horizontal, centred while they
+  fit, BouncingScrollPhysics past that, above the controls in one bottom
+  Column. Non-share layout untouched.
+- Observability: ShareQualityDigest (typed, ParseShortfall model — free text
+  is discarded by the reporter and the server caps detail at 64 chars) filed
+  once per >5s share from stopScreenShare AND hangup teardown, kind
+  'share-quality', e.g. `h264 r2/3 87s c4 f1 cpu12 bw0 fps14 bwe2300`. The
+  codec slug proves from the field whether HW H.264 actually negotiated.
+- Tests: profile test now pins isClean/samplesNeeded truth tables + new ladder
+  bounds; law test pins H264-first/VP9-ban ('video/vp9' literal), watchdog
+  2:6, dampening literal + no-maxBitrate, digest at both ends, FaceStrip
+  scrollability, IgnorePointer. NEW face_strip_test (320dp, 2 and 5 tiles,
+  drag moves) and share_quality_report_test (row through the real reporter
+  seam, 64-char ceiling).
+- Gates: analyze 0 errors / 0 warnings (550 pre-existing infos); full suite
+  1262/1262 passed.
+- Process note: a && chain died on grep -c returning 1 for zero matches, and
+  one suite run silently no-opped from a drifted CWD with `| tail` masking the
+  exit code — both caught, both re-run from /d/Miles/mobile explicitly.
+
+Next: release.sh --bump → build 62 → install both OnePlus → owner field test
+(picture ≤1s, sharpens ≤10s, static page reaches top rung, faces smooth in the
+strip both sides, long-press stats works over the panel, then read the
+share-quality row).
+
+## §184 — Build 62 shipped to both phones (2026-08-29)
+
+- release.sh --bump: snapshot verified "really is build 62", sideload copy
+  Miles.apk is build 62, sha256 b49f3e11…4657d4.
+- Installed via adb; POSTCONDITION read back from dumpsys on both:
+  OnePlus 8 (1896b4b3) versionCode=62, OnePlus 7 (a959ee2b) versionCode=62.
+- app_release NOT updated (self-updater retired).
+- Awaiting owner field test per §183's checklist; after it, read the
+  share-quality row — codec slug must say h264.
