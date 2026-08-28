@@ -387,6 +387,11 @@ class PartnerRewrap {
       partnerId: req.fromUser,
       partnerPubB64: req.newPublicKeyB64,
     );
+    // The override path only runs after the human looked at their own
+    // messages and confirmed this phone reads them — the builds-27-37
+    // false-mark case. Leaving the mark set after a successful hand-over is
+    // what kept the router bouncing a WORKING phone back to this ceremony.
+    if (readableConfirmed) await CryptoCore.clearKeyless();
     return result.dropped;
   }
 
@@ -480,4 +485,35 @@ class PartnerRewrap {
         .eq('id', requestId);
     return result;
   }
+
+  /// Best-effort removal of this phone's own open request — Start fresh uses
+  /// it so the partner's screen stops offering a ceremony nobody can finish.
+  /// Failure is logged, not fatal: the row expires on its own inside ten
+  /// minutes either way.
+  static Future<void> withdraw(String requestId) async {
+    try {
+      await SupabaseService.client
+          .from('partner_rewrap_requests')
+          .delete()
+          .eq('id', requestId);
+    } catch (e) {
+      debugPrint('[rewrap] withdraw failed: $e');
+    }
+  }
+}
+
+/// The answer's outcome, held OUTSIDE the widget tree.
+///
+/// The cover swap tears down the whole MaterialApp while the unlock inside
+/// [PartnerRewrap.answer] is still awaiting; `!mounted` then swallows both the
+/// success snackbar and the failure message, and the loop starts. Statics
+/// survive the teardown (the repo's idiom — SeveranceState.held,
+/// CryptoCore.keyless): _sendAnswer records here BEFORE its mounted checks,
+/// and the next screen's _load consumes exactly once.
+class RewrapAnswerStatus {
+  /// Request id an answer is mid-flight for. A fresh State reads it as "stay
+  /// busy" — which is also the double-send guard across a rebuild.
+  static String? inFlight;
+  static ({String id, int dropped})? sent;
+  static ({String id, String message})? failed;
 }

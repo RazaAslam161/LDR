@@ -8,6 +8,7 @@ import 'package:cryptography/cryptography.dart'
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/key_escrow.dart';
 import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/data/partner_rewrap.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
@@ -18,6 +19,7 @@ import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/closer/memory_threads/memory_failure.dart';
 import 'package:miles/features/safety/severance_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -59,6 +61,12 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
   bool _claiming = false;
   String? _error;
 
+  /// This phone is itself keyless (the stored fact, so a `deferred` phone
+  /// sees it too). Gates the Start-fresh exit: a couple where NEITHER phone
+  /// holds the key is otherwise trapped — each is asked to hand over
+  /// something it does not have.
+  bool _selfKeyless = false;
+
   /// Consecutive mismatches. The third one stops being a typo and starts being
   /// worth warning about.
   int _wrong = 0;
@@ -69,11 +77,16 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
   @override
   void initState() {
     super.initState();
+    // The ceremony screen names the product and shows a live code. Fix A keeps
+    // the tree alive under the OS unlock, so the recents snapshot would
+    // otherwise show this screen — FLAG_SECURE blanks it there.
+    unawaited(SecureScreen.setSecure());
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
   void dispose() {
+    unawaited(SecureScreen.clearSecure());
     _tick?.cancel();
     _sub?.dispose();
     _typed.dispose();
@@ -98,6 +111,37 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
     final coupleId = _coupleId;
     if (_asked || coupleId == null) return;
     _asked = true;
+
+    // An answer's outcome recorded by a State the cover tore down mid-unlock
+    // (see RewrapAnswerStatus). Consumed FIRST, so a completed hand-over
+    // leaves instead of re-querying pending() and looping.
+    final sent = RewrapAnswerStatus.sent;
+    if (sent != null) {
+      RewrapAnswerStatus.sent = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              sent.dropped > 0
+                  ? 'Sent. Their phone can open it all now — though your own '
+                      'earliest memories may no longer open here.'
+                  : 'Sent. Their phone can open it all now.',
+            ),
+          ),
+        );
+        _leave();
+      }
+      return;
+    }
+    final failed = RewrapAnswerStatus.failed;
+    if (failed != null) {
+      RewrapAnswerStatus.failed = null;
+      _error = failed.message;
+    }
+    // Mid-flight answer from a torn-down State: stay busy — this is also the
+    // double-send guard, since the fresh State's _busy starts false.
+    if (RewrapAnswerStatus.inFlight != null) _busy = true;
+    _selfKeyless = await CryptoCore.isKeyless();
 
     // This phone may already be mid-ask from before a process death. The hold
     // is the only record of that — pending() filters own requests out — and it
@@ -156,7 +200,10 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
     if (_sub != null) return;
     _sub = ManagedSubscription.start(
       () => RealtimeService.coupleTable(
-        channelName: 'rewrap:$coupleId',
+        // 'screen:' suffix so this and AppShell's standing subscription never
+        // share a topic — duplicate-topic channels go joined-but-dead (the
+        // class realtime_service.dart documents).
+        channelName: 'rewrap:screen:$coupleId',
         table: 'partner_rewrap_requests',
         coupleId: coupleId,
         onChange: (_) => unawaited(_onRowChange(coupleId)),
@@ -165,6 +212,17 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
   }
 
   Future<void> _onRowChange(String coupleId) async {
+    // The in-flight answer's UPDATE is itself a row change — if its outcome
+    // is waiting, consume it here rather than re-deriving state from the row.
+    final sent = RewrapAnswerStatus.sent;
+    if (sent != null && mounted && !_claiming) {
+      RewrapAnswerStatus.sent = null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sent. Their phone can open it all now.')),
+      );
+      _leave();
+      return;
+    }
     if (!mounted || _busy || _claiming) return;
     if (_requestId != null) {
       await _claim();
@@ -391,9 +449,22 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
         );
         await ensureSharedKey(session);
       }
-      final dropped =
-          await PartnerRewrap.answer(req, readableConfirmed: _readableConfirmed);
+      RewrapAnswerStatus.inFlight = req.id;
+      final int dropped;
+      try {
+        dropped = await PartnerRewrap.answer(
+          req,
+          readableConfirmed: _readableConfirmed,
+        );
+        // BEFORE the mounted check: if the tree was torn down during the
+        // unlock, the fresh State's _load consumes this instead of the
+        // outcome vanishing into `!mounted`.
+        RewrapAnswerStatus.sent = (id: req.id, dropped: dropped);
+      } finally {
+        RewrapAnswerStatus.inFlight = null;
+      }
       if (!mounted) return;
+      RewrapAnswerStatus.sent = null;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -406,14 +477,17 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
       );
       _leave();
     } catch (e) {
+      // The refusals are stated as sentences where they are raised, because
+      // only that code knows which one happened: a declined unlock, or no
+      // key on this phone at all. Guessing "the unlock" for both would tell
+      // someone to fix a thing that was not the problem.
+      final msg = e is StateError ? e.message : partnerKeyMessage(e);
+      RewrapAnswerStatus.failed = (id: req.id, message: msg);
       if (!mounted) return;
+      RewrapAnswerStatus.failed = null;
       setState(() {
         _busy = false;
-        // The refusals are stated as sentences where they are raised, because
-        // only that code knows which one happened: a declined unlock, or no
-        // key on this phone at all. Guessing "the unlock" for both would tell
-        // someone to fix a thing that was not the problem.
-        _error = e is StateError ? e.message : partnerKeyMessage(e);
+        _error = msg;
       });
       // Only this one refusal has a way past it, and only through the person
       // holding the phone. Offered after the digits have already matched, so it
@@ -528,6 +602,11 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
           child: const Text('Not now',
               style: TextStyle(color: MilesColors.taupe),),
         ),
+        TextButton(
+          onPressed: _busy ? null : _offerStartFresh,
+          child: const Text('Start fresh',
+              style: TextStyle(color: MilesColors.faint),),
+        ),
       ];
     }
     return [
@@ -603,6 +682,86 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
         loading: _busy,
         onPressed: _busy || expired ? null : _sendAnswer,
       ),
+      if (_selfKeyless) ...[
+        const SizedBox(height: 16),
+        const Text(
+          "Can't read your old messages on this phone either? "
+          'Then neither phone holds the key.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              fontSize: 12, color: MilesColors.faint, height: 1.4,),
+        ),
+        TextButton(
+          onPressed: _busy ? null : _offerStartFresh,
+          child: const Text('Start fresh',
+              style: TextStyle(color: MilesColors.taupe),),
+        ),
+      ],
     ];
+  }
+
+  /// The exit for a couple where NEITHER phone holds the key — both were
+  /// reinstalled, so each side is asked to hand over something it does not
+  /// have and the ceremony can only loop. Never routes through answer(): no
+  /// key is transmitted, nothing is overwritten. This is the human declaring
+  /// the old key dead — the same authority the readable-override rests on.
+  Future<void> _offerStartFresh() async {
+    // Best-effort: if a recovery backup exists, the LOSSLESS path is signing
+    // out and back in with the password, and the dialog must lead with it.
+    var escrowMissing = true;
+    try {
+      escrowMissing = await KeyEscrow.isMissing();
+    } catch (_) {
+      // Offline — offer the exit anyway; the hint is a courtesy.
+    }
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: const Text('Start fresh?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!escrowMissing) ...[
+              const Text(
+                'This account has a recovery backup. Signing out and back in '
+                'with your password may bring your key back without losing '
+                'anything — try that first.',
+                style: TextStyle(color: MilesColors.gilt, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+            ],
+            const Text(
+              'Your old messages stay sealed forever, on both phones. '
+              'New messages will work normally.',
+              style: TextStyle(color: MilesColors.taupe, height: 1.5),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep waiting'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              "Yes — neither of us can read them",
+              style: TextStyle(color: MilesColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    // Order matters: a stale hold keeps keyless true at the next bindAccount
+    // and blocks publishing the stand-in key.
+    await CryptoCore.releasePublication();
+    await CryptoCore.clearKeyless();
+    final own = _requestId;
+    if (own != null) await PartnerRewrap.withdraw(own);
+    if (mounted) _leave();
   }
 }

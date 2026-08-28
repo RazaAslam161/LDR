@@ -196,7 +196,17 @@ class AppLock {
     }
   }
 
+  /// True from the moment the OS prompt is requested until it resolves.
+  ///
+  /// Lives HERE, not on MilesApp, because `answer()`-style callers demand the
+  /// unlock deep inside core code where no widget can set a guard for them —
+  /// and the one call site that didn't (partner_rewrap.dart) is how the cover
+  /// tore down the ceremony screen mid-prompt and ate the typed code. Setting
+  /// it inside [authenticate] means no future call site can reintroduce that.
+  static bool authInProgress = false;
+
   static Future<bool> authenticate() async {
+    authInProgress = true;
     try {
       final ok = await _auth.authenticate(
         // Deliberately nameless. This prompt is drawn by the system on top of
@@ -216,6 +226,10 @@ class AppLock {
     } catch (e, st) {
       debugPrint('AppLock auth error: $e\n$st');
       return false;
+    } finally {
+      // A finally, so a stuck-true flag is impossible — stuck true would
+      // disable the disguise until process death.
+      authInProgress = false;
     }
   }
 }
