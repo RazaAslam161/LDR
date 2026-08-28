@@ -60,6 +60,7 @@ class Message {
     this.bodyCipher,
     this.bodyNonce,
     this.bodyUndecryptable = false,
+    this.editedAt,
   });
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -92,6 +93,11 @@ class Message {
             : const [],
         albumId: JsonUtils.parseStringOrNull(j['album_id']),
         hasThumb: JsonUtils.parseBool(j['has_thumb']),
+        // Every select here is a bare .select(), so this column already
+        // arrived on the wire and was simply dropped on the floor.
+        editedAt: j['edited_at'] == null
+            ? null
+            : JsonUtils.parseDate(j['edited_at']).toLocal(),
       );
 
   /// `mac || ciphertext` for [body], and its nonce. Null on every row written
@@ -172,6 +178,7 @@ class Message {
         bodyCipher: bodyCipher,
         bodyNonce: bodyNonce,
         bodyUndecryptable: bodyUndecryptable,
+        editedAt: editedAt,
       );
 
   /// The result of hydration: the opened text, or the admission that it could
@@ -204,6 +211,7 @@ class Message {
         // era `body` is still populated, so a key problem is invisible to the
         // reader — which is the entire reason dual-write exists.
         bodyUndecryptable: text == null && bodyCipher != null && body == null,
+        editedAt: editedAt,
       );
 
   /// Adopt the authoritative server row (its created_at fixes cross-device
@@ -346,6 +354,9 @@ class Message {
   }
 
   final DateTime createdAt;
+  /// When the sender last changed the text, or null if never. The server
+  /// sets it; `edit_message` is the only thing that writes it.
+  final DateTime? editedAt;
   final bool deletedForEveryone;
   final List<String> deletedBy;
 
@@ -1066,6 +1077,74 @@ class ChatRepository {
         'delete_message_for_everyone',
         params: {'p_message_id': messageId},
       );
+
+  /// Edit a text message you sent. Answers the server's verdict — `ok`, or one
+  /// of `not_found` `wrong_couple` `not_text` `deleted` `too_late` `too_soon`
+  /// `no_cipher` `too_many` `refused` — rather than throwing, because each one
+  /// is a different sentence to the user and an exception flattens them into
+  /// "something went wrong".
+  ///
+  /// Every rule lives in `edit_message` and none of them is re-implemented
+  /// here: ownership, the 30-minute window, a 3-second debounce, 60 edits an
+  /// hour, and a refusal to strip the cipher off a row that had one. A client
+  /// that checked these itself would be a client a modified build could talk
+  /// out of them.
+  ///
+  /// The ciphertext is bound to the message id (`bodyAd(rowId)`), so the edit
+  /// re-seals against the SAME id — sealing against a new one would write a
+  /// blob no reader could open.
+  static Future<String> editMessage(String messageId, String body) async {
+    // A verdict, not a throw. Every other refusal here is a verdict, and the
+    // five StateErrors in this file are a census of SEND paths — an edit is not
+    // one, and the queue that census protects never carries edits.
+    if (SupabaseService.currentUserId == null) return 'not_signed_in';
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) return 'empty';
+    final sealed = await sealBody(trimmed, messageId);
+    final res = await _c.rpc<dynamic>('edit_message', params: {
+      'p_message_id': messageId,
+      // The same dual-write rule the insert uses. Diverging here would let an
+      // edit drop the plaintext off a row whose cipher the fleet still cannot
+      // read — which is the live field failure, not a hypothetical one.
+      'p_body': omitPlaintext(
+        cipherOnly: ReleaseGate.chatCipherOnly,
+        sealed: sealed != null,
+      )
+          ? null
+          : trimmed,
+      // bytesToBytea, not the raw list: bytea crosses PostgREST in a specific
+      // encoding and the insert path already settled which.
+      'p_cipher': sealed == null ? null : bytesToBytea(sealed.blob),
+      'p_nonce': sealed == null ? null : bytesToBytea(sealed.nonce),
+    });
+    return res as String? ?? 'refused';
+  }
+
+  /// The sentence for each verdict [editMessage] can answer. Copy recovered
+  /// verbatim from build 52 — see docs/guides/BUILD-52-AUDIT.md.
+  static String editMessageError(String verdict) {
+    switch (verdict) {
+      case 'not_text':
+        return 'Only text messages can be edited.';
+      case 'not_found':
+        return 'That message is no longer there.';
+      case 'deleted':
+        return 'That message was deleted.';
+      case 'wrong_couple':
+        return 'That message belongs to a conversation you have left.';
+      case 'too_many':
+        return "You've edited a lot of messages this hour. Try again later.";
+      case 'too_late':
+        return 'That message is too old to edit.';
+      case 'not_signed_in':
+        return 'Sign in again to edit.';
+      case 'too_soon':
+        return 'That message changed while you were editing it. '
+            'Have another look.';
+      default:
+        return "Couldn't save that edit. Check your connection and try again.";
+    }
+  }
 
   /// Hard-deletes every message in the couple's conversation for both users.
   /// The RPC derives the couple_id from auth.uid() server-side.

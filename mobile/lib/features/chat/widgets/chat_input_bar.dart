@@ -23,6 +23,8 @@ class ChatInputBar extends StatefulWidget {
     this.onChanged,
     this.replyingTo,
     this.onCancelReply,
+    this.editingMessage,
+    this.onCancelEdit,
     this.onClearConversation,
   });
 
@@ -53,6 +55,12 @@ class ChatInputBar extends StatefulWidget {
 
   /// The message being replied to (shows a quoted bar above the input).
   final Message? replyingTo;
+
+  /// The message being edited, if any. Non-null swaps the bar into edit
+  /// mode: the field is seeded with the current text and [onSendText]
+  /// means "save this edit" rather than "send a new message".
+  final Message? editingMessage;
+  final VoidCallback? onCancelEdit;
   final VoidCallback? onCancelReply;
 
   /// Clears the conversation on THIS device only (local + instant). The
@@ -100,6 +108,23 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   void didUpdateWidget(ChatInputBar old) {
     super.didUpdateWidget(old);
+    // An edit starting or ending swaps what is in the field, and it happens
+    // with the couple UNCHANGED — so it has to run before the early return
+    // below, not after it.
+    if (widget.editingMessage?.id != old.editingMessage?.id) {
+      final now = widget.editingMessage;
+      // The half-typed message is not collateral. An edit is a detour, so what
+      // was in the field is held and put back when the detour ends — otherwise
+      // tapping edit silently destroys whatever the user was writing.
+      if (now != null) {
+        _draftBeforeEdit = _text.text;
+        _text.text = now.body ?? '';
+      } else {
+        _text.text = _draftBeforeEdit ?? '';
+        _draftBeforeEdit = null;
+      }
+      _text.selection = TextSelection.collapsed(offset: _text.text.length);
+    }
     if (old.coupleId == widget.coupleId) return;
     // A different couple on the same handset (an account switch) must neither
     // inherit the previous one's draft nor lose it.
@@ -107,6 +132,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _text.clear();
     _restoreDraft();
   }
+
+  /// What was in the field when an edit began, restored when it ends.
+  String? _draftBeforeEdit;
 
   /// Put back whatever was typed and not sent.
   ///
@@ -562,7 +590,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (widget.replyingTo != null)
+            // Never both: an edit REPLACES a body, so a reply target attached
+            // to it would have nowhere to go.
+            if (widget.editingMessage != null)
+              _EditBar(onCancel: widget.onCancelEdit)
+            else if (widget.replyingTo != null)
               _ReplyBar(
                   message: widget.replyingTo!, onCancel: widget.onCancelReply,),
             Row(
@@ -696,6 +728,46 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         ),
                       ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The composer wearing its edit state. Deliberately shaped like [_ReplyBar]
+/// — same height, same rule down the left — because it occupies the same slot
+/// and a differently-sized banner would make the whole bar jump.
+class _EditBar extends StatelessWidget {
+  const _EditBar({this.onCancel});
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: MilesColors.surface1,
+          borderRadius: BorderRadius.circular(12),
+          border: const Border(
+            left: BorderSide(color: MilesColors.gilt, width: 3),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.edit_outlined, size: 16, color: MilesColors.gilt),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Editing message',
+                  style: TextStyle(color: MilesColors.gilt, fontSize: 13),),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18, color: MilesColors.taupe),
+              onPressed: onCancel,
             ),
           ],
         ),

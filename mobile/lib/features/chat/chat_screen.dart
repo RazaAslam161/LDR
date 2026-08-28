@@ -96,6 +96,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _typingActive = false;
   bool _hasNewMessage = false;
   Message? _replyingTo;
+  Message? _editingMessage;
   RealtimeChannel? _moodChannel;
 
   /// Local-only "clear conversation" cutoff: messages at or before this are
@@ -424,12 +425,76 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return true;
   }
 
+  /// One composer, one job. Starting a reply while an edit is open would
+  /// silently discard the edit — the field is already holding the message's
+  /// text — so the edit is named and kept instead of being thrown away.
+  bool _blockedByEdit() {
+    if (_editingMessage == null) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Finish or cancel the edit first.')),
+    );
+    return true;
+  }
+
   void _startReply(Message m) {
     if (m.deletedForEveryone) return;
+    if (_blockedByEdit()) return;
     setState(() => _replyingTo = m);
   }
 
   void _cancelReply() => setState(() => _replyingTo = null);
+
+  /// How long the SERVER allows an edit. Mirrored here for one reason only —
+  /// to avoid offering a button that is already doomed — and never as the
+  /// authority. `edit_message` answers `too_late` and that answer is the truth;
+  /// a client clock is not evidence about anything.
+  static const _editWindow = Duration(minutes: 30);
+
+  bool _canEdit(Message m, String? uid) =>
+      m.isMine(uid) &&
+      m.kind == 'text' &&
+      !m.deletedForEveryone &&
+      m.sendStatus == SendStatus.sent &&
+      DateTime.now().difference(m.createdAt) < _editWindow;
+
+  void _startEdit(Message m) {
+    // An edit replaces a body; a reply target attached to it has nowhere to go.
+    setState(() {
+      _replyingTo = null;
+      _editingMessage = m;
+    });
+  }
+
+  void _cancelEdit() => setState(() => _editingMessage = null);
+
+  /// Save an edit. Every refusal is the server's, and each gets its own
+  /// sentence rather than one shrug — see [ChatRepository.editMessageError].
+  Future<void> _saveEdit(Message target, String text) async {
+    if (text.trim() == (target.body ?? '').trim()) {
+      setState(() => _editingMessage = null);
+      return;
+    }
+    String verdict;
+    try {
+      verdict = await ChatRepository.editMessage(target.id, text);
+    } catch (e) {
+      debugPrint('[chat] edit failed: $e');
+      verdict = 'network';
+    }
+    if (!mounted) return;
+    if (verdict == 'ok') {
+      setState(() => _editingMessage = null);
+      // The row is refreshed by the same realtime path a send uses; nothing is
+      // patched into _messages by hand, so an edit cannot leave the list
+      // disagreeing with the server.
+      return;
+    }
+    // The composer STAYS in edit mode on a refusal, holding the typed text.
+    // Dropping out of it would throw the edit away along with the message.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ChatRepository.editMessageError(verdict))),
+    );
+  }
 
   /// The id to attach to the next send (and clears the reply state).
   String? _takeReplyId() {
@@ -1464,6 +1529,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // row for the reaction's foreign key to point at, and one already deleted
     // for everyone has nothing left to react to.
     if (!ChatSelection.canSelect(m)) return;
+    if (_blockedByEdit()) return;
     final uid = SupabaseService.currentUserId;
     var choice = await ReactionBar.show(
       context,
@@ -2090,6 +2156,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                           _copyMessage(one);
                                         },
                                       ),
+                                    // Offered only where the server would
+                                    // accept it: your own text, still within
+                                    // the window. The server decides regardless
+                                    // — this only avoids a button that is
+                                    // already doomed.
+                                    if (_canEdit(one, uid))
+                                      IconButton(
+                                        tooltip: 'Edit',
+                                        icon: const Icon(Icons.edit_outlined,
+                                            color: MilesColors.gilt,),
+                                        onPressed: () {
+                                          _clearSelection();
+                                          _startEdit(one);
+                                        },
+                                      ),
                                     IconButton(
                                       tooltip: 'Reply',
                                       icon: const Icon(Icons.reply,
@@ -2335,7 +2416,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         onChanged: _onTyping,
                         replyingTo: _replyingTo,
                         onCancelReply: _cancelReply,
-                        onSendText: (t) => _sendTextFast(couple.id, t),
+                        editingMessage: _editingMessage,
+                        onCancelEdit: _cancelEdit,
+                        onSendText: (t) {
+                          final editing = _editingMessage;
+                          return editing == null
+                              ? _sendTextFast(couple.id, t)
+                              : _saveEdit(editing, t);
+                        },
                         onSendMedia: (items) =>
                             _sendMediaBatch(couple.id, items),
                         onSendFiles: (docs) =>
@@ -2619,6 +2707,20 @@ class _Bubble extends StatelessWidget {
                 _bubbleTimeFormat.format(message.createdAt),
                 style: const TextStyle(fontSize: 10, color: MilesColors.faint),
               ),
+              // Said, not hidden. A message whose text changed after it was
+              // read is a different message, and the person who read the first
+              // version is entitled to know a second one exists.
+              if (message.editedAt != null) ...[
+                const SizedBox(width: 4),
+                const Text(
+                  'edited',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: MilesColors.faint,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
               if (mine && status != null) ...[
                 const SizedBox(width: 4),
                 // Rebuilt by the 5s notifier alone, so a decaying receipt

@@ -246,28 +246,81 @@ class _Item extends StatelessWidget {
 Future<String?> showReactionPicker(BuildContext context) =>
     showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: MilesColors.surface1,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(left: 8, bottom: 8),
-                child: Text(
-                  'Pick a reaction',
-                  style: TextStyle(
-                    color: MilesColors.cream50,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+      builder: (ctx) => const _ReactionPickerSheet(),
+    );
+
+/// Seventy-two emoji is past the point where scanning beats typing, so the
+/// sheet searches. Recovered from build 52 — see docs/guides/BUILD-52-AUDIT.md.
+class _ReactionPickerSheet extends StatefulWidget {
+  const _ReactionPickerSheet();
+
+  @override
+  State<_ReactionPickerSheet> createState() => _ReactionPickerSheetState();
+}
+
+class _ReactionPickerSheetState extends State<_ReactionPickerSheet> {
+  String _query = '';
+
+  List<String> get _matches {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return kReactionPalette;
+    return [
+      for (final e in kReactionPalette)
+        if ((kReactionKeywords[e] ?? '').contains(q)) e,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = _matches;
+    return SafeArea(
+      child: Padding(
+        // The keyboard's own inset, so the grid is not hidden under it.
+        padding: EdgeInsets.fromLTRB(
+          12,
+          14,
+          12,
+          12 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 8, bottom: 8),
+              child: Text(
+                'Pick a reaction',
+                style: TextStyle(
+                  color: MilesColors.cream50,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+            ),
+            TextField(
+              autofocus: false,
+              style: const TextStyle(color: MilesColors.cream50),
+              decoration: const InputDecoration(
+                hintText: 'Search emoji',
+                prefixIcon: Icon(Icons.search, color: MilesColors.taupe),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+            const SizedBox(height: 10),
+            if (matches.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(
+                  child: Text('No emoji for that',
+                      style: TextStyle(color: MilesColors.taupe),),
+                ),
+              )
+            else
               Flexible(
                 child: GridView.builder(
                   shrinkWrap: true,
@@ -276,27 +329,26 @@ Future<String?> showReactionPicker(BuildContext context) =>
                       const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 52,
                   ),
-                  itemCount: kReactionPalette.length,
+                  itemCount: matches.length,
                   itemBuilder: (_, i) => GestureDetector(
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      Navigator.pop(ctx, kReactionPalette[i]);
+                      Navigator.pop(context, matches[i]);
                     },
                     behavior: HitTestBehavior.opaque,
                     child: Center(
-                      child: Text(
-                        kReactionPalette[i],
-                        style: const TextStyle(fontSize: 26),
-                      ),
+                      child: Text(matches[i],
+                          style: const TextStyle(fontSize: 26),),
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
+  }
+}
 
 /// The full set the "+" opens.
 ///
@@ -313,3 +365,84 @@ const List<String> kReactionPalette = <String>[
   '🎵', '🎧', '📷', '✈️', '🏡', '🚗', '⏰', '💤',
   '🤔', '🙃', '😴', '🤒', '😅', '😉', '🫂', '💌',
 ];
+
+/// Search terms per emoji.
+///
+/// Written out rather than derived: Flutter has no Unicode name table at
+/// runtime, and the words people actually type ("heart", "laugh", "sorry") are
+/// not the official names anyway. Lower-case, and matched as a substring so
+/// "lau" finds laughing.
+const Map<String, String> kReactionKeywords = <String, String>{
+  '❤️': 'heart red love',
+  '🧡': 'heart orange love',
+  '💛': 'heart yellow love',
+  '💚': 'heart green love',
+  '💙': 'heart blue love',
+  '💜': 'heart purple love',
+  '🤍': 'heart white love',
+  '💖': 'heart sparkle love shine',
+  '😂': 'laugh cry funny joy',
+  '🤣': 'laugh rolling funny',
+  '😊': 'smile happy blush',
+  '😍': 'love eyes adore',
+  '🥰': 'love hearts adore smile',
+  '😘': 'kiss blow love',
+  '🤗': 'hug arms',
+  '😌': 'relieved calm content',
+  '😮': 'surprise open mouth wow',
+  '😲': 'astonished shock wow',
+  '🤯': 'mind blown shock',
+  '🥺': 'pleading please puppy eyes',
+  '😢': 'sad cry tear',
+  '😭': 'sob cry sad',
+  '😔': 'sad down pensive',
+  '😞': 'disappointed sad',
+  '🙏': 'pray thanks please sorry',
+  '👍': 'thumbs up yes good ok',
+  '👎': 'thumbs down no bad',
+  '👏': 'clap applause well done',
+  '🙌': 'raise hands celebrate praise',
+  '🤝': 'handshake deal agree',
+  '✌️': 'peace victory',
+  '🫶': 'heart hands love',
+  '🔥': 'fire hot lit',
+  '✨': 'sparkles shine magic',
+  '🌟': 'star glow shine',
+  '💫': 'dizzy star swirl',
+  '🎉': 'party celebrate congrats',
+  '🥳': 'party face celebrate',
+  '🎈': 'balloon party',
+  '🎁': 'gift present',
+  '☀️': 'sun sunny day',
+  '🌙': 'moon night',
+  '⭐': 'star',
+  '🌈': 'rainbow',
+  '🌸': 'blossom flower pink spring',
+  '🌹': 'rose flower red',
+  '🌻': 'sunflower flower yellow',
+  '🍀': 'clover luck lucky',
+  '☕': 'coffee tea cup',
+  '🍰': 'cake slice dessert',
+  '🍕': 'pizza food',
+  '🍫': 'chocolate sweet',
+  '🍦': 'ice cream dessert',
+  '🥂': 'cheers toast drinks',
+  '🍓': 'strawberry fruit',
+  '🍉': 'watermelon fruit',
+  '🎵': 'music note song',
+  '🎧': 'headphones music listen',
+  '📷': 'camera photo picture',
+  '✈️': 'plane flight travel',
+  '🏡': 'home house',
+  '🚗': 'car drive',
+  '⏰': 'clock alarm time',
+  '💤': 'sleep zzz tired',
+  '🤔': 'think hmm wonder',
+  '🙃': 'upside down silly',
+  '😴': 'sleep sleeping tired',
+  '🤒': 'sick ill unwell',
+  '😅': 'sweat smile nervous phew',
+  '😉': 'wink',
+  '🫂': 'hug hugging comfort',
+  '💌': 'love letter note',
+};
