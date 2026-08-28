@@ -28,7 +28,8 @@ class MapToken {
 
   static bool get configured => (_token?.isNotEmpty ?? false);
 
-  /// Fetch once per app run. Cheap to call repeatedly.
+  /// Fetch once per app run — once per SUCCESSFUL fetch. Cheap to call
+  /// repeatedly.
   static Future<String?> ensure() async {
     if (_fetched) return _token;
     try {
@@ -36,13 +37,15 @@ class MapToken {
       final map = JsonUtils.asMap(res.data);
       final t = JsonUtils.parseStringOrNull(map['token']);
       _token = (t?.isEmpty ?? true) ? null : t;
+      // Only a fetch that ANSWERED pins the state. The server saying "not
+      // configured" is an answer; a dead socket is not — setting _fetched on
+      // the failure path pinned "the world map is not set up yet" for the
+      // whole process over one bad moment of connectivity.
+      _fetched = true;
     } catch (e) {
-      // Offline, signed out, or the function is not deployed. All three are
-      // "no map right now" rather than something to surface as an error.
       debugPrint('[map] token unavailable: ${e.runtimeType}');
       _token = null;
     }
-    _fetched = true;
     return _token;
   }
 

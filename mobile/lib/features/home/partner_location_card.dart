@@ -1,21 +1,29 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:miles/core/data/models.dart';
+import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/partner_sentence.dart';
 import 'package:miles/features/home/world_map_screen.dart';
-import 'package:geolocator/geolocator.dart'; // For Distance
+// `show`, because geolocator's Position collides with Mapbox's geotypes
+// Position — and this file only ever wants the distance helper.
+import 'package:geolocator/geolocator.dart' show Geolocator;
 
-/// Live partner location on the dashboard. Shows a Google Map
-/// with the partner's marker that animates to each new fix, "updated Xs ago",
-/// and the distance between you.
+/// Live partner location on the dashboard: a small dark Mapbox map with the
+/// partner's marker easing to each new fix, "updated Xs ago", and the distance
+/// between you.
+///
+/// Mapbox, not Google — the Google billing account is closed for good
+/// (BRAIN §4b), so every Google surface rendered an unauthorised grey void.
+/// The token comes from the server at runtime (MapToken), same as the world
+/// map, so this card works on every install without a key in the APK.
 class PartnerLocationCard extends StatefulWidget {
   const PartnerLocationCard({
     required this.partner,
@@ -41,14 +49,35 @@ class PartnerLocationCard extends StatefulWidget {
 }
 
 class _PartnerLocationCardState extends State<PartnerLocationCard> {
-  GoogleMapController? _mapController;
-  BitmapDescriptor? _partnerIcon;
-  BitmapDescriptor? _myIcon;
+  MapboxMap? _map;
+  PointAnnotationManager? _points;
+  PolylineAnnotationManager? _lines;
+  PointAnnotation? _partnerPin;
+  PointAnnotation? _myPin;
+  PolylineAnnotation? _line;
+
+  Uint8List? _partnerIcon;
+  Uint8List? _myIcon;
+
+  bool _ready = false;
+  bool _tokenMissing = false;
 
   @override
   void initState() {
     super.initState();
     _loadIcons();
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    final token = await MapToken.ensure();
+    if (!mounted) return;
+    if (token == null) {
+      setState(() => _tokenMissing = true);
+      return;
+    }
+    MapboxOptions.setAccessToken(token);
+    setState(() => _ready = true);
   }
 
   Future<void> _loadIcons() async {
@@ -58,7 +87,9 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     if (mounted) setState(() {});
   }
 
-  static Future<BitmapDescriptor> _createAvatarMarker(
+  /// The same canvas drawing the Google version used — only the return type
+  /// changed: Mapbox point annotations take the PNG bytes directly.
+  static Future<Uint8List> _createAvatarMarker(
       String name, Color color, Color textColor) async {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
@@ -92,10 +123,10 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     final ui.Image image = await pictureRecorder.endRecording().toImage(48, 48);
     final ByteData? byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+    return byteData!.buffer.asUint8List();
   }
 
-  static Future<BitmapDescriptor> _createMyDotMarker() async {
+  static Future<Uint8List> _createMyDotMarker() async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
 
@@ -111,7 +142,79 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     final ui.Image image = await pictureRecorder.endRecording().toImage(26, 26);
     final ByteData? byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+    return byteData!.buffer.asUint8List();
+  }
+
+  Future<void> _onMapCreated(MapboxMap map) async {
+    _map = map;
+    await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
+    await map.compass.updateSettings(CompassSettings(enabled: false));
+    _points = await map.annotations.createPointAnnotationManager();
+    _lines = await map.annotations.createPolylineAnnotationManager();
+    await _syncAnnotations();
+  }
+
+  /// Mapbox annotations are imperative where Google's were declarative: the
+  /// build method computes the positions and this pushes them at the map.
+  Future<void> _syncAnnotations() async {
+    final points = _points;
+    final lines = _lines;
+    if (points == null || lines == null) return;
+    final p = widget.partner;
+    if (p == null || !p.isSharingLive || p.latitude == null) return;
+
+    final partnerPoint =
+        Point(coordinates: Position(p.longitude!, p.latitude!));
+    final icon = _partnerIcon;
+    if (icon != null) {
+      if (_partnerPin == null) {
+        _partnerPin = await points.create(PointAnnotationOptions(
+          geometry: partnerPoint,
+          image: icon,
+          // The drawn marker carries its ground shadow at the bottom edge —
+          // same reason the Google anchor was (0.5, 0.9).
+          iconAnchor: IconAnchor.BOTTOM,
+        ),);
+      } else {
+        _partnerPin!.geometry = partnerPoint;
+        await points.update(_partnerPin!);
+      }
+    }
+
+    final myIcon = _myIcon;
+    if (widget.myLat != null && widget.myLon != null && myIcon != null) {
+      final myPoint =
+          Point(coordinates: Position(widget.myLon!, widget.myLat!));
+      if (_myPin == null) {
+        _myPin = await points.create(PointAnnotationOptions(
+          geometry: myPoint,
+          image: myIcon,
+          iconAnchor: IconAnchor.CENTER,
+        ),);
+      } else {
+        _myPin!.geometry = myPoint;
+        await points.update(_myPin!);
+      }
+
+      final lineGeom = LineString(coordinates: [
+        Position(widget.myLon!, widget.myLat!),
+        Position(p.longitude!, p.latitude!),
+      ],);
+      if (_line == null) {
+        // Solid at 0.55 opacity where Google drew dots — per-annotation
+        // dash arrays do not exist in this SDK, and a faint solid thread
+        // reads the same at card size.
+        _line = await lines.create(PolylineAnnotationOptions(
+          geometry: lineGeom,
+          lineColor: MilesColors.blush.toARGB32(),
+          lineOpacity: 0.55,
+          lineWidth: 2,
+        ),);
+      } else {
+        _line!.geometry = lineGeom;
+        await lines.update(_line!);
+      }
+    }
   }
 
   @override
@@ -125,8 +228,10 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
       final moved = old.partner?.latitude != p.latitude ||
           old.partner?.longitude != p.longitude;
       if (moved) {
-        _mapController?.animateCamera(
-            CameraUpdate.newLatLng(LatLng(p.latitude!, p.longitude!)));
+        final point = Point(coordinates: Position(p.longitude!, p.latitude!));
+        unawaited(_map?.easeTo(CameraOptions(center: point),
+            MapAnimationOptions(duration: 600),),);
+        unawaited(_syncAnnotations());
       }
     }
   }
@@ -134,8 +239,13 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
   void _recenter() {
     final p = widget.partner;
     if (p == null || !p.isSharingLive) return;
-    _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(p.latitude!, p.longitude!), 15.5));
+    unawaited(_map?.easeTo(
+      CameraOptions(
+        center: Point(coordinates: Position(p.longitude!, p.latitude!)),
+        zoom: 15.5,
+      ),
+      MapAnimationOptions(duration: 600),
+    ),);
   }
 
   String _agoText(DateTime? at) {
@@ -179,6 +289,28 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
       ),
     );
   }
+
+  /// The 210px slot when the map cannot draw: the server token is absent or
+  /// this fetch failed. The card's words and distance still work, and the tap
+  /// still leads to the full screen (which explains the setup).
+  Widget _mapFallback() => Container(
+        height: 210,
+        width: double.infinity,
+        color: MilesColors.night,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.public_off, color: MilesColors.taupe, size: 28),
+            const SizedBox(height: 8),
+            Text(
+              _tokenMissing
+                  ? 'The map needs its server token.'
+                  : 'Loading the map…',
+              style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
+            ),
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -236,40 +368,10 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
       );
     }
 
-    final point = LatLng(p.latitude!, p.longitude!);
-    final myPoint = (widget.myLat != null && widget.myLon != null)
-        ? LatLng(widget.myLat!, widget.myLon!)
-        : null;
     final dist = _distanceText();
-
-    final Set<Marker> markers = {};
-    if (_partnerIcon != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('partner'),
-        position: point,
-        icon: _partnerIcon!,
-        anchor: const Offset(0.5, 0.9),
-      ));
-    }
-    if (myPoint != null && _myIcon != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('me'),
-        position: myPoint,
-        icon: _myIcon!,
-        anchor: const Offset(0.5, 0.5),
-      ));
-    }
-
-    final Set<Polyline> polylines = {};
-    if (myPoint != null) {
-      polylines.add(Polyline(
-        polylineId: const PolylineId('line'),
-        points: [myPoint, point],
-        color: MilesColors.blush.withValues(alpha: 0.55),
-        width: 2,
-        patterns: [PatternItem.dot, PatternItem.gap(10)],
-      ));
-    }
+    // A new fix arriving is a rebuild; push it at the imperative annotation
+    // layer once the frame settles.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncAnnotations());
 
     return SurfacePanel(
       padding: EdgeInsets.zero,
@@ -299,8 +401,8 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => WorldMapScreen(
-                          lat: point.latitude,
-                          lon: point.longitude,
+                          lat: p.latitude!,
+                          lon: p.longitude!,
                           name: widget.partnerName,
                         ),
                       ),
@@ -325,19 +427,25 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                 child: AbsorbPointer(
                   child: Stack(
                     children: [
-                      GoogleMap(
-                        initialCameraPosition: CameraPosition(
-                          target: point,
-                          zoom: 15.5,
+                      if (!_ready)
+                        Positioned.fill(child: _mapFallback())
+                      else
+                        Positioned.fill(
+                          child: MapWidget(
+                            key: const ValueKey('partner-card-map'),
+                            cameraOptions: CameraOptions(
+                              center: Point(
+                                coordinates:
+                                    Position(p.longitude!, p.latitude!),
+                              ),
+                              zoom: 15.5,
+                            ),
+                            // Dark vector style: matches the app, and cheap —
+                            // the card is glanced at, not explored.
+                            styleUri: MapboxStyles.DARK,
+                            onMapCreated: _onMapCreated,
+                          ),
                         ),
-                        markers: markers,
-                        polylines: polylines,
-                        zoomControlsEnabled: false,
-                        compassEnabled: false,
-                        mapToolbarEnabled: false,
-                        myLocationButtonEnabled: false,
-                        onMapCreated: (c) => _mapController = c,
-                      ),
                       Positioned(
                         bottom: 8,
                         right: 8,
@@ -347,7 +455,7 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 5),
                             // scrim over the map tiles behind it
-                  color: Colors.black.withValues(alpha: 0.45),
+                            color: Colors.black.withValues(alpha: 0.45),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [

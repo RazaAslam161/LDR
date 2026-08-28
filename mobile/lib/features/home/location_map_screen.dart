@@ -3,13 +3,23 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
+// `show`, because geolocator's Position collides with Mapbox's geotypes one.
+import 'package:geolocator/geolocator.dart'
+    show Geolocator, LocationAccuracy, LocationSettings;
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart'
+    hide LocationSettings;
+import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+/// A bare coordinate pair for the screen's own logic — Mapbox's Point is a
+/// GeoJSON object and Google's LatLng is gone with its SDK.
+typedef _Geo = ({double lat, double lon});
 
 class LocationMapScreen extends ConsumerStatefulWidget {
   const LocationMapScreen({
@@ -27,7 +37,17 @@ class LocationMapScreen extends ConsumerStatefulWidget {
 
 class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     with TickerProviderStateMixin {
-  GoogleMapController? _map;
+  MapboxMap? _map;
+  PointAnnotationManager? _points;
+  PolylineAnnotationManager? _lines;
+  PointAnnotation? _partnerPin;
+  PointAnnotation? _myPin;
+  PolylineAnnotation? _line;
+  bool _partnerPinFresh = true;
+  _Geo? _followedAt;
+
+  bool _ready = false;
+  bool _tokenMissing = false;
 
   late final AnimationController _distancePulse;
 
@@ -35,9 +55,9 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
   double? _myLon;
   Timer? _myPosPoll;
 
-  BitmapDescriptor? _partnerIconLive;
-  BitmapDescriptor? _partnerIconStale;
-  BitmapDescriptor? _myIcon;
+  Uint8List? _partnerIconLive;
+  Uint8List? _partnerIconStale;
+  Uint8List? _myIcon;
 
   @override
   void initState() {
@@ -52,6 +72,18 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     });
 
     _loadIcons();
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    final token = await MapToken.ensure();
+    if (!mounted) return;
+    if (token == null) {
+      setState(() => _tokenMissing = true);
+      return;
+    }
+    MapboxOptions.setAccessToken(token);
+    setState(() => _ready = true);
   }
 
   Future<void> _loadIcons() async {
@@ -61,7 +93,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     if (mounted) setState(() {});
   }
 
-  static Future<BitmapDescriptor> _createPartnerMarker(
+  static Future<Uint8List> _createPartnerMarker(
       String name, bool isLive) async {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
@@ -124,10 +156,10 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     final ui.Image image = await pictureRecorder.endRecording().toImage(60, 70);
     final ByteData? byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+    return byteData!.buffer.asUint8List();
   }
 
-  static Future<BitmapDescriptor> _createMyDotMarker() async {
+  static Future<Uint8List> _createMyDotMarker() async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
 
@@ -157,7 +189,7 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     final ui.Image image = await pictureRecorder.endRecording().toImage(32, 48);
     final ByteData? byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+    return byteData!.buffer.asUint8List();
   }
 
   @override
@@ -183,24 +215,122 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     } catch (_) {}
   }
 
-  void _fitBoth(LatLng? partner, LatLng? me) {
-    if (_map == null) return;
+  Future<void> _fitBoth(_Geo? partner, _Geo? me) async {
+    final map = _map;
+    if (map == null) return;
     if (partner != null && me != null) {
-      final bounds = LatLngBounds(
-        southwest: LatLng(
-          partner.latitude < me.latitude ? partner.latitude : me.latitude,
-          partner.longitude < me.longitude ? partner.longitude : me.longitude,
-        ),
-        northeast: LatLng(
-          partner.latitude > me.latitude ? partner.latitude : me.latitude,
-          partner.longitude > me.longitude ? partner.longitude : me.longitude,
-        ),
+      final bounds = CoordinateBounds(
+        southwest: Point(coordinates: Position(
+          partner.lon < me.lon ? partner.lon : me.lon,
+          partner.lat < me.lat ? partner.lat : me.lat,
+        ),),
+        northeast: Point(coordinates: Position(
+          partner.lon > me.lon ? partner.lon : me.lon,
+          partner.lat > me.lat ? partner.lat : me.lat,
+        ),),
+        infiniteBounds: false,
       );
-      _map!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
-    } else if (partner != null) {
-      _map!.animateCamera(CameraUpdate.newLatLngZoom(partner, 15));
-    } else if (me != null) {
-      _map!.animateCamera(CameraUpdate.newLatLngZoom(me, 15));
+      final cam = await map.cameraForCoordinateBounds(
+        bounds,
+        MbxEdgeInsets(top: 80, left: 80, bottom: 80, right: 80),
+        null, null, null, null,
+      );
+      await map.flyTo(cam, MapAnimationOptions(duration: 700));
+    } else {
+      final one = partner ?? me;
+      if (one == null) return;
+      await map.flyTo(
+        CameraOptions(
+          center: Point(coordinates: Position(one.lon, one.lat)),
+          zoom: 15,
+        ),
+        MapAnimationOptions(duration: 700),
+      );
+    }
+  }
+
+  Future<void> _onMapCreated(MapboxMap map) async {
+    _map = map;
+    await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
+    await map.compass.updateSettings(CompassSettings(enabled: false));
+    _points = await map.annotations.createPointAnnotationManager();
+    _lines = await map.annotations.createPolylineAnnotationManager();
+    await _syncAnnotations();
+  }
+
+  /// Push the current positions at the imperative annotation layer. Cheap to
+  /// call from a post-frame: every branch no-ops when nothing moved.
+  Future<void> _syncAnnotations() async {
+    final points = _points;
+    final lines = _lines;
+    if (points == null || lines == null) return;
+
+    final presence = ref.read(partnerPresenceProvider);
+    final partner = presence?.isSharingLive ?? false ? presence : null;
+    final fresh = partner?.locationUpdatedAt != null &&
+        DateTime.now()
+                .toUtc()
+                .difference(partner!.locationUpdatedAt!.toUtc())
+                .inSeconds <
+            45;
+
+    if (partner?.latitude != null && partner?.longitude != null) {
+      final geom = Point(
+          coordinates: Position(partner!.longitude!, partner.latitude!),);
+      final icon = fresh ? _partnerIconLive : _partnerIconStale;
+      if (icon != null) {
+        // Freshness swaps the ICON, and an annotation's image can only be set
+        // at creation — so a staleness flip recreates the pin.
+        if (_partnerPin != null && _partnerPinFresh != fresh) {
+          await points.delete(_partnerPin!);
+          _partnerPin = null;
+        }
+        if (_partnerPin == null) {
+          _partnerPin = await points.create(PointAnnotationOptions(
+            geometry: geom,
+            image: icon,
+            iconAnchor: IconAnchor.CENTER,
+          ),);
+          _partnerPinFresh = fresh;
+        } else {
+          _partnerPin!.geometry = geom;
+          await points.update(_partnerPin!);
+        }
+      }
+    }
+
+    if (_myLat != null && _myLon != null && _myIcon != null) {
+      final geom = Point(coordinates: Position(_myLon!, _myLat!));
+      if (_myPin == null) {
+        _myPin = await points.create(PointAnnotationOptions(
+          geometry: geom,
+          image: _myIcon,
+          iconAnchor: IconAnchor.CENTER,
+        ),);
+      } else {
+        _myPin!.geometry = geom;
+        await points.update(_myPin!);
+      }
+
+      if (partner?.latitude != null) {
+        final lineGeom = LineString(coordinates: [
+          Position(_myLon!, _myLat!),
+          Position(partner!.longitude!, partner.latitude!),
+        ],);
+        if (_line == null) {
+          // Solid at 0.55 where Google drew dots — this SDK has no
+          // per-annotation dash array, and the faint thread reads the same.
+          _line = await lines.create(PolylineAnnotationOptions(
+            geometry: lineGeom,
+            lineColor: MilesColors.blush.toARGB32(),
+            lineOpacity: 0.55,
+            lineWidth: 2,
+          ),);
+        } else {
+          _line!.geometry = lineGeom;
+          await lines.update(_line!);
+        }
+      }
     }
   }
 
@@ -211,10 +341,10 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     super.dispose();
   }
 
-  String _distanceText(LatLng? p, LatLng? me) {
+  String _distanceText(_Geo? p, _Geo? me) {
     if (p == null || me == null) return '—';
-    final m = Geolocator.distanceBetween(
-        me.latitude, me.longitude, p.latitude, p.longitude);
+    final m =
+        Geolocator.distanceBetween(me.lat, me.lon, p.lat, p.lon);
     if (m < 1000) return '${m.round()} m apart';
     return '${(m / 1000).toStringAsFixed(1)} km apart';
   }
@@ -223,56 +353,28 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
   Widget build(BuildContext context) {
     final presence = ref.watch(partnerPresenceProvider);
     final partner = presence?.isSharingLive ?? false ? presence : null;
-    final partnerPoint = partner?.latitude != null && partner?.longitude != null
-        ? LatLng(partner!.latitude!, partner.longitude!)
-        : null;
-    final myPoint =
-        (_myLat != null && _myLon != null) ? LatLng(_myLat!, _myLon!) : null;
+    final _Geo? partnerPoint =
+        partner?.latitude != null && partner?.longitude != null
+            ? (lat: partner!.latitude!, lon: partner.longitude!)
+            : null;
+    final _Geo? myPoint =
+        (_myLat != null && _myLon != null) ? (lat: _myLat!, lon: _myLon!) : null;
 
-    if (partnerPoint != null) {
+    if (partnerPoint != null && partnerPoint != _followedAt) {
+      // Follow only when she actually moved — re-centring on every rebuild
+      // (the Google version's behaviour) fought the user's own pan.
+      _followedAt = partnerPoint;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _map?.animateCamera(CameraUpdate.newLatLng(partnerPoint));
+        unawaited(_map?.easeTo(
+          CameraOptions(
+            center: Point(
+                coordinates: Position(partnerPoint.lon, partnerPoint.lat),),
+          ),
+          MapAnimationOptions(duration: 600),
+        ),);
       });
     }
-
-    final fresh = partner?.locationUpdatedAt != null &&
-        DateTime.now()
-                .toUtc()
-                .difference(partner!.locationUpdatedAt!.toUtc())
-                .inSeconds <
-            45;
-
-    final Set<Marker> markers = {};
-    if (partnerPoint != null) {
-      final icon = fresh ? _partnerIconLive : _partnerIconStale;
-      if (icon != null) {
-        markers.add(Marker(
-          markerId: const MarkerId('partner'),
-          position: partnerPoint,
-          icon: icon,
-          anchor: const Offset(0.5, 0.5),
-        ));
-      }
-    }
-    if (myPoint != null && _myIcon != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('me'),
-        position: myPoint,
-        icon: _myIcon!,
-        anchor: const Offset(0.5, 0.5),
-      ));
-    }
-
-    final Set<Polyline> polylines = {};
-    if (partnerPoint != null && myPoint != null) {
-      polylines.add(Polyline(
-        polylineId: const PolylineId('line'),
-        points: [myPoint, partnerPoint],
-        color: MilesColors.blush.withValues(alpha: 0.55),
-        width: 2,
-        patterns: [PatternItem.dot, PatternItem.gap(10)],
-      ));
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncAnnotations());
 
     return Scaffold(
       backgroundColor: MilesColors.night,
@@ -280,20 +382,44 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
       body: Stack(
         children: [
           Positioned.fill(
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: partnerPoint ?? myPoint ?? const LatLng(0, 0),
-                zoom: partnerPoint != null ? 15 : 3,
-              ),
-              markers: markers,
-              polylines: polylines,
-              mapType: MapType.normal,
-              compassEnabled: false,
-              mapToolbarEnabled: false,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              onMapCreated: (controller) => _map = controller,
-            ),
+            child: !_ready
+                ? ColoredBox(
+                    color: MilesColors.night,
+                    child: Center(
+                      child: _tokenMissing
+                          ? const Padding(
+                              padding: EdgeInsets.all(32),
+                              child: Text(
+                                'The map needs its Mapbox token stored '
+                                'server-side. Everything else here still '
+                                'works.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    color: MilesColors.taupe, fontSize: 13,),
+                              ),
+                            )
+                          : const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                    ),
+                  )
+                : MapWidget(
+                    key: const ValueKey('location-map'),
+                    cameraOptions: CameraOptions(
+                      center: Point(
+                        coordinates: Position(
+                          (partnerPoint ?? myPoint)?.lon ?? 0,
+                          (partnerPoint ?? myPoint)?.lat ?? 0,
+                        ),
+                      ),
+                      zoom: partnerPoint != null ? 15 : 3,
+                    ),
+                    styleUri: MapboxStyles.DARK,
+                    onMapCreated: _onMapCreated,
+                  ),
           ),
           Positioned(
             top: 0,
@@ -321,27 +447,20 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                         _ChromeButton(
                           icon: Icons.explore_rounded,
                           onTap: () async {
-                            if (_map != null) {
-                              final double zoom = await _map!.getZoomLevel();
-                              final LatLngBounds bounds =
-                                  await _map!.getVisibleRegion();
-                              final center = LatLng(
-                                (bounds.northeast.latitude +
-                                        bounds.southwest.latitude) /
-                                    2,
-                                (bounds.northeast.longitude +
-                                        bounds.southwest.longitude) /
-                                    2,
-                              );
-                              _map!
-                                  .animateCamera(CameraUpdate.newCameraPosition(
-                                CameraPosition(
-                                    target: center,
-                                    zoom: zoom,
-                                    bearing: 0,
-                                    tilt: 0),
-                              ));
-                            }
+                            final map = _map;
+                            if (map == null) return;
+                            // Same view, north-up and flat — the camera
+                            // already knows where it is.
+                            final cam = await map.getCameraState();
+                            await map.easeTo(
+                              CameraOptions(
+                                center: cam.center,
+                                zoom: cam.zoom,
+                                bearing: 0,
+                                pitch: 0,
+                              ),
+                              MapAnimationOptions(duration: 500),
+                            );
                           },
                         ),
                       ],
@@ -406,12 +525,12 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
                             enabled: partnerPoint != null,
                             onTap: () async {
                               final uri = Uri.parse(
-                                  'google.navigation:q=${partnerPoint!.latitude},${partnerPoint.longitude}');
+                                  'google.navigation:q=${partnerPoint!.lat},${partnerPoint.lon}');
                               if (await canLaunchUrl(uri)) {
                                 await launchUrl(uri);
                               } else {
                                 await launchUrl(Uri.parse(
-                                    'https://maps.google.com/?q=${partnerPoint.latitude},${partnerPoint.longitude}'));
+                                    'https://maps.google.com/?q=${partnerPoint.lat},${partnerPoint.lon}'));
                               }
                             },
                           ),
