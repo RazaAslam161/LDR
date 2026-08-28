@@ -138,6 +138,8 @@ class CallStatsMonitor {
         final kind = (v['kind'] ?? v['mediaType'])?.toString();
         switch (r.type) {
           case 'outbound-rtp':
+            // One video sender on this connection — the camera. The share
+            // rides its own connection and samples itself there.
             if (kind == 'video') outVideo = r;
           case 'inbound-rtp':
             if (kind == 'video') inVideo = r;

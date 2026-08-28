@@ -258,6 +258,20 @@ class ErrorReporter {
         // report — the N of M — died right here in the switch.
         ParseShortfall(:final where, :final parsed, :final of, :final first) =>
           '$where: $parsed/$of, first=$first',
+        ShareQualityDigest(
+          :final codec,
+          :final finalRung,
+          :final topRung,
+          :final durationS,
+          :final climbs,
+          :final falls,
+          :final cpu,
+          :final bw,
+          :final fpsP50,
+          :final bweKbps
+        ) =>
+          '$codec r$finalRung/$topRung ${durationS}s c$climbs f$falls '
+              'cpu$cpu bw$bw fps$fpsP50 bwe$bweKbps',
         _ => null,
       };
 
@@ -407,4 +421,43 @@ class ParseShortfall implements Exception {
 
   @override
   String toString() => 'ParseShortfall';
+}
+
+/// How a screen share actually performed, reported once when it ends.
+///
+/// Safe by construction on the [ParseShortfall] model: rung indices, counts
+/// and a codec slug, assembled by the share session itself — nothing
+/// user-generated can ride in. The codec is the headline: it says from the
+/// field whether hardware H.264 actually won negotiation, which no test on
+/// this machine can prove.
+class ShareQualityDigest implements Exception {
+  ShareQualityDigest({
+    required this.codec,
+    required this.finalRung,
+    required this.topRung,
+    required this.durationS,
+    required this.climbs,
+    required this.falls,
+    required this.cpu,
+    required this.bw,
+    required this.fpsP50,
+    required this.bweKbps,
+  });
+
+  /// Short codec slug from the outbound stats, e.g. 'h264'.
+  final String codec;
+  final int finalRung;
+  final int topRung;
+  final int durationS;
+  final int climbs;
+  final int falls;
+
+  /// Samples the encoder spent cpu- or bandwidth-limited.
+  final int cpu;
+  final int bw;
+  final int fpsP50;
+  final int bweKbps;
+
+  @override
+  String toString() => 'ShareQualityDigest';
 }

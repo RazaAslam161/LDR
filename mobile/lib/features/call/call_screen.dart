@@ -8,6 +8,7 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/call/call_controller.dart';
+import 'package:miles/features/call/call_face_strip.dart';
 import 'package:miles/features/call/call_video.dart';
 
 /// Whether the diagnostic readout is showing. Outside the widget so it survives
@@ -43,6 +44,12 @@ class CallScreen extends ConsumerWidget {
     final ringing = call.state == CallState.ringing;
     final calling = call.state == CallState.calling;
     final video = call.isVideo;
+    // A share in either direction reshapes the whole screen the same way:
+    // the share takes the big view, and every face moves into one strip.
+    // (Both directions at once is impossible — the controller refuses a
+    // share while one is being received.)
+    final anyShare =
+        connected && video && (call.sharingScreen || call.remoteScreen);
 
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
@@ -76,18 +83,34 @@ class CallScreen extends ConsumerWidget {
             if (connected && video)
               Positioned.fill(
                 key: const ValueKey('call-remote'),
-                // Their shared display takes the big view when there is one,
-                // and their face moves to a tile beside mine rather than being
-                // displaced by it — the second m-line means we no longer have
-                // to choose between the screen and the person.
-                //
-                // The crop follows the frame, not the `screen` broadcast —
-                // see CallVideo for why the broadcast was the wrong input.
-                child: CallVideo(
-                  renderer:
-                      call.remoteScreen ? call.screenRenderer : call.remoteRenderer,
-                  portraitHint: call.remoteScreen,
-                ),
+                // The share — theirs or mine — takes the big view, and the
+                // faces move to the strip rather than being displaced by it.
+                child: call.sharingScreen
+                    // My own share holds the big view. Live only when Android
+                    // confirmed an app-scoped capture — a whole-display
+                    // self-preview is a mirror inside the captured pixels
+                    // (a tunnel), so that case gets the status panel.
+                    ? call.appScopedShare
+                        ? RTCVideoView(call.screenSelfRenderer,
+                            key: const ValueKey('call-share-self'),
+                            objectFit: RTCVideoViewObjectFit
+                                .RTCVideoViewObjectFitContain,)
+                        // IgnorePointer is load-bearing: ColoredBox hit-tests
+                        // opaque, and full-screen it would sit over the
+                        // long-press layer and make the stats overlay
+                        // untogglable on the one phone mid-share.
+                        : const IgnorePointer(
+                            key: ValueKey('call-share-panel'),
+                            child: _SharingCard(big: true),
+                          )
+                    // The crop follows the frame, not the `screen` broadcast —
+                    // see CallVideo for why the broadcast was the wrong input.
+                    : CallVideo(
+                        renderer: call.remoteScreen
+                            ? call.screenRenderer
+                            : call.remoteRenderer,
+                        portraitHint: call.remoteScreen,
+                      ),
               )
             else
               const Positioned.fill(
@@ -210,61 +233,33 @@ class CallScreen extends ConsumerWidget {
             // somebody is (theirs, then mine), because the big view is then
             // the shared display and neither person should have to give up
             // seeing the other to look at it.
-            if (video && (calling || connected))
+            if (video && (calling || connected) && !anyShare)
               Align(
                 key: const ValueKey('call-local'),
                 alignment: connected ? Alignment.topRight : Alignment.center,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      // Their face, only when their screen has taken the big
-                      // view. Otherwise their face IS the big view and a
-                      // duplicate tile would be two draws of one texture —
-                      // the thing §77 spent its whole diff removing.
-                      if (connected && call.remoteScreen) ...[
-                        _FaceTile(
-                          key: const ValueKey('call-face-remote'),
-                          child: CallVideo(
-                            renderer: call.remoteRenderer,
-                            filterQuality: FilterQuality.medium,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      _FaceTile(
-                        key: const ValueKey('call-face-local'),
-                        big: !connected,
-                        // A live self-view is right again — with the share on
-                        // its own m-line the camera never leaves the wire, so
-                        // this mirror is finally showing what the partner is
-                        // actually receiving.
-                        //
-                        // Except on the old-peer fallback, where the display
-                        // DID take the camera's sender. Then it would be a
-                        // mirror of a camera nobody is receiving, drawn inside
-                        // the very pixels being captured — a tunnel. The card
-                        // says what is happening instead.
-                        child: call.cameraLive
-                            ? RTCVideoView(call.localRenderer,
-                                // Follows the actual camera. Pinned to true,
-                                // the back camera showed the world reversed.
-                                mirror: call.frontCamera,
-                                // The preview is a thumbnail, so this is a big
-                                // DOWNscale — 720p into ~120dp. medium adds
-                                // mipmapping, which is what stops a downscale
-                                // shimmering and looking cheap. Deliberately
-                                // not applied to the remote view: that one
-                                // UPscales, where mipmaps do nothing and would
-                                // only soften it further.
-                                filterQuality: FilterQuality.medium,
-                                objectFit: RTCVideoViewObjectFit
-                                    .RTCVideoViewObjectFitCover,)
-                            : const _SharingCard(),
-                      ),
-                    ],
+                  child: _FaceTile(
+                    key: const ValueKey('call-face-local'),
+                    big: !connected,
+                    // Outside a share only — during one, every face is in the
+                    // strip above the controls. The camera stays on the wire
+                    // throughout, so this mirror shows what the partner
+                    // actually receives.
+                    child: RTCVideoView(call.localRenderer,
+                        // Follows the actual camera. Pinned to true, the back
+                        // camera showed the world reversed.
+                        mirror: call.frontCamera,
+                        // The preview is a thumbnail, so this is a big
+                        // DOWNscale — 720p into ~120dp. medium adds
+                        // mipmapping, which is what stops a downscale
+                        // shimmering and looking cheap. Deliberately not
+                        // applied to the remote view: that one UPscales,
+                        // where mipmaps do nothing and would only soften it
+                        // further.
+                        filterQuality: FilterQuality.medium,
+                        objectFit:
+                            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
                   ),
                 ),
               ),
@@ -287,14 +282,44 @@ class CallScreen extends ConsumerWidget {
                 ),
               ),
 
-            // Controls
+            // The bottom cluster: during a share, the face strip rides just
+            // above the controls — one Column, so a two-run controls Wrap on
+            // a narrow screen pushes the strip up instead of colliding.
             Align(
               key: const ValueKey('call-controls'),
               alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 44),
-                child: ringing
-                    ? Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (anyShare) ...[
+                    FaceStrip(
+                      key: const ValueKey('call-face-strip'),
+                      tiles: [
+                        _FaceTile(
+                          key: const ValueKey('call-face-remote'),
+                          height: 150,
+                          child: CallVideo(
+                            renderer: call.remoteRenderer,
+                            filterQuality: FilterQuality.medium,
+                          ),
+                        ),
+                        _FaceTile(
+                          key: const ValueKey('call-face-local'),
+                          height: 150,
+                          child: RTCVideoView(call.localRenderer,
+                              mirror: call.frontCamera,
+                              filterQuality: FilterQuality.medium,
+                              objectFit: RTCVideoViewObjectFit
+                                  .RTCVideoViewObjectFitCover,),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 44),
+                    child: ringing
+                        ? Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _RoundBtn(
@@ -336,27 +361,24 @@ class CallScreen extends ConsumerWidget {
                               label: 'Speaker',
                               onTap: () => call.setSpeaker(!call.speakerOn),),
                           if (video) ...[
-                            // Live again during a share, because the camera is
-                            // now on its own m-line and stays on the wire. They
-                            // are hidden only on the old-peer fallback, where
-                            // the display did take the camera's sender and
-                            // these would silently do nothing.
-                            if (call.cameraLive) ...[
-                              _RoundBtn(
-                                  icon: call.camOn
-                                      ? Icons.videocam
-                                      : Icons.videocam_off,
-                                  bg: MilesColors.surface2,
-                                  label: 'Camera',
-                                  onTap: call.toggleCam,),
-                              _RoundBtn(
-                                  icon: Icons.cameraswitch,
-                                  bg: MilesColors.surface2,
-                                  label: 'Flip',
-                                  onTap: call.switchCamera,),
-                            ],
-                            // Connected-only: the swap needs a negotiated
-                            // video sender to swap onto.
+                            // Live during a share too: the camera never leaves
+                            // the call's connection — the display rides its
+                            // own — so these always do what they say.
+                            _RoundBtn(
+                                icon: call.camOn
+                                    ? Icons.videocam
+                                    : Icons.videocam_off,
+                                bg: MilesColors.surface2,
+                                label: 'Camera',
+                                onTap: call.toggleCam,),
+                            _RoundBtn(
+                                icon: Icons.cameraswitch,
+                                bg: MilesColors.surface2,
+                                label: 'Flip',
+                                onTap: call.switchCamera,),
+                            // Connected-only: the share opens its own peer
+                            // connection, and there is no one to answer it
+                            // until the call itself is up.
                             if (connected)
                               _RoundBtn(
                                   icon: call.sharingScreen
@@ -389,6 +411,8 @@ class CallScreen extends ConsumerWidget {
                               onTap: call.hangup,),
                         ],
                       ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -486,15 +510,24 @@ class _RoundBtn extends StatelessWidget {
 /// rather than a corner tile. Everything else about the two sizes was already
 /// duplicated inline; it is one widget now because there can be two of them.
 class _FaceTile extends StatelessWidget {
-  const _FaceTile({required this.child, this.big = false, super.key});
+  const _FaceTile({
+    required this.child,
+    this.big = false,
+    this.height = 160,
+    super.key,
+  });
 
   final Widget child;
   final bool big;
 
+  /// Mini-tile height — the strip runs slightly shorter tiles than the
+  /// corner tile so the whole bottom cluster fits a small phone.
+  final double height;
+
   @override
   Widget build(BuildContext context) => Container(
         width: big ? 220 : 110,
-        height: big ? 320 : 160,
+        height: big ? 320 : height,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           border:
@@ -509,8 +542,12 @@ class _FaceTile extends StatelessWidget {
 ///
 /// Not a live view of the capture — that would be a mirror inside the very
 /// pixels being captured, which recurses. See the comment at its use site.
+/// [big] scales it up for the whole-display share's big view, where an
+/// app-scoped capture would have shown a live preview instead.
 class _SharingCard extends StatelessWidget {
-  const _SharingCard();
+  const _SharingCard({this.big = false});
+
+  final bool big;
 
   @override
   Widget build(BuildContext context) {
@@ -519,16 +556,18 @@ class _SharingCard extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.screen_share, color: MilesColors.gilt, size: 26),
-          const SizedBox(height: 8),
+          Icon(Icons.screen_share,
+              color: MilesColors.gilt, size: big ? 48 : 26,),
+          SizedBox(height: big ? 16 : 8),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: EdgeInsets.symmetric(horizontal: big ? 32 : 8),
             child: Text(
-              'Sharing your screen',
+              'Sharing your screen — they see exactly what this screen '
+              'shows.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: MilesColors.cream50.withValues(alpha: 0.85),
-                fontSize: 11,
+                fontSize: big ? 14 : 11,
                 height: 1.3,
               ),
             ),

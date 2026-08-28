@@ -5,6 +5,10 @@ import 'dart:ui' show PlatformDispatcher, Size;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+// A src/ import, deliberately: the plugin's global event stream is public in
+// behaviour but not re-exported, and the vendored fork (see pubspec) is pinned
+// so the path cannot drift under us.
+import 'package:flutter_webrtc/src/native/event_channel.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -12,6 +16,7 @@ import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/features/call/call_foreground.dart';
 import 'package:miles/features/call/call_stats.dart';
+import 'package:miles/features/call/screen_share_session.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/main.dart' show MilesApp;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,45 +38,32 @@ class CallController extends ChangeNotifier {
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
 
-  /// The partner's shared display, on its own m-line and so its own renderer.
-  ///
-  /// Separate from [remoteRenderer] because both now arrive at once: the whole
-  /// point of the second track is that a share no longer costs you their face.
+  /// The partner's shared display, on its own connection and so its own
+  /// renderer. Separate from [remoteRenderer] because both arrive at once: a
+  /// share never costs you their face.
   final RTCVideoRenderer screenRenderer = RTCVideoRenderer();
+
+  /// My own outgoing share, for the self-preview — bound whenever a share is
+  /// live, DRAWN only when [appScopedShare] says the capture excludes this
+  /// app (previewing a whole-display share is a mirror inside the pixels
+  /// being captured, which recurses).
+  final RTCVideoRenderer screenSelfRenderer = RTCVideoRenderer();
+
+  /// True once Android has reported a captured-content size smaller than the
+  /// display: the user picked "One app" in the Android 14 picker. Never set
+  /// on older Android — the event does not exist there.
+  bool appScopedShare = false;
+  StreamSubscription<Map<String, dynamic>>? _webrtcEventsSub;
 
   RealtimeChannel? _chan;
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
 
-  /// The sender carrying my camera, and only ever my camera.
-  RTCRtpSender? _videoSender;
-
-  /// The second video m-line and its sender, negotiated empty at call setup so
-  /// a share is a replaceTrack rather than a renegotiation. See [_createPc].
-  RTCRtpTransceiver? _screenTransceiver;
-  RTCRtpSender? _screenSender;
-
-  /// The partner's screen track id, learned from onTrack. Held rather than
-  /// rendered immediately because it arrives at negotiation time, long before
-  /// they ever press Share — until then it is a live track carrying no frames.
-  String? _remoteScreenTrackId;
-
-  /// The partner's camera stream. Kept for its `ownerTag`, which is how the
-  /// native side scopes a track-id lookup to this peer connection.
-  MediaStream? _remoteStream;
-
-  /// Whether the live share is going out on the second m-line (both faces stay
-  /// up) or, against a peer too old to have one, on the camera's sender (the
-  /// old swap). Decided per share from the negotiated SDP, never assumed.
-  bool _shareOnSecondLine = false;
-
-  /// Whether my camera is actually reaching the partner right now.
-  ///
-  /// True in every case except the old-peer fallback, where the display took
-  /// the camera's sender. The self-preview reads this so it can never show a
-  /// mirror of a camera the other person is not receiving — which is what it
-  /// did for the whole of every share before the second m-line existed.
-  bool get cameraLive => !sharingScreen || _shareOnSecondLine;
+  /// The share's own dedicated peer connection — the sharer's send side or the
+  /// receiver's receive side, whichever this device is. Null when no share is
+  /// up. The call's connection never carries a display; see
+  /// [ScreenShareSession] for why.
+  ScreenShareSession? _shareSession;
 
   /// The display capture, separate from [_localStream] and ours to dispose. The
   /// camera track stays alive inside _localStream throughout, so stopping a
@@ -91,9 +83,6 @@ class CallController extends ChangeNotifier {
   CallStats? stats;
   late final CallStatsMonitor _statsMonitor = CallStatsMonitor((s) {
     stats = s;
-    // The one place these numbers are acted on rather than only displayed.
-    // No-op unless a share is live.
-    unawaited(_adaptScreenProfile(s));
     notifyListeners();
   });
   bool frontCamera = true; // drives the local preview mirror
@@ -783,6 +772,13 @@ class CallController extends ChangeNotifier {
     await localRenderer.initialize();
     await screenRenderer.initialize();
     await remoteRenderer.initialize();
+    await screenSelfRenderer.initialize();
+    // The vendored plugin forwards MediaProjection's callbacks as events —
+    // the system "Stop sharing" press, and Android 14's captured-content size.
+    _webrtcEventsSub =
+        FlutterWebRTCEventChannel.instance.handleEvents.stream.listen(
+      _onWebrtcPluginEvent,
+    );
     // Disk first so a call placed seconds after launch already has a relay,
     // then refresh in the background. Never awaited on a call path.
     await loadCachedTurn();
@@ -1083,7 +1079,7 @@ class CallController extends ChangeNotifier {
   /// whoever is signed in shares the pixels, and there is nothing to keep in
   /// sync because there is only one stream.
   Future<void> startScreenShare() async {
-    if (state != CallState.connected || _videoSender == null || sharingScreen) {
+    if (state != CallState.connected || sharingScreen) {
       return;
     }
     // Two whole-display captures at once is a genuine feedback loop, not merely
@@ -1116,7 +1112,15 @@ class CallController extends ChangeNotifier {
       // Returns false when the consent dialog is cancelled; it does not throw.
       // It also drops the cached projection token on every call, which is what
       // Android 15+ demands — a spent token must never be replayed.
-      if (!await Helper.requestCapturePermission(fullScreenOnly: true)) return;
+      //
+      // No fullScreenOnly. Verified in the plugin source
+      // (GetUserMediaImpl.java:207-215): true forces
+      // createConfigForDefaultDisplay — whole display, always — while the
+      // default intent gives Android 14's own picker, where "One app"
+      // excludes the status bar, notifications, the launcher, the cover and
+      // this app's PiP from every captured frame. The echo the owner
+      // photographed was largely this one argument.
+      if (!await Helper.requestCapturePermission()) return;
       if (attempt != _attempt) return;
       // Before the capture, not after: Android 14+ wants the mediaProjection
       // service already running when the virtual display is created.
@@ -1150,45 +1154,49 @@ class CallController extends ChangeNotifier {
       return;
     }
     _screenStream = screen;
+    screenSelfRenderer.srcObject = screen;
     track.onEnded = () => unawaited(stopScreenShare());
-    // Which m-line carries it, decided from the SDP that actually negotiated
-    // rather than from a flag we hope is in step. A peer running a build from
-    // before the second m-line answers with one video section, and its sender
-    // would send into nothing.
-    _shareOnSecondLine = await _peerTakesSecondVideo();
-    final shareSender = _shareOnSecondLine ? _screenSender : _videoSender;
-    if (shareSender == null || attempt != _attempt) {
-      await _dropCapture(screen);
-      await CallForegroundService.dropScreenShare();
-      return;
-    }
-    Diag.record(DiagArea.call, 'screen_share_line', corr: _callId,
-        fields: {'second_m_line': _shareOnSecondLine},);
-    try {
-      await shareSender.replaceTrack(track);
-    } catch (_) {
-      // The capture is already running at this point. Left alone it would keep
-      // recording the display into a track nothing sends, with the system cast
-      // indicator up and no button state to stop it — and the next tap would
-      // orphan it for the life of the process.
-      Diag.record(DiagArea.call, 'screen_share_failed', corr: _callId);
-      if (identical(_screenStream, screen)) _screenStream = null;
-      await _dropCapture(screen);
-      await CallForegroundService.dropScreenShare();
-      return;
-    }
-    // A teardown landing inside replaceTrack has already disposed the capture
-    // and reset these; setting them now would announce a share on a call that
+    // The share gets its OWN peer connection, built fresh per share and torn
+    // down with it. The call's connection is not renegotiated, retuned or even
+    // touched — see [ScreenShareSession] for the architecture.
+    final session = ScreenShareSession(
+      send: _send,
+      iceConfig: await _iceConfig(),
+      onRemoteStream: (_) {},
+      onEnded: () => unawaited(stopScreenShare()),
+      stopHinted: () => _screenStopHinted,
+    );
+    // A teardown landing during the awaits above has already disposed the
+    // capture and reset these; going on would announce a share on a call that
     // has ended, and _send would carry a null call_id the far side does not
     // drop — letterboxing their *next* call around an ordinary camera feed.
-    if (attempt != _attempt) return;
+    if (attempt != _attempt) {
+      await session.close();
+      await _dropCapture(screen);
+      await CallForegroundService.dropScreenShare();
+      return;
+    }
+    _shareSession = session;
     sharingScreen = true;
-    // Straight after the swap, before anything is announced: the sender is
-    // still carrying camera-shaped encoder settings, and the source behind it
-    // is now three to five times the pixel rate.
-    await _applyScreenProfile();
+    _shareStartedAt = DateTime.now();
+    _screenStopHinted = false;
     _send('screen', {'on': true});
     notifyListeners();
+    // The faces are thumbnails for the length of the share, so the camera
+    // stops paying full price: half resolution, half framerate. That is the
+    // uplink and CPU the share's encoder climbs on — and it is what un-jams
+    // the face tiles, which were starving against an uncapped 720p30 camera.
+    await _setCameraShareProfile(damp: true);
+    try {
+      await session.startSharing(track, screen, _displayPixels());
+    } catch (e) {
+      // The capture is already running. Left alone it would keep recording the
+      // display into a connection that never opened, with the system cast
+      // indicator up and no button state to stop it.
+      debugPrint('[call] share start failed: $e');
+      Diag.record(DiagArea.call, 'screen_share_failed', corr: _callId);
+      await stopScreenShare();
+    }
   }
 
   Future<void> _dropCapture(MediaStream stream) async {
@@ -1196,131 +1204,6 @@ class CallController extends ChangeNotifier {
       await stream.dispose();
     } catch (_) {}
   }
-
-  /// Whether the far side negotiated the second video m-line.
-  ///
-  /// Read from the remote description rather than tracked in a field, because
-  /// the SDP is the only account of what actually negotiated — and this is a
-  /// cross-version question, where a flag we set ourselves would be exactly the
-  /// thing that is wrong. A build older than the second m-line answers with one
-  /// `m=video`; sharing onto our second sender would then send into nothing and
-  /// look, from the sharer's side, like a share that simply did not arrive.
-  ///
-  /// False means fall back to the old behaviour: swap the display onto the
-  /// camera sender. That costs the sharer's face for the length of the share,
-  /// which is the pre-existing trade and is what that peer can render.
-  Future<bool> _peerTakesSecondVideo() async {
-    if (_screenSender == null) return false;
-    try {
-      return sdpHasSecondVideoLine((await _pc?.getRemoteDescription())?.sdp);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Whether [sdp] carries two or more video sections.
-  ///
-  /// Pure and separately tested, because it is the one decision in this class
-  /// that spans app VERSIONS — and it is the decision that cannot be checked on
-  /// the machine this was written on, where there is no Android SDK and so no
-  /// second handset to negotiate with. Counting `m=` section headers is exact:
-  /// `m=` is only ever legal at the start of a line, and the answerer must
-  /// mirror the offerer's section count, so two video sections in the remote
-  /// description means both ends built one.
-  @visibleForTesting
-  static bool sdpHasSecondVideoLine(String? sdp) {
-    if (sdp == null) return false;
-    var seen = 0;
-    for (final line in const LineSplitter().convert(sdp)) {
-      if (line.startsWith('m=video')) seen++;
-      if (seen >= 2) return true;
-    }
-    return false;
-  }
-
-  /// Point [screenRenderer] at the partner's screen track.
-  ///
-  /// The track belongs to a transceiver and to no stream, so it cannot be
-  /// handed over as `srcObject`. `setSrcObject(trackId:)` is the path that
-  /// works: natively it calls `getTrackForId`, which falls through
-  /// `getRemoteTrack` to `getTransceiversTrack` — the lookup that finds a track
-  /// on a transceiver with no stream behind it. The stream is passed only for
-  /// its `ownerTag`, which scopes that search to this peer connection.
-  Future<void> _attachRemoteScreen() async {
-    final id = _remoteScreenTrackId;
-    if (id == null) return;
-    try {
-      await screenRenderer.setSrcObject(stream: _remoteStream, trackId: id);
-    } catch (e) {
-      // A share we cannot draw must not take the call with it — the audio and
-      // both cameras are on other m-lines and are unaffected.
-      debugPrint('[call] remote screen attach failed: $e');
-      Diag.record(DiagArea.call, 'remote_screen_attach_failed', corr: _callId);
-    }
-  }
-
-  // ─── Screen-share encoder profile ──────────────────────────────────────────
-  //
-  // Read this before changing a number here.
-  //
-  // The rule this file has carried since 26cae00 is that encoder settings come
-  // from getStats on a real call, not from a plan. That revert was about the
-  // CAMERA sender, and its finding was specific: MAINTAIN_FRAMERATE holds
-  // framerate by throwing resolution away, which was the reported blur. None of
-  // that is touched here, and nothing below runs unless a share is live.
-  //
-  // The screen sender's problem is the mirror image, and it is not a matter of
-  // taste. getDisplayMedia captures the REAL display — 1080x2400 on a common
-  // handset, 1440x3200 on a flagship — at a fixed 30fps, into a sender whose
-  // m-line was negotiated for a 1280x720 camera. That is roughly three to five
-  // times the pixel rate. libwebrtc knows the source is a screencast
-  // (createVideoSource(true), and OrientationAwareScreenCapturer.isScreencast()
-  // returns true), and with no explicit preference its screencast default is
-  // MAINTAIN_RESOLUTION: it holds all 2.6 megapixels and throws FRAMERATE away
-  // instead. That is exactly the reported symptom — a viewer watching a picture
-  // that sticks, worst of all while the sharer scrolls, because scrolling is
-  // full-frame motion.
-  //
-  // So: bring the pixel rate down to something a phone uplink can actually
-  // fund, then let libwebrtc adapt within that. BALANCED rather than either
-  // extreme, because at ~720p the text is legible and the remaining headroom
-  // should be spent wherever the encoder finds it. [_adaptScreenProfile] moves
-  // these from the numbers getStats reports, which is what the rule asks for.
-
-  /// Long edge to aim the encoder at. 720p-class: legible for small text on a
-  /// phone screen, and a pixel rate a mobile uplink can carry at a real
-  /// framerate rather than in stutters.
-  static const int _screenTargetLongEdge = 1280;
-
-  /// What a share gives away, one rung at a time, when the encoder says it
-  /// cannot keep up.
-  ///
-  /// Deliberately ONE ladder rather than a cpu branch and a bandwidth branch:
-  /// every rung is strictly cheaper than the one above it in both pixels and
-  /// frames, so the state is a single integer that cannot oscillate and can be
-  /// tested exhaustively. Frames go first — a screen is mostly still, and 15fps
-  /// on a document reads fine where a halved resolution does not.
-  static const List<_ScreenRung> _screenRungs = [
-    _ScreenRung(scaleMul: 1, fps: 24),
-    _ScreenRung(scaleMul: 1, fps: 15),
-    _ScreenRung(scaleMul: 1.5, fps: 15),
-    _ScreenRung(scaleMul: 1.5, fps: 10),
-    _ScreenRung(scaleMul: 2, fps: 10),
-  ];
-
-  /// Which rung a live share is currently on, or null when none is.
-  int? _screenRung;
-
-  /// Consecutive samples showing a live share sending no frames at all. The
-  /// plugin swallows MediaProjection.Callback.onStop (its body is a comment),
-  /// so `track.onEnded` can never fire and stopping the share from Android's
-  /// own cast notification used to leave the partner on a frozen last frame
-  /// until somebody hung up. This is how that is noticed instead.
-  int _screenStallSamples = 0;
-
-  /// Whether this share has ever been seen sending frames. Arms
-  /// [_screenStallSamples]; see the note at its use.
-  bool _screenSawFrames = false;
 
   /// The capture is the real panel, in physical pixels — the same value
   /// `display.getRealSize()` hands the capturer on the native side.
@@ -1330,171 +1213,82 @@ class CallController extends ChangeNotifier {
     return views.first.physicalSize;
   }
 
-  /// The factor that brings the panel's long edge to [_screenTargetLongEdge].
-  ///
-  /// 1080x2400 -> 1.875. 1440x3200 -> 2.5. 720x1280 -> 1.0, i.e. a small screen
-  /// is left alone rather than upscaled.
-  @visibleForTesting
-  static double screenScaleFor(Size pixels) {
-    final long = pixels.longestSide;
-    if (long <= 0) return 1;
-    return (long / _screenTargetLongEdge).clamp(1.0, 4.0);
-  }
+  bool _screenStopHinted = false;
+  DateTime? _shareStartedAt;
 
-  /// The scale and framerate for a given rung, on a given panel.
-  @visibleForTesting
-  static ({double scale, int fps}) screenProfileFor(Size pixels, int rung) {
-    final r = _screenRungs[rung.clamp(0, _screenRungs.length - 1)];
-    return (
-      scale: (screenScaleFor(pixels) * r.scaleMul).clamp(1.0, 4.0),
-      fps: r.fps,
-    );
-  }
-
-  Future<void> _applyScreenProfile() async {
-    _screenRung = 0;
-    _screenSawFrames = false;
-    _screenHealthySamples = 0;
-    await _pushScreenProfile(0);
-  }
-
-  Future<void> _pushScreenProfile(int rung) async {
-    final p = screenProfileFor(_displayPixels(), rung);
-    await _writeSenderProfile(
-      scale: p.scale,
-      fps: p.fps,
-      // The screen is text. BALANCED rather than either extreme: the pixel
-      // count is already down to something fundable, so the remaining headroom
-      // should go wherever the encoder finds it, instead of being spent
-      // entirely on resolution (the screencast default, and the freeze) or
-      // entirely on framerate (the camera default, and the blur 26cae00 undid).
-      degradation: RTCDegradationPreference.BALANCED,
-      what: 'screen r$rung',
-    );
-  }
-
-  /// Put the sender back exactly as an untuned camera sender behaves.
-  ///
-  /// Not "clear" — there is no clear. Both this plugin's Dart layer and its
-  /// Android layer skip null fields (RTCRtpEncoding.toMap omits them,
-  /// PeerConnectionObserver.updateRtpParameters only assigns when the map value
-  /// is non-null), so once a value is set it can only be overwritten, never
-  /// unset. Every value below is therefore the documented default rather than a
-  /// choice:
-  ///
-  ///  - scaleResolutionDownBy 1.0 is libwebrtc's default, i.e. no scaling.
-  ///  - the camera is captured at an explicit 30fps (see _openMedia), so a cap
-  ///    at 30 cannot bind.
-  ///  - MAINTAIN_FRAMERATE is libwebrtc's default for camera content — as
-  ///    26cae00 established when it removed the explicit setting and noted that
-  ///    setting it had been "almost certainly a NO-OP".
-  ///
-  /// So the camera path is left behaving as it does today, which is the whole
-  /// point: nothing here is camera tuning.
-  Future<void> _restoreCameraProfile() => _writeSenderProfile(
-        scale: 1,
-        fps: 30,
-        degradation: RTCDegradationPreference.MAINTAIN_FRAMERATE,
-        what: 'camera',
-      );
-
-  /// getParameters/setParameters is a read-modify-write: the encodings that
-  /// come back carry the ssrc the transport is already using, so they are
-  /// edited in place rather than replaced.
-  Future<void> _writeSenderProfile({
-    required double scale,
-    required int fps,
-    required RTCDegradationPreference degradation,
-    required String what,
-  }) async {
-    // Whichever sender the display actually went out on. On the second m-line
-    // — the normal case now — this never touches the camera's sender at all,
-    // which settles the 26cae00 question outright rather than by restoring a
-    // default afterwards.
-    final sender = _shareOnSecondLine ? _screenSender : _videoSender;
-    if (sender == null) return;
-    try {
-      final params = sender.parameters;
-      final encodings = params.encodings;
-      if (encodings == null || encodings.isEmpty) return;
-      for (final e in encodings) {
-        e
-          ..scaleResolutionDownBy = scale
-          ..maxFramerate = fps;
-      }
-      params.degradationPreference = degradation;
-      await sender.setParameters(params);
-      Diag.record(DiagArea.call, 'sender_profile', corr: _callId, fields: {
-        'profile': what,
-        'scale': scale.toStringAsFixed(2),
-        'fps': fps,
-      },);
-    } catch (e) {
-      // Never worth failing a share over. Without this the share still runs —
-      // it runs at whatever libwebrtc picks, which is where it was before.
-      debugPrint('[call] sender profile failed: $e');
-    }
-  }
-
-  /// Move the share one rung, from what the last sample actually measured.
-  ///
-  /// One rung at a time, and asymmetric: down on the first bad sample, up only
-  /// after five clean ones. The recovery half matters as much as the clamp — a
-  /// ceiling that cannot come back up is precisely what 26cae00 identified as
-  /// the failure of tuning by hand, and it is why this reads getStats instead
-  /// of picking a number and hoping.
-  Future<void> _adaptScreenProfile(CallStats s) async {
-    final at = _screenRung;
-    if (at == null || !sharingScreen) return;
-
-    // A live share that HAD been sending frames and has stopped. Almost always
-    // the system cast notification's "Stop sharing", which the plugin never
-    // reports (its MediaProjection.Callback.onStop body is a comment), so
-    // track.onEnded can never fire. Left alone, the partner sits on a frozen
-    // last frame until somebody hangs up.
-    //
-    // Gated on having seen frames first, and that gate is not defensive
-    // paperwork: `framesPerSecond` is absent from getStats until libwebrtc has
-    // enough samples to compute it, so a share that is merely slow to start
-    // reports exactly the same zero as one that has died. Without the gate this
-    // would kill healthy shares on slow handsets six seconds in.
-    if (s.sendFps > 0) {
-      _screenSawFrames = true;
-      _screenStallSamples = 0;
-    } else if (_screenSawFrames) {
-      if (++_screenStallSamples >= 3) {
-        Diag.record(DiagArea.call, 'screen_share_stalled', corr: _callId);
-        await stopScreenShare();
-      }
+  /// Events the vendored plugin forwards from MediaProjection's callback.
+  void _onWebrtcPluginEvent(Map<String, dynamic> e) {
+    if (e.containsKey('miles.screenCaptureStop')) {
+      // NEVER a direct kill. Upstream's comment in the patched callback says
+      // it out loud: on some OEMs onStop fires SPURIOUSLY right after capture
+      // starts — the reason the body was empty. Build 59 trusted it verbatim
+      // and every share on affected handsets died at birth. So: ignore the
+      // documented just-started window entirely, and outside it treat the
+      // event as a HINT that fast-tracks the stall watchdog — the share ends
+      // on real evidence (frames actually stopped) within one stats sample
+      // instead of three.
+      final started = _shareStartedAt;
+      final young = started != null &&
+          DateTime.now().difference(started) < const Duration(seconds: 3);
+      if (sharingScreen && !young) _screenStopHinted = true;
       return;
     }
-
-    int next;
-    switch (s.limitation) {
-      case 'cpu':
-      case 'bandwidth':
-        _screenHealthySamples = 0;
-        next = at + 1;
-      case 'none':
-        // Ten seconds clean before giving anything back, so a momentary lull
-        // cannot start an oscillation.
-        if (++_screenHealthySamples < 5) return;
-        _screenHealthySamples = 0;
-        next = at - 1;
-      default:
-        // 'other', and '' — which is not "healthy" but "no outbound report in
-        // this sample", the state every share is in for its first second or
-        // two. Reading it as healthy would spend the recovery budget on
-        // missing data. Also anything libwebrtc adds to the enum later.
-        return;
+    final resize = e['miles.screenCaptureContentResize'];
+    if (resize is Map && sharingScreen) {
+      final w = (resize['width'] as num?)?.toDouble();
+      final h = (resize['height'] as num?)?.toDouble();
+      if (w == null || h == null || w <= 0 || h <= 0) return;
+      final display = _displayPixels();
+      // Meaningfully smaller than the panel on either axis = the user picked
+      // one app. Exact equality is wrong on purpose: insets and rounding make
+      // a full-display capture a few pixels short on some OEMs.
+      final scoped = w < display.width * 0.9 || h < display.height * 0.9;
+      if (scoped != appScopedShare) {
+        appScopedShare = scoped;
+        notifyListeners();
+      }
+      // Re-aim the encoder at what is actually being captured: an app window
+      // is smaller than the panel, and scaling from the panel's size would
+      // shrink content that already fits the current rung's bound.
+      final session = _shareSession;
+      if (session != null) unawaited(session.retarget(Size(w, h)));
     }
-    next = next.clamp(0, _screenRungs.length - 1);
-    if (next == at) return;
-    _screenRung = next;
-    await _pushScreenProfile(next);
   }
 
-  int _screenHealthySamples = 0;
+  /// Reshape the camera sender around a live share, both directions.
+  ///
+  /// ONLY scale and framerate, never bitrate: this plugin skips null
+  /// parameter fields, so a bitrate cap set once could never be unset and
+  /// would ride the camera forever after the share ends. Scale and framerate
+  /// restore to the capture's own defaults (720p@30, `_openMedia`) — writing
+  /// those pins values that were previously unset, which is harmless
+  /// precisely because they equal the defaults; they must track `_openMedia`
+  /// if its constraints ever change.
+  Future<void> _setCameraShareProfile({required bool damp}) async {
+    try {
+      final pc = _pc;
+      if (pc == null) return;
+      for (final s in await pc.getSenders()) {
+        if (s.track?.kind != 'video') continue;
+        final params = s.parameters;
+        final encodings = params.encodings;
+        if (encodings == null || encodings.isEmpty) return;
+        for (final e in encodings) {
+          e
+            // Doubles and ints are load-bearing: the Android bridge
+            // hard-casts scale to Double and framerate to Integer.
+            ..scaleResolutionDownBy = damp ? 2.0 : 1.0
+            ..maxFramerate = damp ? 15 : 30;
+        }
+        await s.setParameters(params);
+        return;
+      }
+    } catch (e) {
+      // Best effort in both directions — a camera at full price is a worse
+      // share, not a broken call.
+      debugPrint('[call] camera profile damp=$damp: $e');
+    }
+  }
 
   /// Take the display off the wire and drop the capture.
   ///
@@ -1504,26 +1298,24 @@ class CallController extends ChangeNotifier {
   Future<void> stopScreenShare() async {
     if (!sharingScreen) return;
     sharingScreen = false;
-    _screenRung = null;
-    _screenStallSamples = 0;
-    _screenHealthySamples = 0;
-    _screenSawFrames = false;
-    if (_shareOnSecondLine) {
-      // The camera never left its own sender, so there is nothing to put back
-      // — the screen m-line simply goes quiet. Its encoder profile can stay:
-      // that sender carries the display and nothing else, ever.
-      await _screenSender?.replaceTrack(null);
-    } else {
-      // Old-peer fallback: the display was on the camera's sender, so the
-      // camera has to be swapped back and the profile undone.
-      final camera = _localStream?.getVideoTracks().firstOrNull;
-      if (camera != null) await _videoSender?.replaceTrack(camera);
-      await _restoreCameraProfile();
+    // The share's whole connection goes with it — encoder, ladder state,
+    // sockets. The call's connection was never involved and needs nothing
+    // put back. The digest is taken BEFORE close(), which resets it.
+    final session = _shareSession;
+    _shareSession = null;
+    final digest = session?.takeDigest();
+    if (digest != null) {
+      ErrorReporter.report(digest, StackTrace.current, kind: 'share-quality');
     }
-    _shareOnSecondLine = false;
+    if (session != null) await session.close();
+    await _setCameraShareProfile(damp: false);
     _send('screen', {'on': false});
     final screen = _screenStream;
     _screenStream = null;
+    screenSelfRenderer.srcObject = null;
+    appScopedShare = false;
+    _screenStopHinted = false;
+    _shareStartedAt = null;
     if (screen != null) await _dropCapture(screen);
     // The projection is gone; the service should stop claiming it.
     await CallForegroundService.dropScreenShare();
@@ -1697,35 +1489,8 @@ class CallController extends ChangeNotifier {
     _statsMonitor.noRelay = !relayAvailable;
     _statsMonitor.start(pc);
     for (final track in _localStream!.getTracks()) {
-      final sender = await pc.addTrack(track, _localStream!);
-      // The camera's sender, and now it only ever carries the camera. A share
-      // no longer swaps onto it, so the face stays on the wire throughout.
-      if (track.kind == 'video') _videoSender = sender;
+      await pc.addTrack(track, _localStream!);
     }
-    // A SECOND video m-line, negotiated up front with no track on it, so a
-    // screen share is a replaceTrack onto a sender the far side already knows
-    // about — and the camera keeps running beside it. This class still has no
-    // renegotiation path and does not need one: pre-negotiating the m-line is
-    // what buys both faces at once without an offer/answer round trip.
-    //
-    // Deliberately NO `streams:` on the init. That is not an oversight, it is
-    // the compatibility mechanism and the identification mechanism at once:
-    //
-    //  - No streams => no msid on the m-line => the far side's onTrack fires
-    //    with an EMPTY `streams` list (PeerConnectionObserver.onAddTrack builds
-    //    that array from the msid). A build that predates this change guards
-    //    with `if (event.streams.isNotEmpty)` and therefore SKIPS this track
-    //    instead of pointing its one remote renderer at a track carrying
-    //    nothing. Production is ahead of this repo — builds 49, 51 and 52 are
-    //    on real handsets — so a call between versions has to degrade, not
-    //    break. It degrades to exactly the old behaviour.
-    //  - And on this side, msid-lessness IS how the screen track is told from
-    //    the camera track in onTrack below. One property, both jobs.
-    _screenTransceiver = await pc.addTransceiver(
-      kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
-      init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv),
-    );
-    _screenSender = _screenTransceiver?.sender;
     pc.onIceGatheringState = (g) => Diag.record(
         DiagArea.call, 'ice_gathering',
         corr: _callId, fields: {'state': g.name},);
@@ -1756,19 +1521,11 @@ class CallController extends ChangeNotifier {
       });
     };
     pc.onTrack = (event) {
-      if (event.streams.isNotEmpty) {
-        // Carries an msid, so it came from addTrack: the camera, or the mic.
-        _remoteStream = event.streams.first;
-        remoteRenderer.srcObject = event.streams.first;
-        notifyListeners();
-        return;
-      }
-      // No msid and video: the screen m-line added above. Nothing else in this
-      // connection is msid-less, so this is exact rather than a guess.
-      if (event.track.kind == 'video') {
-        _remoteScreenTrackId = event.track.id;
-        unawaited(_attachRemoteScreen());
-      }
+      // The call's connection only ever carries the camera and the mic; the
+      // display arrives on its own connection (see [ScreenShareSession]).
+      if (event.streams.isEmpty) return;
+      remoteRenderer.srcObject = event.streams.first;
+      notifyListeners();
     };
     pc.onConnectionState = (s) {
       // Only the CURRENT connection may drive state. Tearing down disposes the
@@ -1928,12 +1685,61 @@ class CallController extends ChangeNotifier {
           return;
         }
         _addIce(map);
+      case 'share-offer':
+        // The partner started a share: build the receive side of its
+        // dedicated connection and answer.
+        unawaited(_receiveShare(map));
+      case 'share-answer':
+        final session = _shareSession;
+        if (session != null) unawaited(session.onAnswer(map));
+      case 'share-ice':
+        final session = _shareSession;
+        if (session != null) unawaited(session.onIce(map));
       case 'screen':
         remoteScreen = map['on'] == true;
+        // While sharingScreen the held session is my SEND side — a stray
+        // 'off' from the far side must not close it.
+        if (!remoteScreen && !sharingScreen) {
+          // Their share ended: drop the receive connection and the last frame,
+          // or the next share would letterbox around a stale picture.
+          final session = _shareSession;
+          _shareSession = null;
+          if (session != null) unawaited(session.close());
+          screenRenderer.srcObject = null;
+        }
         notifyListeners();
       case 'hangup':
         _teardown(CallState.ended);
     }
+  }
+
+  /// Build the receive side of the partner's share connection.
+  ///
+  /// Any session already held is superseded — either their previous share's
+  /// receive side that a lost 'screen off' never closed, or a dead send side.
+  Future<void> _receiveShare(Map<dynamic, dynamic> map) async {
+    // Both pressed Share inside one round trip: the guards never saw each
+    // other. Their offer is already on the wire, so yield — end mine cleanly
+    // rather than strand a send session the UI still calls live.
+    if (sharingScreen) await stopScreenShare();
+    final old = _shareSession;
+    _shareSession = null;
+    if (old != null) await old.close();
+    final session = ScreenShareSession(
+      send: _send,
+      iceConfig: await _iceConfig(),
+      onRemoteStream: (stream) {
+        screenRenderer.srcObject = stream;
+        remoteScreen = true;
+        notifyListeners();
+      },
+      // Receive side: the sharer announces the end via 'screen off'; a failed
+      // connection here has nothing to stop.
+      onEnded: () {},
+      stopHinted: () => false,
+    );
+    _shareSession = session;
+    await session.onOffer(map);
   }
 
   /// Open the window in which this device holds two calls at once.
@@ -2289,16 +2095,18 @@ class CallController extends ChangeNotifier {
       minimized = false;
       sharingScreen = false;
       remoteScreen = false;
-      _screenRung = null;
-      _screenStallSamples = 0;
-      _screenHealthySamples = 0;
-      _screenSawFrames = false;
-      _videoSender = null;
-      _screenSender = null;
-      _screenTransceiver = null;
-      _remoteScreenTrackId = null;
-      _remoteStream = null;
-      _shareOnSecondLine = false;
+      // Hangup mid-share is a common share end, so the digest is taken here
+      // too (null on the receive side). No camera restore on purpose: the
+      // peer connection is disposed below, and the next call builds fresh
+      // senders at defaults.
+      final shareSession = _shareSession;
+      _shareSession = null;
+      final shareDigest = shareSession?.takeDigest();
+      if (shareDigest != null) {
+        ErrorReporter.report(shareDigest, StackTrace.current,
+            kind: 'share-quality',);
+      }
+      if (shareSession != null) await shareSession.close();
       try {
         await _screenStream?.dispose();
       } catch (_) {}
@@ -2306,6 +2114,10 @@ class CallController extends ChangeNotifier {
       localRenderer.srcObject = null;
       remoteRenderer.srcObject = null;
       screenRenderer.srcObject = null;
+      screenSelfRenderer.srcObject = null;
+      appScopedShare = false;
+      _screenStopHinted = false;
+      _shareStartedAt = null;
       _setState(end);
       // settle back to idle so the next call can start
       Future.delayed(const Duration(milliseconds: 300), () {
@@ -2352,9 +2164,12 @@ class CallController extends ChangeNotifier {
     final ch = _chan;
     _chan = null;
     if (ch != null) SupabaseService.client.removeChannel(ch);
+    _webrtcEventsSub?.cancel();
+    _shareSession?.close();
     localRenderer.dispose();
     screenRenderer.dispose();
     remoteRenderer.dispose();
+    screenSelfRenderer.dispose();
     _pc?.close();
     _localStream?.dispose();
     // Disposed here as well as in _teardown: a container torn down while a
@@ -2371,17 +2186,6 @@ class CallController extends ChangeNotifier {
 /// first, so this never reaches a user-facing message.
 class _Superseded implements Exception {
   const _Superseded();
-}
-
-/// One rung of the screen-share ladder — see `CallController._screenRungs`.
-///
-/// [scaleMul] multiplies the panel's own downscale factor rather than replacing
-/// it, so the same rung means the same thing on a 1080p handset and a 1440p
-/// one: the rungs describe how much is being given up, not an absolute size.
-class _ScreenRung {
-  const _ScreenRung({required this.scaleMul, required this.fps});
-  final double scaleMul;
-  final int fps;
 }
 
 /// What a session change means for call signalling.

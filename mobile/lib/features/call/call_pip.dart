@@ -67,6 +67,10 @@ class _CallPipState extends ConsumerState<CallPip> {
         call.state == CallState.connected || call.state == CallState.calling;
     final router = _router;
     if (!active || !call.minimized) return const SizedBox.shrink();
+    // While THIS phone shares its screen, the floating window sits inside the
+    // very pixels being captured — the partner watches it echo. The
+    // ongoing-call notification is the way back during a share.
+    if (call.sharingScreen) return const SizedBox.shrink();
     // Never two views on one texture.
     if (router != null && isOnCallRoute(router)) return const SizedBox.shrink();
 
