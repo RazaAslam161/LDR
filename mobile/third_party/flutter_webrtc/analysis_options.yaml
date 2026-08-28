@@ -1,0 +1,8 @@
+# Vendored fork (see mobile/pubspec.yaml dependency_overrides): upstream's
+# include pointed at package:lints, which is not in this app's dependency
+# graph and only produced a dangling-include warning. Third-party code is not
+# held to this repo's lint law; the ONE patched file is reviewed by
+# test/unit/call/screen_share_law_test.dart instead.
+analyzer:
+  errors:
+    include_file_not_found: ignore

@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+48
+version: 0.1.0+62
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
@@ -112,8 +112,17 @@ dependencies:
   google_mlkit_pose_detection: ^0.14.1
   file_picker: ^11.0.3
   flutter_image_compress: ^2.5.1
-  google_maps_flutter: ^2.18.0
   mapbox_maps_flutter: ^2.28.1
+# The ONE vendored fork, and why: flutter_webrtc leaves MediaProjection's
+# onStop empty (the system "Stop sharing" press dies there) and never plumbs
+# Android 14's onCapturedContentResize (the only signal a share is app-scoped,
+# which gates the safe live self-preview). Both are ~20 lines in ONE file —
+# third_party/flutter_webrtc/.../GetUserMediaImpl.java, marked "Miles patch".
+# Vendored at the exact previously-resolved 1.6.0, so nothing else changes.
+dependency_overrides:
+  flutter_webrtc:
+    path: third_party/flutter_webrtc
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

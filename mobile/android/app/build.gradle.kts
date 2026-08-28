@@ -17,24 +17,6 @@ val keystoreProperties = Properties().apply {
 }
 val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
 
-// The Maps key has to sit in the merged manifest in plaintext — the Maps SDK
-// reads it from there and from nowhere else, so it cannot hide behind an edge
-// function the way the Mapbox token does. Keeping it out of the tracked
-// manifest at least stops the next rotation from landing in git history again.
-val mapsProperties = Properties().apply {
-    val f = rootProject.file("maps.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
-}
-val mapsApiKey = mapsProperties.getProperty("mapsApiKey") ?: run {
-    logger.warn("=========================================================")
-    logger.warn(" NO android/maps.properties - Google Maps will NOT load.")
-    logger.warn(" Add mapsApiKey=<key>. Touch Map ships blank without it.")
-    logger.warn("=========================================================")
-    // Not an empty string: the SDK logs an explicit authorisation failure for
-    // a key it cannot parse, where an empty one just draws a grey rectangle.
-    "MISSING_MAPS_API_KEY"
-}
-
 android {
     namespace = "com.miles.miles"
     compileSdk = 36
@@ -55,7 +37,6 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        manifestPlaceholders["mapsApiKey"] = mapsApiKey
     }
 
     buildFeatures {

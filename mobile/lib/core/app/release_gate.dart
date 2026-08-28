@@ -25,7 +25,7 @@ class ReleaseGate {
   /// This build. Bump with every release that a server change will depend on.
   /// Kept here rather than read from pubspec because the number that matters is
   /// the one the SERVER compares against, and it has to be legible in a diff.
-  static const buildNumber = 48;
+  static const buildNumber = 62;
 
   /// The human-facing version, shown in Settings > About. Kept beside
   /// [buildNumber] and mirrored from pubspec's `version:` — the About card used

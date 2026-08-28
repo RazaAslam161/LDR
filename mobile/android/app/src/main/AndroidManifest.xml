@@ -112,12 +112,6 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false">
 
-        <!-- Substituted from android/maps.properties (untracked). The Maps SDK
-             reads the key from the merged manifest and nowhere else, so it
-             cannot live behind an edge function like the Mapbox token does. -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${mapsApiKey}" />
         <meta-data
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />

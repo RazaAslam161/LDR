@@ -36,6 +36,18 @@ fi
 
 cd "$(dirname "$0")/.."   # mobile/
 
+# ── The backend the APK will carry is decided by a GITIGNORED file. ─────────
+# A sideload build pointing at staging shipped on 2026-08-28 (builds 53-55:
+# .env was hand-recreated after the disk crash against the wrong project) and
+# read as "the whole app is broken" — every feature failed against a drifted
+# backend, and no gate in this script looked. This one does.
+if ! grep -q "sopictusdonlvuezmfep" .env 2>/dev/null; then
+  echo "REFUSING: mobile/.env does not point at the PRODUCTION project." >&2
+  echo "A release that ships the wrong backend fails everywhere at once." >&2
+  echo "Building against another project on purpose: MILES_ALLOW_NONPROD=1" >&2
+  [ "${MILES_ALLOW_NONPROD:-0}" = "1" ] || exit 1
+fi
+
 # Credentials, if they are kept in a file rather than exported by hand.
 # tool/.release-env is gitignored and holds the MILES_* exports. It exists
 # because a non-interactive shell never sources ~/.bashrc, so an agent or a
