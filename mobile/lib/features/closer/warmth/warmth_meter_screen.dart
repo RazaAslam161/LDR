@@ -4,6 +4,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/closer/warmth/closeness_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Closeness — daily private 1–10 slider, shown on the Closer grid as
@@ -21,11 +22,21 @@ class WarmthMeterScreen extends ConsumerStatefulWidget {
 
 class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
   double _myScore = 5;
-  int? _partnerScore; // null = not yet today OR hidden by reveal logic
+  /// Null means the SERVER did not send it — either they have not set one, or
+  /// the reveal has not happened. The difference is deliberately invisible
+  /// here; see [_partnerCheckedIn] for the part that is safe to know.
+  int? _partnerScore;
   bool _submittedToday = false;
+  bool _partnerCheckedIn = false;
   bool _loading = true;
+  String? _loadError;
   ManagedSubscription? _channel;
   bool _subscribed = false;
+
+  void _toast(String m) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
 
   @override
   void didChangeDependencies() {
@@ -62,103 +73,76 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
   }
 
   Future<void> _loadToday() async {
-    final session = ref.read(sessionProvider);
-    final couple = session.couple;
-    final me = session.profile;
-    if (couple == null || me == null) {
-      if (mounted) setState(() => _loading = false);
-      return;
+    try {
+      _apply(await ClosenessRepository.today());
+    } catch (e) {
+      // This used to be a bare await. A failed read left _loading true and the
+      // screen sat on a spinner with nothing said.
+      if (!mounted) return;
+      setState(() {
+        _loadError = "Couldn't reach Closeness. Check your connection.";
+        _loading = false;
+      });
+      debugPrint('closeness load failed: $e');
     }
+  }
 
-    final today = DateTime.now().toUtc();
-    final todayStr =
-        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-
-    final res = await SupabaseService.client
-        .from('desire_temps')
-        .select('user_id, score')
-        .eq('couple_id', couple.id)
-        .eq('on_date', todayStr);
-
-    int? mine;
-    int? partner;
-    for (final row in res as List) {
-      final uid = row['user_id'] as String;
-      final s = (row['score'] as num).toInt();
-      if (uid == me.id) {
-        mine = s;
-      } else {
-        partner = s;
-      }
-    }
-
+  /// One place where a [Closeness] becomes screen state, so a read and a write
+  /// cannot drift — `set_closeness` returns exactly what `get_closeness` does.
+  void _apply(Closeness c) {
     if (!mounted) return;
     setState(() {
-      _myScore = (mine ?? 5).toDouble();
-      _submittedToday = mine != null;
-      // Reveal logic: only show partner score if BOTH ≥ 7
-      if (mine != null && partner != null && mine >= 7 && partner >= 7) {
-        _partnerScore = partner;
-      } else {
-        _partnerScore = null;
-      }
       _loading = false;
+      _loadError = c.ok
+          ? null
+          : c.verdict == 'not_authenticated'
+              ? 'Sign in again to check in.'
+              : null;
+      _myScore = (c.mine ?? 5).toDouble();
+      _submittedToday = c.submitted;
+      _partnerCheckedIn = c.partnerCheckedIn;
+      // Never computed here any more. Null means the server withheld it.
+      _partnerScore = c.partner;
     });
   }
 
   Future<void> _submit() async {
-    final session = ref.read(sessionProvider);
-    final couple = session.couple;
-    final me = session.profile;
-    if (couple == null || me == null) return;
-
-    final today = DateTime.now().toUtc();
-    final todayStr =
-        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     final score = _myScore.round();
-
-    await SupabaseService.client.from('desire_temps').upsert({
-      'couple_id': couple.id,
-      'on_date': todayStr,
-      'user_id': me.id,
-      'score': score,
-    });
-
-    if (!mounted) return;
-    setState(() => _submittedToday = true);
-
-    // Re-check reveal logic with the latest partner score.
-    final res = await SupabaseService.client
-        .from('desire_temps')
-        .select('user_id, score')
-        .eq('couple_id', couple.id)
-        .eq('on_date', todayStr);
-
-    int? partner;
-    for (final row in res as List) {
-      final uid = row['user_id'] as String;
-      if (uid != me.id) partner = (row['score'] as num).toInt();
+    // The range is the server's to enforce — it answers bad_score — but there
+    // is no reason to spend a round trip finding that out.
+    if (score < 1 || score > 10) {
+      _toast('Pick a number between 1 and 10.');
+      return;
     }
-
-    if (!mounted) return;
-    setState(() {
-      if (partner != null && score >= 7 && partner >= 7) {
-        _partnerScore = partner;
-      } else {
-        _partnerScore = null;
-      }
-    });
+    try {
+      // One call, and it returns the whole state: no second read, so the
+      // reveal cannot be computed against a partner score fetched separately.
+      _apply(await ClosenessRepository.submit(score));
+    } catch (e) {
+      if (!mounted) return;
+      _toast("Couldn't reach Closeness. Check your connection.");
+      debugPrint('closeness submit failed: $e');
+    }
   }
 
   String get _revealMessage {
+    if (_loadError != null) return _loadError!;
     if (_partnerScore != null) {
-      return "You're both feeling close today ✨";
+      return "You're both feeling close today ✨\n"
+          'They put $_partnerScore. Read it aloud together once.';
     }
     if (_submittedToday) {
-      return "You're a little out of sync today.\nThat's okay.";
+      return "Locked in for today.\n"
+          "Change today's any time — everyone sees the change.";
     }
-    return "Slide to set yours.\nYour partner won't see the number — "
-        'only a nudge if you both feel the same way.';
+    // Knowing they have answered is safe; their number is not, and the server
+    // has not sent it. Saying so is what stops the wait feeling like silence.
+    if (_partnerCheckedIn) {
+      return 'Your partner has checked in for today.\n'
+          'Slide to set yours.';
+    }
+    return 'Slide to set yours.\n'
+        "If you both landed at 7 or higher, you'll both be told.";
   }
 
   @override
