@@ -259,6 +259,25 @@ GoRouter buildRouter(Ref ref) {
         path: '/app/settings/export',
         builder: (context, state) => const ExportScreen(),
       ),
+      // The three settings subpages. Recovered from build 52's binary, which
+      // carried these exact paths — they are what let fourteen flat sections
+      // become five groups. Each is the SAME screen in a different page, so
+      // every handler stays where it already lives.
+      GoRoute(
+        path: '/app/settings/profile',
+        builder: (context, state) =>
+            const SettingsScreen(page: SettingsPage.profile),
+      ),
+      GoRoute(
+        path: '/app/settings/notifications',
+        builder: (context, state) =>
+            const SettingsScreen(page: SettingsPage.notifications),
+      ),
+      GoRoute(
+        path: '/app/settings/account',
+        builder: (context, state) =>
+            const SettingsScreen(page: SettingsPage.account),
+      ),
       // No partner id in the path. The screen reads the session, so a link that
       // outlives a sign-out opens the new account's partner or nothing at all —
       // never the previous one's.

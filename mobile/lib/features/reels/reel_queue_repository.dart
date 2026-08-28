@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -97,15 +98,22 @@ class ReelQueueRepository {
     ManagedSubscription? views;
     late final StreamController<List<SharedReel>> controller;
     var loading = false;
+    var delivered = false;
 
     Future<void> reload() async {
       if (loading) return;
       loading = true;
       try {
         final list = await fetch(coupleId);
+        delivered = true;
         if (!controller.isClosed) controller.add(list);
-      } catch (e) {
-        debugPrint('[reels] reload: ${e.runtimeType}');
+      } catch (e, st) {
+        ErrorReporter.report(e, st, kind: 'reels');
+        // A failed FIRST load must fail the stream — swallowing it left
+        // hasData false forever, which rendered as an infinite spinner with
+        // "Couldn't load the list" unreachable. After one delivery, a
+        // transient failure keeps showing the last good list instead.
+        if (!delivered && !controller.isClosed) controller.addError(e);
       } finally {
         loading = false;
       }

@@ -8,6 +8,11 @@ import 'package:flutter/services.dart';
 /// link on exactly the path people use most — opening Instagram, hitting share,
 /// and landing in an app that was not running.
 class ShareIntake {
+  /// A URL the SHELL drained before the queue screen existed. The screen
+  /// consumes it first in its own drain; a static because the hand-off
+  /// crosses a route push and neither side holds the other's context.
+  static String? handedOff;
+
   ShareIntake._();
 
   static const _channel = MethodChannel('miles/share_intent');

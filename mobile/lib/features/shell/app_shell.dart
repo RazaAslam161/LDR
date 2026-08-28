@@ -9,6 +9,7 @@ import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/features/reels/share_intake.dart';
 import 'package:miles/core/data/partner_rewrap.dart';
 import 'package:miles/core/ui/tab_dissolve.dart';
 import 'package:miles/core/widgets/gilt_nav_icon.dart';
@@ -334,14 +335,37 @@ class _AppShellState extends ConsumerState<AppShell>
     _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
     unawaited(ref.read(callControllerProvider).reconnect());
     ref.read(sessionProvider.notifier).reconnectPresence();
+    // A share into a still-running app arrives as onNewIntent → resume.
+    unawaited(_drainSharedLink());
+  }
+
+  /// True when the ceremony route is already on top — the stateless guard the
+  /// per-State [_rewrapOpen] cannot be: every cover flip disposes this State
+  /// and resets the flag, so without this check each remount re-offered the
+  /// ceremony on top of itself.
+  bool _rewrapRouteUp() =>
+      GoRouter.of(context)
+          .routerDelegate.currentConfiguration.uri.path ==
+      '/rewrap';
+
+  /// A link shared from another app while the queue screen was not mounted
+  /// used to evaporate — ShareIntake drained only inside that screen, and
+  /// nothing routed there on ACTION_SEND. Drain here, hand the URL across,
+  /// and carry the user to the list where it lands.
+  Future<void> _drainSharedLink() async {
+    final url = ShareIntake.firstUrl(await ShareIntake.take());
+    if (url == null || !mounted) return;
+    ShareIntake.handedOff = url;
+    if (!_rewrapRouteUp()) context.push('/app/watch-list');
   }
 
   Future<void> _resumeOwnRewrap() async {
-    if (_rewrapOpen || await CryptoCore.heldRequest() == null) return;
+    if (_rewrapOpen || _rewrapRouteUp()) return;
+    if (await CryptoCore.heldRequest() == null) return;
     // Re-checked after the await: this and _offerRewrap fire unawaited side by
     // side, and both passing the entry guard before either sets the flag ends
     // with two rewrap screens claiming over each other.
-    if (!mounted || _rewrapOpen) return;
+    if (!mounted || _rewrapOpen || _rewrapRouteUp()) return;
     _rewrapOpen = true;
     await context.push('/rewrap');
     _rewrapOpen = false;
@@ -353,7 +377,7 @@ class _AppShellState extends ConsumerState<AppShell>
   /// "your partner is reinstalling" hands the event to Google, and the voice
   /// call the ceremony already requires IS the notification.
   Future<void> _offerRewrap(String coupleId) async {
-    if (_rewrapOpen) return;
+    if (_rewrapOpen || _rewrapRouteUp()) return;
     final RewrapRequest? req;
     try {
       req = await PartnerRewrap.pending(coupleId);
@@ -364,13 +388,15 @@ class _AppShellState extends ConsumerState<AppShell>
       // request stands for ten minutes.
       return;
     }
-    if (req == null || !mounted || _rewrapOpen) return;
+    if (req == null || !mounted || _rewrapOpen || _rewrapRouteUp()) return;
     _rewrapOpen = true;
     await context.push('/rewrap');
     _rewrapOpen = false;
   }
 
   void _onReady() {
+    // First: a shared link is the user's own stated intent for this launch.
+    unawaited(_drainSharedLink());
     unawaited(_maybeOfferUpdate());
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;

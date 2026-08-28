@@ -16,11 +16,11 @@ import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/notification_channel_settings.dart';
+import 'package:miles/core/services/notification_state.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/update_service.dart';
-import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
@@ -29,7 +29,6 @@ import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/signed_image.dart';
-import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/legal/faq_screen.dart';
@@ -43,8 +42,20 @@ import 'package:miles/features/settings/security_code_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+/// Which face of Settings a route is asking for.
+///
+/// Build 52 carried real routes for these — `/app/settings/profile`,
+/// `/notifications`, `/account` — recovered from its binary. They are pages of
+/// ONE screen rather than three widgets because every handler
+/// (`_changeAvatar`, `_toggleAppLock`, `_deleteAccount`, and fifteen more)
+/// lives in this State; moving them out to get three classes would be a large
+/// refactor of working code for no user-visible gain.
+enum SettingsPage { root, profile, notifications, account }
+
 class SettingsScreen extends ConsumerStatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.page = SettingsPage.root});
+
+  final SettingsPage page;
 
   @override
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
@@ -105,6 +116,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       _loadAppLock();
       _loadEscrow();
       _loadCodeVerified();
+      _loadNotificationState();
     });
   }
 
@@ -115,12 +127,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     // fired — not when the user comes back. Without this the tile still said
     // "blocked" after they had just unblocked it, which is the same lie in the
     // other direction.
-    if (state == AppLifecycleState.resumed) _loadLocationMode();
+    if (state == AppLifecycleState.resumed) {
+      _loadLocationMode();
+      _loadNotificationState();
+    }
   }
 
   Future<void> _loadAppLock() async {
     final on = await AppLock.isEnabled();
     if (mounted) setState(() => _appLock = on);
+  }
+
+  /// Android's own answer about notifications, re-read on resume because the
+  /// user repairs it in the system settings app and comes back.
+  NotificationState _notif = const NotificationState();
+
+  Future<void> _loadNotificationState() async {
+    final n = await NotificationState.read();
+    if (mounted) setState(() => _notif = n);
   }
 
   Future<void> _loadEscrow() async {
@@ -565,7 +589,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             Text(
               "We'll send a confirmation link to "
               '${current ?? 'your current address'} and to the new address. '
-              'Your email only changes once you open both.',
+              'Your email only changes once you open both. '
+              'This replaces the old one everywhere you are signed in.',
               style: const TextStyle(color: MilesColors.taupe, height: 1.5),
             ),
             const SizedBox(height: 16),
@@ -654,7 +679,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(switch (widget.page) {
+          SettingsPage.root => 'Settings',
+          SettingsPage.profile => 'Your profile',
+          SettingsPage.notifications => 'Notifications',
+          SettingsPage.account => 'Account & data',
+        },),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
@@ -682,418 +712,148 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               ),
               const SizedBox(height: 8),
             ],
-            // ── Profile ──────────────────────────────────────────
-            const _SectionHeader(label: 'Profile'),
-            Center(
-              // With a photo set the child is an unlabeled image, so TalkBack
-              // walked straight past the only way to change it. One node named
-              // for what tapping does; the tap lives on the Semantics because
-              // excludeSemantics drops the detector's own.
-              child: Semantics(
-                button: true,
-                // enabled tracks the in-flight state: a button that announces
-                // itself and then ignores the double-tap reads as broken.
-                enabled: !_changingAvatar,
-                label: 'Change profile photo',
-                onTap: _changingAvatar ? null : _changeAvatar,
-                excludeSemantics: true,
-                child: EmberPress(
-                  onTap: _changingAvatar ? null : _changeAvatar,
-                  child: _AvatarEditor(
-                    url: _localAvatarUrl ?? profile?.avatarUrl,
-                    name: profile?.displayName ?? '',
-                    busy: _changingAvatar,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            LoveTextField(
-              label: 'Display name',
-              controller: _name,
-              hint: 'What should we call you?',
-              maxLength: 30,
-            ),
-            const SizedBox(height: 16),
-            LoveTextField(
-              label: 'Status',
-              controller: _status,
-              hint: 'A little note your partner sees',
-              maxLength: 60,
-            ),
-            const SizedBox(height: 16),
-            GlowButton(
-              label: 'Save profile',
-              color: MilesColors.blush,
-              loading: _savingProfile,
-              onPressed: _savingProfile ? null : _saveProfile,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Gender',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: Text(
-                profile?.gender == 'female'
-                    ? 'Female'
-                    : profile?.gender == 'male'
-                        ? 'Male'
-                        : 'Not set',
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
-              ),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: _changeGender,
-            ),
+            ...switch (widget.page) {
+              SettingsPage.root => _rootGroups(profile, partner, isModest),
+              SettingsPage.profile => _profilePage(profile, partner),
+              SettingsPage.notifications => _notificationsPage(),
+              SettingsPage.account => _accountPage(),
+            },
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
 
-            const SizedBox(height: 28),
-
-            // ── Timezone ─────────────────────────────────────────
-            const _SectionHeader(label: 'Timezone'),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                profile?.timezone.replaceAll('_', ' ') ?? '—',
-                style: const TextStyle(color: MilesColors.cream50),
-              ),
-              subtitle: const Text('Used for the countdown & sky',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: _changeTimezone,
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Language ─────────────────────────────────────────
-            const _SectionHeader(label: 'Language'),
-            // A plain Row rather than a ListTile: the label takes what is left
-            // after the switch, which is the only arrangement where a wide
-            // control cannot squeeze the text into a one-letter column.
-            InkWell(
-              onTap: () => ref.read(contentLanguageProvider.notifier).toggle(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Content language',
-                              style: TextStyle(color: MilesColors.cream50),),
-                          const SizedBox(height: 2),
-                          Text(
-                            ref.watch(contentLanguageProvider) ==
-                                    ContentLanguage.english
-                                ? 'Games in English'
-                                : 'Games in Roman Urdu',
-                            style: const TextStyle(
-                                color: MilesColors.taupe, fontSize: 12,),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const LanguageToggle(padding: EdgeInsets.zero),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Disguise ─────────────────────────────────────────
-            const _SectionHeader(label: 'Disguise'),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('How this app looks',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text(
-                  'Change the icon and name shown on your phone',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+  /// The root screen: a profile card and five groups.
+  ///
+  /// This replaced fourteen `_SectionHeader`s over bare ListTiles. The change
+  /// that makes it fit is not the cards — it is putting each setting's CURRENT
+  /// VALUE at the end of its own row ("On", "Asia/Karachi", "Backup on"), so a
+  /// row explains itself without a header above it. Recovered from build 52;
+  /// see docs/guides/BUILD-52-AUDIT.md.
+  List<Widget> _rootGroups(dynamic profile, dynamic partner, bool isModest) => [
+        _ProfileCard(
+          name: profile?.displayName as String? ?? '',
+          pairState: partner == null
+              ? 'Not linked yet. Pair with your partner to share this app'
+              : 'Paired with ${partner.displayName}',
+          avatarUrl: _localAvatarUrl ?? profile?.avatarUrl as String?,
+          onTap: () => context.push('/app/settings/profile'),
+        ),
+        _SettingsGroup(children: [
+          _SettingsRow(
+            icon: Icons.notifications_none,
+            title: 'Notifications',
+            // The truth, not a decoration. This row said "On" unconditionally,
+            // which is the one thing it must never say when they are off.
+            value: _notif.appBlocked
+                ? 'Off'
+                : _notif.anyBlocked
+                    ? 'Some blocked'
+                    : _notif.appEnabled == null
+                        ? null
+                        : 'On',
+            onTap: () => context.push('/app/settings/notifications'),
+          ),
+          const _SettingsRow(
+            icon: Icons.translate,
+            title: 'Content language',
+            subtitle: 'Games in English',
+            trailing: LanguageToggle(),
+          ),
+          _SettingsRow(
+            icon: Icons.schedule,
+            title: 'Timezone',
+            subtitle: 'Used for the countdown & sky',
+            value: profile?.timezone.replaceAll('_', ' ') as String? ?? '—',
+            onTap: _changeTimezone,
+          ),
+        ],),
+        _SettingsGroup(
+          label: 'Appearance',
+          children: [
+            _SettingsRow(
+              icon: Icons.palette_outlined,
+              title: 'How this app looks',
+              subtitle: 'The icon and name shown on your phone',
+              value: 'Miles',
               onTap: () => context.push('/app/disguise'),
             ),
-
-            const SizedBox(height: 28),
-
-            // ── Location ─────────────────────────────────────────
-            const _SectionHeader(label: 'Location sharing'),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(_locationLabel,
-                  style: const TextStyle(color: MilesColors.cream50),),
-              subtitle: Text(
-                _locationProblem ?? 'Only your partner can ever see this',
-                style: TextStyle(
-                  color: _locationProblem == null
-                      ? MilesColors.taupe
-                      : MilesColors.ember,
-                  fontSize: 12,
-                ),
+          ],
+        ),
+        _SettingsGroup(
+          label: 'Privacy & security',
+          children: [
+            _SettingsRow(
+              icon: Icons.fingerprint,
+              title: 'App lock',
+              subtitle: 'Require fingerprint / face / PIN to open Miles',
+              trailing: Switch(
+                value: _appLock,
+                onChanged: _toggleAppLock,
+                activeThumbColor: MilesColors.ember,
               ),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
+            ),
+            _SettingsRow(
+              icon: Icons.pin_outlined,
+              title: 'Security code',
+              // The STATE, not a description of the feature: a row that only
+              // says what the code is cannot tell the couple whether they have
+              // ever used it, and for most couples the answer is no.
+              subtitle: switch (_codeVerified) {
+                true => 'Compared with your partner — this key is verified',
+                false => 'Not compared yet — read it aloud together once',
+                null => 'A code you both compare to verify your encryption',
+              },
+              onTap: () =>
+                  showSecurityCodeDialog(context, partnerId: partner?.id as String?),
+            ),
+            _SettingsRow(
+              icon: Icons.location_on_outlined,
+              title: 'Location sharing',
+              subtitle: _locationProblem ?? 'Only your partner can ever see this',
+              value: _locationLabel,
               onTap: _locationProblem == null
                   ? _changeLocationSharing
                   : _fixLocationSharing,
             ),
-
-            const SizedBox(height: 28),
-
-            // ── Notifications ────────────────────────────────────
-            // Android already holds the real per-type controls — every alert
-            // below is a notification channel with its own OS page for sound,
-            // vibration and importance. Until now the only route there was
-            // Settings > Apps > (whatever the launcher calls this) >
-            // Notifications, which nobody finds. Each row deep-links straight
-            // to its channel's page. The titles here say what the channel is
-            // actually for; the page Android opens shows only the channel's
-            // neutral OS-visible name, so the disguise holds outside the app.
-            // notification_channel_rows_test.dart pins every channel id
-            // created in code to a row here, so a new channel cannot ship
-            // with controls nobody can reach.
-            const _SectionHeader(label: 'Notifications'),
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('Full-screen alerts',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: Text(
-                  'Let your partner wake your screen when they reach for you',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              trailing:
-                  Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: FsiPermission.openSettings,
-            ),
-            for (final (String id, String title, String subtitle) in const [
-              (
-                kReachChannelId,
-                'Reach alerts',
-                'The buzz when your partner reaches for you',
-              ),
-              (
-                kCallChannelId,
-                'Incoming calls',
-                'How a call rings on this phone',
-              ),
-              (
-                kMsgChannelId,
-                'Messages',
-                'The alert for new chat messages',
-              ),
-              (
-                kCareChannelId,
-                'Reminders',
-                'Care reminders, rituals and memory proposals',
-              ),
-              (
-                kQuietChannelId,
-                'Silent delivery',
-                'Alerts that arrive without sound on quiet covers',
-              ),
-              (
-                kCallServiceChannelId,
-                'Ongoing calls',
-                'The quiet notice shown while a call is running',
-              ),
-              (
-                kTimerChannelId,
-                'Timer cover',
-                'The countdown finishing in the Timer cover',
-              ),
-            ])
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(title,
-                    style: const TextStyle(color: MilesColors.cream50),),
-                subtitle: Text(subtitle,
-                    style: const TextStyle(
-                        color: MilesColors.taupe, fontSize: 12,),),
-                trailing:
-                    const Icon(Icons.chevron_right, color: MilesColors.gilt),
-                onTap: () =>
-                    NotificationChannelSettings.open(context, channelId: id),
-              ),
-
-            const SizedBox(height: 28),
-
-            // ── Privacy ──────────────────────────────────────────
-            const _SectionHeader(label: 'Privacy'),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: !isModest,
-              onChanged: _busy ? null : _toggleModestMode,
-              activeThumbColor: MilesColors.ember,
-              title: const Text('Closer',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: Text(
-                isModest
-                    ? 'Hidden. Reveal for both partners.'
-                    : 'Visible to both of you.',
-                style: const TextStyle(fontSize: 12, color: MilesColors.taupe),
-              ),
-            ),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
                 child: Text(_error!,
                     style: const TextStyle(color: MilesColors.blush),),
               ),
-
-            const SizedBox(height: 28),
-
-            // ── Sounds ───────────────────────────────────────────
-            const _SectionHeader(label: 'Sounds'),
-            ValueListenableBuilder<int>(
-              valueListenable: ReleaseGate.revision,
-              builder: (context, _, __) {
-                final killed = ReleaseGate.uiSoundKilled;
-                return SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: !killed && MilesSound.enabled,
-                  onChanged: killed ? null : _toggleSounds,
-                  activeThumbColor: MilesColors.ember,
-                  secondary: const Icon(Icons.music_note_outlined,
-                      color: MilesColors.gilt,),
-                  title: const Text('Sounds',
-                      style: TextStyle(color: MilesColors.cream50),),
-                  subtitle: Text(
-                    killed
-                        ? 'Turned off remotely for this release.'
-                        : 'Soft sounds for moments — sending, sealing, '
-                            'breathing. Vibration is separate and stays on.',
-                    style: const TextStyle(
-                        fontSize: 12, color: MilesColors.taupe,),
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Security ─────────────────────────────────────────
-            const _SectionHeader(label: 'Security'),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _appLock,
-              onChanged: _toggleAppLock,
-              activeThumbColor: MilesColors.ember,
-              secondary: const Icon(Icons.fingerprint, color: MilesColors.gilt),
-              title: const Text('Biometric app lock',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text(
-                  'Require fingerprint / face / PIN to open Miles',
-                  style: TextStyle(fontSize: 12, color: MilesColors.taupe),),
-            ),
-            // The couple's safety code (partner_key_pin.dart) — the standing
-            // place to find it, because the key-change sheet tells the OTHER
-            // phone to read theirs from exactly this row.
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.pin_outlined, color: MilesColors.gilt),
-              title: const Text('Security code',
-                  style: TextStyle(color: MilesColors.cream50),),
-              // The state, quietly, rather than a description of the feature —
-              // a screen that only ever says what the code IS cannot tell the
-              // couple whether they have ever used it, and the answer for most
-              // couples is no.
-              subtitle: Text(
-                  switch (_codeVerified) {
-                    true => 'Compared with your partner — this key is verified',
-                    false => 'Not compared yet — read it aloud together once',
-                    null => 'A code you both compare to verify your encryption',
-                  },
-                  style: const TextStyle(
-                      fontSize: 12, color: MilesColors.taupe,),),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: () =>
-                  showSecurityCodeDialog(context, partnerId: partner?.id),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Partner ──────────────────────────────────────────
-            const _SectionHeader(label: 'Partner'),
-            if (partner != null) ...[
-              SurfacePanel(
-                child: Row(
-                  children: [
-                    const Text('💞', style: TextStyle(fontSize: 24)),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(partner.displayName,
-                              style: const TextStyle(
-                                  color: MilesColors.cream50,
-                                  fontWeight: FontWeight.w600,),),
-                          Text(partner.timezone.replaceAll('_', ' '),
-                              style: const TextStyle(
-                                  color: MilesColors.taupe, fontSize: 12,),),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: MilesColors.danger,
-                  side: const BorderSide(color: Color(0x55B83A57)),
-                ),
-                onPressed: _busy ? null : _removePartner,
-                icon: const Icon(Icons.link_off, size: 18),
-                label: const Text('Remove partner'),
-              ),
-            ] else
-              const Text('Not linked yet.',
-                  style: TextStyle(color: MilesColors.taupe),),
-
-            const SizedBox(height: 28),
-
-            // ── Safety ───────────────────────────────────────────
-            // Every label here is neutral, and that is the design rather than
-            // squeamishness: this list may be read over the user's shoulder by
-            // the person the pause is about. Nothing says "block", nothing
-            // names anybody, and nothing shows a report after it is filed.
-            const _SectionHeader(label: 'Safety'),
-            ValueListenableBuilder<bool>(
-              valueListenable: ContactPause.active,
-              builder: (context, paused, _) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  paused
-                      ? Icons.notifications_off
-                      : Icons.notifications_off_outlined,
-                  color: paused ? MilesColors.gilt : MilesColors.taupe,
-                ),
-                title: const Text('Pause notifications',
-                    style: TextStyle(color: MilesColors.cream50),),
-                subtitle: Text(
-                  paused
-                      ? _pauseSubtitle()
-                      : 'Quiet for a while, without ending anything',
-                  style:
-                      const TextStyle(color: MilesColors.taupe, fontSize: 12),
-                ),
-                onTap: () => showContactPauseSheet(context),
+            _SettingsRow(
+              icon: Icons.favorite_border,
+              title: 'Closer',
+              subtitle: isModest
+                  ? 'Hidden. Reveal for both partners.'
+                  : 'Visible to both of you.',
+              trailing: Switch(
+                value: !isModest,
+                onChanged: _busy ? null : _toggleModestMode,
+                activeThumbColor: MilesColors.ember,
               ),
             ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading:
-                  const Icon(Icons.flag_outlined, color: MilesColors.taupe),
-              title: const Text('Report a problem',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text('Something here that should not be',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              // partner while paired, so submit_report can resolve who the
-              // report is about; app_content otherwise, which files it against
-              // Miles rather than against a person who does not exist yet.
+          ],
+        ),
+        _SettingsGroup(
+          label: 'Support',
+          children: [
+            _SettingsRow(
+              icon: Icons.help_outline,
+              title: 'Help & FAQ',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const FaqScreen()),
+              ),
+            ),
+            _SettingsRow(
+              icon: Icons.flag_outlined,
+              title: 'Report a problem',
+              subtitle: 'Something here that should not be',
+              // Same target choice the flat screen made: a report with no
+              // partner is about the app, not about a person who is not there.
               onTap: () => showReportSheet(
                 context,
                 target: partner == null
@@ -1101,111 +861,258 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                     : ReportTarget.partner,
               ),
             ),
-
-            const SizedBox(height: 28),
-
-            // ── Account ──────────────────────────────────────────
-            const _SectionHeader(label: 'Account'),
-            // Whether a sealed copy of the encryption key exists server-side.
-            // isMissing() reports false when the server is unreachable, so an
-            // offline visit reads "on" — the same bias the launch prompt has,
-            // and for the same reason: a dropped connection must not accuse.
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                _escrowMissing
-                    ? Icons.gpp_maybe_outlined
-                    : Icons.verified_user_outlined,
-                color: _escrowMissing ? MilesColors.ember : MilesColors.taupe,
-              ),
-              title: Text(
-                _escrowMissing
-                    ? 'Recovery backup: off'
-                    : 'Recovery backup: on',
-                style: const TextStyle(color: MilesColors.cream50),
-              ),
-              subtitle: Text(
-                _escrowMissing
-                    ? 'A reinstall would lose your encrypted memories '
-                        '— tap to fix'
-                    : 'Your key can survive a reinstall',
-                style: TextStyle(
-                  color:
-                      _escrowMissing ? MilesColors.ember : MilesColors.taupe,
-                  fontSize: 12,
-                ),
-              ),
-              onTap: _escrowMissing ? _fixEscrow : null,
-            ),
-            // The counterpart to the destroy buttons below: everything the
-            // couple keeps here, copied out unencrypted to a folder the user
-            // picks. E2EE means only their own device can ever build it.
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.drive_file_move_outline,
-                  color: MilesColors.taupe,),
-              title: const Text('Export your data',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text(
-                  'An unencrypted copy, in a folder you choose',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: () => context.push('/app/settings/export'),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading:
-                  const Icon(Icons.alternate_email, color: MilesColors.taupe),
-              title: const Text('Change email',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: Text(
-                SupabaseService.client.auth.currentUser?.email ?? '—',
-                style: const TextStyle(color: MilesColors.taupe, fontSize: 12),
-              ),
-              trailing:
-                  const Icon(Icons.chevron_right, color: MilesColors.gilt),
-              onTap: _changeEmail,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.devices, color: MilesColors.taupe),
-              title: const Text('Sign out of other devices',
-                  style: TextStyle(color: MilesColors.cream50),),
-              subtitle: const Text('This phone stays signed in',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              onTap: _signOutOtherDevices,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.logout, color: MilesColors.ember),
-              title: const Text('Sign out',
-                  style: TextStyle(color: MilesColors.ember),),
-              onTap: _signOut,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading:
-                  const Icon(Icons.delete_forever, color: MilesColors.danger),
-              title: const Text('Delete account',
-                  style: TextStyle(color: MilesColors.danger),),
-              subtitle: const Text('Permanently erases your data',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),),
-              onTap: _busy ? null : _deleteAccount,
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── About ────────────────────────────────────────────
-            const _SectionHeader(label: 'About'),
-            const _AboutCard(),
-
-            const SizedBox(height: 40),
           ],
         ),
-      ),
-    );
-  }
+        _SettingsGroup(
+          label: 'Your data',
+          children: [
+            _SettingsRow(
+              icon: Icons.manage_accounts_outlined,
+              title: 'Account & data',
+              subtitle: 'Email, export, sign out, delete',
+              value: _escrowMissing ? 'Backup off' : 'Backup on',
+              onTap: () => context.push('/app/settings/account'),
+            ),
+            _SettingsRow(
+              icon: Icons.info_outline,
+              title: 'About',
+              value: '0.1.0 (${ReleaseGate.buildNumber})',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (_) => const Dialog(
+                  backgroundColor: MilesColors.surface1,
+                  child: _AboutCard(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ];
+
+  List<Widget> _profilePage(dynamic profile, dynamic partner) => [
+        Center(
+          child: Semantics(
+            button: true,
+            enabled: !_changingAvatar,
+            label: 'Change profile photo',
+            onTap: _changingAvatar ? null : _changeAvatar,
+            excludeSemantics: true,
+            child: EmberPress(
+              onTap: _changingAvatar ? null : _changeAvatar,
+              child: _AvatarEditor(
+                url: _localAvatarUrl ?? profile?.avatarUrl as String?,
+                name: profile?.displayName as String? ?? '',
+                busy: _changingAvatar,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        LoveTextField(
+          label: 'Display name',
+          controller: _name,
+          hint: 'What should we call you?',
+          maxLength: 30,
+        ),
+        const SizedBox(height: 16),
+        LoveTextField(
+          label: 'Status',
+          controller: _status,
+          hint: 'A little note your partner sees',
+          maxLength: 60,
+        ),
+        const SizedBox(height: 16),
+        GlowButton(
+          label: 'Save profile',
+          color: MilesColors.blush,
+          loading: _savingProfile,
+          onPressed: _savingProfile ? null : _saveProfile,
+        ),
+        const SizedBox(height: 22),
+        if (partner != null) ...[
+          _SettingsGroup(
+            label: 'Partner',
+            children: [
+              _SettingsRow(
+                icon: Icons.favorite,
+                title: partner.displayName as String,
+                subtitle: partner.timezone.replaceAll('_', ' ') as String,
+              ),
+              // The sheet owns every word of the unpair ceremony, including
+              // the confirmation. A row that restates it here is the copy
+              // severance_confirm_test was written to keep out.
+              _SettingsRow(
+                icon: Icons.link_off,
+                title: 'Remove partner',
+                onTap: _busy ? null : _removePartner,
+              ),
+            ],
+          ),
+        ],
+        _SettingsGroup(children: [
+          _SettingsRow(
+            icon: Icons.badge_outlined,
+            title: 'About you',
+            subtitle: 'Gender',
+            value: profile?.gender == 'female'
+                ? 'Female'
+                : profile?.gender == 'male'
+                    ? 'Male'
+                    : 'Not set',
+            onTap: _changeGender,
+          ),
+        ],),
+      ];
+
+  List<Widget> _notificationsPage() => [
+        // Said at the top, because every row below is a lie while this is
+        // true: they all open the right pages and none of them can ring.
+        if (_notif.appBlocked)
+          _SettingsGroup(children: [
+            _SettingsRow(
+              icon: Icons.notifications_off_outlined,
+              title: 'Alerts are off for this app, so nothing below can '
+                  'reach you.',
+              value: 'Go to settings',
+              onTap: FsiPermission.openSettings,
+            ),
+          ],)
+        else if (_notif.appEnabled == null)
+          const _SettingsGroup(children: [
+            _SettingsRow(
+              icon: Icons.help_outline,
+              title: "Your phone didn't say how these are set. The rows still "
+                  'open the right pages.',
+            ),
+          ],),
+        _SettingsGroup(children: [
+          FutureBuilder<bool>(
+            future: FsiPermission.canUse(),
+            builder: (context, snap) {
+              // Only ONE of the three states offers a tap. A row that opens a
+              // settings page this phone does not have is worse than a row
+              // that says so.
+              final supported = snap.data;
+              return _SettingsRow(
+                icon: Icons.fullscreen,
+                title: 'Full-screen alerts',
+                subtitle: supported == false
+                    ? 'This phone has no full-screen alert setting.'
+                    : 'Let a call light up your screen while the phone '
+                        'is locked',
+                onTap:
+                    supported == false ? null : FsiPermission.openSettings,
+              );
+            },
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: ContactPause.active,
+            builder: (context, paused, _) => _SettingsRow(
+              icon: Icons.notifications_paused_outlined,
+              title: 'Pause notifications',
+              subtitle: paused
+                  ? _pauseSubtitle()
+                  : 'Quiet for a while, without ending anything',
+              onTap: () => showContactPauseSheet(context),
+            ),
+          ),
+        ],),
+        _SettingsGroup(
+          label: 'Sound & vibrate',
+          children: [
+            ValueListenableBuilder<int>(
+              valueListenable: ReleaseGate.revision,
+              builder: (context, _, __) {
+                final killed = ReleaseGate.uiSoundKilled;
+                return _SettingsRow(
+                  icon: Icons.music_note_outlined,
+                  title: 'Sounds',
+                  subtitle: killed
+                      ? 'Turned off remotely for this release.'
+                      : 'Soft sounds for moments — sending, sealing, '
+                          'breathing. Vibration is separate and stays on.',
+                  trailing: Switch(
+                    value: !killed && MilesSound.enabled,
+                    onChanged: killed ? null : _toggleSounds,
+                    activeThumbColor: MilesColors.ember,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        _SettingsGroup(
+          label: 'Channels',
+          children: [
+            for (final (String id, String title, String subtitle) in const [
+              (kReachChannelId, 'Reach alerts',
+                  'The buzz when your partner reaches for you'),
+              (kCallChannelId, 'Incoming calls', 'How a call rings on this phone'),
+              (kMsgChannelId, 'Messages', 'New chat messages'),
+              (kCareChannelId, 'Reminders',
+                  'Care reminders, rituals and memory proposals'),
+              (kQuietChannelId, 'Silent delivery',
+                  'Alerts that arrive without sound on quiet covers'),
+              (kCallServiceChannelId, 'Ongoing calls',
+                  'The quiet notice shown while a call is running'),
+              (kTimerChannelId, 'Timer cover',
+                  'The countdown finishing in the Timer cover'),
+            ])
+              _SettingsRow(
+                icon: Icons.tune,
+                title: title,
+                subtitle: subtitle,
+                value: _notif.blocked.contains(id) ? 'Blocked' : null,
+                onTap: () =>
+                    NotificationChannelSettings.open(context, channelId: id),
+              ),
+          ],
+        ),
+      ];
+
+  List<Widget> _accountPage() => [
+        _SettingsGroup(children: [
+          _SettingsRow(
+            icon: Icons.backup_outlined,
+            title: 'Recovery backup',
+            subtitle: _escrowMissing
+                ? 'Off — without it, a reinstall cannot read your history'
+                : 'On',
+            value: _escrowMissing ? 'Backup off' : 'Backup on',
+            onTap: _escrowMissing ? _fixEscrow : null,
+          ),
+          _SettingsRow(
+            icon: Icons.download_outlined,
+            title: 'Export your data',
+            subtitle: 'A copy of everything, readable offline',
+            onTap: () => context.push('/app/settings/export'),
+          ),
+          _SettingsRow(
+            icon: Icons.mail_outline,
+            title: 'Change email',
+            onTap: _changeEmail,
+          ),
+        ],),
+        _SettingsGroup(children: [
+          _SettingsRow(
+            icon: Icons.devices_outlined,
+            title: 'Sign out of other devices',
+            subtitle: 'This phone stays signed in',
+            onTap: _signOutOtherDevices,
+          ),
+          _SettingsRow(
+            icon: Icons.logout,
+            title: 'Sign out',
+            onTap: _signOut,
+          ),
+          _SettingsRow(
+            icon: Icons.delete_forever_outlined,
+            title: 'Delete account',
+            subtitle: 'Permanently erases your data',
+            onTap: _busy ? null : _deleteAccount,
+          ),
+        ],),
+      ];
 }
 
 /// Who made this, and which build you are actually holding.
@@ -1555,6 +1462,234 @@ class _AvatarEditor extends StatelessWidget {
               size: 15, color: MilesColors.cream50,),
         ),
       ],
+    );
+  }
+}
+
+/// A group of rows in one rounded card, the way a platform settings app does
+/// it: hairline rules between rows, inset past the icon column so a rule
+/// starts where the text does.
+///
+/// The fill is opaque on purpose. This is a surface you read on and the ember
+/// field behind it moves; a translucent one is an animation playing under your
+/// settings, which repo_hygiene_test fails the build for.
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.children, this.label});
+
+  /// Null for the first group, which carries no header — the screen opens on
+  /// rows rather than on a word.
+  final String? label;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) {
+        rows.add(const Padding(
+          padding: EdgeInsets.only(left: 54),
+          child: Divider(height: 1, thickness: 1, color: MilesColors.hairline),
+        ));
+      }
+      rows.add(children[i]);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (label != null) _SectionHeader(label: label!),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: MilesColors.surface1,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: MilesColors.hairline),
+            ),
+            child: Column(children: rows),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One settings row: icon, title, optional subtitle, and either a value or a
+/// control at the end.
+///
+/// Putting the CURRENT STATE at the end of the row — "On", "Asia/Karachi",
+/// "Midnight Boudoir" — is what lets one screen carry this many settings
+/// without a header above every single one.
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.value,
+    this.trailing,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+
+  /// Current state, shown at the end of the row.
+  final String? value;
+
+  /// A control instead of a value — a switch, a segmented toggle.
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      child: Row(
+        children: [
+          Icon(icon, size: 22, color: MilesColors.gilt),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                      color: MilesColors.cream50,
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w600,
+                    ),),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!,
+                      style: const TextStyle(
+                        color: MilesColors.taupe,
+                        fontSize: 12.5,
+                        height: 1.3,
+                      ),),
+                ],
+              ],
+            ),
+          ),
+          if (value != null)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 132),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: Text(value!,
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(
+                      color: MilesColors.taupe,
+                      fontSize: 13,
+                    ),),
+              ),
+            ),
+          if (trailing != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: trailing,
+            ),
+          if (onTap != null)
+            const Padding(
+              padding: EdgeInsets.only(left: 6),
+              child:
+                  Icon(Icons.chevron_right, size: 20, color: MilesColors.gilt),
+            ),
+        ],
+      ),
+    );
+    if (onTap == null) return row;
+    return EmberPress(onTap: onTap, child: row);
+  }
+}
+
+/// The hero card the screen opens on: who you are, and whether the couple
+/// exists yet. It answers "is this thing connected" before any setting does.
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.name,
+    required this.pairState,
+    required this.avatarUrl,
+    required this.onTap,
+  });
+
+  final String name;
+  final String pairState;
+  final String? avatarUrl;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: EmberPress(
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: MilesColors.surface1,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: MilesColors.hairline),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 62,
+                  height: 62,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: MilesColors.surface2,
+                    border: Border.all(color: MilesColors.hairline),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  alignment: Alignment.center,
+                  // SignedImage, never NetworkImage: avatars are PATHS in the
+                  // private couple_media bucket. Handing the raw path to
+                  // NetworkImage threw ArgumentError on every Settings open —
+                  // the build-59 client_errors named it.
+                  child: avatarUrl != null
+                      ? SignedImage(
+                          bucket: 'couple_media',
+                          value: avatarUrl,
+                          width: 62,
+                          height: 62,
+                          thumb: true,
+                        )
+                      : Text(
+                          name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+                          style: const TextStyle(
+                            color: MilesColors.cream50,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name.isEmpty ? 'Your profile' : name,
+                          style: const TextStyle(
+                            color: MilesColors.cream50,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),),
+                      const SizedBox(height: 3),
+                      Text(pairState,
+                          style: const TextStyle(
+                            color: MilesColors.taupe,
+                            fontSize: 13.5,
+                          ),),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: MilesColors.gilt),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -197,10 +197,16 @@ class MilesApp extends ConsumerStatefulWidget {
     if (DisguiseService.enabled) showRealApp.value = false;
   }
 
-  /// True only while the biometric prompt is on screen. The prompt itself makes
-  /// the app `inactive`; this guards that transition from resetting
-  /// [showRealApp] and cancelling the unlock mid-auth.
-  static bool authInProgress = false;
+  /// True only while an OS unlock prompt is on screen. The prompt itself makes
+  /// the app `inactive` (biometric overlay) or `paused` (the PIN/pattern
+  /// credential Activity); this guards both transitions from resetting
+  /// [showRealApp] and tearing down the tree mid-auth.
+  ///
+  /// Delegates to [AppLock.authInProgress] — one backing bool, set inside
+  /// AppLock.authenticate() itself, so callers that never touch this class
+  /// (partner_rewrap.dart demands the unlock from core code) are guarded too.
+  static bool get authInProgress => AppLock.authInProgress;
+  static set authInProgress(bool v) => AppLock.authInProgress = v;
 
   /// True while an in-app flow has intentionally handed focus to a system
   /// overlay — the gallery picker, the full-screen reaction camera, the
@@ -352,7 +358,14 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // in-picture window, so the cover would come up INSIDE the floating
         // call — showing News where her face should be, which is both useless
         // and a louder tell than the call was.
-        if (!MilesApp.systemOverlayActive && !PipMode.active.value) {
+        // authInProgress is the third exemption: the PIN/pattern flavour of
+        // the OS unlock is a full Activity and reports `paused`, not
+        // `inactive` — raising the cover here swapped the MaterialApp and
+        // destroyed the very screen (the rewrap ceremony) whose unlock was in
+        // progress, taking the typed code with it.
+        if (!MilesApp.systemOverlayActive &&
+            !PipMode.active.value &&
+            !MilesApp.authInProgress) {
           MilesApp.raiseCover();
         }
         // Sound goes silent on ANY real backgrounding, cover or not — a bed
@@ -407,7 +420,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
     // only while the REAL app is visible, never unsolicited over the News cover,
     // and NOT while a system picker we opened is up (else picking a photo would
     // trip the lock and prompt biometrics on the way back).
-    if (state == AppLifecycleState.paused && !MilesApp.systemOverlayActive) {
+    if (state == AppLifecycleState.paused &&
+        !MilesApp.systemOverlayActive &&
+        !MilesApp.authInProgress) {
+      // Without the authInProgress guard the ceremony's own prompt set
+      // `locked`, and the user unlocked twice back to back.
       AppLock.lockIfEnabled();
     } else if (state == AppLifecycleState.resumed) {
       if (MilesApp.showRealApp.value && AppLock.locked.value) {

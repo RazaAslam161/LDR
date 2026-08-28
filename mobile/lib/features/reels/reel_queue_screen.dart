@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/reels/reel_queue_repository.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/features/reels/share_intake.dart';
 import 'package:miles/features/watch/watch_source.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -60,6 +61,13 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
 
   /// Takes whatever was shared into the app and queues it.
   Future<void> _drainShare() async {
+    // A share that arrived while this screen did not exist: the shell drained
+    // it and routed here; consume it before asking the platform channel.
+    final handed = ShareIntake.handedOff;
+    if (handed != null) {
+      ShareIntake.handedOff = null;
+      if (mounted) await _addUrl(handed);
+    }
     final url = ShareIntake.firstUrl(await ShareIntake.take());
     if (url == null || !mounted) return;
     await _addUrl(url);
@@ -69,7 +77,16 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
     final session = ref.read(sessionProvider);
     final coupleId = session.couple?.id;
     final me = session.profile?.id;
-    if (coupleId == null || me == null) return;
+    if (coupleId == null || me == null) {
+      // The session can still be in flight right after launch. Doing nothing
+      // here read as "the add is broken" — say what is actually happening.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Still loading. Try that again in a second.'),
+        ),
+      );
+      return;
+    }
     try {
       await ReelQueueRepository.add(
         coupleId: coupleId,
@@ -83,7 +100,11 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Added for both of you')),
       );
-    } catch (_) {
+    } catch (e, st) {
+      // Reported, not swallowed: this bare catch was the only error surface
+      // for the whole add, and it destroyed the evidence of WHY — an RLS
+      // refusal, a 500 and a dead socket all printed the same sentence.
+      ErrorReporter.report(e, st, kind: 'reels');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Couldn't add that link. Try again.")),
@@ -134,8 +155,25 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
         ],
       ),
     );
-    final clean = ShareIntake.firstUrl(url);
-    if (clean != null) await _addUrl(clean);
+    final raw = url?.trim() ?? '';
+    var clean = ShareIntake.firstUrl(raw);
+    // A link pasted without its scheme (instagram.com/reel/…) is the common
+    // case, not garbage — upgrade it rather than silently doing nothing.
+    if (clean == null &&
+        raw.isNotEmpty &&
+        raw.contains('.') &&
+        !raw.contains(' ')) {
+      clean = ShareIntake.firstUrl('https://' + raw);
+    }
+    if (clean != null) {
+      await _addUrl(clean);
+    } else if (raw.isNotEmpty && mounted) {
+      // The old behaviour: nothing at all. An add that does nothing and says
+      // nothing is indistinguishable from a broken feature.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("That doesn't look like a link.")),
+      );
+    }
   }
 
   @override
