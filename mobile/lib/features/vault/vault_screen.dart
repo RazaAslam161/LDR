@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/media_normalize.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
@@ -54,6 +57,18 @@ class _VaultScreenState extends State<VaultScreen> {
     try {
       _items = await VaultRepository.items();
       _loadError = null;
+      // ONE batched signing call for every tile AND every original, before a
+      // single tile asks. personal_vault is private, so without this each
+      // tile paid its own sign round-trip and the grid opened as a wall of
+      // glyphs filling in over many seconds — and each tap paid the same
+      // round-trip again for the original. The gallery has always done this
+      // (MediaUrls.warm); the vault never did.
+      unawaited(MediaUrls.warm(VaultRepository.bucket, [
+        for (final i in _items) ...[
+          if (i.thumbPath != null) i.thumbPath!,
+          if (i.storagePath != null) i.storagePath!,
+        ],
+      ],),);
     } catch (e) {
       // Swallowing this rendered the "Your vault is empty" copy on a network
       // blip — the worst possible lie to tell someone about a vault.
@@ -180,6 +195,10 @@ class _VaultScreenState extends State<VaultScreen> {
     final List<XFile> picked;
     MilesApp.systemOverlayActive = true;
     try {
+      // The one picker in the app that skipped the system Photo Picker flag —
+      // so the vault opened the DOCUMENT provider (a file manager) where every
+      // other surface opened the gallery.
+      PhotoPickerService.useSystemGallery();
       picked = await ImagePicker().pickMultipleMedia();
     } catch (e, st) {
       // Was outside the try below, so a PlatformException escaped _addMedia,
@@ -304,9 +323,12 @@ class _VaultScreenState extends State<VaultScreen> {
     try {
       await VaultRepository.addNote(text);
       await _load();
-    } catch (_) {
+    } catch (e, st) {
       // The sheet's controller is disposed by now, so the typed note exists
       // nowhere but this closure — losing it silently loses it for good.
+      // Reported too: this was the one vault write whose failure left no row
+      // in client_errors, which is indistinguishable from "never failed".
+      ErrorReporter.report(e, st, kind: 'vault');
       _toast("That note didn't save.", onRetry: () => _saveNote(text));
     }
   }
@@ -632,6 +654,24 @@ class _VaultTileState extends State<_VaultTile> {
     }
     final path = widget.item.gridPath;
     if (path == null) return; // video/audio: the glyph is the preview
+    if (!path.endsWith('.enc')) {
+      // The gallery mechanism verbatim: the screen's _load already
+      // batch-signed every path, so this is a cache hit, not a round trip.
+      try {
+        final url = MediaUrls.cached(VaultRepository.bucket, path) ??
+            await MediaUrls.sign(VaultRepository.bucket, path);
+        if (!_mounted) return;
+        if (url != null) {
+          setState(() => _provider = NetworkImage(url));
+        } else {
+          setState(() => _failed = true);
+        }
+      } catch (e, st) {
+        ErrorReporter.report(e, st, kind: 'vault-tile');
+        if (_mounted) setState(() => _failed = true);
+      }
+      return;
+    }
     try {
       final p = await EncryptedMediaCache.tileProvider(
         bucket: VaultRepository.bucket,
@@ -642,10 +682,20 @@ class _VaultTileState extends State<_VaultTile> {
         keyOverride: await CryptoCore.exportVaultKeyBytes(),
       );
       if (_mounted) setState(() => _provider = p);
-    } catch (e) {
+    } catch (e, st) {
+      // Named, finally. This catch swallowed the grid's whole failure mode —
+      // black tiles reached the owner three builds running with nothing in
+      // client_errors to say whether the sign, the download, the decrypt or
+      // the decode was the half that died.
+      ErrorReporter.report(e, st, kind: 'vault-tile');
       if (_mounted) setState(() => _failed = true);
     }
   }
+
+  /// One report per tile instance: a decode failure reruns the errorBuilder
+  /// on every rebuild, and sixty reports a second is how the cap gets spent
+  /// on one broken picture.
+  bool _decodeReported = false;
 
   IconData get _glyph => switch (widget.item.type) {
         'saved_video' => Icons.play_circle_outline_rounded,
@@ -671,9 +721,18 @@ class _VaultTileState extends State<_VaultTile> {
                 gaplessPlayback: true,
                 // Zero fade-out: the default composites two frames per
                 // recycled cell for a full second during a scroll.
-                errorBuilder: (_, __, ___) => Center(
-                  child: Icon(_glyph, color: MilesColors.faint, size: 26),
-                ),
+                errorBuilder: (_, err, st) {
+                  // The decrypt SUCCEEDED and the plaintext would not decode
+                  // as an image — a different disease from every failure the
+                  // catch above can see, and it was rendered identically.
+                  if (!_decodeReported) {
+                    _decodeReported = true;
+                    ErrorReporter.report(err, st, kind: 'vault-tile-decode');
+                  }
+                  return Center(
+                    child: Icon(_glyph, color: MilesColors.faint, size: 26),
+                  );
+                },
               )
             else
               Center(

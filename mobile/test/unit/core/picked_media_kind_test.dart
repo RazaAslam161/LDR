@@ -60,5 +60,12 @@ void main() {
     // One missed entry point is one action that still opens the file manager.
     expect('_useSystemGallery();'.allMatches(src).length, 3,
         reason: 'pick, pickMedia and pickVideo each open a system picker',);
+    // The vault is the fourth entry point, outside this service: it needs the
+    // raw multi-pick, so it sets the flag through the public name. It shipped
+    // without it once — the vault was the one picker opening the file manager.
+    final vault =
+        File('lib/features/vault/vault_screen.dart').readAsStringSync();
+    expect(vault, contains('PhotoPickerService.useSystemGallery();'),
+        reason: 'the vault picker must ask for the gallery too',);
   });
 }

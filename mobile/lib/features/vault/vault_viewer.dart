@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -122,9 +123,60 @@ class _PageState extends State<_Page> {
     }
   }
 
+  Future<void> _loadPlainImage(String path) async {
+    try {
+      final url = MediaUrls.cached(VaultRepository.bucket, path) ??
+          await MediaUrls.sign(VaultRepository.bucket, path);
+      if (!mounted) return;
+      if (url == null) {
+        setState(() => _error = "This one couldn't be opened.");
+        return;
+      }
+      setState(() => _provider = NetworkImage(url));
+    } catch (e) {
+      if (mounted) setState(() => _error = "This one couldn't be opened.");
+    }
+  }
+
+  /// Plaintext video/audio: a signed URL straight into the player — no
+  /// decrypt, no loopback server.
+  Future<void> _loadPlainPlayable(String path) async {
+    try {
+      final url = MediaUrls.cached(VaultRepository.bucket, path) ??
+          await MediaUrls.sign(VaultRepository.bucket, path);
+      if (url == null) {
+        if (mounted) setState(() => _error = "This one couldn't be opened.");
+        return;
+      }
+      final vp = VideoPlayerController.networkUrl(Uri.parse(url));
+      await vp.initialize();
+      if (!mounted) {
+        await vp.dispose();
+        return;
+      }
+      setState(() {
+        _vp = vp;
+        _chewie = ChewieController(
+          videoPlayerController: vp,
+          autoPlay: true,
+          allowFullScreen: true,
+          deviceOrientationsAfterFullScreen: const [
+            DeviceOrientation.portraitUp,
+          ],
+        );
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = "This one couldn't be opened.");
+    }
+  }
+
   /// Decrypts in memory and plays from loopback. See [VaultVideoServer] for why
   /// this does not decrypt to a file.
   Future<void> _loadPlayable(String path) async {
+    if (!path.endsWith('.enc')) {
+      await _loadPlainPlayable(path);
+      return;
+    }
     try {
       final bytes = await EncryptedMediaCache.bytes(
         bucket: VaultRepository.bucket,
@@ -205,6 +257,33 @@ class _PageState extends State<_Page> {
       await _loadPlayable(path);
       return;
     }
+    if (!path.endsWith('.enc')) {
+      // Plaintext row: the gallery mechanism — sign, then stream. Same road
+      // the legacy couple-bucket rows have always taken.
+      await _loadPlainImage(path);
+      return;
+    }
+    // The grid already decrypted the 400px tile into memory — paint it NOW
+    // and let the original replace it in place. A black screen with a wheel
+    // while a multi-MB original signs, downloads and decrypts was the
+    // reported symptom, with this preview resident the whole time.
+    final gridPath = widget.item.gridPath;
+    if (gridPath != null) {
+      try {
+        final tile = await EncryptedMediaCache.tileProvider(
+          bucket: VaultRepository.bucket,
+          path: gridPath,
+          associatedData: widget.item.thumbPath != null
+              ? VaultRepository.thumbAdFor(widget.item.id)
+              : VaultRepository.fullAdFor(widget.item.id),
+          keyOverride: await CryptoCore.exportVaultKeyBytes(),
+        );
+        if (mounted && _provider == null) setState(() => _provider = tile);
+      } catch (_) {
+        // A head start, not the load. The full path below is the real one
+        // and carries the real error message.
+      }
+    }
     try {
       final p = await EncryptedMediaCache.fullProvider(
         bucket: VaultRepository.bucket,
@@ -215,7 +294,11 @@ class _PageState extends State<_Page> {
       if (mounted) setState(() => _provider = p);
     } catch (e) {
       if (mounted) {
-        setState(() => _error = "This one couldn't be opened.");
+        // The tile may already be up — keep showing it rather than swapping a
+        // visible picture for an error sentence.
+        if (_provider == null) {
+          setState(() => _error = "This one couldn't be opened.");
+        }
       }
     }
   }
@@ -262,6 +345,9 @@ class _PageState extends State<_Page> {
         child: Image(
           image: provider,
           fit: BoxFit.contain,
+          // The tile is painted first and the original swaps in over it —
+          // without this the swap blanks for a frame.
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => const Center(
             child: Text(
               "This one couldn't be displayed.",

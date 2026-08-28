@@ -2,11 +2,8 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
-import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/thumbnails.dart';
-import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -125,7 +122,10 @@ class VaultRepository {
 
   static Future<void> addNote(String content) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    // Thrown, not returned: a bare return completes normally, and the screen
+    // reads a normal completion as "saved" — the note then simply never
+    // appears, with nothing said. Same law as every ChatRepository send.
+    if (uid == null) throw StateError('not signed in');
     await _c.from('personal_vault_items').insert({
       'owner_id': uid,
       'type': 'note',
@@ -165,10 +165,6 @@ class VaultRepository {
   static String fullAdFor(String itemId) => '${itemId}_vault_full';
   static String thumbAdFor(String itemId) => '${itemId}_vault_thumb';
 
-  static String _fullPath(String ownerId, String id) =>
-      '$ownerId/vault/$id.enc';
-  static String _thumbPath(String ownerId, String id) =>
-      '$ownerId/vault/thumb/$id.enc';
 
   /// Copies [bytes] INTO the vault: encrypted, under the owner's own folder,
   /// with a thumbnail so a grid never decodes an original.
@@ -191,7 +187,8 @@ class VaultRepository {
     String type = 'saved_photo',
   }) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return null;
+    // Thrown for the same reason as addNote: null reads as success upstream.
+    if (uid == null) throw StateError('not signed in');
 
     final id = _uuid();
     final isVideo = mimeType.startsWith('video/');
@@ -212,29 +209,21 @@ class VaultRepository {
     // encrypt with the COUPLE key, which nothing on this path ever derived, so
     // every save after a cold start threw 'no shared key' before reaching the
     // first upload. See CryptoCore._vaultKey.
-    final vaultKey = await CryptoCore.exportVaultKeyBytes();
-
-    final fullPath = _fullPath(uid, id);
-    final packedFull = packFull(
-      await CryptoCore.encryptBytesOffThread(bytes,
-          associatedData: fullAdFor(id), keyOverride: vaultKey,),
-    );
-    _refuseCleartext(packedFull);
-
-    String? thumbPath;
-    if (tile != null) {
-      thumbPath = _thumbPath(uid, id);
-      final packedTile = packFull(
-        await CryptoCore.encryptBytesOffThread(tile,
-            associatedData: thumbAdFor(id), keyOverride: vaultKey,),
-      );
-      _refuseCleartext(packedTile);
-      await _upload(thumbPath, packedTile);
-      await EncryptedMediaCache.seed(
-        bucket: bucket, path: thumbPath, packed: packedTile,);
-    }
-
-    await _upload(fullPath, packedFull);
+    // PLAINTEXT in the PRIVATE bucket, read back by signed URL — the exact
+    // mechanism the gallery proved on this fleet all day. Owner's decision
+    // (2026-08-28): the E2EE tile pipeline produced three builds of black
+    // tiles; what the vault keeps is what actually guards it — the PIN gate,
+    // FLAG_SECURE, and owner-only RLS — the same protection level every
+    // couple_intimate photo already lives at. Legacy `.enc` objects keep
+    // their decrypt read-path; nothing old breaks harder.
+    final ext = _plainExt(mimeType);
+    final fullPath = '$uid/vault/$id$ext';
+    final thumbPath = tile == null ? null : '$uid/vault/thumb/$id.jpg';
+    await Future.wait([
+      _uploadPlain(fullPath, bytes, mimeType),
+      if (tile != null && thumbPath != null)
+        _uploadPlain(thumbPath, tile, 'image/jpeg'),
+    ]);
 
     try {
       final row = await _c
@@ -266,27 +255,28 @@ class VaultRepository {
   /// shape — nonce and MAC both empty. Uploading one would put the vault's
   /// contents in storage in the clear.
   ///
-  /// Deliberately local rather than reaching for the memory-threads copy, which
-  /// is @visibleForTesting: the vault should not depend on another feature's
-  /// internals to know it is encrypted.
-  static void _refuseCleartext(Uint8List packed) {
-    if (packed.length >= 40 && packed.take(40).every((b) => b == 0)) {
-      throw StateError('refusing to upload vault media as cleartext');
-    }
-  }
 
-  static Future<void> _upload(String path, Uint8List packed) =>
-      _c.storage.from(bucket).uploadBinary(
-            path,
-            packed,
-            // Ciphertext is opaque. Uploading it under the original mime is
-            // rejected with 415 invalid_mime_type — the same omission that
-            // broke the intimate bucket once already.
-            fileOptions: const FileOptions(
-              contentType: 'application/octet-stream',
-              upsert: true,
-            ),
-          );
+  /// The bucket's allow-list already carries these (verified live:
+  /// image/jpeg|png|webp, video/mp4|quicktime, audio/mp4|aac|mpeg).
+  static String _plainExt(String mime) => switch (mime) {
+        'image/jpeg' => '.jpg',
+        'image/png' => '.png',
+        'image/webp' => '.webp',
+        'video/mp4' => '.mp4',
+        'video/quicktime' => '.mov',
+        'audio/mp4' || 'audio/aac' => '.m4a',
+        'audio/mpeg' => '.mp3',
+        _ => '.bin',
+      };
+
+  static Future<void> _uploadPlain(
+      String path, Uint8List bytes, String mime,) async {
+    await _c.storage.from(bucket).uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(contentType: mime, upsert: true),
+        );
+  }
 
   static Future<void> _removeObjects(List<String> paths) async {
     if (paths.isEmpty) return;

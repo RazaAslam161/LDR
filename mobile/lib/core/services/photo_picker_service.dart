@@ -41,7 +41,11 @@ class PhotoPickerService {
   /// the wrong app is not a thing to leave depending on a bootstrap line
   /// somebody may reorder. Assignment is idempotent and the platform instance
   /// is a singleton.
-  static void _useSystemGallery() {
+  static void _useSystemGallery() => useSystemGallery();
+
+  /// The same flag, public for the one call site (the vault) that needs the
+  /// raw multi-pick rather than this service's crop/compress pipeline.
+  static void useSystemGallery() {
     final impl = ImagePickerPlatform.instance;
     if (impl is ImagePickerAndroid) impl.useAndroidPhotoPicker = true;
   }
