@@ -215,7 +215,8 @@ Deno.serve(async (req) => {
       | "message"
       | "memory"
       | "ritual"
-      | "msg_sync" = payload.kind ?? payload.type ?? "reach";
+      | "msg_sync"
+      | "unlink" = payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
 
@@ -230,6 +231,10 @@ Deno.serve(async (req) => {
       ? row?.sender_id
       : kind === "memory"
       ? row?.proposer
+      // An unlink ceremony names its initiator; the recipient is the partner
+      // being told, resolved by the standard other-member lookup below.
+      : kind === "unlink"
+      ? row?.initiated_by
       : row?.from_user;
     // A ritual has no author — the couple set it, and it goes to BOTH of them.
     // The worker addresses each partner in its own call rather than this
@@ -329,6 +334,8 @@ Deno.serve(async (req) => {
           ...(kind === "msg_sync"
             ? { message_id: rowId, seq: String(row?.seq ?? "") }
             : {}),
+          // unlink adds nothing: type + couple_id is the whole story, and the
+          // ceremony row itself is fetched by the client over RLS.
         },
         // A call is worthless if it arrives late, but a MESSAGE must survive a
         // doze window or an offline stretch — a 30s TTL made FCM discard it
@@ -344,8 +351,10 @@ Deno.serve(async (req) => {
           // it is worth having whenever the phone next comes back, and a 30s
           // TTL would drop it for anyone whose handset was dozing at 10 PM —
           // which is most people, at 10 PM.
+          // An unlink ceremony runs for seven DAYS — the one push that tells
+          // the partner it began must survive any doze window.
           ttl: kind === "message" || kind === "memory" || kind === "ritual" ||
-              kind === "msg_sync"
+              kind === "msg_sync" || kind === "unlink"
             ? "86400s"
             : "30s",
           // A delivery wake is worth exactly as much as the newest one. Ten
