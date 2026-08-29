@@ -144,6 +144,21 @@ void main() {
               'column of tiles is the build-61 complaint',);
     });
 
+    test('the sharer is never blind — the PiP carries faces during a share',
+        () {
+      final pip = File('lib/features/call/call_pip.dart').readAsStringSync();
+      expect(
+          pip.contains('if (call.sharingScreen) return const SizedBox.shrink'),
+          isFalse,
+          reason: 'hiding the window mid-share left the sharer with no call '
+              'surface at all — the build-62 field complaint',);
+      expect(pip.contains('pip-share-local'), isTrue);
+      expect(pip.contains('pip-share-remote'), isTrue);
+      expect(pip.contains('screenSelfRenderer'), isFalse,
+          reason: 'faces only — a live share preview inside the captured '
+              'display is the recursion tunnel',);
+    });
+
     test('the full-screen sharing panel cannot eat the stats long-press', () {
       final at = screen.indexOf('_SharingCard(big: true)');
       expect(at, greaterThan(-1));
@@ -178,6 +193,20 @@ void main() {
       expect(session.contains('else if (_sawFrames)'), isTrue,
           reason: 'a share that has not yet produced frames reports the same '
               'zero as a dead one; killing it there breaks slow handsets',);
+    });
+
+    test('a share that never produces a frame ends VISIBLY, not black', () {
+      // Build 62 sat connected and black for 138 seconds. The never-started
+      // watch first retries with the floor dropped, then ends the share and
+      // stamps the digest with the reason.
+      expect(session.contains('floorKbps: 50'), isTrue,
+          reason: 'the one-shot floor-drop retry',);
+      expect(session.contains('_neverStarted >= 20'), isTrue,
+          reason: 'twenty frameless seconds after negotiation is a dead '
+              'share, and hanging black is the worst possible answer',);
+      expect(session.contains('_endReason = 2'), isTrue);
+      expect(session.contains('endReason: _endReason'), isTrue,
+          reason: 'the digest must say HOW the share ended',);
     });
 
     test('the resize event re-aims the running session', () {

@@ -64,22 +64,26 @@ class ScreenShareSession {
 
   // ── The climb ─────────────────────────────────────────────────────────
   //
-  // Long edge, fps, and the ceiling that funds them. Every rung is strictly
-  // richer than the one below; the ladder is walked UP on clean samples and
-  // DOWN one rung the moment the encoder reports cpu or bandwidth limitation.
-  // The ceilings are sized for H.264, which needs roughly a quarter more bits
-  // than VP9 for the same text — and a ceiling is what BWE ramps into, never
-  // an opening bid.
-  static const climb = <({int longEdge, int fps, int maxKbps})>[
-    (longEdge: 960, fps: 15, maxKbps: 1200),
-    (longEdge: 1280, fps: 20, maxKbps: 2000),
-    (longEdge: 1920, fps: 24, maxKbps: 3500),
-    (longEdge: 1920, fps: 30, maxKbps: 5000),
+  // Long edge, fps, the ceiling that funds them, and the floor under the
+  // encoder's undershoot. Every rung is strictly richer than the one below;
+  // the ladder is walked UP on clean samples and DOWN one rung the moment
+  // the encoder reports cpu or bandwidth limitation. The ceilings are sized
+  // for H.264, which needs roughly a quarter more bits than VP9 for the same
+  // text — and a ceiling is what BWE ramps into, never an opening bid.
+  //
+  // THE FLOOR LAW (build 62's black share, field-proven): libwebrtc's
+  // bandwidth estimator is BORN at ~300kbps, and a stream whose minBitrate
+  // the estimate cannot fund is SUSPENDED — zero frames encoded, and with no
+  // media the estimate never moves, so the share sits connected and black
+  // forever (`fps0 bwe300` for 138s in the field). The start rung's floor
+  // must therefore sit well under 300k; higher rungs only run once the
+  // estimate has proven bigger, and may afford more.
+  static const climb = <({int longEdge, int fps, int maxKbps, int minKbps})>[
+    (longEdge: 960, fps: 15, maxKbps: 1200, minKbps: 100),
+    (longEdge: 1280, fps: 20, maxKbps: 2000, minKbps: 150),
+    (longEdge: 1920, fps: 24, maxKbps: 3500, minKbps: 250),
+    (longEdge: 1920, fps: 30, maxKbps: 5000, minKbps: 300),
   ];
-
-  /// The floor that stops the encoder's undershoot starving a static page
-  /// into mush between refreshes; low enough that rung 0 always funds.
-  static const minKbps = 300;
 
   int _rung = 0;
   int _cleanSamples = 0;
@@ -88,6 +92,16 @@ class ScreenShareSession {
   bool _sampling = false;
   DateTime? _lastFallAt;
   Size _captureSize = const Size(1920, 1080);
+
+  /// Samples since the answer landed with no frame EVER seen, and whether the
+  /// one-shot floor drop has been tried. The never-started watch — distinct
+  /// from the stall watchdog, which only fires after frames were seen.
+  int _neverStarted = 0;
+  bool _floorDropped = false;
+
+  /// How this share ended, for the digest: 0 stopped, 1 stalled after frames,
+  /// 2 never produced a frame at all.
+  int _endReason = 0;
 
   // What this share actually did, for the one digest row it reports when it
   // ends. Counters only — nothing user-generated.
@@ -184,7 +198,7 @@ class ScreenShareSession {
     await _applyRung();
   }
 
-  Future<void> _applyRung() async {
+  Future<void> _applyRung({int? floorKbps}) async {
     final sender = _sender;
     if (sender == null) return;
     final r = climb[_rung];
@@ -197,7 +211,7 @@ class ScreenShareSession {
           ..scaleResolutionDownBy = scaleFor(_captureSize, r.longEdge)
           ..maxFramerate = r.fps
           ..maxBitrate = r.maxKbps * 1000
-          ..minBitrate = minKbps * 1000;
+          ..minBitrate = (floorKbps ?? r.minKbps) * 1000;
       }
       params.degradationPreference = RTCDegradationPreference.BALANCED;
       await sender.setParameters(params);
@@ -326,6 +340,23 @@ class ScreenShareSession {
       _stallSamples = 0;
     } else if (_sawFrames) {
       if (++_stallSamples >= (stopHinted() ? 2 : 6)) {
+        _endReason = 1;
+        onEnded();
+        return;
+      }
+    } else if (_remoteSet) {
+      // Negotiated, connected — and not one frame yet. Build 62 sat here,
+      // connected and black, for 138 seconds. First a one-shot retry with the
+      // floor dropped to nothing (against any allocator refusing to fund the
+      // configured minimum); if the encoder still never starts, END VISIBLY —
+      // the receiver's letterbox falls with the 'screen off' announcement,
+      // and the digest names the death instead of a person guessing at it.
+      _neverStarted++;
+      if (_neverStarted == 10 && !_floorDropped) {
+        _floorDropped = true;
+        await _applyRung(floorKbps: 50);
+      } else if (_neverStarted >= 20) {
+        _endReason = 2;
         onEnded();
         return;
       }
@@ -394,6 +425,7 @@ class ScreenShareSession {
       bw: _bwSamples,
       fpsP50: sorted.isEmpty ? 0 : sorted[sorted.length ~/ 2].round(),
       bweKbps: _lastBweKbps,
+      endReason: _endReason,
     );
   }
 
@@ -506,6 +538,9 @@ class ScreenShareSession {
     _lastBweKbps = 0;
     _codec = '';
     _fpsRing.clear();
+    _neverStarted = 0;
+    _floorDropped = false;
+    _endReason = 0;
     if (pc != null) {
       try {
         await pc.close();

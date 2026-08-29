@@ -268,10 +268,11 @@ class ErrorReporter {
           :final cpu,
           :final bw,
           :final fpsP50,
-          :final bweKbps
+          :final bweKbps,
+          :final endReason
         ) =>
           '$codec r$finalRung/$topRung ${durationS}s c$climbs f$falls '
-              'cpu$cpu bw$bw fps$fpsP50 bwe$bweKbps',
+              'cpu$cpu bw$bw fps$fpsP50 bwe$bweKbps e$endReason',
         _ => null,
       };
 
@@ -442,6 +443,7 @@ class ShareQualityDigest implements Exception {
     required this.bw,
     required this.fpsP50,
     required this.bweKbps,
+    required this.endReason,
   });
 
   /// Short codec slug from the outbound stats, e.g. 'h264'.
@@ -457,6 +459,10 @@ class ShareQualityDigest implements Exception {
   final int bw;
   final int fpsP50;
   final int bweKbps;
+
+  /// 0 = stopped normally, 1 = stalled after frames flowed, 2 = the encoder
+  /// never produced a frame at all (the build-62 black-share class).
+  final int endReason;
 
   @override
   String toString() => 'ShareQualityDigest';

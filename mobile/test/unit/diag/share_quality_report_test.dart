@@ -31,6 +31,7 @@ void main() {
         bw: 0,
         fpsP50: 14,
         bweKbps: 2300,
+        endReason: 0,
       );
 
   test('the row carries the digest, inside every server ceiling', () async {
@@ -45,13 +46,13 @@ void main() {
     expect(rows.single['kind'], 'share-quality');
     expect(rows.single['error_type'], 'ShareQualityDigest');
     final detail = rows.single['detail']! as String;
-    expect(detail, 'h264 r2/3 87s c4 f1 cpu12 bw0 fps14 bwe2300');
+    expect(detail, 'h264 r2/3 87s c4 f1 cpu12 bw0 fps14 bwe2300 e0');
     expect(detail.length, lessThanOrEqualTo(64),
         reason: 'the server CHECK rejects longer and the row dies unseen',);
     expect(
       detail,
       matches(RegExp(r'^\w+ r\d+/\d+ \d+s c\d+ f\d+ cpu\d+ bw\d+ '
-          r'fps\d+ bwe\d+$',),),
+          r'fps\d+ bwe\d+ e\d$',),),
     );
   });
 
@@ -71,6 +72,7 @@ void main() {
         bw: 86400,
         fpsP50: 60,
         bweKbps: 99999,
+        endReason: 2,
       ),
       StackTrace.current,
       kind: 'share-quality',

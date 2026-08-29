@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -34,6 +35,10 @@ class _CallPipState extends ConsumerState<CallPip> {
   static const _h = 148.0;
   static const _margin = 12.0;
 
+  /// Wider while this phone shares: the window then carries BOTH faces side
+  /// by side, because the share took the big view everywhere else.
+  static const _wShare = 200.0;
+
   /// Watched so this window disappears the moment the call screen is on top.
   /// [CallController.minimized] alone was not enough: the call screen's
   /// PopScope sets it true as the route pops, so during that transition — and
@@ -67,18 +72,24 @@ class _CallPipState extends ConsumerState<CallPip> {
         call.state == CallState.connected || call.state == CallState.calling;
     final router = _router;
     if (!active || !call.minimized) return const SizedBox.shrink();
-    // While THIS phone shares its screen, the floating window sits inside the
-    // very pixels being captured — the partner watches it echo. The
-    // ongoing-call notification is the way back during a share.
-    if (call.sharingScreen) return const SizedBox.shrink();
     // Never two views on one texture.
     if (router != null && isOnCallRoute(router)) return const SizedBox.shrink();
+
+    // While THIS phone shares its screen, the window stays up and carries the
+    // FACES — the sharer must not fly blind through their own share. Yes, the
+    // card is inside the captured pixels and the partner sees it in the frame:
+    // deliberate, disclosed, and what every major meeting app does with its
+    // own bubble. Only the faces are drawn here, never the share itself — a
+    // live share preview inside the captured display is the recursion tunnel,
+    // and that ban holds.
+    final sharing = call.sharingScreen;
+    final w = sharing ? _wShare : _w;
 
     final size = MediaQuery.sizeOf(context);
     final insets = MediaQuery.paddingOf(context);
     final pos = _pos ??
         Offset(
-          size.width - _w - _margin,
+          size.width - w - _margin,
           size.height - _h - _margin - insets.bottom - 72,
         );
 
@@ -91,7 +102,7 @@ class _CallPipState extends ConsumerState<CallPip> {
           // Clamped so it cannot be dragged off-screen and stranded — there is
           // no other way back to the call once the window is gone.
           _pos = Offset(
-            next.dx.clamp(_margin, size.width - _w - _margin),
+            next.dx.clamp(_margin, size.width - w - _margin),
             next.dy.clamp(
               insets.top + _margin,
               size.height - _h - _margin - insets.bottom,
@@ -112,12 +123,37 @@ class _CallPipState extends ConsumerState<CallPip> {
             clipBehavior: Clip.antiAlias,
             color: MilesColors.surface1,
             child: SizedBox(
-              width: _w,
+              width: w,
               height: _h,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (call.isVideo && call.remoteRenderer.srcObject != null)
+                  if (sharing)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: call.remoteRenderer.srcObject != null
+                              ? CallVideo(
+                                  key: const ValueKey('pip-share-remote'),
+                                  renderer: call.remoteRenderer,
+                                )
+                              : const Center(
+                                  child: Icon(Icons.videocam,
+                                      color: Color(0xCCFBF8F4), size: 24,),
+                                ),
+                        ),
+                        Expanded(
+                          child: RTCVideoView(
+                            call.localRenderer,
+                            key: const ValueKey('pip-share-local'),
+                            mirror: call.frontCamera,
+                            objectFit: RTCVideoViewObjectFit
+                                .RTCVideoViewObjectFitCover,
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (call.isVideo && call.remoteRenderer.srcObject != null)
                     // Their screen when there is one, their face otherwise —
                     // the same choice the full screen makes. A window this
                     // small has room for one of them, and the shared screen is

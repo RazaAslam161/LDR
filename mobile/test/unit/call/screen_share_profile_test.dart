@@ -55,8 +55,26 @@ void main() {
     test('the first rung is fundable on a bad mobile uplink', () {
       expect(climb.first.maxKbps, lessThanOrEqualTo(1200));
       expect(climb.first.longEdge, lessThanOrEqualTo(960));
-      expect(ScreenShareSession.minKbps,
-          lessThanOrEqualTo(climb.first.maxKbps),);
+    });
+
+    // Build 62's black share, pinned forever: libwebrtc's bandwidth estimator
+    // is BORN at ~300kbps, and a stream whose minBitrate the estimate cannot
+    // fund is SUSPENDED — zero frames, and with no media the estimate never
+    // moves. The field row read `fps0 bwe300` for 138 seconds.
+    test("the start floor sits well under the estimator's birth value", () {
+      expect(climb.first.minKbps, lessThan(300));
+    });
+
+    test('every floor fits under its ceiling, and floors never shrink', () {
+      for (var i = 0; i < climb.length; i++) {
+        expect(climb[i].minKbps, lessThanOrEqualTo(climb[i].maxKbps),
+            reason: 'rung $i',);
+        if (i > 0) {
+          expect(climb[i].minKbps, greaterThanOrEqualTo(climb[i - 1].minKbps),
+              reason: 'rung $i — a higher rung may afford a higher floor, '
+                  'never a lower one',);
+        }
+      }
     });
 
     test('the top rung is full 1920-class sharpness at full motion', () {
