@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/widgets/hold_to_confirm.dart';
 
 /// The ways out, at every size, on one sheet.
 ///
@@ -14,10 +13,13 @@ import 'package:miles/core/widgets/hold_to_confirm.dart';
 /// slower and not one tap further away than it was before — it is the second
 /// row, always drawn, never gated. What sits above it is what most people
 /// actually want at the moment they reach for it; what sits below it is the
-/// Play-mandated route out, so neither ever ends up behind the other. The
-/// EMERGENCY row is last and subdued on purpose: the ordinary way out is the
-/// ceremony, and the row that skips its seven days answers only to the person
-/// who can prove they are this phone's owner.
+/// Play-mandated route out, so neither ever ends up behind the other.
+///
+/// There is NO immediate-exit row. "Leave right now" was removed on 2026-08-29
+/// by the owner: the ceremony IS the way out, and a second door that skipped
+/// its seven days meant the sheet offered two endings with different rules and
+/// a proof-of-owner prompt that said nothing when it failed. One ending, one
+/// set of rules.
 ///
 /// What deliberately is NOT here: an undo. There is no SnackBarAction anywhere
 /// in this file and there must never be one. An "Undo" chip sitting on screen
@@ -26,11 +28,23 @@ import 'package:miles/core/widgets/hold_to_confirm.dart';
 /// whoever takes the phone.
 enum SeveranceOutcome { paused, ended, deleteRequested, unlinkStarted }
 
+/// [hasPartner] is the load-bearing argument, not a cosmetic one.
+///
+/// Every row on this sheet except deletion needs somebody on the other end.
+/// `mute_partner` opens with `if v_partner is null then raise exception
+/// 'no partner'`, and `unlink_start` cannot begin a ceremony with nobody to
+/// hold the other side of it. Offered unconditionally, both rows reached a
+/// server that refused them and died in a generic catch — which is exactly
+/// what "I pressed the 1 hour button and nothing happened" is.
+///
+/// A couple of ONE is a real state this app can be in: a dissolution can leave
+/// one member standing, and create_pairing_invite mints a couple for a caller
+/// who has none. So the sheet asks whether there is a partner and offers only
+/// what can actually work.
 Future<SeveranceOutcome?> showSeveranceSheet(
   BuildContext context, {
-  required Future<void> Function() onEnd,
   required Future<void> Function() onStartCeremony,
-  required Future<bool> Function() confirmIdentity,
+  required bool hasPartner,
 }) {
   return showModalBottomSheet<SeveranceOutcome>(
     context: context,
@@ -40,23 +54,20 @@ Future<SeveranceOutcome?> showSeveranceSheet(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
     builder: (_) => _SeveranceSheet(
-      onEnd: onEnd,
       onStartCeremony: onStartCeremony,
-      confirmIdentity: confirmIdentity,
+      hasPartner: hasPartner,
     ),
   );
 }
 
 class _SeveranceSheet extends StatelessWidget {
   const _SeveranceSheet({
-    required this.onEnd,
     required this.onStartCeremony,
-    required this.confirmIdentity,
+    required this.hasPartner,
   });
 
-  final Future<void> Function() onEnd;
   final Future<void> Function() onStartCeremony;
-  final Future<bool> Function() confirmIdentity;
+  final bool hasPartner;
 
   @override
   Widget build(BuildContext context) {
@@ -88,38 +99,59 @@ class _SeveranceSheet extends StatelessWidget {
               ),
             ),
           ),
-          ListTile(
-            leading: const Icon(
-              Icons.notifications_off_outlined,
-              color: MilesColors.gilt,
+          if (hasPartner) ...[
+            ListTile(
+              leading: const Icon(
+                Icons.notifications_off_outlined,
+                color: MilesColors.gilt,
+              ),
+              title: const Text(
+                'Pause notifications',
+                style: TextStyle(color: MilesColors.cream50),
+              ),
+              subtitle: const Text(
+                'Quiet for a while. Nothing is told, nothing ends.',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+              // Popped, not pushed from here. Opening the pause sheet on this
+              // sheet's own context after popping it pushes onto a route that is
+              // already gone; the caller owns what happens next, exactly as it
+              // does for the deletion row.
+              onTap: () => Navigator.pop(context, SeveranceOutcome.paused),
             ),
-            title: const Text(
-              'Pause notifications',
-              style: TextStyle(color: MilesColors.cream50),
+            ListTile(
+              leading: const Icon(Icons.link_off, color: MilesColors.danger),
+              title: const Text(
+                'End the connection',
+                style: TextStyle(color: MilesColors.cream50),
+              ),
+              subtitle: const Text(
+                'Seven days, visible to both of you. One tap undoes it, '
+                'any day.',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+              onTap: () => _openCeremony(context),
             ),
-            subtitle: const Text(
-              'Quiet for a while. Nothing is told, nothing ends.',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+          ] else
+            // Nobody on the other end. Pausing notifications from a partner who
+            // is not there, and beginning a seven-day goodbye with nobody to
+            // read it, are both refused by the server — so neither is offered.
+            // What IS offered is the way out of the empty connection, because
+            // this state otherwise has no exit from this screen at all.
+            ListTile(
+              leading: const Icon(Icons.link_off, color: MilesColors.danger),
+              title: const Text(
+                'Leave this connection',
+                style: TextStyle(color: MilesColors.cream50),
+              ),
+              subtitle: const Text(
+                'Nobody is on the other side of it any more. There is nothing '
+                'to wait seven days for, so this ends it now and frees you to '
+                'connect again.',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+              onTap: () => _confirmLeaveEmpty(context),
             ),
-            // Popped, not pushed from here. Opening the pause sheet on this
-            // sheet's own context after popping it pushes onto a route that is
-            // already gone; the caller owns what happens next, exactly as it
-            // does for the deletion row.
-            onTap: () => Navigator.pop(context, SeveranceOutcome.paused),
-          ),
-          ListTile(
-            leading: const Icon(Icons.link_off, color: MilesColors.danger),
-            title: const Text(
-              'End the connection',
-              style: TextStyle(color: MilesColors.cream50),
-            ),
-            subtitle: const Text(
-              'Seven days, visible to both of you. One tap undoes it, '
-              'any day.',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 12),
-            ),
-            onTap: () => _openCeremony(context),
-          ),
           // Last, and never behind the row above it. Play requires the
           // deletion route to stay reachable, and someone who came here to
           // delete an account must not have to end a connection first.
@@ -136,27 +168,52 @@ class _SeveranceSheet extends StatelessWidget {
             onTap: () =>
                 Navigator.pop(context, SeveranceOutcome.deleteRequested),
           ),
-          // The exit that skips the seven days. Deliberately last, deliberately
-          // quiet, and behind proof-of-owner — during a ceremony it is the one
-          // control that bypasses the protection, and a phone picked up by the
-          // wrong hands must not be able to fire it. The way out itself is
-          // never gated: the ceremony above needs no proof at all.
-          ListTile(
-            leading: const Icon(Icons.bolt_outlined, color: MilesColors.taupe),
-            title: const Text(
-              'Leave right now',
-              style: TextStyle(color: MilesColors.taupe),
-            ),
-            subtitle: const Text(
-              'No waiting period. Only you can confirm this is you.',
-              style: TextStyle(color: MilesColors.taupe, fontSize: 12),
-            ),
-            onTap: () => _openEmergency(context),
-          ),
           const SizedBox(height: 12),
         ],
       ),
     );
+  }
+
+  /// Leaving a connection that has nobody in it. Confirmed rather than
+  /// instant — it is still an ending, and the row sits where "End the
+  /// connection" sits — but there is no seven-day window to offer, because a
+  /// waiting period exists so the other person can object and there is no
+  /// other person.
+  ///
+  /// Popped upward like every other row: the caller owns what follows, and
+  /// leaveCouple must run in the caller's context so the local wipe and the
+  /// profile reload keep the order settings_screen pins them in.
+  Future<void> _confirmLeaveEmpty(BuildContext context) async {
+    final navigator = Navigator.of(context);
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: const Text(
+          'Leave this connection?',
+          style: TextStyle(color: MilesColors.cream50),
+        ),
+        content: const Text(
+          'It has no one else in it. Leaving clears it from this account so '
+          'you can connect again.',
+          style: TextStyle(color: MilesColors.taupe),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep it'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Leave',
+              style: TextStyle(color: MilesColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (sure ?? false) navigator.pop(SeveranceOutcome.ended);
   }
 
   Future<void> _openCeremony(BuildContext context) async {
@@ -176,25 +233,6 @@ class _SeveranceSheet extends StatelessWidget {
     if (choice == 'pause') navigator.pop(SeveranceOutcome.paused);
   }
 
-  Future<void> _openEmergency(BuildContext context) async {
-    if (!await confirmIdentity()) return;
-    if (!context.mounted) return;
-    await _openEnd(context);
-  }
-
-  Future<void> _openEnd(BuildContext context) async {
-    final navigator = Navigator.of(context);
-    final ended = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: MilesColors.surface1,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _EndSheet(onEnd: onEnd),
-    );
-    if (ended ?? false) navigator.pop(SeveranceOutcome.ended);
-  }
 }
 
 /// The ceremony's front door: what beginning one means, said plainly, with
@@ -322,132 +360,6 @@ class _CeremonySheetState extends State<_CeremonySheet> {
                   ),
                   onPressed: _busy ? null : _begin,
                   child: const Text('Begin'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EndSheet extends StatefulWidget {
-  const _EndSheet({required this.onEnd});
-
-  final Future<void> Function() onEnd;
-
-  @override
-  State<_EndSheet> createState() => _EndSheetState();
-}
-
-class _EndSheetState extends State<_EndSheet> {
-  bool _busy = false;
-  String? _error;
-
-  Future<void> _confirm() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.onEnd();
-      if (mounted) Navigator.pop(context, true);
-    } catch (_) {
-      // The same string the report and pause sheets already use. A fourth
-      // wording for one failure is how a user learns to distrust all of them.
-      if (mounted) {
-        setState(() {
-          _error = "That didn't go through. Try again.";
-          _busy = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'End the connection?',
-              style: TextStyle(
-                color: MilesColors.cream50,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Every sentence is checked against the code. The dialog this
-            // replaces promised private data was "preserved" and that it
-            // "cannot be undone", and the app's own FAQ said the opposite of
-            // the second one. Saying less, accurately, is the fix.
-            const Text(
-              'This takes effect immediately and for both of you. From the '
-              'moment you confirm, neither phone can open the messages, '
-              'photos or anything else the two of you shared. Nothing is sent '
-              'to them and nothing announces it.',
-              style: TextStyle(
-                color: MilesColors.taupe,
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Your own account is untouched, and so is your private vault — '
-              'it was never held under the shared key.',
-              style: TextStyle(
-                color: MilesColors.taupe,
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'What the two of you made together is kept for 30 days and then '
-              'erased for good.',
-              style: TextStyle(
-                color: MilesColors.taupe,
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                style: const TextStyle(
-                  color: MilesColors.danger,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: _busy ? null : () => Navigator.pop(context, false),
-                  child: const Text(
-                    'Not now',
-                    style: TextStyle(color: MilesColors.taupe),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Expanded, not a bare width. A Row child sized with
-                // Size.fromHeight resolves its width to double.infinity and
-                // throws — the same trap the gallery hit.
-                Expanded(
-                  child: HoldToConfirm(
-                    label: 'Hold to end',
-                    holdingLabel: 'Ending…',
-                    onConfirmed: _busy ? null : _confirm,
-                  ),
                 ),
               ],
             ),

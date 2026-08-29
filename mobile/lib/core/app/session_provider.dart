@@ -13,6 +13,7 @@ import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -115,6 +116,19 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// matters is whether the session that asked for them still exists when they
   /// answer.
   int _generation = 0;
+
+  /// May a run that began at [gen] still publish DEVICE-GLOBAL state?
+  ///
+  /// A predicate rather than one guard, because the answer expires: every await
+  /// taken after a check reopens the window the check closed. loadProfile asked
+  /// once, halfway down, and three publishes still lived below it — the
+  /// presence subscribe, the online write and the couple-key derive — each
+  /// awaiting again on the far side of that fence. A sign-out landing in any of
+  /// those windows left a realtime channel joined on the ex-couple's id, this
+  /// handset written online inside it, and their derived key re-parked in
+  /// CoupleKey for the rest of the process. Every publish point re-asks; none
+  /// of them trusts an earlier answer.
+  bool _mayPublish(int gen) => gen == _generation;
 
   /// Bumped per loadProfile call. `_generation` says which SESSION a run
   /// belongs to; this says which RUN it is, so an abandoned one can tell
@@ -261,7 +275,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // online in it. One ordinary user tapping Sign out on a bad connection
       // reaches this: nothing here re-read the session after an await, and
       // signOut() holds no handle to cancel the load.
-      if (gen != _generation) {
+      if (!_mayPublish(gen)) {
         debugPrint('[session] loadProfile answered after the session ended');
         // The one thing this run may still publish is the flag it raised
         // itself. Returning with loading left true strands every guard in the
@@ -287,7 +301,21 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // rather than at sign-in because pairing, leaving and re-pairing all
       // change it without a new session — and a stale value would either drop
       // this couple's pushes or admit the previous one's.
-      unawaited(SessionScope.setCouple(couple?.id));
+      //
+      // The fourth device-global publish, and the last one that was reading an
+      // answer from the wrong side of an await. The fence above is taken here,
+      // but this call is UNAWAITED and suspends on the prefs handle before it
+      // writes, so a sign-out landing in that window had the ex-couple's id
+      // stamped back into SharedPreferences after forgetDevice had removed it —
+      // and the row, not the in-memory copy, is what the FCM background isolate
+      // reads, so that couple's queued pushes (24h TTL) were admitted again on
+      // a handset nobody was signed into. `stillCurrent` re-asks the same
+      // predicate in the same slice as the write, which is the only moment the
+      // answer is still true when it is used.
+      unawaited(SessionScope.setCouple(
+        couple?.id,
+        stillCurrent: () => _mayPublish(gen),
+      ));
 
       // The couple key starts deriving the moment a partner is known, not when
       // some screen happens to need it. Every encrypted write outside Closer
@@ -295,8 +323,8 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // cycle screen or an ETA from the map went out unsealed unless the chat
       // tab had been opened earlier in the same process. Unawaited — nothing
       // here waits on it, and the derive parks itself in CoupleKey for whoever
-      // asks next.
-      if (partner != null) unawaited(CoupleKey.prime(state));
+      // asks next. Unawaited is not unsupervised, though — see _primeCoupleKey.
+      if (partner != null) unawaited(_primeCoupleKey(gen));
 
       // An open unlinking ceremony, if this couple has one. Paired members
       // read the row straight through RLS; unawaited because the banner and
@@ -336,7 +364,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
       }
 
       final coupleId = couple.id;
-      unawaited(_subscribePresence(coupleId));
+      unawaited(_subscribePresence(coupleId, gen));
 
       // PRESENCE INTEGRITY GUARD
       // Silently verify and repair presence.couple_id. Catches the case
@@ -351,6 +379,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
               .select('couple_id')
               .eq('user_id', uid)
               .maybeSingle();
+          // That select is a round trip of its own, taken well past the fence
+          // above. The repair below writes the couple id BACK onto the presence
+          // row — so a sign-out answering during the select had its teardown
+          // undone by this self-healing, which is the one thing it must never
+          // heal. Nothing further down belongs to a dead session either.
+          if (!_mayPublish(gen)) {
+            debugPrint('[session] presence repair abandoned: session ended');
+            return;
+          }
           if (row != null && row['couple_id'] != coupleId) {
             // Presence is stale — repair silently.
             await SupabaseService.client.from('presence').update({
@@ -366,6 +403,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // Write presence to the new couple immediately. If this is a re-pair,
       // presence.couple_id was just repaired above; stamp it active so the
       // partner can see us online right away.
+      //
+      // Asked again because the repair itself awaits: this is the loudest
+      // publish in the function — it tells the server, and the partner's
+      // socket, that this handset is live INSIDE that couple, minutes after
+      // the user watched the app return to the sign-in screen.
+      if (!_mayPublish(gen)) return;
       try {
         await PresenceService.setOnline(coupleId, online: true);
       } catch (_) {}
@@ -380,9 +423,34 @@ class SessionNotifier extends StateNotifier<SessionState> {
     }
   }
 
+  /// Derive the couple key. The straggler problem is answered at the WRITE.
+  ///
+  /// The derive is three round trips and endCouple's teardown is synchronous,
+  /// so a sign-out inside those round trips used to drop a key that had not
+  /// been parked yet, and the derive then parked the ex-couple's key for the
+  /// rest of the process.
+  ///
+  /// This method used to undo that from out here, gated on a counter. That was
+  /// wrong twice over and is gone: a counter can see that THIS session ended,
+  /// but not whether the key now parked is its own straggler or a live one a
+  /// newer session put there — and dropping the live one is silent plaintext.
+  /// [CryptoCore.deriveSharedKey] now refuses to park a key whose derive began
+  /// before the last wipe, which is the same question asked where it can
+  /// actually be answered, and it covers the four other call sites that never
+  /// had a guard at all.
+  ///
+  /// So there is nothing to undo here. What remains is the reason the call is
+  /// unawaited: nobody blocks the session on a key derive.
+  Future<void> _primeCoupleKey(int gen) async {
+    await CoupleKey.prime(state);
+    if (_mayPublish(gen)) return;
+    debugPrint('[session] couple key derived after the session ended; '
+        'deriveSharedKey refused to park it');
+  }
+
   bool _subscribingPresence = false;
 
-  Future<void> _subscribePresence(String coupleId) async {
+  Future<void> _subscribePresence(String coupleId, int gen) async {
     if (_subscribingPresence) return;
     _subscribingPresence = true;
     try {
@@ -396,9 +464,21 @@ class SessionNotifier extends StateNotifier<SessionState> {
           await SupabaseService.client.removeChannel(old);
         } catch (_) {}
       }
+      // Removing the old channel is a round trip, and _endSession's own
+      // teardown ran inside it: that teardown nulled a handle this method had
+      // already taken, so the join below then opened a NEW channel on the
+      // ex-couple's id with nothing left holding it — live realtime traffic for
+      // a couple the user has left, until the process dies.
+      if (!_mayPublish(gen)) {
+        debugPrint('[session] presence subscribe abandoned: session ended');
+        return;
+      }
       _presenceChannel = SupabaseRepository.subscribeToPresence(
         coupleId: coupleId,
         onPartnerUpdate: (p) {
+          // The socket outlives every check above by definition. An ex-partner
+          // arriving on it must not be written back into the notifier.
+          if (!_mayPublish(gen)) return;
           state = state.copyWith(partner: p);
         },
       );
@@ -411,10 +491,18 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// the partner's mood / avatar / online status keep updating live.
   void reconnectPresence() {
     final couple = state.couple;
-    if (couple != null) _subscribePresence(couple.id);
+    if (couple != null) _subscribePresence(couple.id, _generation);
   }
 
   Future<void> signOut() async {
+    // Before either network call. endCouple bumps this too, but it only runs
+    // once forgetDevice() and the server sign-out have BOTH answered — two
+    // round trips on the user's connection, during which a loadProfile
+    // resolving in the background still read a live generation, walked through
+    // every check in this class and re-published the couple the user was in
+    // the middle of leaving. The fence closes when the user asks, not when the
+    // network agrees.
+    _generation++;
     // FIRST, and here rather than at the call sites. Two of the four sign-out
     // buttons never called it, so the handset kept a push token on the profile
     // it was leaving: reach-notify went on addressing that couple's Reaches to
@@ -458,6 +546,22 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // First, before anything is torn down: a load still in flight for the
     // couple being ended must not publish it back over everything below.
     _generation++;
+    // And immediately after it, before the first await that could strand it:
+    // the row every push on this handset is checked against. It is the only
+    // piece of teardown state that lives outside this isolate — the FCM
+    // background isolate reads it from disk, where none of the in-memory
+    // clears below exist — so a couple left standing in it goes on admitting
+    // that couple's queued pushes long after the app has forgotten everything
+    // else about them. Verified rather than assumed, because a removal that
+    // silently did not happen looks identical from in here to one that worked;
+    // that is precisely how the row outlived four earlier teardown paths.
+    if (!await SessionScope.forgetCouple()) {
+      ErrorReporter.report(
+        StateError('active_couple_id survived endCouple'),
+        StackTrace.current,
+        kind: 'session-scope',
+      );
+    }
     final ch = _presenceChannel;
     _presenceChannel = null;
     if (ch != null) {

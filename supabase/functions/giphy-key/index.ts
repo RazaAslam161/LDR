@@ -54,11 +54,26 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const { data } = await admin
+    const { data, error } = await admin
       .from("app_secrets")
       .select("value")
       .eq("key", "GIPHY_API_KEY")
       .maybeSingle();
+    // A read that FAILED is not an answer, and answering 200 turned it into
+    // one. supabase-js returns PostgREST failures in the envelope instead of
+    // throwing, so the catch below never saw them and `?? ""` collapsed them
+    // into "nobody seeded the key" — while GiphyService latches _resolved on
+    // any parseable 200 (giphy_service.dart:86), which is the very latch its
+    // author's comment says must not close over a transient failure. One
+    // database hiccup therefore pinned "GIFs are not set up yet" for the whole
+    // app process, with nothing logged on either side. A 5xx is what runs the
+    // client's retryable path: functions.invoke throws on it, _resolved stays
+    // false, and the next picker open asks again. Same shape as map-token, one
+    // directory over.
+    if (error) {
+      console.error("app_secrets read failed for GIPHY_API_KEY", error.message);
+      return json({ error: "secret_read_failed" }, 500);
+    }
 
     const key = data?.value ?? "";
     // An absent key is a configuration state, not an error — `configured` lets
@@ -67,6 +82,10 @@ Deno.serve(async (req) => {
     return json({ key, configured: key.length > 0 });
   } catch (e) {
     console.error("giphy-key", e);
-    return json({ key: "", configured: false });
+    // Not `configured: false`. Anything that threw on the way here — the JWT
+    // check, the client construction — is a failure of ours, and handing it
+    // back as a 200 told the client "there is no key" with the same authority
+    // as a read that succeeded, latching it for the process.
+    return json({ error: "giphy_key_failed" }, 500);
   }
 });

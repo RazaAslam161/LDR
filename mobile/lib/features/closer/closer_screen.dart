@@ -6,7 +6,9 @@ import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/partner_key_pin.dart';
+import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
@@ -40,6 +42,24 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
   /// code and to repin once the couple has compared it.
   PartnerKeyChangedException? _keyChange;
 
+  /// Where the two halves of the consent stand, once the server has said.
+  ///
+  /// Null while loading. [_consentError] is set instead when the read failed,
+  /// and the two are deliberately not one nullable field: "nobody has consented
+  /// yet" renders an instruction, and printing that instruction over a failed
+  /// read tells somebody who has already turned Closer on to go and turn it on
+  /// again.
+  IntimacyConsent? _consent;
+  String? _consentError;
+
+  /// A failed WITHDRAWAL, kept apart from [_consentError] for the same reason
+  /// that one is kept apart from [_consent]: the read's error screen says
+  /// "could not check who has turned Closer on", which is the wrong sentence
+  /// entirely over a write that was refused, and it would replace the button
+  /// the user has to press again.
+  String? _withdrawError;
+  bool _withdrawing = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -52,8 +72,11 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
     final me = session.profile;
     final partner = session.partner;
 
-    // If not enabled yet, the modest-mode UI handles it; skip key prep.
+    // Not enabled yet: the key is not the question, the consent is. Which of
+    // the two of them has answered is the only thing that lets this screen
+    // stop repeating "turn it on in Settings" at somebody who already did.
     if (couple == null || couple.modestMode || me == null || partner == null) {
+      await _loadConsent(couple);
       return;
     }
 
@@ -97,6 +120,69 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
     }
   }
 
+  /// An unpaired account is not asked: `intimacy_consent_state` would answer
+  /// exactly this, and a round trip that can only return "nobody, nothing,
+  /// modest" is one the screen can skip. Assigned rather than left null,
+  /// because null is the loading state and this one is settled.
+  Future<void> _loadConsent(Couple? couple) async {
+    if (couple == null) {
+      setState(() {
+        _consent = (mine: false, partner: false, members: 0, modest: true);
+        _consentError = null;
+      });
+      return;
+    }
+    setState(() {
+      _consent = null;
+      _consentError = null;
+      _withdrawError = null;
+    });
+    try {
+      final state = await SupabaseRepository.fetchIntimacyConsent();
+      if (!mounted) return;
+      setState(() => _consent = state);
+      // Nothing pushes the partner's consent to this device — the realtime
+      // channel carries the partner ROW, not the couple one — so this read is
+      // the freshest word on the derived flag the whole screen switches on.
+      // Without the reconcile, a couple whose Closer the server has just
+      // opened goes on reading "waiting for them" here until something else
+      // reloads the profile.
+      if (couple.modestMode != state.modest) {
+        await ref.read(sessionProvider.notifier).loadProfile();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _consentError = _friendly(e));
+    }
+  }
+
+  /// Takes this member's half of the consent back while the couple is still
+  /// waiting on the other half.
+  ///
+  /// Until this existed there was no control anywhere that could say no: the
+  /// Settings switch is drawn from `couples.modest_mode`, which stays true
+  /// until BOTH have agreed, so the only switch a waiting member was ever
+  /// offered wrote consent = true again. The RPC's own answer is what the
+  /// screen then renders — re-reading the couple row cannot tell "mine is off
+  /// now" from "mine was never on", because the derived flag is true either
+  /// way.
+  Future<void> _withdrawConsent() async {
+    setState(() {
+      _withdrawing = true;
+      _withdrawError = null;
+    });
+    try {
+      final state = await SupabaseRepository.setIntimacyConsent(false);
+      if (!mounted) return;
+      setState(() => _consent = state);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _withdrawError = _friendly(e));
+    } finally {
+      if (mounted) setState(() => _withdrawing = false);
+    }
+  }
+
   Future<void> _reviewKeyChange() async {
     final me = ref.read(sessionProvider).profile;
     final change = _keyChange;
@@ -124,6 +210,14 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // didChangeDependencies does not fire on a provider change, so without this
+    // the consent read stays whatever it was at first frame — including the
+    // unpaired answer assigned before the couple had loaded, and the stale
+    // "waiting for them" of a partner who has since agreed.
+    ref.listen(
+      sessionProvider.select((s) => (s.couple?.id, s.couple?.modestMode)),
+      (_, __) => _prepareKey(),
+    );
     final session = ref.watch(sessionProvider);
     final couple = session.couple;
     final isModest = couple?.modestMode ?? true;
@@ -143,10 +237,27 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: isModest
-              ? const _ModestModeOn()
+              ? _buildModestState(session.partner?.displayName)
               : _buildEnabledState(),
         ),
       ),
+    );
+  }
+
+  Widget _buildModestState(String? partnerName) {
+    final error = _consentError;
+    if (error != null) {
+      return _ConsentError(message: error, onRetry: _prepareKey);
+    }
+    final consent = _consent;
+    if (consent == null) return const Center(child: CircularProgressIndicator());
+    return _ModestModeOn(
+      consent: consent,
+      partnerName: partnerName,
+      onWithdraw: _withdrawConsent,
+      onRecheck: _prepareKey,
+      withdrawing: _withdrawing,
+      withdrawError: _withdrawError,
     );
   }
 
@@ -170,11 +281,57 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
 }
 
 /// Shown when Modest Mode is on (default).
+///
+/// The last line here used to read "It stays off until both of you turn it on
+/// in Settings" over a schema where one person's tap opened Closer on both
+/// phones — the app stating a guarantee no code implemented. 20260829160000
+/// made the guarantee real, so the sentence stays; what it can now do, because
+/// the server will say, is stop repeating an instruction at whoever already
+/// followed it.
 class _ModestModeOn extends StatelessWidget {
-  const _ModestModeOn();
+  const _ModestModeOn({
+    required this.consent,
+    required this.onWithdraw,
+    required this.onRecheck,
+    required this.withdrawing,
+    this.withdrawError,
+    this.partnerName,
+  });
+
+  final IntimacyConsent consent;
+  final VoidCallback onWithdraw;
+
+  /// Re-reads the consent AND reconciles the session's copy of the derived
+  /// flag, which is the pair of steps that turn a partner's yes on the other
+  /// handset into this screen opening.
+  final VoidCallback onRecheck;
+  final bool withdrawing;
+  final String? withdrawError;
+  final String? partnerName;
 
   @override
   Widget build(BuildContext context) {
+    // Named only when the server says there are two of them; a couple of one
+    // has nobody to be waiting for, whatever the session still holds.
+    final them = (partnerName?.trim().isNotEmpty ?? false)
+        ? partnerName!.trim()
+        : 'your partner';
+    // members == 2 is the server's count of live members, and the derivation
+    // needs exactly two — so a stale consent left behind by somebody who has
+    // gone is not "waiting for them", it is nobody to wait for.
+    final linked = consent.members == 2;
+    final waiting = linked && consent.mine;
+    final theirTurn = linked && !consent.mine && consent.partner;
+    final line = !linked
+        ? 'Closer opens for two. It stays off until the two of you are linked '
+            'and both of you turn it on.'
+        : waiting
+            ? "You've turned Closer on. It opens the moment $them does too — "
+                'nothing here is visible to either of you until then.'
+            : theirTurn
+                ? '$them has turned Closer on. It opens the moment you do too, '
+                    'and not before.'
+                : 'It stays off until both of you turn it on in Settings.';
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -197,18 +354,89 @@ class _ModestModeOn extends StatelessWidget {
             style: TextStyle(color: Color(0x99F5EFE6), height: 1.5),
           ),
           const SizedBox(height: 24),
-          const Text(
-            'It stays off until both of you turn it on in Settings.',
+          Text(
+            line,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Color(0x66F5EFE6)),
+            style: const TextStyle(fontSize: 12, color: Color(0x66F5EFE6)),
           ),
           const SizedBox(height: 32),
+          if (waiting) ...[
+            // The one state Settings could not express before this pass, and
+            // the only screen the waiting member is actually looking at. It
+            // writes consent = false; the couple-wide flag does not move,
+            // because it was already closed.
+            OutlinedButton(
+              onPressed: withdrawing ? null : onWithdraw,
+              child: Text(withdrawing ? 'Taking it back…' : 'Take it back'),
+            ),
+            TextButton(
+              // The answer being waited for lands on the OTHER phone and
+              // arrives here on no channel. Without this the wait ends only
+              // when something else happens to reload the profile.
+              onPressed: withdrawing ? null : onRecheck,
+              child: const Text('Check again'),
+            ),
+          ] else
+            OutlinedButton(
+              // push, not go: '/app/settings' is a top-level route, so go()
+              // collapses the stack and leaves the Settings back arrow with
+              // nothing to pop — it threw, and system back left the app.
+              onPressed: () => context.push('/app/settings'),
+              child: const Text('Open Settings'),
+            ),
+          if (withdrawError != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              // The button above stays where it is, so pressing it again IS
+              // the retry — this line says why the last press did nothing
+              // instead of leaving the screen looking as though it worked.
+              withdrawError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: MilesColors.blush),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The consent read failed.
+///
+/// Its own state, not the modest one: modest renders an instruction, and an
+/// instruction printed over a failed read is the app telling somebody who has
+/// already turned Closer on to go and turn it on again. Retry re-runs the whole
+/// entry load, which is the only path that reaches the RPC.
+class _ConsentError extends StatelessWidget {
+  const _ConsentError({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('⚠️', style: TextStyle(fontSize: 44)),
+          const SizedBox(height: 12),
+          Text(
+            'Could not check who has turned Closer on',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                  color: const Color(0xFFFBF8F4),
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Color(0x80F5EFE6), fontSize: 12),
+          ),
+          const SizedBox(height: 24),
           OutlinedButton(
-            // push, not go: '/app/settings' is a top-level route, so go()
-            // collapses the stack and leaves the Settings back arrow with
-            // nothing to pop — it threw, and system back left the app.
-            onPressed: () => context.push('/app/settings'),
-            child: const Text('Open Settings'),
+            onPressed: onRetry,
+            child: const Text('Try again'),
           ),
         ],
       ),

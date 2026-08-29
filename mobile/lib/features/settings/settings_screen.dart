@@ -119,6 +119,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       _loadEscrow();
       _loadCodeVerified();
       _loadNotificationState();
+      _loadConsent();
     });
   }
 
@@ -132,6 +133,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (state == AppLifecycleState.resumed) {
       _loadLocationMode();
       _loadNotificationState();
+      // The other half of the consent is repaired on the OTHER phone, and
+      // nothing tells this one when it happens. Coming back to Settings after
+      // the partner has answered is the moment the row would otherwise still
+      // be saying "waiting for them" about a couple whose Closer is open.
+      _loadConsent();
     }
   }
 
@@ -162,6 +168,56 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       ref.read(sessionProvider).partner?.id,
     );
     if (mounted) setState(() => _codeVerified = verified);
+  }
+
+  /// Where both halves of the Closer consent stand, as the server sees them.
+  ///
+  /// The row used to draw itself from `couples.modest_mode` alone, which is
+  /// DERIVED and stays true until BOTH members agree (20260829152003). So the
+  /// switch snapped straight back after a tap that had in fact been recorded,
+  /// and a member who had already consented was offered only the control that
+  /// re-wrote consent = true — there was no way to say no. Null while the read
+  /// is in flight; [_consentError] carries a read that failed, because a row
+  /// that quietly falls back to "off" tells that same lie again.
+  IntimacyConsent? _consent;
+  String? _consentError;
+
+  Future<void> _loadConsent() async {
+    final couple = ref.read(sessionProvider).couple;
+    // An unpaired account is not asked: `intimacy_consent_state` would answer
+    // exactly this, and the RPC's own refusal for a couple of one is what the
+    // disabled switch below is already saying.
+    if (couple == null) {
+      if (mounted) {
+        setState(() {
+          _consent = (mine: false, partner: false, members: 0, modest: true);
+          _consentError = null;
+        });
+      }
+      return;
+    }
+    try {
+      final state = await SupabaseRepository.fetchIntimacyConsent();
+      if (!mounted) return;
+      setState(() {
+        _consent = state;
+        _consentError = null;
+      });
+      // Nothing pushes the partner's consent to this device — the presence
+      // channel carries the partner ROW, not the couple one — so this read is
+      // the freshest word on whether the Closer tab should exist at all.
+      // Reconcile the session with it rather than leaving the shell a restart
+      // behind the answer the row is already printing.
+      if (couple.modestMode != state.modest) {
+        await ref.read(sessionProvider.notifier).loadProfile();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _consentError = friendlyAuthError(e);
+        _consent = null;
+      });
+    }
   }
 
   /// The same dialog and re-authentication the launch prompt uses. That prompt
@@ -413,11 +469,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// the wording now, and the sheet is in features/safety because it is read
   /// under the same over-the-shoulder rule as the report and pause sheets.
   Future<void> _removePartner() async {
+    // Read from the session rather than from `couple != null`: a couple of ONE
+    // has a couple and no partner, and it is the partner every row on that
+    // sheet actually needs. mute_partner and unlink_start both refuse without
+    // one, so offering their rows in that state is offering dead controls.
+    final hasPartner = ref.read(sessionProvider).partner != null;
     final outcome = await showSeveranceSheet(
       context,
-      onEnd: _endConnection,
       onStartCeremony: _startUnlink,
-      confirmIdentity: _confirmEmergencyIdentity,
+      hasPartner: hasPartner,
     );
     if (!mounted) return;
     // Both follow-ups are opened from HERE rather than from inside the sheet:
@@ -431,6 +491,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       case SeveranceOutcome.unlinkStarted:
         await context.push('/unlink');
       case SeveranceOutcome.ended:
+        // The empty-connection exit. leaveCouple runs here, in the caller's
+        // context, so the server dissolve still precedes the local wipe and
+        // the profile reload — the order severance_confirm_test pins.
+        await _endConnection();
       case null:
         break;
     }
@@ -441,25 +505,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _startUnlink() async {
     await UnlinkRepository.start();
     await UnlinkState.load();
-  }
-
-  /// Proof-of-owner for the exit that skips the seven days: the device
-  /// credential first (AppLock arms authInProgress itself, so the disguise
-  /// cover stays down through the OS prompt), the account password when no
-  /// screen lock is enrolled — the gate must exist on every phone, or the
-  /// emergency exit exists on none of the phones that need it most.
-  Future<bool> _confirmEmergencyIdentity() async {
-    if (await AppLock.available()) {
-      if (await AppLock.authenticate()) return true;
-      return false;
-    }
-    if (!mounted) return false;
-    final password = await showDialog<String>(
-      context: context,
-      builder: (_) => const _EmergencyPasswordDialog(),
-    );
-    if (password == null || password.isEmpty) return false;
-    return SupabaseRepository.reauthenticate(password);
   }
 
   /// Enforcement first, and the local wipe second — never the other way round.
@@ -489,17 +534,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     }
   }
 
-  Future<void> _toggleModestMode(bool newValue) async {
-    final couple = ref.read(sessionProvider).couple;
-    if (couple == null) return;
-    if (newValue == true) {
+  /// Records THIS member's half of the Closer consent. It is not a decision
+  /// for the couple: `couples.modest_mode` opens only when both halves are
+  /// true, so [consented] = true may perfectly well leave Closer shut.
+  ///
+  /// The switch used to be wired to the couple-wide flag and this handler
+  /// discarded the RPC's answer, then re-read that flag — so a first tap wrote
+  /// a real consent and the switch snapped back to off with nothing on screen
+  /// to distinguish "it failed" from "waiting for them". The returned state is
+  /// now what the row draws, and it lands BEFORE the key publish below,
+  /// because a consent that was recorded must not read as one that was not
+  /// just because a later step threw.
+  Future<void> _setCloserConsent(bool consented) async {
+    if (ref.read(sessionProvider).couple == null) return;
+    if (consented) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Enable Closer?'),
+          title: const Text('Turn Closer on?'),
           content: const Text(
-            'This makes Closer visible for both of you. You can re-enable '
-            'Modest Mode any time.',
+            'This is your half of the answer. Closer opens for both of you '
+            'only once your partner turns it on too, and you can take yours '
+            'back at any time.',
             style: TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [
@@ -508,7 +564,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 child: const Text('Cancel'),),
             FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Enable'),),
+                child: const Text('Turn it on'),),
           ],
         ),
       );
@@ -519,17 +575,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       _error = null;
     });
     try {
-      await SupabaseRepository.setModestMode(
-          coupleId: couple.id, enabled: !newValue,);
-      if (newValue == true) {
+      final state = await SupabaseRepository.setIntimacyConsent(consented);
+      if (!mounted) return;
+      setState(() {
+        _consent = state;
+        _consentError = null;
+      });
+      // Before the key publish, for the same reason the consent is: a session
+      // still holding the old flag hides the Closer tab the server has just
+      // opened, and a failure two lines down must not be what decides that.
+      await ref.read(sessionProvider.notifier).loadProfile();
+      if (consented) {
         // Swallowing this left Closer switched on with no public key published,
         // so every Closer screen sat on "waiting for your partner" forever and
         // nothing here ever said why. Let it fail the whole toggle instead.
         await SupabaseRepository.publishMyPublicKey();
       }
-      await ref.read(sessionProvider.notifier).loadProfile();
     } catch (e) {
-      setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -705,10 +768,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
-    final couple = session.couple;
     final profile = session.profile;
     final partner = session.partner;
-    final isModest = couple?.modestMode ?? true;
     _seed(profile);
 
     return Scaffold(
@@ -748,7 +809,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               const SizedBox(height: 8),
             ],
             ...switch (widget.page) {
-              SettingsPage.root => _rootGroups(profile, partner, isModest),
+              SettingsPage.root => _rootGroups(profile, partner),
               SettingsPage.profile => _profilePage(profile, partner),
               SettingsPage.notifications => _notificationsPage(),
               SettingsPage.account => _accountPage(),
@@ -767,7 +828,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// VALUE at the end of its own row ("On", "Asia/Karachi", "Backup on"), so a
   /// row explains itself without a header above it. Recovered from build 52;
   /// see docs/guides/BUILD-52-AUDIT.md.
-  List<Widget> _rootGroups(dynamic profile, dynamic partner, bool isModest) => [
+  List<Widget> _rootGroups(dynamic profile, dynamic partner) => [
         _ProfileCard(
           name: profile?.displayName as String? ?? '',
           pairState: partner == null
@@ -859,18 +920,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 child: Text(_error!,
                     style: const TextStyle(color: MilesColors.blush),),
               ),
-            _SettingsRow(
-              icon: Icons.favorite_border,
-              title: 'Closer',
-              subtitle: isModest
-                  ? 'Hidden. Reveal for both partners.'
-                  : 'Visible to both of you.',
-              trailing: Switch(
-                value: !isModest,
-                onChanged: _busy ? null : _toggleModestMode,
-                activeThumbColor: MilesColors.ember,
-              ),
-            ),
+            _closerRow(partner),
           ],
         ),
         _SettingsGroup(
@@ -923,6 +973,70 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ],
         ),
       ];
+
+  /// The Closer row, in the states the server actually has: off, your half in
+  /// and waiting for them, their half in and waiting for you, open — plus the
+  /// two this row must never collapse into "off", a read still in flight and a
+  /// read that failed.
+  ///
+  /// The switch shows MY half, never the couple-wide flag. That flag is false
+  /// only once both agree, so drawing the switch from it made a recorded
+  /// consent look like a rejected one and left the waiting member holding the
+  /// single control that could only ever say yes again.
+  Widget _closerRow(dynamic partner) {
+    const icon = Icons.favorite_border;
+    final error = _consentError;
+    if (error != null) {
+      return _SettingsRow(
+        icon: icon,
+        title: 'Closer',
+        // Distinct from every "off" sentence below, and the retry is the row
+        // itself — the read is the only thing standing between here and an
+        // answer, so tapping repeats exactly it.
+        subtitle: 'Could not check who has turned it on — $error. '
+            'Tap to try again.',
+        onTap: _loadConsent,
+      );
+    }
+    final consent = _consent;
+    if (consent == null) {
+      return const _SettingsRow(
+        icon: icon,
+        title: 'Closer',
+        subtitle: 'Checking who has turned it on…',
+      );
+    }
+    final name = partner?.displayName as String?;
+    final them =
+        (name == null || name.trim().isEmpty) ? 'your partner' : name.trim();
+    // The server's count of live members, not the session's partner: the
+    // derivation opens Closer only for exactly two, and set_intimacy_consent
+    // refuses an account with no couple at all.
+    final linked = consent.members == 2;
+    final subtitle = !linked
+        ? 'Opens for the two of you. Pair with your partner first.'
+        : consent.mine
+            ? consent.partner
+                ? 'On for both of you.'
+                : 'Your half is on. It stays hidden until $them turns it on '
+                    'too — turn this off to take yours back.'
+            : consent.partner
+                ? '$them has turned it on. It opens when you do too.'
+                : 'Hidden. It opens only when both of you turn it on.';
+    return _SettingsRow(
+      icon: icon,
+      title: 'Closer',
+      subtitle: subtitle,
+      trailing: Switch(
+        value: consent.mine,
+        // Not a guard around a control that looks live: a couple of one has
+        // nothing for the RPC to write against, so the switch is not offered
+        // rather than offered and refused.
+        onChanged: _busy || !linked ? null : _setCloserConsent,
+        activeThumbColor: MilesColors.ember,
+      ),
+    );
+  }
 
   List<Widget> _profilePage(dynamic profile, dynamic partner) => [
         Center(

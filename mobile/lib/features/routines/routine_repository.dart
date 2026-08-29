@@ -148,6 +148,13 @@ class RoutineRepository {
     var loading = false;
     var delivered = false;
 
+    // False until the ordered first load below has run. ManagedSubscription
+    // invokes its builder immediately as well as on every rebuild, so a re-read
+    // placed in the builder would, on that first pass only, race ahead of
+    // ensureDefaults and paint "nothing on the chart yet" over a couple whose
+    // defaults were still being seeded.
+    var subscribed = false;
+
     Future<void> reload() async {
       if (loading) return;
       loading = true;
@@ -163,9 +170,9 @@ class RoutineRepository {
         // bare spinner was the terminal state — for a warm session that lost
         // the network, and for any PostgrestException (an RLS denial, schema
         // drift against a build already on a handset) at full connectivity,
-        // which re-throws on every realtime wake. Nothing re-runs it in place:
-        // the subscriptions resubscribe on reconnect without reloading. After
-        // one delivery a transient failure keeps the last good chart instead.
+        // which re-throws on every realtime wake. The screen's retry and the
+        // re-read on each rebuild below are what clear it. After one delivery a
+        // transient failure keeps the last good chart instead.
         if (!delivered && !controller.isClosed) controller.addError(e);
       } finally {
         loading = false;
@@ -175,34 +182,52 @@ class RoutineRepository {
     controller = StreamController<RoutineDay>.broadcast(
       onListen: () async {
         items = ManagedSubscription.start(
-          () => RealtimeService.coupleTable(
-            channelName: 'routine-items:$coupleId',
-            table: 'routine_items',
-            coupleId: coupleId,
-            onChange: (_) => unawaited(reload()),
-          ),
+          () {
+            // The re-read rides with each rebuild, as it does on cycle_screen's
+            // subscription. A rebuild is all a socket resume does here, so a
+            // tick written while the phone was off the network arrived by no
+            // path at all: the chart sat on pre-outage rows until something
+            // else changed. Worse for a FIRST load that threw — the screen
+            // showed its error and nothing but a person tapping retry could
+            // ever clear it.
+            if (subscribed) unawaited(reload());
+            return RealtimeService.coupleTable(
+              channelName: 'routine-items:$coupleId',
+              table: 'routine_items',
+              coupleId: coupleId,
+              onChange: (_) => unawaited(reload()),
+            );
+          },
         );
         // routine_checks has no couple_id, so it cannot use the couple-scoped
         // helper. RLS still limits delivery to this couple's items.
         checks = ManagedSubscription.start(
-          () => SupabaseService.client
-              .channel('routine-checks:$coupleId')
-              .onPostgresChanges(
-                event: PostgresChangeEvent.all,
-                schema: 'public',
-                table: 'routine_checks',
-                callback: (_) => unawaited(reload()),
-              )
-              .subscribe(),
+          () {
+            // Both builders re-read, not just one: they rebuild independently
+            // (each jitters its own rejoin), so either can be the one that
+            // comes back first.
+            if (subscribed) unawaited(reload());
+            return SupabaseService.client
+                .channel('routine-checks:$coupleId')
+                .onPostgresChanges(
+                  event: PostgresChangeEvent.all,
+                  schema: 'public',
+                  table: 'routine_checks',
+                  callback: (_) => unawaited(reload()),
+                )
+                .subscribe();
+          },
         );
         await ensureDefaults();
         await reload();
+        subscribed = true;
       },
       onCancel: () {
         items?.dispose();
         checks?.dispose();
         items = null;
         checks = null;
+        subscribed = false;
       },
     );
     return controller.stream;

@@ -28,6 +28,24 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
   Stream<RoutineDay>? _stream;
   String _date = RoutineRepository.today();
 
+  /// The couple and date [_stream] is open on, null when nothing is open.
+  ///
+  /// The stream used to be assigned once, in didChangeDependencies, under an
+  /// `_stream == null` guard — and a Riverpod rebuild does not re-run a
+  /// dependency pass: ref.watch marks the element dirty and calls build. So a
+  /// mount that happened before the session resolved — every cold start, where
+  /// the couple arrives a profile fetch later — left the field null for the
+  /// life of the screen, and StreamBuilder rendered a spinner with no data, no
+  /// error and nothing a retry could act on. Deriving the stream from the
+  /// session on every build is what makes that unrepresentable; this key is
+  /// what stops it being rebuilt on every frame.
+  ///
+  /// Keyed on the COUPLE as well as the date, so a re-pair inside one process
+  /// cannot leave the chart subscribed to the couple that ended.
+  String? _openFor;
+
+  static String _key(String coupleId, String date) => '$coupleId@$date';
+
   /// My ticks, applied before the server has heard about them.
   ///
   /// The box used to fill only after a write round trip AND the realtime echo
@@ -64,25 +82,56 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
     return local;
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final coupleId = ref.read(sessionProvider).couple?.id;
-    if (coupleId != null && _stream == null) {
-      _stream = RoutineRepository.stream(coupleId, _date);
-    }
+  /// Point the screen at [coupleId]'s chart for today, opening a stream only
+  /// when the couple or the date actually changed.
+  ///
+  /// Called from build and assigns the fields directly rather than through
+  /// setState: the StreamBuilder underneath reads them in the same pass. The
+  /// midnight rollover folded in here used to be its own build-time call into
+  /// setState — a markNeedsBuild during build, which asserts on exactly the
+  /// night it exists for, the phone left open by the bed past twelve.
+  void _sync(String? coupleId) {
+    final date = RoutineRepository.today();
+    final want = coupleId == null ? null : _key(coupleId, date);
+    if (want == _openFor) return;
+    _openFor = want;
+    _date = date;
+    // Yesterday's unconfirmed ticks are not today's, and neither couple's are
+    // the other's. _mine prefers a local override until the server agrees with
+    // it, and the new day's server count is zero — so a tap left unconfirmed
+    // at 23:59 read as done for the whole of the next day.
+    _optimistic.clear();
+    _stream =
+        coupleId == null ? null : RoutineRepository.stream(coupleId, date);
   }
 
-  /// The app is left open overnight constantly on a phone by a bed, so the
-  /// chart has to notice the date changed without a restart.
-  void _rolloverIfNeeded() {
-    final now = RoutineRepository.today();
-    if (now == _date) return;
+  /// Rebuilds the stream from scratch, which is the only thing that re-runs a
+  /// first load that failed: the error the chart renders comes from a load that
+  /// threw before anything was delivered, and the subscriptions underneath only
+  /// re-read when the socket resumes — which is not an event a person waiting
+  /// on a broken screen can cause.
+  void _retry() {
     final coupleId = ref.read(sessionProvider).couple?.id;
-    if (coupleId == null) return;
+    if (coupleId == null) {
+      // There is no chart to reopen, so the SESSION is what gets retried: the
+      // couple arrives with the profile, and _sync opens the stream on the
+      // rebuild that lands it. This used to be the snackbar alone, telling the
+      // user to sign out and back in — a button that does nothing to the state
+      // it is offered against, which is the class of failure this screen is
+      // being fixed for.
+      unawaited(ref.read(sessionProvider.notifier).loadProfile());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reloading your account…')),
+      );
+      return;
+    }
+    // The key is set beside the stream, never left behind it: _sync would
+    // otherwise see an unchanged key on the next build and the retry would
+    // last exactly one frame.
     setState(() {
-      _date = now;
-      _stream = RoutineRepository.stream(coupleId, now);
+      _date = RoutineRepository.today();
+      _openFor = _key(coupleId, _date);
+      _stream = RoutineRepository.stream(coupleId, _date);
     });
   }
 
@@ -169,8 +218,8 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _rolloverIfNeeded();
     final session = ref.watch(sessionProvider);
+    _sync(session.couple?.id);
     final me = session.profile?.id ?? '';
     final partner = session.partner?.id ?? '';
     final partnerName = session.partner?.displayName ?? 'Them';
@@ -185,10 +234,32 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen> {
       ),
       body: SafeArea(
         child: StreamBuilder<RoutineDay>(
+          // Keyed on the stream OBJECT so a reopen gets a fresh element and a
+          // fresh snapshot. StreamBuilder's own swap keeps the old summary —
+          // afterDisconnected/afterConnected only restate the connection, so
+          // the error survives into the new subscription — and the retry then
+          // sat on the same failure screen for the length of the refetch with
+          // nothing to show it had been pressed.
+          key: ObjectKey(_stream),
           stream: _stream,
           builder: (context, snap) {
+            // Nothing to subscribe to: this build found no couple, so _sync
+            // opened nothing. A null stream is ConnectionState.none — no data
+            // and no error — and it fell through to the spinner below, which
+            // is honest only while the session is still resolving. Once the
+            // session has answered, that spinner is the terminal state this
+            // screen is being fixed for, so it has to become a failure with a
+            // control on it.
+            if (_stream == null) {
+              return session.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _LoadFailed(
+                      message: "Couldn't load your couple.",
+                      onRetry: _retry,
+                    );
+            }
             if (snap.hasError) {
-              return const _Note("Couldn't load the chart. Pull to try again.");
+              return _LoadFailed(onRetry: _retry);
             }
             if (!snap.hasData) {
               return const Center(child: CircularProgressIndicator());
@@ -512,6 +583,53 @@ class _AddRoutineSheetState extends State<_AddRoutineSheet> {
       ),
     );
   }
+}
+
+/// A read that failed, deliberately unlike [_Note] beside it.
+///
+/// This state was unreachable until the repository stopped swallowing a failed
+/// first load, and what it then rendered was the empty state's grey line of
+/// text with different words on it, instructing a pull-to-refresh gesture no
+/// screen in this feature has ever had. A chart that could not be read looked
+/// like a chart with nothing on it, and the only instruction it gave did
+/// nothing.
+///
+/// Two causes reach it and they say so separately: a read that threw, and a
+/// build that found no couple to read for. One sentence for both would put the
+/// screen back where it started — a state whose text does not name what broke.
+class _LoadFailed extends StatelessWidget {
+  const _LoadFailed({
+    required this.onRetry,
+    this.message = "Couldn't load today's chart.",
+  });
+
+  final VoidCallback onRetry;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined,
+                  color: Color(0xFFEF6F58), size: 32,),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFFBF8F4), height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: onRetry,
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 class _Note extends StatelessWidget {

@@ -74,6 +74,11 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     }
   }
 
+  /// Held true from a Try again tap for one beat — see the builder, which is
+  /// where it earns its keep.
+  bool _retrying = false;
+  Timer? _retryHold;
+
   /// The only thing that re-runs a failed first fetch.
   ///
   /// The repository seeds its broadcast controller once, on first listen, so
@@ -84,8 +89,29 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
   /// network) as a dead end with a gesture that does not exist.
   void _retry() {
     final coupleId = ref.read(sessionProvider).couple?.id;
-    if (coupleId == null) return; // no couple: the stream was never built
-    setState(() => _stream = GalleryRepository.stream(coupleId));
+    if (coupleId == null) {
+      // Unlinked between the failure and the tap — there is no gallery left to
+      // build a stream for. Returning quietly was the dead button all over
+      // again, in the one case where no amount of tapping can ever help.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("You're not linked to anyone.")),
+      );
+      return;
+    }
+    _retryHold?.cancel();
+    _retryHold = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _retrying = false);
+    });
+    setState(() {
+      _retrying = true;
+      _stream = GalleryRepository.stream(coupleId);
+    });
+  }
+
+  @override
+  void dispose() {
+    _retryHold?.cancel();
+    super.dispose();
   }
 
   Future<void> _add() async {
@@ -259,8 +285,27 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
       ),
       body: SafeArea(
         child: StreamBuilder<List<GalleryItem>>(
+          // Keyed by the stream OBJECT, and that key IS the retry.
+          //
+          // StreamBuilder carries its snapshot across a stream swap:
+          // didUpdateWidget runs afterDisconnected then afterConnected, and
+          // both go through AsyncSnapshot.inState, whose own doc says data,
+          // error and stackTrace "persist unmodified". So `hasError` stayed
+          // true from the dead stream and the second failure repainted the
+          // FIRST failure's card — byte-identical, no spinner between them.
+          // Try again looked wired to nothing. A new key builds a new element
+          // with an empty snapshot, so a dead stream's error cannot outlive the
+          // stream it came from.
+          key: ObjectKey(_stream),
           stream: _stream,
           builder: (context, snap) {
+            // Held for a beat even when the replacement stream fails at once:
+            // a repeat failure that repaints the same card inside one frame is
+            // indistinguishable from a tap that did nothing, which is the whole
+            // complaint. Data is never held — it falls straight through.
+            if (_retrying && !snap.hasData) {
+              return const _Message('Trying again…', busy: true);
+            }
             if (snap.hasError) {
               return _Message(
                 'Could not load the gallery.',
@@ -634,12 +679,17 @@ class _Tile extends StatelessWidget {
 }
 
 class _Message extends StatelessWidget {
-  const _Message(this.text, {this.onRetry});
+  const _Message(this.text, {this.onRetry, this.busy = false});
   final String text;
 
   /// Present only on the failure state — which is what separates it from the
   /// empty one, since both are otherwise this same card.
   final VoidCallback? onRetry;
+
+  /// A retry is in flight. The button becomes the spinner it started, so the
+  /// tap is visible for its own sake rather than only when it happens to
+  /// succeed.
+  final bool busy;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -655,7 +705,14 @@ class _Message extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Color(0x99F5EFE6), height: 1.5),
               ),
-              if (onRetry != null) ...[
+              if (busy) ...[
+                const SizedBox(height: 14),
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ] else if (onRetry != null) ...[
                 const SizedBox(height: 8),
                 TextButton(onPressed: onRetry, child: const Text('Try again')),
               ],

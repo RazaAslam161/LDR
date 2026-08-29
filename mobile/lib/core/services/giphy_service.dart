@@ -18,6 +18,49 @@ class GiphyGif {
   final String fullUrl; // sent / flung
 }
 
+/// How a fetch ended.
+///
+/// A bare `List<GiphyGif>` was the whole answer, so a revoked key, a spent
+/// quota, a GIPHY outage and a handset with no network all reached the picker
+/// as the same empty list a search that genuinely matched nothing returns —
+/// and the picker, having nothing to branch on, told the user their word was
+/// the problem. That is the one explanation that is never true of a fetch that
+/// never left the phone.
+enum GiphyStatus {
+  /// GIPHY answered. [GiphyResult.gifs] may still be empty, and THAT one is
+  /// the only case that really is "nothing matched".
+  ok,
+
+  /// The key lookup answered and there is no key. No amount of retrying moves
+  /// this; a row in `app_secrets` does.
+  notConfigured,
+
+  /// GIPHY refused the key itself — revoked, or belonging to a deleted app.
+  /// Separate from [notConfigured] because a key IS configured, and separate
+  /// from [unavailable] because waiting changes nothing: the row has to be
+  /// replaced. [GiphyService] drops its cached key on this one so the retry
+  /// re-reads `app_secrets` instead of re-sending the key that was just
+  /// refused.
+  keyRejected,
+
+  /// The key's quota or rate window is spent — possibly by somebody else, on a
+  /// key this app cannot see the usage of. Time fixes it and nothing else
+  /// does, which is the opposite advice from every other failure here.
+  rateLimited,
+
+  /// Nothing was reached — the key function, GIPHY itself, or the network in
+  /// between. Retrying is the right response, so the picker offers one.
+  unavailable,
+}
+
+/// A fetch's outcome: what happened, and what came back if anything did.
+class GiphyResult {
+  const GiphyResult(this.status, {this.gifs = const []});
+
+  final GiphyStatus status;
+  final List<GiphyGif> gifs;
+}
+
 /// Thin GIPHY REST client.
 ///
 /// The key comes from the `giphy-key` edge function (`app_secrets` row
@@ -30,26 +73,21 @@ class GiphyGif {
 /// spending it, and this app has no update channel — held server-side it
 /// rotates in one UPDATE instead of one release to every handset.
 ///
-/// No key → empty results (the picker shows a friendly "add your key" note
-/// instead).
+/// Every way that can go wrong reaches the picker as its own [GiphyStatus] —
+/// no key, a key GIPHY refused, a spent quota, nothing reachable — rather than
+/// as an empty search, because the fixes are a new `app_secrets` row, waiting,
+/// and tapping again, and telling a user to retype their word covers none of
+/// them.
 class GiphyService {
   GiphyService._();
 
   static String _key = '';
   static bool _resolved = false;
 
-  /// False only once a fetch has actually come back without a key.
-  ///
-  /// giphy_picker.dart:118 reads this synchronously, before the first fetch
-  /// can have resolved. Treating "not known yet" as unconfigured flashes the
-  /// "add a key" note over the top of every open, and after a failed fetch it
-  /// blames the configuration for what is a network problem.
-  static bool get isConfigured => !_resolved || _key.isNotEmpty;
-
-  static Future<List<GiphyGif>> trending({int limit = 24}) =>
+  static Future<GiphyResult> trending({int limit = 24}) =>
       _fetch('trending', {'limit': '$limit'});
 
-  static Future<List<GiphyGif>> search(String q, {int limit = 24}) =>
+  static Future<GiphyResult> search(String q, {int limit = 24}) =>
       _fetch('search', {'q': q, 'limit': '$limit'});
 
   /// Fetch the key once per app run. Only an answer latches: a picker opened
@@ -63,8 +101,9 @@ class GiphyService {
       _key = JsonUtils.parseString(map['key']).trim();
       _resolved = true;
     } catch (e, st) {
-      // Offline, signed out, or the function is not deployed. All three are
-      // "no GIFs right now", which the picker already renders as an empty grid.
+      // Offline, signed out, or the function is not deployed. _resolved stays
+      // false through all three, so the fetch reports them as unavailable and
+      // the picker offers a retry — never as a key nobody configured.
       // Reported as well as printed: silenceLogsInRelease makes debugPrint an
       // empty closure in a shipped build, so this line reaches nobody on a
       // handset — and "the giphy-key function is not answering" is exactly the
@@ -75,12 +114,21 @@ class GiphyService {
     return _key;
   }
 
-  static Future<List<GiphyGif>> _fetch(
+  static Future<GiphyResult> _fetch(
     String endpoint,
     Map<String, String> params,
   ) async {
     final key = await _ensureKey();
-    if (key.isEmpty) return const [];
+    if (key.isEmpty) {
+      // _resolved is the whole difference between the two, and it is why the
+      // picker cannot work this out for itself: the function ANSWERED and the
+      // `app_secrets` row is missing (nothing on this handset fixes that), vs
+      // the lookup never got an answer at all — offline, signed out, function
+      // not deployed — where trying again is exactly right.
+      return GiphyResult(
+        _resolved ? GiphyStatus.notConfigured : GiphyStatus.unavailable,
+      );
+    }
     final url = Uri.https('api.giphy.com', '/v1/gifs/$endpoint', {
       ...params,
       'api_key': key,
@@ -98,13 +146,24 @@ class GiphyService {
         // and a spent quota — the two failures this file's own doc comment
         // worries about, and the two with completely different fixes —
         // indistinguishable from a search that genuinely matched nothing. It
-        // rides in the exception TYPE because that is what [ErrorReporter]
-        // sends: `detail` is a machine code read from a typed field it already
-        // knows, and free text never leaves the device.
+        // still rides in the exception TYPE for [ErrorReporter], whose `detail`
+        // is a machine code read from a typed field it already knows and never
+        // free text; it now ALSO reaches the picker, which is the surface the
+        // person holding the phone is actually reading.
+        final status = _statusFor(res.statusCode);
+        if (status == GiphyStatus.keyRejected) {
+          // The latch below is per app run, so without this the retry re-sends
+          // the key GIPHY just refused and fails identically for as long as the
+          // process lives — a button known in advance to do nothing. Dropped,
+          // Try again re-reads `app_secrets`, so rotating that row is enough
+          // and nobody has to kill the app to pick the new key up.
+          _resolved = false;
+          _key = '';
+        }
         debugPrint('[giphy] $endpoint HTTP ${res.statusCode}');
         ErrorReporter.report(
-            _statusFailure(res.statusCode), StackTrace.current, kind: 'giphy',);
-        return const [];
+            _failureFor(status), StackTrace.current, kind: 'giphy',);
+        return GiphyResult(status);
       }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final list = (data['data'] as List?) ?? const [];
@@ -125,21 +184,31 @@ class GiphyService {
         out.add(
             GiphyGif(id: e['id'].toString(), previewUrl: pUrl, fullUrl: fUrl),);
       }
-      return out;
+      return GiphyResult(GiphyStatus.ok, gifs: out);
     } catch (e, st) {
       // Timeout, DNS, or a response shape that no longer fits the cast above.
       // Swallowed unlogged, every one of them arrived at the user as "No GIFs
       // found — try another word.", blaming the words they typed — on the
-      // trending load they typed none.
+      // trending load they typed none. Logging fixed that for the operator;
+      // the status is what fixes it for the person holding the phone.
       debugPrint('[giphy] $endpoint failed: ${e.runtimeType}');
       ErrorReporter.report(e, st, kind: 'giphy');
-      return const [];
+      return const GiphyResult(GiphyStatus.unavailable);
     }
   }
 
-  static Exception _statusFailure(int status) => switch (status) {
-        401 || 403 => GiphyKeyRejected(),
-        429 => GiphyRateLimited(),
+  /// The single place an HTTP code is read as a failure CLASS. What the user
+  /// is told and what the reporter is sent both derive from this, so the two
+  /// cannot drift into disagreeing about the same response.
+  static GiphyStatus _statusFor(int code) => switch (code) {
+        401 || 403 => GiphyStatus.keyRejected,
+        429 => GiphyStatus.rateLimited,
+        _ => GiphyStatus.unavailable,
+      };
+
+  static Exception _failureFor(GiphyStatus status) => switch (status) {
+        GiphyStatus.keyRejected => GiphyKeyRejected(),
+        GiphyStatus.rateLimited => GiphyRateLimited(),
         _ => GiphyBadStatus(),
       };
 }

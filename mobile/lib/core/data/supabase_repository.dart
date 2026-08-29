@@ -25,6 +25,39 @@ bool strandedAfterRestore({
 }) =>
     alreadyKeyless || (!hasSeed && hadPriorIdentity);
 
+/// The escrow write threw: a session and a seed were both there and the row
+/// still did not land.
+///
+/// A named type rather than a `StateError` because `error_type` in
+/// `client_errors` is `runtimeType` and nothing else from this call site
+/// survives redaction — the message is discarded by design (diag.dart:236), so
+/// the type IS the report. Two types rather than one field, for the same
+/// reason: `kind` is also the reporter's dedup key, and splitting these across
+/// two kinds would have let a run report one of them and swallow the other.
+class EscrowBackupFailed implements Exception {
+  const EscrowBackupFailed();
+}
+
+/// The escrow write had no account to write for — a sign-in that produced no
+/// user. Separate from [EscrowBackupFailed] because the fix is somewhere else
+/// entirely: nothing about the escrow is wrong in this one.
+class EscrowBackupNoSession implements Exception {
+  const EscrowBackupNoSession();
+}
+
+/// Where the two halves of Closer's consent stand, as the server sees them.
+///
+/// [modest] is the DERIVED couple-wide state — the same value that lands in
+/// `couples.modest_mode` — and it is false only when [members] is 2 and both
+/// halves are true. [mine] and [partner] are what let a screen say "waiting
+/// for them" instead of repeating the instruction.
+typedef IntimacyConsent = ({
+  bool mine,
+  bool partner,
+  int members,
+  bool modest,
+});
+
 /// What checking someone's password actually established.
 ///
 /// Two failures, because "no" and "we could not ask" are different sentences
@@ -258,8 +291,42 @@ class SupabaseRepository {
   /// already carries whose escrow it was.
   static Future<void> _backupEscrow(String password) async {
     if (await KeyEscrow.backup(password)) return;
+    // False is FOUR different answers and this used to report one sentence for
+    // all of them, which is why "why did the escrow write fail" had no answer
+    // in the table — and why most of the rows were not failures at all. Two of
+    // the four are ordinary: an account whose seed has not been minted yet has
+    // nothing to seal, and every first sign-up is in that state; a device in
+    // recovery refuses on purpose rather than sealing its stand-in over the row
+    // that still holds the couple's real key (key_escrow.dart:218). Reporting
+    // those spent the reporter's per-run cap and, worse, the dedup slot keyed
+    // on `escrow-backup` — so the ONE real failure in a run that also held a
+    // first sign-up was the report that got dropped.
+    //
+    // Re-read rather than returned. backup() keeps its exception inside its own
+    // catch (key_escrow.dart:251) and this file cannot reach it; the state can
+    // in principle move between the two reads, and a diagnostic that is one
+    // sign-in stale still names which branch answered, which is more than
+    // `StateError('escrow backup did not take')` ever did. The exception TYPE
+    // is still only in logcat — closing that needs the bool at
+    // key_escrow.dart:206 to carry the error, which is a change to that file.
+    if (SupabaseService.currentUserId == null) {
+      // Reached only from signIn: signUp checks the id off the response before
+      // it gets here. A sign-in that authenticated and then had no user is not
+      // an escrow problem, but it is the escrow that notices.
+      ErrorReporter.report(
+        const EscrowBackupNoSession(),
+        StackTrace.current,
+        kind: 'escrow-backup',
+      );
+      return;
+    }
+    if (!await CryptoCore.hasSeed()) return;
+    if (await CryptoCore.isKeyless() && !await KeyEscrow.isMissing()) return;
+    // A session, a seed on the device, and not a recovery hold: the derive, the
+    // seal or the upsert threw. This is the only one of the four that is a
+    // defect, and now the only one that lands.
     ErrorReporter.report(
-      StateError('escrow backup did not take'),
+      const EscrowBackupFailed(),
       StackTrace.current,
       kind: 'escrow-backup',
     );
@@ -503,16 +570,55 @@ class SupabaseRepository {
         .update({'presence_status': status.name}).eq('id', uid);
   }
 
-  /// Toggles the couple-wide modest mode flag (hides intimacy module).
-  /// Should be wrapped in a dual-consent prompt in the UI, but the schema
-  /// permits either partner to flip it — modesty defaults to safe.
-  static Future<void> setModestMode({
+  /// Records THIS user's half of the consent to Closer, and returns where both
+  /// halves now stand.
+  ///
+  /// The comment that used to sit here admitted "the schema permits either
+  /// partner to flip it" — one screen away from closer_screen.dart printing
+  /// "It stays off until both of you turn it on in Settings". 20260829160000
+  /// makes the screen true instead of retiring it: `couples.modest_mode` is
+  /// derived from a per-member consent table, and a direct write to the column
+  /// is reinterpreted by a trigger as the writer's own consent, so builds 49-64
+  /// become two-party without being updated.
+  ///
+  /// [enabled] still means modest mode — hide Closer — and [coupleId] is still
+  /// taken, because settings_screen.dart passes both and the RPC no longer
+  /// needs either: it reads the couple off the caller's own profile, which is
+  /// the whole least-privilege point of not having a couple_id on the wire.
+  static Future<IntimacyConsent> setModestMode({
     required String coupleId,
     required bool enabled,
-  }) async {
-    await _c
-        .from('couples')
-        .update({'modest_mode': enabled}).eq('id', coupleId);
+  }) =>
+      setIntimacyConsent(!enabled);
+
+  /// [consented] is in the screen's vocabulary: true means "I want Closer on".
+  ///
+  /// Throws `no_active_couple` for an unpaired account rather than reporting a
+  /// consent nobody can pair with — a silent success here is how the toggle
+  /// used to look like it had taken.
+  static Future<IntimacyConsent> setIntimacyConsent(bool consented) async {
+    final res = await _c.rpc<dynamic>(
+      'set_intimacy_consent',
+      params: {'p_enabled': consented},
+    );
+    return _intimacyConsent(res);
+  }
+
+  static Future<IntimacyConsent> fetchIntimacyConsent() async {
+    final res = await _c.rpc<dynamic>('intimacy_consent_state');
+    return _intimacyConsent(res);
+  }
+
+  static IntimacyConsent _intimacyConsent(dynamic res) {
+    final m = _singleRow(res);
+    return (
+      mine: JsonUtils.parseBool(m['mine']),
+      partner: JsonUtils.parseBool(m['partner']),
+      members: JsonUtils.parseInt(m['members']),
+      // No fallback that reads as "open". A field this decode failed to find
+      // must not be the reason a screen shows the intimate module.
+      modest: JsonUtils.parseBool(m['modest'], fallback: true),
+    );
   }
 
   // ─── Partner key exchange (E2EE) ────────────────────────────

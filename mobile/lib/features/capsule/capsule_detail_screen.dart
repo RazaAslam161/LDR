@@ -27,7 +27,8 @@ class CapsuleDetailScreen extends ConsumerStatefulWidget {
       _CapsuleDetailScreenState();
 }
 
-class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
+class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen>
+    with WidgetsBindingObserver {
   late Capsule _capsule = widget.capsule;
   Map<CapsuleItemType, int> _summary = const {};
   List<CapsuleItem> _items = const [];
@@ -41,12 +42,20 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   ProximityStatus? _proxStatus;
   bool _checking = false;
 
+  /// True only between "we opened the settings app for them" and the resume
+  /// that follows it. Scoped that tightly on purpose: Android's own permission
+  /// dialog pauses and resumes the app, so a re-check on EVERY resume would
+  /// re-request permission, be denied, resume, and re-request — a prompt loop
+  /// with no way out of the screen.
+  bool _sentToSettings = false;
+
   final AudioPlayer _player = AudioPlayer();
   ManagedSubscription? _channel;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _channel = ManagedSubscription.start(
         () => CapsuleRepository.subscribe(_capsule.coupleId, _reload),);
     if (_capsule.isUnlocked) {
@@ -110,7 +119,14 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
   }
 
   Future<void> _startProximity() async {
-    setState(() => _checking = true);
+    // The error card's "Try again" lands here too, so the previous service —
+    // its 4s timer and its broadcast channel — has to go before a second one
+    // starts, or every retry leaves another one pinging behind it.
+    _prox?.stop();
+    setState(() {
+      _checking = true;
+      _proxStatus = null;
+    });
     _prox = ProximityService();
     await _prox!.start(
       coupleId: _capsule.coupleId,
@@ -118,6 +134,43 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
         if (mounted) setState(() => _proxStatus = s);
       },
     );
+  }
+
+  /// Coming back from the settings app is the moment the answer changed, so it
+  /// is the moment to ask again. [ProximityService.start] takes an early exit
+  /// when location is off or unpermitted — no 4s timer is armed, that instance
+  /// never speaks again — so without this the user flips the toggle, returns,
+  /// and the card still reads "Location is off" until the screen is rebuilt.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !_sentToSettings) return;
+    _sentToSettings = false;
+    if (!mounted || _revealed || _opening || !_checking) return;
+    unawaited(_startProximity());
+  }
+
+  /// Which page repairs this depends on which half of `permissionBlocked` is
+  /// true, and they are not the same screen: with location services off
+  /// device-wide, the app's own settings page holds no toggle that fixes it.
+  /// Sending both cases to `openAppSettings` — as the card did — left half of
+  /// them staring at a page that could not help.
+  Future<void> _openLocationSettings({required bool serviceOff}) async {
+    _sentToSettings = true;
+    final opened = serviceOff
+        ? await Geolocator.openLocationSettings()
+        : await Geolocator.openAppSettings();
+    if (opened) return;
+    if (!mounted) return;
+    // A button that silently does nothing is worse than no button. This fails
+    // on handsets whose OEM removed the settings activity we ask for.
+    _sentToSettings = false;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(serviceOff
+          ? "This phone wouldn't open its location settings. Turn Location on "
+              'from the notification shade, then tap Check again.'
+          : "This phone wouldn't open Miles' settings. Allow Location for "
+              'Miles from Settings › Apps, then tap Check again.'),
+    ),);
   }
 
   bool get _canOpen {
@@ -174,6 +227,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _channel?.dispose();
     _prox?.stop();
     _player.dispose();
@@ -220,6 +274,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen> {
                           unawaited(_loadSummary());
                         },
                         onCheckProximity: _startProximity,
+                        onOpenSettings: _openLocationSettings,
                         onOpen: _attemptOpen,
                       ),
       ),
@@ -241,6 +296,7 @@ class _SealedView extends StatelessWidget {
     required this.error,
     required this.onAdd,
     required this.onCheckProximity,
+    required this.onOpenSettings,
     required this.onOpen,
   });
 
@@ -253,6 +309,7 @@ class _SealedView extends StatelessWidget {
   final String? error;
   final VoidCallback onAdd;
   final VoidCallback onCheckProximity;
+  final void Function({required bool serviceOff}) onOpenSettings;
   final VoidCallback onOpen;
 
   int get _total => summary.values.fold(0, (a, b) => a + b);
@@ -317,6 +374,7 @@ class _SealedView extends StatelessWidget {
           proxStatus: proxStatus,
           canOpen: canOpen,
           onCheckProximity: onCheckProximity,
+          onOpenSettings: onOpenSettings,
           onOpen: onOpen,
         ),
         if (error != null) ...[
@@ -351,6 +409,7 @@ class _UnlockSection extends StatelessWidget {
     required this.proxStatus,
     required this.canOpen,
     required this.onCheckProximity,
+    required this.onOpenSettings,
     required this.onOpen,
   });
 
@@ -359,6 +418,7 @@ class _UnlockSection extends StatelessWidget {
   final ProximityStatus? proxStatus;
   final bool canOpen;
   final VoidCallback onCheckProximity;
+  final void Function({required bool serviceOff}) onOpenSettings;
   final VoidCallback onOpen;
 
   @override
@@ -409,18 +469,41 @@ class _UnlockSection extends StatelessWidget {
       return _hintCard('Looking for your location…');
     }
     if (s.permissionBlocked) {
+      // `permissionBlocked` is two different failures wearing one card, and
+      // they are repaired on two different screens — see [onOpenSettings].
+      // Saying "Location is off" to someone whose location is ON but who never
+      // granted the app permission sent them hunting for a toggle that was
+      // already where they left it.
+      final serviceOff = !s.serviceEnabled;
+      final extra = capsule.unlockMode == CapsuleUnlockMode.both
+          ? ' It can still open on its date.'
+          : '';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _hintCard(
-            'Location is off. A "when you\'re together" capsule needs it to '
-            "know you've reunited. ${capsule.unlockMode == CapsuleUnlockMode.both ? 'It can still open on its date.' : ''}",
+            serviceOff
+                ? 'Location is off on this phone. A "when you\'re together" '
+                    "capsule needs it to know you've reunited.$extra"
+                : "Miles doesn't have permission to use this phone's location, "
+                    "so it can't tell when you've reunited.$extra",
             icon: Icons.location_off,
           ),
           const SizedBox(height: 8),
-          const OutlinedButton(
-            onPressed: Geolocator.openAppSettings,
-            child: Text('Open location settings'),
+          OutlinedButton(
+            onPressed: () => onOpenSettings(serviceOff: serviceOff),
+            child: Text(serviceOff ? 'Turn on location' : 'Open app settings'),
+          ),
+          const SizedBox(height: 4),
+          // The one control that makes this card not a dead end. The service
+          // takes an early exit on this branch and arms no timer, so nothing
+          // re-checks on its own: turn location on, come back, and the card
+          // still said "Location is off" until the screen was rebuilt. This
+          // starts a NEW service, which asks the platform again from scratch.
+          TextButton.icon(
+            onPressed: onCheckProximity,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Check again'),
           ),
         ],
       );
@@ -428,6 +511,30 @@ class _UnlockSection extends StatelessWidget {
     if (s.withinRange) {
       return _hintCard("You're together 💞  Open it.",
           icon: Icons.favorite, color: MilesColors.sage,);
+    }
+    // Before the distance and before the wait: a failed check on THIS handset
+    // is not news about the partner. The service had written the cause into
+    // `error` since the audit and nothing read it, so every unknown throw —
+    // a platform exception, a fix that never arrived — fell through to
+    // "waiting for your partner" and blamed them for this phone's fault.
+    if (s.error != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _hintCard(
+            capsule.unlockMode == CapsuleUnlockMode.both
+                ? '${s.error} It can still open on its date.'
+                : s.error!,
+            icon: Icons.error_outline,
+            color: MilesColors.blush,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: onCheckProximity,
+            child: const Text('Try again'),
+          ),
+        ],
+      );
     }
     if (s.partnerSeen && s.distanceMeters != null) {
       return _hintCard('So close — about ${s.distanceMeters!.round()}m apart.',

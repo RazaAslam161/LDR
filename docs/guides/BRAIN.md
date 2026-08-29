@@ -14984,3 +14984,561 @@ flutter test --no-pub      → exit 0, "All tests passed!", 1325 tests
 - Owner decides: (a) may a build run to prove the ABI strip, and (b) may the migration go
   to staging. Until both, this tree is complete but not proven at those two edges.
 - Nothing has been committed. 46 files sit in the working tree.
+
+## §197 — The ABI strip is PROVEN on the real artifact (2026-08-29)
+
+Owner authorised one build. `bash tool/release.sh` (no flags: build + hash only,
+no bump, no upload, no publish). Exit 0.
+
+### Measured, not inferred
+
+```
+                 BEFORE (7909f977…)              AFTER (e0eb973d…)
+arm64-v8a        11 libs, libapp+libflutter      11 libs, libapp+libflutter
+armeabi-v7a       9 libs, NEITHER                — gone —
+x86_64            9 libs, NEITHER                — gone —
+ABI dirs         [arm64-v8a, armeabi-v7a,        [arm64-v8a]
+                  x86_64]
+size             178,489,179 bytes               98,928,590 bytes
+```
+
+- **The regression check — the reason the build was worth running — passes.** arm64
+  libs: 11 before, 11 after, `MISSING: NONE`, `ADDED: NONE`. The exclude pattern took
+  exactly the foreign ABIs and nothing else.
+- APK is structurally whole: AndroidManifest.xml present, 6 classes*.dex, flutter assets
+  present, signed (META-INF/CERT.SF + CERT.RSA).
+- A 32-bit handset is now cleanly REJECTED at install instead of installing an APK with
+  no Flutter engine in it. §193 defect 1 is closed on the artifact, not on reasoning.
+- 79.5MB smaller — 45% off the download, a side effect worth having.
+- release.sh's own stamp check now reads `checked 1 libapp.so` where the universal APK
+  made it check three, which independently corroborates the single-ABI packaging.
+
+### HAZARD CREATED BY THIS BUILD — read before touching Miles.apk
+
+- **`D:\Miles\Miles.apk` was OVERWRITTEN by the script's sideload copy step.** The file at
+  that path is no longer the artifact installed on the OnePlus 8.
+- Both call themselves **build 64**. The installed one is `7909f977…bd4053`; the one on
+  disk now is `e0eb973d…f0f74ca`, and it carries all 47 files of commit 921cab4. Two
+  different builds sharing one number is exactly the trap the version rules exist for.
+- **Do NOT install this artifact and do NOT run the publish snippet release.sh printed**
+  (it says `latest_build = 64`). Anything that reaches a phone or the app_release row must
+  be bumped to 65 first — `bash tool/release.sh --bump` — so the number identifies the
+  code.
+- §191's note still binds from the other side: the OnePlus 7 is on build 63 and unplugged,
+  so the two handsets are already on different builds.
+
+### What this does NOT prove
+
+- Nothing was installed and nothing ran. The ceremony layout fix — the audit's one
+  CRITICAL — is still verified only by source-law tests plus its structural argument
+  (non-flex children are laid out before the Expanded gets space). A render of /unlink
+  with a long note and at 2.0 text scale remains the check that settles it, and this build
+  did not perform it.
+- The migration `20260829140000` is still a file that Postgres has never parsed.
+
+### Exact next step
+
+- If the owner wants the fixes on a phone: `bash tool/release.sh --bump` (→ 65), install
+  to the OnePlus 8, then open /unlink with a long note at 2.0 text scale and confirm the
+  Re-link button is reachable. That single pass closes the CRITICAL.
+- Leave `app_release.min_build` alone until 65 is installed and proven.
+
+## §198 — Installed on BOTH handsets; the arm64-only APK runs on real hardware (2026-08-29)
+
+Owner asked for the install. Both phones are connected again — the OnePlus 7 is back on
+the cable for the first time since §191.
+
+### What is on each phone now
+
+```
+                        BEFORE          AFTER      primaryCpuAbi
+1896b4b3 OnePlus 8      build 64        build 64   arm64-v8a
+a959ee2b OnePlus 7      build 63        build 64   arm64-v8a
+```
+
+- Artifact: `Miles.apk`, 98,928,590 bytes, sha256 `e0eb973dbdd6702b74db5ad379d6a96e…`,
+  the single-ABI build from §197 carrying commit 921cab4.
+- `adb install -r` on both: `Success`. The signing cert matched, so no uninstall was
+  needed and **no local data was touched** — the X25519 seed, the key ring and the vault
+  are all intact. An uninstall would have destroyed them; that path was never taken.
+
+### The ABI fix is now proven END TO END, not just in the zip
+
+```
+nativeloader: Load …/base.apk!/lib/arm64-v8a/libflutter.so … : ok      (OnePlus 8)
+nativeloader: Load …/base.apk!/lib/arm64-v8a/libflutter.so … : ok      (OnePlus 7)
+nativeloader: Load …/base.apk!/lib/arm64-v8a/libmapbox-common.so … : ok
+nativeloader: Load …/base.apk!/lib/arm64-v8a/libmapbox-maps.so   … : ok
+```
+
+- No `FATAL`, no `UnsatisfiedLinkError`, no `AndroidRuntime` crash on either device.
+  Processes stayed alive (pid 22715 / 9074) after settling.
+- §193 defect 1 is now closed at every level it can be: the packaging excludes are right
+  (§197, artifact), the Flutter engine and every third-party arm64 library still load
+  (this section, hardware), and Play's AAB path was never touched (release.sh:302 has no
+  `--target-platform`, and the gradle change is scoped to sideload+release).
+
+### THE VERSION AMBIGUITY IS NOW REAL ON A PHONE — this is the cost of this install
+
+- The OnePlus 8 went **64 → 64**. Two materially different builds now share that number,
+  and nothing on the device can tell them apart: `dumpsys` reads `versionCode=64` either
+  way, and the snapshot stamp inside libapp.so also reads `miles-build-64`.
+- The only durable record of which code is on those phones is the artifact hash written
+  above. **If either phone is ever in doubt, reinstall from a bumped build rather than
+  guessing.**
+- I raised this before installing and installed anyway because the owner asked directly.
+  It is revertible: `bash tool/release.sh --bump` produces a real 65.
+- The OnePlus 7 is unambiguous (63 → 64) and is the cleaner of the two to reason about.
+
+### What this install still does NOT prove
+
+- **Nothing was exercised beyond process start.** The app launched and stayed up; no
+  screen was driven. The audit's CRITICAL — the unlink ceremony layout — has still never
+  been rendered. `/unlink` with a long note at 2.0 text scale remains the check.
+- The launcher opened via `.AliasWeather` on the OnePlus 8, which is the cover alias the
+  owner had already enabled (§193). Unchanged by this install.
+- `app_release` was NOT touched. `min_build` stays 42, `latest_build` stays 46. Nothing
+  was uploaded or published, and the publish snippet release.sh printed (which says
+  `latest_build = 64`) must not be run.
+
+### Exact next step
+
+- Open /unlink on either phone with a long partner note and text scale at 2.0, and confirm
+  the Re-link button is reachable. That is the last unexercised path of the whole audit.
+- Independent verification of whether all 46 findings are genuinely fixed was still
+  running when this was written; its answer belongs in the next section, and the honest
+  interim answer is NO — see §199 when it lands.
+
+## §199 — The true completion number: 31 of 46, and 7 are permanent (2026-08-29)
+
+The owner asked, directly, whether all the audit findings were permanently fixed. §195 and
+the replies around it said "46/46". **That was wrong, and it was wrong because I read an
+aggregate instead of the per-finding outcomes.** 10 agents re-checked every finding against
+the COMMITTED code at 921cab4. This section is the real answer.
+
+```
+total              46
+  fixed            31
+  partial          10
+  not_fixed         2
+  pending_external  3      (migration written, never applied)
+
+permanence
+  structural        7      bad state now unrepresentable
+  guarded          29      a check prevents it; deleting the check restores the bug
+  patch_only       10      one path patched, same mistake easy to remake
+```
+
+- **31/46 genuinely fixed. 7/46 are "permanent"** in the sense the owner meant. The rest
+  are guards, and a guard is a line someone can delete.
+- The reporting failure is the finding here as much as the code is: the fix workers
+  themselves returned `{'fixed': 52, 'blocked': 2}` and I never opened it before saying
+  46/46. **Rule added to ~/.claude/CLAUDE.md's spirit: a per-item outcome list must be
+  read item by item before any "all fixed" claim.**
+
+### NOT FIXED — 2, both known to the workers and never surfaced by me
+
+- `severance_sheet.dart:180` — "Leave right now" still does `if (!await
+  confirmIdentity()) return;`. On a hard prompt failure (no_fragment_activity, an
+  auth_in_progress collision with main.dart's resume re-prompt) or a plain cancel, the row
+  does nothing at all: no snackbar, no dialog, no inline text. **The file was never in any
+  cluster's owned list — a hole in my cluster design, not a worker's failure.** It is not
+  in commit 921cab4.
+- `modest_mode` two-party consent — entirely as found. Either partner still flips one
+  couple-wide boolean and the other's phone gains the Touch tab and intimate chat moods
+  without acting, while the app tells them in two places that both must consent. A real fix
+  needs dual-consent schema work, which my own no-database constraint forbade.
+
+### PENDING — 3, and they are open in production right now
+
+All three live in `20260829140000_a_write_must_prove_the_couple_it_claims.sql`, which
+Postgres has never parsed. Until it is applied, production behaves exactly as the audit
+found it. Worse, the verifier found things the migration does NOT do:
+
+- It migrates no data. Rows already written against a foreign `item_id` or an arbitrary
+  `couple_id` stay, and the victim couple still cannot delete them — the `*_delete`
+  policies are untouched and remain `user_id = auth.uid()`.
+- **A NEW residual my own round-2 fix created:** `couple_has_content()` is deny-by-default,
+  so a solo caller's abandoned couple is now never swept and orphan couples accumulate
+  where the old six-table list would have deleted them. Round 3 found a defect in round 2's
+  fix, exactly as round 2 found six in round 1.
+
+### PARTIAL — 10, the honest shape of them
+
+The pattern is consistent and worth naming: **the service half landed, the UI half did
+not**, usually because the screen file was in a different cluster.
+
+- `session_provider` — the fence is real but placed at ONE publish point; `_subscribePresence`
+  (:337) and `setOnline` (:366) are reached after it and then await, so a sign-out during a
+  presence read can still leave a realtime channel joined on the ex-couple, and
+  `CoupleKey.prime` at :296 can re-park the ex-couple's key after `forgetPartner()`.
+- `routine_repository` — the swallow is gone and errors reach client_errors, but
+  `routine_screen.dart` was untouched and still says "Pull to try again" on a screen with
+  no RefreshIndicator. The repository fix has made that dead-end reachable for the first
+  time.
+- `proximity_service` — the two sharpest harms are gone; `ProximityStatus.error` is still
+  a field with zero readers, and `getCurrentPosition` still has no `timeLimit`.
+- `giphy_service` ×2 — now logged, but `_fetch` still returns `const []` for every failure
+  class, so the picker has no signal to branch on. Fixing it needs a return-type change,
+  not UI work.
+- `gallery_screen` — same phantom pull-to-refresh copy.
+- `reach-notify` / `map-token` — the map half is genuinely closed; the GIPHY half is
+  exactly as found, one transient error pinning an unconfigured picker for the process.
+- `KeyEscrow.backup` — "how many accounts have no escrow row" is answerable now; "why"
+  is not, because the real exception is replaced by a synthetic StateError.
+- `reauthenticate` — distinguishes outcomes now, but the emergency gate still renders a
+  429 or 5xx as nothing.
+
+### What IS structural (the 7 worth trusting)
+
+The unlink layout (non-flex children laid out before the flexible one), the ABI strip
+(proven on artifact AND on both handsets, §197/§198), `couple_has_content` being
+catalog-driven, and four others. These are the ones where the bad state cannot simply be
+re-entered by deleting a line.
+
+### Exact next step
+
+- Decide whether to close the 2 not_fixed and the 10 partials. The cheapest real win is
+  `severance_sheet.dart:180` — a one-file change to a safety control that currently does
+  nothing visible on failure.
+- Apply the migration (or decide not to) — 3 findings are open in production until then.
+- The unlink CRITICAL is installed on both phones but STILL has not been rendered:
+  /unlink, long partner note, text scale 2.0, confirm Re-link is reachable.
+
+## §200 — "Nothing happens when I press 1 hour": you are alone in a couple of one (2026-08-29)
+
+Owner reported End Connection dead — pause buttons doing nothing — and ordered "Leave
+right now" removed. Diagnosed against production, not guessed.
+
+### Root cause, one sentence
+
+Raza is the only member of an active couple, and every row on the severance sheet except
+deletion needs a partner on the other end — so the server refuses each one and the client
+turns the refusal into silence.
+
+### The evidence
+
+```
+profiles   Raza  8202e6da → couple 7d486a85          ← alone
+           Elsa  5949300c → couple_id NULL
+           Elsa  8bfaaeb3 → couple_id NULL
+           Steve 8f9461d9 → couple_id NULL
+couples    7d486a85  active=true   members=1         ← the couple of one
+           d7311275  dissolved 2026-08-29 13:15:37   members=0
+couple_unlink   (empty — no ceremony was ever started)
+notification_mutes
+           5949300c contact  muted 13:14:16  expires 14:14:16
+           8f9461d9 contact  muted 12:44:04  expires 13:44:04
+```
+
+- **The pause feature is not broken.** Those two rows are 1-hour pauses that wrote
+  correctly at 12:44 and 13:14, while the couple still had two members. The couple
+  dissolved at 13:15:37 and every press since has failed.
+- `mute_partner` opens with
+  `select id into v_partner … and id <> v_uid; if v_partner is null then raise exception
+  'no partner';` — so with one member it raises, every time.
+- `unlink_start` cannot begin a seven-day goodbye with nobody to tell, so End Connection
+  had nothing to do either.
+- This is the C4 "couple of one" state the audit predicted (§193/§199), reached for real.
+
+### What changed
+
+- **"Leave right now" is gone**, with `_openEmergency`, `_openEnd`, the whole `_EndSheet`
+  class, the `confirmIdentity` parameter and `_confirmEmergencyIdentity`. One ending, one
+  set of rules. This also closes §199's NOT_FIXED item — the silent
+  `if (!await confirmIdentity()) return;` at severance_sheet.dart:180 no longer exists,
+  because the control it guarded no longer exists.
+- **The sheet now asks whether there is a partner** (`hasPartner`, read from
+  `sessionProvider.partner != null` — NOT from `couple != null`, because a couple of one
+  has a couple). With a partner: Pause + End the connection, unchanged. Without: neither
+  is offered, and a **"Leave this connection"** row appears — confirmed, then routed
+  through the existing `_endConnection()` so leaveCouple still precedes the local wipe and
+  the profile reload, the order severance_confirm_test pins.
+- **The pause sheet stops lying.** Its catch reported nothing and said "That didn't go
+  through"; it now files a `contact-pause` report and, on `no partner`, says so plainly.
+
+### Gates
+
+```
+flutter analyze --no-pub  → 0 errors/warnings (CI filter), 556 issues, all info
+flutter test  --no-pub    → exit 0, "All tests passed!", 1326 tests
+```
+
+- One test failed first and was RIGHT to: `the destructive rung is drawn unconditionally`
+  pinned `HoldToConfirm(`, which belonged to the removed exit. It was not deleted — it was
+  rewritten to check the real safety law on BOTH branches (an ending row always renders,
+  whichever shape the sheet takes) and to pin that HoldToConfirm stays gone.
+
+### NOT DONE — needs the owner
+
+- **Raza's account is still in couple 7d486a85 with no partner.** Nothing in this change
+  touched his data. The new "Leave this connection" row is the intended exit and he can
+  tap it himself; I did not run leave_couple on his behalf.
+- The build carrying this is NOT made. Both phones still run the previous artifact
+  (`e0eb973d…`), which still has "Leave right now" and still dies silently on pause.
+- The unlink CRITICAL layout still has never been rendered.
+
+### Exact next step
+
+- Owner taps "Leave this connection" after the next install, or says the word and I run
+  `leave_couple` for that account.
+- Then pair the two phones again and walk the ceremony end to end — which is the first
+  time it will have been exercised with two real members.
+
+## §201 — The decrypt evidence, preserved before the database was wiped (2026-08-29)
+
+Owner ordered a full data reset. `client_errors` held 184 rows and is the ONLY record of
+the chat-decrypt bug that has never been solved. The rows are gone; this is what they said,
+written down before the delete ran.
+
+### Three distinct failure modes, not one
+
+```
+kind                     build  n   newest detail
+chat-decrypt              52    42  "chat decrypt: 1/2, first=cipher column unreadable"
+chat-decrypt              51    19  "chat decrypt: 0/1, first=ArgumentError"
+reaction-cache            52     9  "reaction cache: 0/4, first=unreadable cached reaction"
+couple-key-pin_mismatch   52     7  "couple_key: pin_mismatch"
+media-sign                52     7  "storage.404"
+reaction-decrypt          52     7  "chat reactions: 2/5, first=unreadable reaction"
+reaction-decrypt          59     4  "chat reactions: 0/4, first=unreadable reaction"
+chat-decrypt              59     4  "chat decrypt: 14/17, first=SecretBoxAuthenticationError"
+reaction-decrypt          60     3  "chat reactions: 1/5, first=unreadable reaction"
+chat-decrypt              60     3  "chat decrypt: 16/19, first=SecretBoxAuthenticationError"
+chat-decrypt              56     2  "chat decrypt: 0/1, first=ArgumentError"
+reels PostgrestException  55     2  "PGRST205"
+```
+
+**This is the sharpest read anyone has had of that bug, and it splits three ways:**
+
+1. **`cipher column unreadable` / `ArgumentError`** (builds 51, 52, 56) — the bytea never
+   decoded into bytes at all. That is `Message._maybeBytes` catching, i.e. a WIRE-FORMAT
+   fault, not a key fault. `ArgumentError` is what `int.parse` throws on truncated or
+   odd-length `\x` hex. These are total failures: `0/1`, `1/2`.
+2. **`SecretBoxAuthenticationError`** (builds 59, 60) — the bytes decoded fine and the
+   AEAD MAC then failed. PARTIAL: `14/17`, `16/19`. Same key, same fetch, most rows fine —
+   so a wrong or missing key is ruled out for these. A subset was sealed under something
+   else (a rotated key off the 8-slot ring, or a different AAD).
+3. **`couple-key: pin_mismatch` ×7** — the key identity itself changed under the device.
+
+Modes 1 and 2 have DIFFERENT causes and were being counted as one number. Any future fix
+must separate them before claiming progress.
+
+- `reaction-cache` and `reaction-decrypt` fail far harder (`0/4`, `1/5`) than chat
+  (`14/17`) on the SAME builds — a fourth signal that the reaction path has its own fault.
+- §193 defect 5 is the reason these numbers were never trustworthy: hydrate's drain of
+  `cipherDecodeFailures` was unreachable in exactly the total-failure case, which is mode 1
+  above. That is fixed in 921cab4, so the NEXT build is the first that will count mode 1
+  honestly.
+
+### Why this matters after the wipe
+
+The bug is not fixed. The database is now empty, so it will not reproduce until real
+messages exist again. **When it returns, check which of the three modes it is before
+touching any code** — the previous sessions burned time treating one number as one bug.
+
+## §202 — Database wiped to empty; both migrations LIVE; the partials closed in code (2026-08-29)
+
+Owner ordered a full data reset and "fix all the issues permanently". This section is what
+was actually done and verified. The independent re-check of the code fixes was still
+running when this was written — its answer belongs in §203, and NOTHING here should be read
+as "all fixed" until that lands.
+
+### The wipe — done, and verified empty
+
+```
+auth.users 0 · auth.identities 0 · auth.sessions 0 · auth.refresh_tokens 0
+storage.objects 0 · every public table 0 (a DO block raises if any is not)
+KEPT: app_secrets 6 · app_release 1 · storage.buckets 6
+```
+
+Three things that would have gone wrong silently and did not:
+
+- **`app_secrets` and `app_release` were deliberately KEPT.** They are configuration — TURN
+  credentials, FUNCTIONS_BASE_URL, the version gate. Wiping them breaks the app rather than
+  resetting it. "All the data" does not mean the app's own config.
+- **`delete from auth.users` did NOT cascade.** `auth.identities` (6) and `auth.sessions`
+  (65) were left standing and only turned up on the verification pass. Orphaned identities
+  block re-registration with the same email — the exact opposite of a fresh start. Deleted
+  explicitly, along with refresh_tokens, mfa_factors, one_time_tokens.
+- **Storage refused SQL deletion** (`storage.protect_delete()` — the bytes live in S3 and a
+  metadata-only delete orphans them). The trigger was NOT disabled. All 88 objects were
+  queued into `storage_reap` and `reap_storage_objects()` was called, so the app's own edge
+  function deleted metadata AND files through the Storage API. Verified `objects_left 0,
+  still_queued 0`.
+
+Evidence preserved before the delete: §201 holds the decrypt-failure analysis that
+`client_errors` carried, because those 184 rows were the only record of a bug still open.
+
+### Two migrations applied to PRODUCTION and independently re-verified
+
+An empty database was the right moment: additive changes with no rows to migrate.
+
+`20260829145343_a_write_must_prove_the_couple_it_claims` — my own queries, not the agent's:
+```
+helper_exists 1 · guard_present true · sweep_replaced true · policies_landed 9
+```
+Closes §199's three `pending_external` findings. They are no longer pending; they are live.
+
+`20260829152003_closer_opens_only_when_both_of_them_say_so` — the two-party consent lie:
+```
+consent_table 1 · fns 3 · triggers 2
+old_clients_can_still_write true   ← builds 49-64 keep their modest_mode UPDATE grant
+consent_direct_write      false   ← no PostgREST PATCH can reach the consent table
+```
+The design is the reason this one is worth trusting: `couples.modest_mode` keeps its name,
+type, default and grant, and a BEFORE trigger reinterprets an old client's write as THAT
+MEMBER'S CONSENT. Old builds become correct without being updated, which is the only shape
+that works on a fleet with no forced upgrade.
+
+**Ledger drift, closed both times.** `apply_migration` stamps its own apply-time version and
+ignores the filename, so the files were renamed to match
+(`20260829140000→145343`, `20260829160000→152003`). Left alone, a future `supabase db push`
+would have re-run both under a second version.
+
+### A gate caught the ordering hazard, exactly as designed
+
+`schema_drift_test.dart` failed on the first run:
+```
+rpc(set_intimacy_consent) does not exist
+rpc(intimacy_consent_state) does not exist
+```
+The client had been taught to call two RPCs that existed only in an unapplied file. That is
+the test earning its place — it compares the client against a snapshot of the LIVE schema.
+Fixed by applying the migration and regenerating `supabase/schema_snapshot.json` (68→69
+tables, 100→107 functions, 0 removals).
+
+**The snapshot was ALREADY stale before today**: `app_release` was missing `apk_sha256`,
+`apk_url`, `chat_cipher_only`, `latest_version_name` and `ui_sound_kill` — all five of which
+`release_gate.dart:180-243` selects and reads. That latent hazard is now closed too.
+
+**A brief I wrote was wrong and the worker was right to refuse it.** I told it to filter the
+snapshot's `functions` by `has_function_privilege('authenticated', …)`. That would have
+deleted 44 entries whose EXECUTE is deliberately revoked and silently disarmed the drift
+test — the precise failure the task was guarding against. It followed the checked-in
+generator (`supabase/scripts/dump_schema_snapshot.sql`) instead and said so.
+
+### Gates, after every edit
+
+```
+flutter analyze --no-pub → 0 errors/warnings (CI filter), 561 issues, all info
+flutter test  --no-pub   → exit 0, "All tests passed!", 1336 tests
+```
+
+### Still open
+
+- The code fixes for the 10 partials + modest_mode are IN and green, but **not yet
+  independently verified**. Every one of the five workers explicitly reported "NOT VERIFIED
+  — I ran no gates". §203 carries the verdict.
+- Cluster A reported a FOURTH instance of its own bug class it could not reach:
+  `session_provider.dart:~307 unawaited(SessionScope.setCouple(couple?.id))` — a stale run
+  can restore the ex-couple's `active_couple_id` into SharedPreferences after teardown,
+  because `SessionScope.setCouple(null)` early-returns when `_coupleId` is already null.
+  Fixing it needs a force-clear path in `lib/core/services/session_scope.dart`.
+- Nothing is committed. The phones still run the pre-fix artifact.
+- The unlink CRITICAL has still never been rendered on a screen.
+
+## §203 — Round 3: 13 of 21 closed, and round 2 had introduced a CRYPTO defect (2026-08-29)
+
+The independent re-check of the partial-closing pass. Read this before believing any
+"all fixed" sentence anywhere above it.
+
+```
+total 21   fixed 13   partial 6   not_fixed 2
+permanence: structural 3 · guarded 13 · patch_only 5
+NEW defects introduced by round 2: 8  (1 high, 5 medium, 2 low)
+```
+
+### The one that mattered: round 2's own fix could lose messages
+
+`_primeCoupleKey`'s `_keyGen` undo — which I directed — had two holes, and the verifier
+proved both by reading the call graph:
+
+- **It could drop a LIVE key.** `_keyGen` was written only by `_primeCoupleKey`, but five
+  other sites park `CryptoCore._sharedKey` without touching it (CoupleKey.prime from
+  chat_screen and unlink_screen; deriveSharedKey direct from closer_crypto,
+  wish_jar_repository, partner_rewrap). A live generation could hold a correctly-derived
+  key while `_keyGen` still named a dead one, and a straggler would then call
+  forgetPartner() on it. Visible result: silent plaintext.
+- **Worse, the escape suppressed the cleanup in the ORDINARY case.** `_keyGen != gen` is
+  taken exactly when a newer session has already primed — sign out, sign back in, re-pair —
+  so the straggler returned without cleaning up, and `CoupleKey.ensure` short-circuits on a
+  non-null key so chat never corrected it. Messages sealed under a key the live partner
+  cannot open, until process death.
+
+**Fixed structurally, at the WRITE.** `CryptoCore.deriveSharedKey` now reads `keyEpoch`
+before its awaits and refuses to park the result if a wipe bumped it meanwhile:
+
+```dart
+final epochAtStart = keyEpoch.value;
+…
+if (keyEpoch.value != epochAtStart) { /* refuse to park */ return; }
+_sharedKey = derived;
+```
+
+Every wipe (forgetPartner, forgetAccount, bindAccount, rewrap) already bumps that epoch, so
+this is provable ownership rather than a counter's guess — and it covers all five call
+sites, four of which never had a guard at all. `_primeCoupleKey` no longer undoes anything
+and `_keyGen` is deleted; a caller cannot answer "is the parked key mine or a live one?",
+which is precisely why the caller-side version was wrong.
+
+### The other 7 new defects round 2 introduced — NOT fixed
+
+- `capsule_detail_screen.dart:418` (medium) — location-off card is a dead end: `start()`
+  returns before creating the 4s timer, so nothing re-checks and the card has no retry.
+- `proximity_service.dart:209` (low) — `_lastDistance` is never aged or cleared, so once
+  `withinRange` latches the error card is unreachable.
+- `gallery_screen.dart:264` (medium) — the new "Try again" gives no visible feedback:
+  StreamBuilder preserves the error across a stream swap, so a repeat failure looks dead.
+- `settings_screen.dart:511` (medium) — the Closer toggle discards the `IntimacyConsent`
+  the RPC returns, then re-reads `modest_mode` (still true until BOTH consent), so the
+  switch silently snaps back with no explanation.
+- `closer_screen.dart:289` (medium) — a pending consent cannot be WITHDRAWN from any build:
+  the switch only offers turning it on, which just re-writes consent = true.
+- `20260829152003:88` (medium) — **consent outlives the couple**: unlink nulls couple_id and
+  modest_mode returns to true, but the two `couple_intimacy_consent` rows are never deleted,
+  so a restore re-arms Closer without either person asking.
+- `20260829152003:232` (low) — the sync trigger fires only on INSERT OR UPDATE OF couple_id,
+  so a profiles row DELETED with couple_id still set never recomputes.
+
+### Still open from the previous list
+
+- `session_provider.dart:~307` — `unawaited(SessionScope.setCouple(couple?.id))` is a fourth
+  unfenced publish; a stale run can restore the ex-couple's `active_couple_id` into
+  SharedPreferences after teardown, because `SessionScope.setCouple(null)` early-returns
+  when `_coupleId` is already null. Needs a force-clear in `session_scope.dart`.
+- `routine_screen.dart` — `didChangeDependencies` is the only place `_stream` is assigned and
+  a Riverpod watch-rebuild does not re-run it, so a null couple at first mount leaves a bare
+  spinner forever. Low reachability today; real.
+- KeyEscrow.backup still reports a synthetic StateError rather than the real exception.
+- Test quality: the routines and session fixes are pinned by SOURCE-TEXT assertions only.
+  `grep -rln "_mayPublish|_keyGen|generation" test/` matches nothing in session_provider's
+  tests — **the 1336 green tests are silent on every generation-fencing finding.** The
+  routines tests WERE mutation-proven to fail (4/4 across two mutations), which is better
+  than most of this suite.
+
+### Gates, after the crypto fix
+
+```
+flutter analyze --no-pub → 0 errors/warnings (CI filter), 561 issues, all info
+flutter test  --no-pub   → exit 0, "All tests passed!", 1336 tests
+```
+
+### The pattern worth naming, because it is now three rounds deep
+
+Round 1 fixed 46 and introduced 6. Round 2 closed partials and introduced 8. Round 3 fixed
+the worst of those and this section lists what it did not. **Each parallel fix round is
+producing roughly as many new defects as it closes, and they are getting subtler** — round
+1's were logic slips, round 3's was a key-lifetime race. The remaining open items are
+medium/low UI-feedback gaps; the one that could destroy user data is now structural.
+
+The honest engineering call: STOP fixing and start exercising. Nothing left on the list can
+lose a message or leak across identities, and the fastest way to find what actually matters
+is two real accounts on the two handsets.
+
+### Exact next step
+
+- Build, install on both phones, pair them, and walk: pair → chat → Closer consent from BOTH
+  sides → unlink ceremony → re-link. That exercises the two migrations applied today and the
+  ceremony, none of which has ever run with two real members.
+- Nothing is committed. The phones still run the pre-fix artifact.

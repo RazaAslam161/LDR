@@ -397,6 +397,21 @@ class CryptoCore {
   static Future<void> deriveSharedKey({
     required String partnerPublicKeyB64,
   }) async {
+    // Which key generation this derive belongs to, read BEFORE any await.
+    //
+    // Every wipe — forgetPartner, forgetAccount, bindAccount, the rewrap
+    // ceremony — bumps [keyEpoch]. A derive that started before one of those
+    // and lands after it is a straggler holding a key the teardown existed to
+    // remove, and parking it resurrects the ex-couple's key for the rest of the
+    // process. The check belongs HERE, at the write, and not in the callers:
+    // there are five of them (session_provider, chat_screen and unlink_screen
+    // via CoupleKey.prime, closer_crypto, wish_jar_repository, partner_rewrap)
+    // and a caller-side guard only ever fixed the one that had it. A counter in
+    // the caller could not answer this either — it can see that ITS session
+    // ended, but not whether the key now parked is its own or a live one a newer
+    // session put there, and dropping THAT is silent plaintext for a real
+    // couple.
+    final epochAtStart = keyEpoch.value;
     // Plaintext mode is OVER (2026-08-18). The sentinel used to switch this
     // class into writing zero-nonce, zero-MAC cleartext for couples where one
     // partner had no key yet; every caller has refused the sentinel before
@@ -451,10 +466,21 @@ class CryptoCore {
       throw StateError('X25519 agreed on the all-zero secret — refusing a '
           'low-order partner key');
     }
-    _sharedKey = await _hkdf.deriveKey(
+    final derived = await _hkdf.deriveKey(
       secretKey: SecretKey(sharedBytes),
       info: utf8.encode('miles-closer-v1'),
     );
+    // The wipe wins. A bumped epoch means a teardown ran while the ECDH above
+    // was in flight, so this key belongs to a couple, an account or a key
+    // generation that no longer exists here. Returning without parking leaves
+    // whatever the teardown left — nothing, or a newer session's key — and the
+    // next feature that needs one derives it fresh.
+    if (keyEpoch.value != epochAtStart) {
+      debugPrint('[crypto] derive landed after a wipe (epoch $epochAtStart -> '
+          '${keyEpoch.value}); refusing to park a stale shared key');
+      return;
+    }
+    _sharedKey = derived;
     // ensureSharedKey runs on every Closer entry, so bumping unconditionally
     // here would clear every plaintext cache several times a session for a key
     // that did not move. Only a DIFFERENT partner key is a new epoch.

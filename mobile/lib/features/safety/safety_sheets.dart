@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/features/safety/report_service.dart';
@@ -236,9 +237,18 @@ class _PauseSheetState extends State<_PauseSheet> {
         await ContactPause.pause(minutes);
       }
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (e, st) {
+      // Named, not swallowed. mute_partner raises 'no partner' when the couple
+      // has one member left, and the generic sentence turned that into a row
+      // that appeared to do nothing at all — the owner reported exactly this
+      // ("pressed 1 hour, nothing happened") while alone in a couple of one.
+      ErrorReporter.report(e, st, kind: 'contact-pause');
+      final noPartner = e.toString().contains('no partner');
       if (mounted) {
-        setState(() => _error = "That didn't go through. Try again.");
+        setState(() => _error = noPartner
+            ? 'There is no one on the other side of this connection, so '
+                'there is nothing to pause.'
+            : "That didn't go through. Try again.");
       }
     } finally {
       if (mounted) setState(() => _busy = false);

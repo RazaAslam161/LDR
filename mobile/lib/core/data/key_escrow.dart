@@ -5,6 +5,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 
 /// Lets a reinstall keep the couple's encrypted history.
@@ -248,11 +249,23 @@ class KeyEscrow {
         'kdf_params': _argonParams,
       });
       return true;
-    } catch (e) {
+    } catch (e, st) {
       // Best effort. Failing to back the key up must never fail a sign-in —
       // the user simply keeps the behaviour they have today. The one caller
       // that asked the user for a password reports it instead of pretending.
-      debugPrint('[escrow] backup skipped: ${e.runtimeType}');
+      //
+      // Reported from inside the catch because the bool cannot carry the
+      // exception out and both callers are pinned APIs. supabase_repository's
+      // _backupEscrow could only RE-READ the state afterwards and post a
+      // synthetic `EscrowBackupFailed`, so a failed Argon2id derive, a failed
+      // seal and a rejected upsert — an RLS denial, a schema drift, a dead
+      // radio — all reached client_errors as one type with one stack, and
+      // "why did the escrow write fail" was answerable only from a cable in
+      // the phone. Same `kind`, so the two rows group together; the type is
+      // what was missing. Redaction is the reporter's: type, machine code and
+      // frames, never message text (diag.dart:247).
+      debugPrint('[escrow] backup failed: ${e.runtimeType}');
+      ErrorReporter.report(e, st, kind: 'escrow-backup');
       return false;
     }
   }
@@ -324,10 +337,22 @@ class KeyEscrow {
       // re-sealed every already-current row.)
       if (kdf != kdfArgon2idV2) await backup(password);
       return true;
-    } catch (e) {
+    } catch (e, st) {
       // A wrong password lands here as a MAC failure, which is the expected
-      // outcome rather than an error worth surfacing.
+      // outcome rather than an error worth surfacing — and reporting it would
+      // spend the run's cap and the dedup slot on a user retyping.
+      //
+      // Everything else is the same silence as the backup half above, and
+      // costs more: a PostgrestException, an RLS denial or a dead radio
+      // returns the identical false, every caller reads false as "nothing to
+      // recover", and the device carries on with a freshly minted key over a
+      // row that would have opened. A transient failure and a permanent one
+      // are indistinguishable from here, so only the transient one gets a
+      // report that can be acted on.
       debugPrint('[escrow] restore failed: ${e.runtimeType}');
+      if (e is! SecretBoxAuthenticationError) {
+        ErrorReporter.report(e, st, kind: 'escrow-restore');
+      }
       return false;
     }
   }
