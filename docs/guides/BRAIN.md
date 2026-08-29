@@ -14424,3 +14424,96 @@ deadlocked); then read client_errors — expect fps>0, bwe≫300, e0.
   the exact deadlock case). Then read client_errors share-quality: expect
   fps>0, bwe≫300, e0. An e2 row means the never-started watch fired — the
   share ended visibly and named its own death.
+
+## §188 — The Unlinking Ceremony: proposed, refined, approved (2026-08-29)
+
+- PROCESS DEFECT, named: the proposal reply claimed "BRAIN §188 appended" and
+  no append had run. This section is the repair; the claim-without-output
+  class is exactly what the global rulebook's evidence law exists to stop.
+- Owner ordered hold-to-remove replaced with a consent-shaped unlink. Proposal
+  (4 stages) accepted with refinements: NO private sleep-on-it — the partner
+  learns immediately; the initiator lives with a calm Re-link screen (public-
+  domain love quote + Re-link button) for the 7-day window; the partner writes
+  a note that appears on that screen. Safety laws kept: exit slowed never
+  blocked; identity-gated immediate emergency exit.
+- Two Explore agents mapped severance/dissolve (leave_couple 20260826140000,
+  restore-consent table 20260826190000, no realtime on this surface today) and
+  the reuse surface (ManagedSubscription/coupleTable, reach-notify pipeline,
+  sealBody crypto pattern, rewrap takeover + countdown, ContactPause as the
+  pause offramp). Plan agent pressure pass folded in 12 catches — the big one:
+  a dissolution trigger so a ceremony row dies with the couple by ANY exit
+  (closes emergency-exit→restore→ghost-execution). Lead decision: NO cron, no
+  JWT-impersonation primitive — execution happens on human presence only.
+- Full plan approved (plans/misty-launching-alpaca.md). Implementation begins:
+  migration 20260829120000_ending_takes_seven_days.sql → staging → matrix →
+  edge fn → prod → build 64.
+
+## §189 — Unlink ceremony server layer LIVE on staging and prod (2026-08-29)
+
+- Migration 20260829120000_ending_takes_seven_days.sql: staging apply clean,
+  double-apply proven no-op; PROD apply clean (assertions green both).
+- 17-step claim-spoofed matrix ran on staging inside one tx and rolled back
+  (verdict string pasted in session): 7d window, double/counter/stranger
+  starts refused, RLS blinds strangers, direct writes denied, partner-cancel
+  no-ops, self-accept/initiator-note refused, oversize note check-violates,
+  early execute not_yet, accept clamps 24h, RE-LINK WINS in last_look,
+  execute dissolves + trigger kills the row, second execute silent. Staging
+  left pristine (0 rows, couple active).
+- reach-notify v15 deployed prod (staging v1), identical sha 6851766a…:
+  kind 'unlink' union + initiated_by fromUser + 86400s TTL. Ships ahead of
+  clients safely (unknown kinds silently dropped by fielded builds).
+- Next: client build 64 — lib/features/unlink/* then wiring per the approved
+  plan (plans/misty-launching-alpaca.md).
+
+## §190 — The Unlinking Ceremony client is in; gates green (2026-08-29)
+
+- lib/features/unlink/: unlink_state (SeveranceState idiom, fail-open-empty,
+  server-relative due), unlink_repository (5 RPC wrappers; note sealed via
+  CoupleKey/encryptString AAD 'unlink_note:$coupleId' + packMacAndCiphertext,
+  open fail-closed → null + ErrorReporter kind 'unlink'), unlink_quotes
+  (70 public-domain quotes, attributed, UTC-day deterministic — no Rumi:
+  modern translations are copyrighted; no song lyrics ever), unlink_screen
+  (role-adaptive: initiator = quote + partner's note + Re-link; partner =
+  compose note + Accept; both = countdown + memories export), unlink_banner
+  (root-Stack, tappable, OPAQUE surface1 — the glassmorphism law caught the
+  first 0xE6 tint).
+- Wiring: session_provider loads/resets UnlinkState; /unlink route (no
+  redirect, no refreshListenable — documented why); app_shell realtime sub
+  'unlink:$coupleId' via ManagedSubscription + _offerUnlink on ready/resume
+  (due → EXECUTE on human presence, either phone; initiator lands once per
+  session; partner banner only) + _onUnlinkChanged refetch-then-decide +
+  pendingUnlink drain; main.dart banner; fcm_service pendingUnlink 3 paths;
+  reach_notifications allow-list + quiet unlink notification.
+- severance_sheet: 'End the connection' row now OPENS THE CEREMONY (7-day
+  copy, 'Pause instead' bubbles as .paused into the existing ContactPause);
+  the immediate exit survives verbatim as 'Leave right now' behind
+  proof-of-owner (AppLock biometric first, password re-auth fallback);
+  SeveranceOutcome.unlinkStarted; settings wires callbacks + push /unlink.
+- Gate changes, named: severance_confirm_test extended (ceremony + identity
+  gate asserts) — its original 13 asserts pass VERBATIM, as designed.
+  schema_snapshot.json regenerated from the prod dump (couple_unlink + 6
+  functions; drift caught: capsules' update grant narrowed since 08-26 —
+  the fresh dump is the truth, and no Dart write hits the removed columns).
+- New tests: unlink_state (row matrix), unlink_seal (real-AEAD round trip,
+  wrong-AAD refusal, zero-sentinel refused pre-crypto with NO report,
+  no-key fail-closed WITH kind-'unlink' report), unlink_quotes_pool
+  (≥60, attribution, name ban, determinism), unlink_source_law (opaque
+  root-Stack banner, ManagedSubscription not hand-rolled, refetch-only
+  realtime, one AAD builder, no client-side notify, human-presence execute).
+- Gates: analyze 550-baseline exactly (0 errors/warnings, 0 new infos);
+  full suite 1288/1288 passed.
+- NOT verified: the two-phone walkthrough — next step, on build 64.
+
+Next: release.sh --bump → 64 → both phones → owner walks the ceremony:
+start on one, banner+quiet push on the other, note appears live on the
+Re-link screen, Re-link clears both; the emergency row demands identity.
+
+## §191 — Build 64: OnePlus 8 installed; OnePlus 7 is unplugged (2026-08-29)
+
+- release.sh --bump completed, sideload sha256 7909f977…bd4053 (fresh vs 63's
+  bd9ab51c — new artifact). Installed on OnePlus 8 (1896b4b3): dumpsys reads
+  versionCode=64. OnePlus 7 (a959ee2b) is NO LONGER CONNECTED — adb devices
+  lists only the OnePlus 8. The APK sits at D:\Miles\Miles.apk; the moment the
+  OnePlus 7 is replugged: adb -s a959ee2b install -r D:\Miles\Miles.apk.
+- The ceremony walkthrough needs BOTH phones on 64 (a 63 partner sees no
+  banner/push and learns only at execution).
