@@ -245,6 +245,39 @@ class PresenceRouteObserver extends NavigatorObserver {
     _write(null, 'clear');
   }
 
+  /// Forget everything remembered about the identity that just left.
+  ///
+  /// Every field below is process-scoped, and so is this observer: it is built
+  /// once inside buildRouter and nothing ever invalidates the provider that
+  /// holds it, so one instance serves every account that signs in on the
+  /// handset. The dedupe was therefore answering for the WRONG person — the
+  /// first room the next account lands on matches the last room the previous
+  /// one published, so [_write] returns before telling anybody, and that
+  /// couple's presence row keeps whatever the previous session left in it until
+  /// the new user happens to navigate elsewhere. Their partner, sitting in the
+  /// same room, is never told they arrived.
+  ///
+  /// [_deferred] is the same fault one step later: a room held through a
+  /// couple-null window under one identity would be replayed into the next
+  /// one's row by [flushDeferred].
+  ///
+  /// Called from SessionNotifier.endCouple, which is the single door every
+  /// sign-out and unlink goes through.
+  void reset() {
+    // Emptied, not cancelled: a flush scheduled for this frame still runs, and
+    // it must publish "no room" rather than the room the departing identity was
+    // standing in — which would re-arm the dedupe a frame after this cleared it
+    // and hand the next account exactly the bug above. Clearing _flushScheduled
+    // instead would let a second callback be scheduled beside the pending one.
+    _pending = null;
+    _pendingSrc = 'session_end';
+    _lastWritten = null;
+    _everWritten = false;
+    _deferred = null;
+    _hasDeferred = false;
+    _cleared = null;
+  }
+
   /// Puts the user back in the room they were in before the app was
   /// backgrounded.
   ///

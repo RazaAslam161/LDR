@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -157,6 +158,30 @@ void main() {
     expect(m.body, 'fallback',
         reason: 'the plaintext key is still read, and permanently — every '
             'sender in the field today only sends that one',);
+  });
+
+  test('the sender encodes that wire the way messageFrom reads it', () {
+    // The test above feeds itself base64, so it pins the DECODER and nothing
+    // else — its title is a claim about the producer. The producer is an
+    // inline map inside an unawaited closure in a StatefulWidget State, never
+    // extracted the way imagePayload and broadcastPayload were, so it cannot
+    // be called from here at all. Read from source instead: a sender switched
+    // to the `\x` hex the bytea columns use would leave every test in this
+    // file green while every realtime message silently lost its ciphertext
+    // and fell back to plaintext on the faster of the two wires.
+    //
+    // Both homes that literal can have — the screen where it is written
+    // inline today, and the service its siblings were extracted into — so
+    // extracting it does not read here as a deletion.
+    final src = [
+      'lib/features/chat/chat_screen.dart',
+      'lib/features/chat/chat_broadcast_service.dart',
+    ].map((p) => File(p).readAsStringSync()).join('\n');
+    expect(src, contains("'cipher': base64Encode("),
+        reason: 'the sender must name the encoder messageFrom decodes with; '
+            'the `\\x` hex of the bytea columns decodes to nothing here',);
+    expect(src, contains("'nonce': base64Encode("),
+        reason: 'the nonce rides the same wire under the same rule',);
   });
 
   test('a garbage broadcast cipher does not cost the message', () {

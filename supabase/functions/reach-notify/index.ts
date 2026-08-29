@@ -51,14 +51,28 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 // The shared secret the triggers send, read once per instance. Cached because
 // this runs on every push and the value only changes when an operator rotates
 // it, at which point the instance is replaced anyway.
+//
+// Only an ANSWER is cached. supabase-js hands a PostgREST failure back in the
+// envelope rather than throwing, so reading `data` alone made a 503 from the
+// gateway indistinguishable from a row an operator never seeded — and the memo
+// then latched that non-answer for the whole warm life of the instance, so one
+// bad read denied every push of a message burst. On an error the memo stays
+// unset and the next push reads again.
 let _secret: string | null | undefined;
 async function notifySecret(): Promise<string | null> {
   if (_secret !== undefined) return _secret ?? null;
-  const { data } = await admin
+  const { data, error } = await admin
     .from("app_secrets")
     .select("value")
     .eq("key", "NOTIFY_SHARED_SECRET")
     .maybeSingle();
+  if (error) {
+    console.error(
+      "app_secrets read failed for NOTIFY_SHARED_SECRET",
+      error.message,
+    );
+    return null;
+  }
   _secret = data?.value ?? null;
   return _secret ?? null;
 }
@@ -200,6 +214,15 @@ Deno.serve(async (req) => {
     // that does not.
     const expected = await notifySecret();
     if (!expected || !secretMatches(req.headers.get("x-notify-secret"), expected)) {
+      // The one failure path here that used to write nothing down anywhere:
+      // no log, no push_failures row, and the trigger's net.http_post never
+      // reads the response — so an unseeded row, a failed read and an actual
+      // attacker were all the same silence. The reason stays out of the body;
+      // a caller that cannot authenticate learns nothing from us.
+      console.error(
+        "reach-notify denied:",
+        expected ? "secret mismatch" : "NOTIFY_SHARED_SECRET unavailable",
+      );
       return new Response(JSON.stringify({ error: "forbidden" }), {
         status: 403,
         headers: { "Content-Type": "application/json" },

@@ -359,13 +359,20 @@ class _MilesAppState extends ConsumerState<MilesApp>
         // in-picture window, so the cover would come up INSIDE the floating
         // call — showing News where her face should be, which is both useless
         // and a louder tell than the call was.
+        // Paired with the LIVE CALL, never taken on PipMode's word alone: that
+        // flag is set by a native callback and a missed 'pip false' (the OS
+        // killed the window, the Activity was recreated) leaves it stuck true
+        // for the rest of the process — and a stuck exemption is the disguise
+        // never rising again on any background. The exemption only means
+        // anything while a call is actually up, so requiring both makes a
+        // stale flag cost nothing.
         // authInProgress is the third exemption: the PIN/pattern flavour of
         // the OS unlock is a full Activity and reports `paused`, not
         // `inactive` — raising the cover here swapped the MaterialApp and
         // destroyed the very screen (the rewrap ceremony) whose unlock was in
         // progress, taking the typed code with it.
         if (!MilesApp.systemOverlayActive &&
-            !PipMode.active.value &&
+            !(PipMode.active.value && CallController.liveCall.value) &&
             !MilesApp.authInProgress) {
           MilesApp.raiseCover();
         }
@@ -831,6 +838,16 @@ class _MilesAppState extends ConsumerState<MilesApp>
                       // package over a debug-signed install — refused, and the
                       // uninstall "fix" wipes secure storage and the X25519
                       // seed with it.
+                      //
+                      // An UNRESOLVED channel counts as play here. The 2s
+                      // platform timeout in ReleaseGate leaves the field at its
+                      // sideload DEFAULT without ever having been answered, and
+                      // a Play install that lost that race would otherwise
+                      // inherit the sideload dead end for the whole session.
+                      // The default itself stays sideload — that is what keeps
+                      // an unknown client on the floor min_build governs — this
+                      // only stops an unanswered question from removing the one
+                      // exit a store install has.
                       if (UpdateService.available) ...[
                         const SizedBox(height: 28),
                         Builder(
@@ -850,7 +867,15 @@ class _MilesAppState extends ConsumerState<MilesApp>
                                     fontSize: 16, fontWeight: FontWeight.w600,),),
                           ),
                         ),
-                      ] else if (ReleaseGate.channel == 'play') ...[
+                      // Only a KNOWN play channel earns the store button. An
+                      // unresolved channel query used to fall in here too, and
+                      // a sideload install sent to the Play listing installs a
+                      // different signing identity — Android replaces the app,
+                      // and the X25519 seed in its storage goes with it. The
+                      // 'Check again' button below is the exit for a client
+                      // whose channel query lost the race.
+                      ] else if (ReleaseGate.channelKnown &&
+                          ReleaseGate.channel == 'play') ...[
                         const SizedBox(height: 28),
                         ElevatedButton(
                           onPressed: () async {
@@ -894,6 +919,45 @@ class _MilesAppState extends ConsumerState<MilesApp>
                                   fontSize: 16, fontWeight: FontWeight.w600,),),
                         ),
                       ],
+                      // UNCONDITIONAL, and that is the point: both branches
+                      // above are conditional and a sideload install with no
+                      // published APK satisfies neither, so this screen could
+                      // render as an icon and a sentence with nothing to tap —
+                      // a hard requirement (update) handed to the user as a
+                      // dead control.
+                      //
+                      // The check is genuinely re-runnable: it re-asks the
+                      // platform for a channel a 2s timeout may have left
+                      // unresolved, and re-reads a floor the operator may
+                      // already have lowered. recheck() is not usable here (it
+                      // returns early while blocked, because the screen used to
+                      // be terminal); this calls check() itself, and applyRow's
+                      // revision bump rebuilds this tree the moment the answer
+                      // moves.
+                      const SizedBox(height: 20),
+                      Builder(
+                        builder: (ctx) => TextButton(
+                          onPressed: () async {
+                            await ReleaseGate.check();
+                            if (!ctx.mounted) return;
+                            if (!ReleaseGate.isBlocked) return;
+                            // Still blocked. Said out loud rather than left as
+                            // a button that appears to do nothing — the user
+                            // cannot see that a round trip happened at all.
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Still out of date — this build has not been '
+                                  'cleared yet.',
+                                ),
+                              ),
+                            );
+                          },
+                          child: const Text('Check again',
+                              style: TextStyle(
+                                  color: MilesColors.cream50, fontSize: 15,),),
+                        ),
+                      ),
                     ],
                   ),
                 ),

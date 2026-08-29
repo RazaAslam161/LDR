@@ -187,6 +187,26 @@ GoRouter buildRouter(Ref ref) {
         return '/rewrap';
       }
 
+      // A couple of ONE is not "fully set up", and the sweep below used to
+      // treat it as if it were.
+      //
+      // If both partners press "Create & get a code" — the obvious move when
+      // neither was told who goes first — create_pairing_invite mints each of
+      // them a couple of one. From the next relaunch loadProfile fills
+      // session.couple, so needsCouple is false and '/couple' was swept to
+      // '/app' forever. The only field in the whole app that redeems a code
+      // lives on that route, and the invite deep link goes there too, so
+      // neither of them could type the other's code or even open the other's
+      // link. The recorded recovery was deleting an account.
+      //
+      // ALLOWED, never redirected TO: the funnel does not send a couple-holder
+      // here, so the code screen on Home stays the landing. The server half has
+      // been waiting since 20260601006000 — redeem_pairing_invite retires the
+      // caller's empty couple — and this is the client half it was paired with.
+      // The moment a partner actually lands, the session refresh puts '/couple'
+      // back under the sweep, so nobody who is genuinely paired keeps it.
+      if (path == '/couple' && session.partner == null) return null;
+
       // Fully set up → keep them out of the auth + onboarding routes.
       if (isAuthRoute ||
           path == '/welcome' ||

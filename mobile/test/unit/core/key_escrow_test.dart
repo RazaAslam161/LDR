@@ -176,6 +176,33 @@ void main() {
           reason: 'a changed wrap label orphans every v2 row already written',);
     });
 
+    test('the blob is ciphertext THEN mac, split at a 16-byte tail', () {
+      // The seal and the open above are this file's own, so lib could invert
+      // its layout in both halves at once and stay green here while every row
+      // already written became unopenable — on a fleet with no update channel
+      // and no second copy of the seed. Nothing else pins it, and lib itself
+      // is the bait: key_escrow's own comment calls this "the same packing the
+      // rest of the app uses", which is false — closer_crypto's
+      // packMacAndCiphertext writes the MAC FIRST, and escrow is the one site
+      // with the opposite order. A maintainer unifying the two would find
+      // nothing red.
+      final src = read('lib/core/data/key_escrow.dart');
+      final backup = src.substring(
+        src.indexOf('static Future<bool> backup('),
+        src.indexOf('static Future<bool> restore('),
+      );
+      final restore = src.substring(src.indexOf('static Future<bool> restore('));
+      expect(
+        backup.contains('[...box.cipherText, ...box.mac.bytes]'),
+        isTrue,
+        reason: 'the seal packs ciphertext then MAC:\n$backup',
+      );
+      expect(restore.contains('sealed.sublist(0, sealed.length - 16)'), isTrue,
+          reason: 'the open takes the ciphertext off the head',);
+      expect(restore.contains('sealed.sublist(sealed.length - 16)'), isTrue,
+          reason: 'the open takes the 16-byte MAC off the tail',);
+    });
+
     test('restore re-wraps every row that is not the current write format', () {
       // The path that upgrades an HKDF or v1 row the moment its password
       // opens it — the only moment the material to do so exists. The

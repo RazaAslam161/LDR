@@ -374,6 +374,18 @@ class PresenceService {
     liveHint.value = (online: online, at: at);
   }
 
+  /// Drop the last hint when the couple it described ends.
+  ///
+  /// [liveHint] is static and outlives every session in the process, and
+  /// [applyLiveHint] keeps only hints strictly NEWER than the one it holds —
+  /// ordered by the sender's own clock, which is a different person's clock
+  /// after a re-pair or a sign-in as somebody else. So a hint left behind by
+  /// the previous relationship silently swallows the first arrivals and
+  /// departures of the next one, until that person's clock passes it.
+  static void resetLiveHint() {
+    liveHint.value = null;
+  }
+
   static Future<void> setOnline(String coupleId, {required bool online}) {
     // Claiming presence requires a person. Going OFFLINE is always allowed —
     // it is the honest direction, and a goodbye written as the app dies must
@@ -806,6 +818,14 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     _expiry?.cancel();
     _refetchDebounce?.cancel();
     realtimeResumed.removeListener(_refetchOnResume);
+    // Both listeners, not one. liveHint is a static ValueNotifier that lives as
+    // long as the process while this provider is autoDispose, so every
+    // sign-out/sign-in cycle used to leave another dead notifier registered on
+    // it: in release, where the mounted assert is compiled out, each of them
+    // still ran _onLiveHint, wrote state on a disposed notifier and re-armed
+    // the 45s expiry timer — one extra presence SELECT per leaked instance per
+    // arrive/leave, and a dead notifier kept reachable by its own timer.
+    PresenceService.liveHint.removeListener(_onLiveHint);
     _sub?.dispose();
     super.dispose();
   }

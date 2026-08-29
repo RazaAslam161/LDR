@@ -87,6 +87,20 @@ if $publish; then
   for v in MILES_SUPABASE_URL MILES_SUPABASE_SERVICE_KEY; do
     [ -n "${!v:-}" ] || { echo "--publish needs $v set (see the runbook)" >&2; exit 1; }
   done
+  # The other half of the .env guard above, on the other input from the same
+  # gitignored file. That one was checked against production and this one only
+  # for non-emptiness — so a stale export writes the release row to STAGING
+  # while the script prints the production deployment as done, and every phone
+  # keeps being offered the previous build.
+  case "$MILES_SUPABASE_URL" in
+    *sopictusdonlvuezmfep*) ;;
+    *)
+      echo "REFUSING: MILES_SUPABASE_URL does not point at the PRODUCTION project." >&2
+      echo "A release row published elsewhere reaches no phone and reports success." >&2
+      echo "Publishing to another project on purpose: MILES_ALLOW_NONPROD=1" >&2
+      [ "${MILES_ALLOW_NONPROD:-0}" = "1" ] || exit 1
+      ;;
+  esac
 fi
 
 # ── 0. Gates ────────────────────────────────────────────────────────────────
@@ -437,13 +451,24 @@ fi
 # a real phone update itself.
 if $publish; then
   echo "publishing to app_release ..."
-  curl -fsS -X PATCH "${MILES_SUPABASE_URL%/}/rest/v1/app_release?id=eq.true" \
+  published="$(curl -fsS -X PATCH "${MILES_SUPABASE_URL%/}/rest/v1/app_release?id=eq.true" \
     -H "apikey: ${MILES_SUPABASE_SERVICE_KEY}" \
     -H "Authorization: Bearer ${MILES_SUPABASE_SERVICE_KEY}" \
     -H "Content-Type: application/json" \
     -H "Prefer: return=representation" \
-    -d "{\"latest_build\":${pubspec_build},\"latest_version_name\":\"${version_name}\",\"apk_url\":\"${MILES_APK_URL}\",\"apk_sha256\":\"${sha}\"}" \
-    > /dev/null
+    -d "{\"latest_build\":${pubspec_build},\"latest_version_name\":\"${version_name}\",\"apk_url\":\"${MILES_APK_URL}\",\"apk_sha256\":\"${sha}\"}")"
+  # The representation was ASKED for and then thrown away, which made exit 0 the
+  # only evidence the release row moved — and a PATCH whose filter matches
+  # nothing is a 200 with an empty array. Read the postcondition instead: the
+  # row must come back carrying the build we just wrote.
+  case "$(printf '%s' "$published" | tr -d ' \r\n')" in
+    *"\"latest_build\":${pubspec_build}"*) ;;
+    *)
+      echo "PATCH touched no row carrying build ${pubspec_build} — app_release is unchanged." >&2
+      echo "server said: ${published:-<empty>}" >&2
+      exit 1
+      ;;
+  esac
   echo "published build $pubspec_build — phones will offer it on their next cold start"
 else
   cat <<SQL

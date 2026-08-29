@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:geolocator/geolocator.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Snapshot of the proximity check, pushed to the UI.
@@ -50,6 +51,13 @@ class ProximityService {
   void Function(ProximityStatus)? _onUpdate;
   double? _lastDistance;
 
+  /// What [start] found. Kept because a ping that throws must still answer
+  /// "may this app use location, and is location on?" — the defaults say yes
+  /// to both, and the UI hides its "Open location settings" button on that
+  /// answer.
+  LocationPermission? _permission;
+  bool _serviceEnabled = true;
+
   Future<LocationPermission> ensurePermission() async {
     var perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) {
@@ -67,6 +75,8 @@ class ProximityService {
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     final perm = await ensurePermission();
+    _serviceEnabled = serviceEnabled;
+    _permission = perm;
     if (!serviceEnabled ||
         perm == LocationPermission.denied ||
         perm == LocationPermission.deniedForever) {
@@ -92,13 +102,12 @@ class ProximityService {
               (data['lon'] as num).toDouble(),
             );
             _lastDistance = d;
-            onUpdate(ProximityStatus(
-              permission: perm,
-              haveMyLocation: true,
-              partnerSeen: true,
-              distanceMeters: d,
-              withinRange: d <= thresholdMeters,
-            ),);
+            // Through the same snapshot the ping path uses. Built raw, this
+            // omitted serviceEnabled and took the constructor's `true`, so the
+            // partner's next broadcast silently repainted "Location is off"
+            // away — and with it the button that turns it back on — while this
+            // phone's own location was still disabled.
+            onUpdate(_snapshot(haveMyLocation: true));
           },
         )
         .subscribe();
@@ -113,22 +122,47 @@ class ProximityService {
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
       );
       _mine = pos;
+      // A fix that lands proves location is back on — otherwise the flag set
+      // by a LocationServiceDisabledException below would latch for the life
+      // of the screen and keep offering a settings button nobody needs.
+      _serviceEnabled = true;
       await _channel?.sendBroadcastMessage(
         event: 'loc',
         payload: {'uid': _uid, 'lat': pos.latitude, 'lon': pos.longitude},
       );
       // Surface "we have your location, waiting for them" until a partner ping
       // lands (don't clobber a known distance).
-      _onUpdate?.call(ProximityStatus(
-        haveMyLocation: true,
+      _onUpdate?.call(_snapshot(haveMyLocation: true));
+    } catch (e, st) {
+      // This used to emit an ALL-DEFAULT status, which tore down state the
+      // success path had deliberately kept: one throw on the 4s timer flipped
+      // `withinRange` back to false, took the "Open the capsule" button away
+      // from under the user's finger, and blamed the partner for a failure on
+      // this handset. It also re-asserted `serviceEnabled: true`, hiding the
+      // one actionable control — "Open location settings" — in the single case
+      // that control fixes. The service still knew all of it; it just stopped
+      // passing it on.
+      if (e is LocationServiceDisabledException) _serviceEnabled = false;
+      ErrorReporter.report(e, st, kind: 'proximity');
+      _onUpdate?.call(_snapshot(
+        haveMyLocation: _mine != null,
+        error: e.toString(),
+      ),);
+    }
+  }
+
+  /// Everything this service currently knows, so no caller has to guess at a
+  /// default for the parts a single failed ping does not change.
+  ProximityStatus _snapshot({required bool haveMyLocation, String? error}) =>
+      ProximityStatus(
+        permission: _permission,
+        serviceEnabled: _serviceEnabled,
+        haveMyLocation: haveMyLocation,
         partnerSeen: _lastDistance != null,
         distanceMeters: _lastDistance,
         withinRange: _lastDistance != null && _lastDistance! <= thresholdMeters,
-      ),);
-    } catch (e) {
-      _onUpdate?.call(ProximityStatus(error: e.toString()));
-    }
-  }
+        error: error,
+      );
 
   void stop() {
     _timer?.cancel();

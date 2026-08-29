@@ -195,8 +195,9 @@ android {
             )
         }
     }
-    // sideload: one universal APK, every ABI, so it installs on every Android
-    // device. play: an AAB, which Play splits per device itself.
+    // sideload: one APK carrying exactly one ABI (arm64-v8a), stripped in the
+    // androidComponents block below. play: an AAB, which Play splits per device
+    // itself, so it keeps every ABI it is given.
 }
 
 androidComponents {
@@ -207,6 +208,51 @@ androidComponents {
     ) { variant ->
         variant.isMinifyEnabled = true
         variant.shrinkResources = true
+    }
+
+    // The shipped sideload APK must carry ONE architecture, because a partial
+    // one is worse than none. Measured on build 64, straight out of Miles.apk:
+    //
+    //     lib/arm64-v8a/    11 libs, libapp.so and libflutter.so among them
+    //     lib/armeabi-v7a/   9 libs, NEITHER
+    //     lib/x86_64/        9 libs, NEITHER
+    //
+    // tool/release.sh passes --target-platform android-arm64, and that flag
+    // filters only FLUTTER's own libraries. mapbox, WebRTC/jingle and datastore
+    // hand AGP finished .so files for all three ABIs out of their AARs, so
+    // lib/armeabi-v7a/ survived — non-empty, and that is the whole of what the
+    // installer looks at. A 32-bit phone therefore INSTALLED build 64 happily
+    // and then died the instant the Flutter loader went looking for an engine
+    // that was never packaged. An icon that crashes on every tap is strictly
+    // worse than the "app not compatible with this device" the same phone would
+    // have been told had lib/armeabi-v7a/ simply not existed.
+    //
+    // ndk { abiFilters } is the obvious lever and it is the wrong one: measured
+    // inert on build 47, because it governs only what AGP itself builds through
+    // the NDK and never what is copied into jniLibs already compiled. Packaging
+    // excludes are applied where the APK is written, so they catch every .so no
+    // matter who produced it. There is no include list, hence the enumeration —
+    // it is every ABI Android has ever defined except the one we keep, so an
+    // AAR that starts shipping a new one cannot quietly reopen this.
+    //
+    // Deliberately NOT in the android { packaging } block: that would reach the
+    // play channel too, and an AAB Play splits per device loses reach for every
+    // ABI removed while saving nobody a byte. Release-only for the same reason
+    // in the other direction — `flutter run` on an x86_64 emulator builds a
+    // debug APK for the emulator's own architecture, and stripping it here
+    // would make the sideload flavour undebuggable.
+    onVariants(
+        selector().withFlavor("channel", "sideload").withBuildType("release"),
+    ) { variant ->
+        variant.packaging.jniLibs.excludes.addAll(
+            "lib/armeabi/**",
+            "lib/armeabi-v7a/**",
+            "lib/x86/**",
+            "lib/x86_64/**",
+            "lib/mips/**",
+            "lib/mips64/**",
+            "lib/riscv64/**",
+        )
     }
 }
 

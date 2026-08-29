@@ -39,6 +39,13 @@ class UnlinkRepository {
   /// Throws on failure — unlike chat there is no plaintext fallback and
   /// nothing to fall back TO: the caller shows the shared error state and the
   /// person tries again.
+  ///
+  /// The CALLER primes the couple key first. `CoupleKey.ready()` below joins a
+  /// derive already in flight and starts none, and nothing on the ceremony's
+  /// route used to start one — so this reached [CryptoCore.encryptString] with
+  /// no key and threw the same StateError on every retry for the whole
+  /// process. unlink_screen.dart primes before it calls this and puts the real
+  /// reason on screen when the derive says no.
   static Future<void> writeNote(String coupleId, String text) async {
     if (text.trim().isEmpty) {
       await SupabaseService.client.rpc<void>('unlink_write_note', params: {

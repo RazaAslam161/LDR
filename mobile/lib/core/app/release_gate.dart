@@ -124,6 +124,14 @@ class ReleaseGate {
   static const _updater = MethodChannel('miles/updater');
   static bool _channelKnown = false;
 
+  /// Whether [channel] is the platform's answer or merely the safe default.
+  ///
+  /// The block screen needs the difference. 'sideload' means two things there —
+  /// "this install cannot use the store" and "nobody has told us yet" — and
+  /// treating the second as the first is how a Play install whose platform call
+  /// timed out ends up on a screen with no way out at all.
+  static bool get channelKnown => _channelKnown;
+
   /// Exposed so a test can prove the safety-critical half: ANY failure of
   /// the platform query leaves the channel at 'sideload', because moving an
   /// unknown client onto the play floor would unblock phones min_build
@@ -139,6 +147,11 @@ class ReleaseGate {
               .timeout(const Duration(seconds: 2)) ??
           'sideload';
       _channelKnown = true;
+      // The screens that read the channel have nothing else to tell them it
+      // moved: [applyRow]'s bump fires only when the FLOOR or the latest build
+      // changes, so a late answer that merely swaps the block screen's exit
+      // (store link instead of the sideload dead end) would never be painted.
+      revision.value++;
     } catch (e) {
       // Non-Android host, or a native side that predates the method. The
       // default stands; the next check() may ask again.

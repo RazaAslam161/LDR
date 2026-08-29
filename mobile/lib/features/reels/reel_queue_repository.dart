@@ -182,6 +182,22 @@ class ReelQueueRepository {
     }
   }
 
-  static Future<void> remove(String reelId) =>
-      _c.from('shared_reels').update({'deleted': true}).eq('id', reelId);
+  /// Soft-deletes the reel for both of them.
+  ///
+  /// `async` on purpose, not an expression body: a PostgrestBuilder is lazy —
+  /// it issues its request from `then()` — and the only caller binds this to a
+  /// VoidCallback (the long-press in reel_queue_screen), which discards the
+  /// future without ever awaiting it. Returned bare, no request was sent, no
+  /// row changed and no error was raised, so a reel could not be removed from
+  /// the list at all. Awaiting here is what makes the control do its job
+  /// whether or not the caller waits for it.
+  static Future<void> remove(String reelId) async {
+    try {
+      await _c.from('shared_reels').update({'deleted': true}).eq('id', reelId);
+    } catch (e, st) {
+      debugPrint('[reels] remove $reelId: ${e.runtimeType}');
+      ErrorReporter.report(e, st, kind: 'reels');
+      rethrow;
+    }
+  }
 }

@@ -34,22 +34,6 @@ void main() {
     expect(await ChatRepository.sealBody('hello', 'row-1'), isNull);
   });
 
-  test('sealing never throws, whatever it is handed', () async {
-    // Empty, enormous, and full of the bytes that break naive codecs. None of
-    // these may become an exception on the send path.
-    for (final text in <String>[
-      '',
-      ' ',
-      'x' * 100000,
-      // Escapes, not literal control characters: a raw NUL in the source
-      // makes git treat this whole file as BINARY, so it commits with no
-      // diff and cannot be reviewed. The STRING still carries them.
-      'emoji \u{1F642} and \u0000 and \uFFFD',
-    ]) {
-      expect(await ChatRepository.sealBody(text, 'row-1'), isNull);
-    }
-  });
-
   test('both halves derive associated data from one function', () {
     // Seal and open are 200 lines apart. If they ever disagree the failure is
     // silent and permanent — every message written after it is undecryptable,
@@ -160,6 +144,35 @@ void main() {
           bodyCipher: blob,
           bodyNonce: nonce,
         );
+
+    test('sealing never throws, whatever it is handed', () async {
+      // Empty, enormous, and full of the bytes that break naive codecs. None
+      // of these may become an exception on the send path.
+      //
+      // Under the real key, because with no key injected this proved nothing:
+      // encryptBytes threw on the null key before it ever saw the input and
+      // sealBody's catch answered null, so isNull held identically for all
+      // four and for anything else that could have been listed here.
+      for (final text in <String>[
+        '',
+        ' ',
+        'x' * 100000,
+        // Escapes, not literal control characters: a raw NUL in the source
+        // makes git treat this whole file as BINARY, so it commits with no
+        // diff and cannot be reviewed. The STRING still carries them.
+        'emoji \u{1F642} and \u0000 and \uFFFD',
+      ]) {
+        final sealed = await ChatRepository.sealBody(text, 'row-1');
+        expect(sealed, isNotNull,
+            reason: 'a present key must seal ${text.length} chars',);
+        final out = await ChatRepository.hydrate(
+          [rowWith('row-1', blob: sealed!.blob, nonce: sealed.nonce)],
+        );
+        expect(out.single.body, text,
+            reason: 'the round trip must return the bytes it was handed',);
+        expect(out.single.bodyUndecryptable, isFalse);
+      }
+    });
 
     test('sealed by the send path, opened by the read path', () async {
       final sealed = await ChatRepository.sealBody('sealed then opened', 'row-1');

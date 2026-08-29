@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -96,8 +97,13 @@ class RoutineRepository {
   static Future<void> ensureDefaults() async {
     try {
       await _c.rpc<void>('ensure_default_routines');
-    } catch (e) {
+    } catch (e, st) {
+      // Not fatal — the chart still loads whatever rows exist — but a seed
+      // that never runs is an empty chart on a first open, and debugPrint is
+      // compiled to nothing in a release build, so this said nothing at all
+      // to anyone who could act on it.
       debugPrint('[routines] seed failed: ${e.runtimeType}');
+      ErrorReporter.report(e, st, kind: 'routines');
     }
   }
 
@@ -140,15 +146,27 @@ class RoutineRepository {
     ManagedSubscription? checks;
     late final StreamController<RoutineDay> controller;
     var loading = false;
+    var delivered = false;
 
     Future<void> reload() async {
       if (loading) return;
       loading = true;
       try {
         final day = await fetch(coupleId, onDate);
+        delivered = true;
         if (!controller.isClosed) controller.add(day);
-      } catch (e) {
-        debugPrint('[routines] reload: ${e.runtimeType}');
+      } catch (e, st) {
+        debugPrint('[routines] reload $coupleId $onDate: ${e.runtimeType}');
+        ErrorReporter.report(e, st, kind: 'routines');
+        // A failed FIRST load must fail the stream. Swallowing it emitted
+        // nothing at all, so the screen's error branch was unreachable and its
+        // bare spinner was the terminal state — for a warm session that lost
+        // the network, and for any PostgrestException (an RLS denial, schema
+        // drift against a build already on a handset) at full connectivity,
+        // which re-throws on every realtime wake. Nothing re-runs it in place:
+        // the subscriptions resubscribe on reconnect without reloading. After
+        // one delivery a transient failure keeps the last good chart instead.
+        if (!delivered && !controller.isClosed) controller.addError(e);
       } finally {
         loading = false;
       }

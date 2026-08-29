@@ -363,10 +363,26 @@ class _AppShellState extends ConsumerState<AppShell>
           .routerDelegate.currentConfiguration.uri.path ==
       '/unlink';
 
+  /// The ceremony this phone has already carried its initiator to, as
+  /// `<coupleId>|<startedAt>` — the pair is what makes it THIS ceremony and not
+  /// the next one, so ending again after a re-link lands again.
+  ///
+  /// PERSISTED, and it has to be. Neither guard below survives long enough to
+  /// be one: [_unlinkOpen] lives only for the awaited push, [_unlinkRouteUp]
+  /// only answers for the route that is up right now, and this State dies on
+  /// every cover flip. The landing is fired from three places that repeat for
+  /// the whole seven days — [_rearmAlwaysOn] on every socket re-open (so every
+  /// doze recovery and every resume), [_onUnlinkChanged] on every write the
+  /// partner makes to the row, and [_onReady] on every mount — so without a
+  /// flag that outlives the process the initiator is yanked off whatever they
+  /// were doing onto /unlink over and over for a week. The screen is still
+  /// reachable by hand: the banner, the drawer and the tapped push all push it.
+  static const _unlinkLandedKey = 'miles_unlink_landed_v1';
+
   /// What an open ceremony means for THIS side, decided on every launch,
   /// resume and realtime event: past the deadline it executes (on human
   /// presence — either member's), the initiator lands on the re-link screen
-  /// once per session, the partner keeps the banner.
+  /// once per ceremony, the partner keeps the banner.
   Future<void> _offerUnlink() async {
     await UnlinkState.load();
     if (!mounted) return;
@@ -378,8 +394,25 @@ class _AppShellState extends ConsumerState<AppShell>
     }
     final uid = ref.read(sessionProvider).profile?.id;
     if (uid == null || !row.iAmInitiator(uid)) return;
-    if (_unlinkOpen || _unlinkRouteUp()) return;
+    final ceremony = '${row.coupleId}|${row.startedAt.toIso8601String()}';
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString(_unlinkLandedKey) == ceremony) return;
+    // Re-asked after the await, exactly as _resumeOwnRewrap re-asks its own:
+    // this runs unawaited from several callers at once and both passing the
+    // entry guard before either sets the flag ends with two /unlink pushes.
+    if (!mounted || _unlinkOpen || _unlinkRouteUp()) return;
     _unlinkOpen = true;
+    // Written BEFORE the push, not after: the push is awaited for as long as
+    // the user stands on the screen, and every trigger that fires meanwhile
+    // would read a latch that is not there yet.
+    if (!await prefs.setString(_unlinkLandedKey, ceremony)) {
+      debugPrint('[unlink] landing latch unwritable for $ceremony — '
+          'the re-link screen may re-open on the next resume');
+    }
+    if (!mounted) {
+      _unlinkOpen = false;
+      return;
+    }
     await context.push('/unlink');
     _unlinkOpen = false;
   }
@@ -442,8 +475,18 @@ class _AppShellState extends ConsumerState<AppShell>
   /// and carry the user to the list where it lands.
   Future<void> _drainSharedLink() async {
     final url = ShareIntake.firstUrl(await ShareIntake.take());
-    if (url == null || !mounted) return;
+    if (url == null) return;
+    // Handed off BEFORE the lifetime check, and that ordering is the whole
+    // repair. The native read is one-shot and DESTRUCTIVE — it clears the
+    // pending text as it answers — so a shell that went down inside the await
+    // used to drop the link on the floor with nothing logged. `handedOff` is a
+    // plain static that needs no widget; only the carry below needs a context.
     ShareIntake.handedOff = url;
+    if (!mounted) {
+      debugPrint('[share] shell gone mid-drain; link kept for the queue '
+          'screen: $url');
+      return;
+    }
     if (!_rewrapRouteUp()) context.push('/app/watch-list');
   }
 

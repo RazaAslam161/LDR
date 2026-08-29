@@ -576,7 +576,9 @@ class ChatRepository {
   /// nobody can read — not the partner, not the sender, not later. That is
   /// strictly worse than a row the server can read, so the flag alone can never
   /// cause it.
-  @visibleForTesting
+  ///
+  /// Not test-only: the realtime broadcast in chat_screen carries the same
+  /// sentence over a second wire and asks this same question of it.
   static bool omitPlaintext({required bool cipherOnly, required bool sealed}) =>
       cipherOnly && sealed;
 
@@ -635,7 +637,22 @@ class ChatRepository {
   /// the release gate fails open, so a client below min_build can always still
   /// insert plaintext.
   static Future<List<Message>> hydrate(List<Message> messages) async {
-    if (!messages.any((m) => m.bodyCipher != null)) return messages;
+    // Drained ABOVE the ciphertext guard, not below it. A column that will not
+    // decode leaves bodyCipher NULL, so the very failure this counter exists to
+    // report is the one that makes `any(bodyCipher != null)` false — a page
+    // where EVERY cipher column was unreadable returned here with the count
+    // still sitting in the static, unreported. The counter is the number step 3
+    // is gated on, so the blind spot was exactly over the case it was written
+    // for.
+    final undecodable = _takeDecodeFailures();
+    if (!messages.any((m) => m.bodyCipher != null)) {
+      _reportDecryptShortfall(
+        rows: messages.length,
+        failed: 0,
+        undecodable: undecodable,
+      );
+      return messages;
+    }
 
     // The first page of a cold start arrives before the derive finishes, and
     // withDecrypted drops the ciphertext once it has resolved — so a row that
@@ -675,28 +692,59 @@ class ChatRepository {
         out.add(m.withDecrypted(null));
       }
     }
-    // Rows whose cipher never made it as far as a decrypt attempt, because the
-    // column itself would not decode. Folded in here so there is ONE number for
-    // "ciphertext this device could not use", not two with a blind spot between
-    // them.
-    final undecodable = Message.cipherDecodeFailures;
-    Message.cipherDecodeFailures = 0;
-    if (failed > 0 || undecodable > 0) {
-      // Counted and surfaced, never silent — the same contract _parseRows
-      // holds. The error CLASS only: a decrypt failure's message can carry the
-      // value that refused to open, and this is an E2EE app.
-      ErrorReporter.report(
-        ParseShortfall('chat decrypt',
-            parsed: messages.length - failed - undecodable,
-            of: messages.length,
-            first: firstError != null
-                ? '${firstError.runtimeType}'
-                : 'cipher column unreadable',),
-        StackTrace.current,
-        kind: 'chat-decrypt',
-      );
-    }
+    // Folded in with the decrypt failures so there is ONE number for
+    // "ciphertext this device could not use", not two with a blind spot
+    // between them.
+    _reportDecryptShortfall(
+      rows: messages.length,
+      failed: failed,
+      undecodable: undecodable,
+      firstError: firstError,
+    );
     return out;
+  }
+
+  /// Read the parse-time decode failures and zero them in the same step.
+  ///
+  /// Read-and-clear rather than read-then-clear-later: every caller must own
+  /// what it takes, because a count left behind is a count some unrelated page
+  /// will be blamed for.
+  static int _takeDecodeFailures() {
+    final n = Message.cipherDecodeFailures;
+    Message.cipherDecodeFailures = 0;
+    return n;
+  }
+
+  /// The one place a chat-decrypt shortfall is filed, so no path can count a
+  /// failure and then forget to report it.
+  ///
+  /// The error CLASS only: a decrypt failure's message can carry the value that
+  /// refused to open, and this is an E2EE app.
+  static void _reportDecryptShortfall({
+    required int rows,
+    required int failed,
+    required int undecodable,
+    Object? firstError,
+  }) {
+    if (failed == 0 && undecodable == 0) return;
+    // The decode failures normally belong to this very batch — the same
+    // fromJson pass built it — so `rows` is the honest denominator. A count
+    // LARGER than the batch means a parse that no hydrate followed leaked into
+    // this one (shared_media_repository parses messages and never hydrates),
+    // and subtracting it from a one-row page put a negative in the report:
+    // `parsed: 1 - 0 - 12`, which reads as garbage and buries the real signal.
+    // Widen the denominator instead, so the sentence stays true either way.
+    final of = rows < failed + undecodable ? failed + undecodable : rows;
+    ErrorReporter.report(
+      ParseShortfall('chat decrypt',
+          parsed: of - failed - undecodable,
+          of: of,
+          first: firstError != null
+              ? '${firstError.runtimeType}'
+              : 'cipher column unreadable',),
+      StackTrace.current,
+      kind: 'chat-decrypt',
+    );
   }
 
   /// Sign everything a page of messages will render — one round trip per
@@ -1034,6 +1082,15 @@ class ChatRepository {
             // ciphertext, so deliver on this turn of the loop exactly as
             // before. Hydration is async and must not delay a live message.
             if (m.bodyCipher == null) {
+              // Report it HERE though, because a cipher column that would not
+              // decode arrives looking exactly like this row — null cipher —
+              // and skipping hydrate left its count in the static for whatever
+              // page drained next to be blamed for.
+              _reportDecryptShortfall(
+                rows: 1,
+                failed: 0,
+                undecodable: _takeDecodeFailures(),
+              );
               onInsert(m);
               return;
             }

@@ -911,7 +911,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             _SettingsRow(
               icon: Icons.info_outline,
               title: 'About',
-              value: '0.1.0 (${ReleaseGate.buildNumber})',
+              value: '${ReleaseGate.versionName} (${ReleaseGate.buildNumber})',
               onTap: () => showDialog<void>(
                 context: context,
                 builder: (_) => const Dialog(

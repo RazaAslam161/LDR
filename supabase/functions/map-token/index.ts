@@ -57,11 +57,27 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const { data } = await admin
+    const { data, error } = await admin
       .from("app_secrets")
       .select("value")
       .eq("key", "MAPBOX_PUBLIC_TOKEN")
       .maybeSingle();
+    // A read that FAILED is not an answer, and answering 200 turned it into
+    // one. supabase-js returns PostgREST failures in the envelope instead of
+    // throwing, so the catch below never saw them and `?? ""` collapsed them
+    // into "nobody seeded the token" — while MapToken.ensure pins _fetched on
+    // any parseable 200 (map_token.dart:44), which is exactly the latch its
+    // author wrote that comment to prevent. One transient database error
+    // therefore pinned "the map is not set up yet" for the whole app process.
+    // A 5xx is what runs the client's retryable path. Same shape as
+    // turn-credentials, one directory over.
+    if (error) {
+      console.error(
+        "app_secrets read failed for MAPBOX_PUBLIC_TOKEN",
+        error.message,
+      );
+      return json({ error: "secret_read_failed" }, 500);
+    }
 
     const token = data?.value ?? "";
     // An absent token is a configuration state, not an error. The client shows
@@ -70,6 +86,10 @@ Deno.serve(async (req) => {
     return json({ token, configured: token.length > 0 });
   } catch (e) {
     console.error("map-token", e);
-    return json({ token: "", configured: false });
+    // Not `configured: false`. Anything that threw on the way here — the JWT
+    // check, the client construction — is a failure of ours, and handing it
+    // back as a 200 told the client "there is no token" with the same
+    // authority as a read that succeeded, latching it for the process.
+    return json({ error: "map_token_failed" }, 500);
   }
 });

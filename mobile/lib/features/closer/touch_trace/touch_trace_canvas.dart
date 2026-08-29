@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/data/supabase_service.dart';
-import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// A single point on a stroke. Normalised to 0..1 so it renders correctly
@@ -62,7 +62,7 @@ class TouchTraceCanvas extends StatefulWidget {
 }
 
 class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
-  RealtimeChannel? _channel;
+  ManagedSubscription? _sub;
   final List<_TraceStroke> _strokes = [];
   _TraceStroke? _activeStroke;
   DateTime? _strokeStart;
@@ -80,14 +80,18 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
   @override
   void initState() {
     super.initState();
-    _subscribe();
-    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
+    // ManagedSubscription, not a hand-rolled realtimeResumed listener: this
+    // screen used to call the old channel's unsubscribe() without awaiting it
+    // and build a channel on the identical topic in the same breath, which is
+    // the app-wide subscription-health bug named in realtime_service.dart —
+    // and it subscribed with no status callback, so a rejoin that never landed
+    // was silent. Touch Trace has no table behind the broadcast: the partner's
+    // strokes simply stop while this canvas keeps drawing, which reads as "she
+    // isn't there" rather than as a failure.
+    _sub = ManagedSubscription.start(_build);
   }
 
-  void _subscribe() {
-    try {
-      _channel?.unsubscribe();
-    } catch (_) {}
+  RealtimeChannel _build() {
     final ch = SupabaseService.client.channel('touch_trace:${widget.coupleId}', opts: RealtimeChannelConfig(private: true));
 
     // Receive partner's strokes
@@ -131,18 +135,12 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       },
     );
 
-    ch.subscribe();
-    _channel = ch;
+    return ch.subscribe();
   }
 
   @override
   void dispose() {
-    realtimeResumed.removeListener(_subscribe);
-    final ch = _channel;
-    if (ch != null) {
-      ch.unsubscribe();
-      SupabaseService.client.removeChannel(ch);
-    }
+    _sub?.dispose();
     super.dispose();
   }
 
@@ -169,7 +167,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
   }
 
   void _onPanEnd(DragEndDetails _) {
-    _channel?.sendBroadcastMessage(
+    _sub?.channel?.sendBroadcastMessage(
       event: 'stroke_end',
       payload: {'from': widget.userId},
     );
@@ -185,7 +183,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       return;
     }
     _lastSend = now;
-    _channel?.sendBroadcastMessage(
+    _sub?.channel?.sendBroadcastMessage(
       event: 'stroke_point',
       payload: {
         'from': widget.userId,
@@ -197,7 +195,7 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
 
   void _clearAll() {
     setState(_strokes.clear);
-    _channel?.sendBroadcastMessage(
+    _sub?.channel?.sendBroadcastMessage(
       event: 'clear',
       payload: {'from': widget.userId},
     );

@@ -2092,7 +2092,15 @@ class CallController extends ChangeNotifier {
       isVideo = true;
       speakerOn = true;
       frontCamera = true;
+      // The field is raw-written like its neighbours, but the PiP disarm CANNOT
+      // ride on setMinimized: its `minimized == v` early-out skips a field that
+      // is already false, and Android's pipWanted is native state that outlives
+      // this controller's idea of it. Left armed, the next home press — hours
+      // later, no call in sight — floats the REAL Miles UI over the launcher,
+      // and main.dart exempts PiP from the disguise cover, so nothing comes
+      // down over it. Unconditional here, so no exit path can miss it.
       minimized = false;
+      unawaited(PipMode.setWanted(false));
       sharingScreen = false;
       remoteScreen = false;
       // Hangup mid-share is a common share end, so the digest is taken here

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/utils/json_utils.dart';
 
 /// One GIF result from GIPHY.
@@ -61,10 +62,15 @@ class GiphyService {
       final map = JsonUtils.asMap(res.data);
       _key = JsonUtils.parseString(map['key']).trim();
       _resolved = true;
-    } catch (e) {
+    } catch (e, st) {
       // Offline, signed out, or the function is not deployed. All three are
       // "no GIFs right now", which the picker already renders as an empty grid.
+      // Reported as well as printed: silenceLogsInRelease makes debugPrint an
+      // empty closure in a shipped build, so this line reaches nobody on a
+      // handset — and "the giphy-key function is not answering" is exactly the
+      // sort of thing only the field can tell us.
       debugPrint('[giphy] key unavailable: ${e.runtimeType}');
+      ErrorReporter.report(e, st, kind: 'giphy');
     }
     return _key;
   }
@@ -87,7 +93,19 @@ class GiphyService {
     });
     try {
       final res = await http.get(url).timeout(const Duration(seconds: 15));
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        // The status used to be dropped on the floor, which made a revoked key
+        // and a spent quota — the two failures this file's own doc comment
+        // worries about, and the two with completely different fixes —
+        // indistinguishable from a search that genuinely matched nothing. It
+        // rides in the exception TYPE because that is what [ErrorReporter]
+        // sends: `detail` is a machine code read from a typed field it already
+        // knows, and free text never leaves the device.
+        debugPrint('[giphy] $endpoint HTTP ${res.statusCode}');
+        ErrorReporter.report(
+            _statusFailure(res.statusCode), StackTrace.current, kind: 'giphy',);
+        return const [];
+      }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final list = (data['data'] as List?) ?? const [];
       final out = <GiphyGif>[];
@@ -108,8 +126,31 @@ class GiphyService {
             GiphyGif(id: e['id'].toString(), previewUrl: pUrl, fullUrl: fUrl),);
       }
       return out;
-    } catch (_) {
+    } catch (e, st) {
+      // Timeout, DNS, or a response shape that no longer fits the cast above.
+      // Swallowed unlogged, every one of them arrived at the user as "No GIFs
+      // found — try another word.", blaming the words they typed — on the
+      // trending load they typed none.
+      debugPrint('[giphy] $endpoint failed: ${e.runtimeType}');
+      ErrorReporter.report(e, st, kind: 'giphy');
       return const [];
     }
   }
+
+  static Exception _statusFailure(int status) => switch (status) {
+        401 || 403 => GiphyKeyRejected(),
+        429 => GiphyRateLimited(),
+        _ => GiphyBadStatus(),
+      };
 }
+
+/// GIPHY refused the key — revoked, or deleted with the app it belonged to.
+/// The fix is a new key in `app_secrets`, and no other failure here has it.
+class GiphyKeyRejected implements Exception {}
+
+/// The key's quota or rate limit is spent — including by somebody else, which
+/// is the case this service is otherwise blind to.
+class GiphyRateLimited implements Exception {}
+
+/// Any other non-200: a GIPHY outage, or a proxy in front of the handset.
+class GiphyBadStatus implements Exception {}

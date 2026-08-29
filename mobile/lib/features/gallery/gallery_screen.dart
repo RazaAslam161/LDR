@@ -74,6 +74,20 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     }
   }
 
+  /// The only thing that re-runs a failed first fetch.
+  ///
+  /// The repository seeds its broadcast controller once, on first listen, so
+  /// after `addError` nothing re-reads for the life of this subscription — a
+  /// fresh stream is the retry. The error copy used to say "Pull to retry" on
+  /// a screen with no RefreshIndicator on it or above it in the router, which
+  /// left a routine backend failure (a paused project, a phone off the
+  /// network) as a dead end with a gesture that does not exist.
+  void _retry() {
+    final coupleId = ref.read(sessionProvider).couple?.id;
+    if (coupleId == null) return; // no couple: the stream was never built
+    setState(() => _stream = GalleryRepository.stream(coupleId));
+  }
+
   Future<void> _add() async {
     final session = ref.read(sessionProvider);
     final coupleId = session.couple?.id;
@@ -248,7 +262,10 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
           stream: _stream,
           builder: (context, snap) {
             if (snap.hasError) {
-              return const _Message('Could not load the gallery. Pull to retry.');
+              return _Message(
+                'Could not load the gallery.',
+                onRetry: _retry,
+              );
             }
             if (!snap.hasData) {
               return const Center(child: CircularProgressIndicator());
@@ -617,8 +634,12 @@ class _Tile extends StatelessWidget {
 }
 
 class _Message extends StatelessWidget {
-  const _Message(this.text);
+  const _Message(this.text, {this.onRetry});
   final String text;
+
+  /// Present only on the failure state — which is what separates it from the
+  /// empty one, since both are otherwise this same card.
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -634,6 +655,10 @@ class _Message extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Color(0x99F5EFE6), height: 1.5),
               ),
+              if (onRetry != null) ...[
+                const SizedBox(height: 8),
+                TextButton(onPressed: onRetry, child: const Text('Try again')),
+              ],
             ],
           ),
         ),

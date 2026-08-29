@@ -14517,3 +14517,470 @@ Re-link screen, Re-link clears both; the emergency row demands identity.
   OnePlus 7 is replugged: adb -s a959ee2b install -r D:\Miles\Miles.apk.
 - The ceremony walkthrough needs BOTH phones on 64 (a 63 partner sees no
   banner/push and learns only at execution).
+
+## §192 — Ceremony pushed (2026-08-29)
+
+- Owner ordered commit+push. Eight commits went up (build 63's three were
+  still local): 008b27f..a3c21cc on fix-sprint; remote confirms a3c21cc;
+  porcelain 0. Secrets sweep clean (only the password-dialog variable
+  names matched). This section rides the next docs commit, as always.
+
+## §193 — Strict full-app QA audit: gates green, seven real defects (2026-08-29)
+
+Read-only audit. No source file was modified; nothing committed.
+
+### Gates, actually run on this tree
+
+- `flutter analyze --no-pub` → **exit 0**, `550 issues found`, all `info`.
+  CI's own filter `grep -cE '^ *(error|warning) - '` → **0**.
+- `flutter test --no-pub` → **exit 0**, `All tests passed!`, **1288 tests**.
+- Gates are a floor, not evidence: every defect below is in gate-green code.
+
+### Machine state — CLAUDE.md is STALE, correct it
+
+- **The Android SDK IS installed.** `adb devices` → `1896b4b3 device`
+  (OnePlus 8). `dumpsys package com.miles.miles` → `versionCode=64
+  versionName=0.1.0`, flags `[ HAS_CODE ALLOW_CLEAR_USER_DATA ]` (not
+  debuggable). CLAUDE.md's "Android SDK is not installed / no adb" is wrong
+  and made recent sessions declare device paths unverifiable.
+- Package id is **`com.miles.miles`**, not `com.miles.app`.
+
+### Confirmed defects
+
+1. **The APK installs on 32-bit hardware and cannot run there.**
+   `lib/armeabi-v7a/` ships 9 third-party `.so` files but **no
+   `libflutter.so` and no `libapp.so`**; only `arm64-v8a` has them. Android
+   matches the ABI dir, installs, then the loader fails. Root cause:
+   `release.sh:349` `--target-platform android-arm64` filters only Flutter's
+   own libs; the AAR dependencies (mapbox, webrtc) keep all three ABIs. The
+   comment at `release.sh:333` calls this "the ONLY lever that works" — it
+   halved size but did not make the artifact single-ABI. This *resolves* the
+   open question in CLAUDE.md and inverts it: not "a 32-bit handset cannot
+   install", but "it installs and crashes on launch". NOT reproduced on a
+   32-bit device (none connected) — that is the one check still owed.
+2. **The Accept dialog promises the partner a right the server denies.**
+   `unlink_screen.dart:111` — "A final day begins. Either of you can still
+   change your mind until it ends." Live `unlink_cancel()` deletes only
+   `where couple_id = v_couple and initiated_by = v_uid`, and the repo's own
+   comment (`20260829120000_ending_takes_seven_days.sql:121`) says "Initiator
+   only, ANY state". The Re-link button sits inside `else if (mine)` at
+   `unlink_screen.dart:309`, so the partner has no cancel control anywhere
+   (one call site, `unlink_screen.dart:99`). Accepting *shortens* their own
+   window 7d→24h (`unlink_accept` sets `last_look_ends_at = least(...,
+   now() + 24h)`) — bought with a false promise. `unlink_cancel` also returns
+   void on zero rows, so a partner's cancel would report success.
+3. **The farewell note is a dead control when the couple key never derived.**
+   `unlink_repository.dart:50,79` `await CoupleKey.ready();` **discards the
+   bool**. `couple_key.dart:12` — "answers with a bool and never throws".
+   With no key, `CryptoCore.encryptString` refuses (`crypto_core.dart:186`),
+   `writeNote` throws, and `_run` shows only "That didn't go through. Try
+   again." forever. Chat has a plaintext fallback here; the ceremony has none,
+   by design (`unlink_repository.dart:38`). This is the last thing a person
+   writes to their partner. Field data proves keys do fail (below).
+4. **Cipher-only rollout has a hole in the live wire.** The DB insert is gated
+   (`chat_repository.dart:757` `omitPlaintext(...)`), but the realtime
+   broadcast at `chat_screen.dart:204` sends `'body': body` **ungated**.
+   Flipping `chat_cipher_only` stops plaintext at rest and not in transit;
+   there is no server-side switch for the broadcast path.
+5. **The decrypt-failure counter is defeated in exactly the case it was
+   written for.** `chat_repository.dart:133` increments
+   `cipherDecodeFailures` and returns null, so `bodyCipher` is null. But
+   `hydrate` early-returns at `chat_repository.dart:638`
+   (`if (!messages.any((m) => m.bodyCipher != null)) return messages;`)
+   **before** draining the counter at `:682`. When *every* row fails to
+   decode — the systemic case — nothing is reported, and the static counter
+   leaks into a later page's numbers. The comment at `:127` describes this
+   exact hazard. **The field telemetry being used to chase the #1 bug is
+   itself unreliable.**
+6. **A failed cycle load renders as confident negative health data.**
+   `cycle_screen.dart:126` `catch (_) { setState(() => _loading = false); }`
+   with defaults `_onPeriod = false`, `_partnerOnPeriod = false` (`:39,:44`).
+   "Failed to load" is indistinguishable from "not on their period".
+7. **`notifySecret()` memoizes a transient failure forever.**
+   `supabase/functions/reach-notify/index.ts:57` destructures only `data`,
+   discarding `error`; `_secret = data?.value ?? null` is then cached for the
+   instance's life (`:56`). Fails *closed* (403 at `:202`, deliberate and
+   correct), so no security hole — but one bad read silently 403s every push
+   until the instance recycles. Same shape in `reap-storage/index.ts:42`.
+
+### Field data pulled from PROD (`sopictusdonlvuezmfep`)
+
+- `client_errors`: **71 `chat-decrypt` rows**, not the 61 on record, and
+  **still arriving on builds 56/59/60 (2026-08-28)** — not just 51/52.
+- The details are the diagnosis nobody had: `chat decrypt: 16/19,
+  first=SecretBoxAuthenticationError`, `7/14 first=StateError`, `3/10`.
+  **Partial failure in one fetch on one device.** Same key, same session,
+  most rows fine — so "the key never derived" is RULED OUT as the whole
+  story. A MAC failure on a subset means those rows were sealed under
+  something else. A key evicted from the 8-slot ring
+  (`crypto_core.dart:168`, truncation at `:608`) is the leading candidate,
+  but eviction IS surfaced (`rewrap_screen.dart:125,346,471`), so it is a
+  design limit rather than a silent bug — unconfirmed either way.
+- `reaction-decrypt` fails far harder: `0/4`, `1/5`. Different rate implies a
+  second cause, not one bug.
+- `messages` holds only **5 text rows** (all encrypted, 2026-08-23), so the
+  failing rows are gone and cannot be correlated locally.
+
+### Verified CLEAN (so nobody re-audits these)
+
+- Storage RLS: every bucket policy is keyed on `current_user_couple_id()` or
+  `auth.uid()` as path segment 1. No cross-couple read path.
+- `verify_vault_pin` — `auth.uid()`, bcrypt via `crypt`, 5-attempt lockout.
+  `clear_body_photo(p_target)` verifies couple membership before acting.
+- `couple_unlink` RLS is SELECT-only, scoped to the caller's couple; all
+  writes go through SECURITY DEFINER RPCs with `execute` revoked from
+  `public, anon`. `leave_couple` correctly ends it for BOTH partners.
+- `UnlinkState.reset()` fires on sign-out / identity switch
+  (`session_provider.dart:248,486`) — no cross-identity leak.
+- `chat_cipher_only = false` in prod. `allowBackup="false"`,
+  `fullBackupContent="false"`.
+- App-authored content is clean: the suggestive tier was deleted
+  (`truth_dare_deck.dart:7`); remaining matches are affectionate, not sexual.
+- 65 prod security advisories are benign: 55 are the app's intended
+  SECURITY DEFINER RPC pattern, 7 are RLS-enabled-no-policy (deny-all, correct
+  for `app_secrets` / `ops_job_runs` / etc.), and `dissolution_window`'s
+  mutable search_path is harmless — it is `prosecdef=false` (INVOKER).
+- No cron job completes the ceremony: 13 jobs exist, none references
+  `couple_unlink`. `unlink_execute` is client-driven only, so a couple where
+  neither partner opens the app simply stays linked. Believed intentional.
+
+### Downgraded on verification (do not chase these)
+
+- `redeem_pairing_invite` has **no `already_paired` guard** — an authenticated
+  caller in couple A can be moved to couple B, bypassing the whole ceremony.
+  But `router.dart:191-198` redirects a paired user off `/couple` to `/app`,
+  so the deep-link path (`main.dart:730`) cannot reach it. Defense-in-depth
+  gap, **not** user-reachable. Medium, not critical.
+- "Leave right now is dead without biometrics" is **wrong**:
+  `settings_screen.dart:456-461` falls back to an account-password dialog when
+  no lock is enrolled, deliberately (`:446-450`). The narrow real gap is
+  `:453-454` — an *enrolled* lock that fails or is rate-limited gets no
+  fallback, and `severance_sheet.dart:180` returns silently with no message.
+- The reaction `?? ''` on AAD ids (`chat_reactions.dart:597`, reaching
+  `reactionAd` via `:718`) is self-consistent on a clean round-trip
+  (`toJson:628` always writes `u`), so it is a latent robustness defect —
+  defaulting crypto material instead of failing loudly, paired with a fully
+  swallowing `catch (_)` at `:152` — **not** the proven cause of the 0/4.
+
+### Weak test found
+
+- `repo_hygiene_test.dart:753` "the launcher disguise is intact" asserts the
+  *sideload* manifest contains `android:label="News"`. Both manifests label
+  the app **"Miles"**; `News` appears only on `.AliasNews`, which is
+  `enabled="false"`. The test passes on a string in a disabled alias and
+  proves nothing about the shipped launcher name.
+- On the real device the enabled launcher is **`.AliasWeather`**, and
+  `.AliasMiles` is explicitly in `disabledComponents`. That is the opt-in
+  cover feature working — but it means launcher identity now lives in
+  persisted component state, so renaming or removing an alias in a future
+  build would leave that user with no launcher icon at all. Alias names are a
+  pinned-client contract, like a schema column.
+
+### Still open / next step
+
+- Exact next step: decide whether to fix defect 1 (32-bit install-then-crash)
+  by stripping foreign-ABI `jniLibs` at packaging, or by accepting arm64-only
+  and declaring an abiFilters/split so 32-bit devices are rejected cleanly
+  instead of installing a broken app.
+- Owed check this session could not run: launch build 64 on a 32-bit handset
+  (none connected) to observe the `UnsatisfiedLinkError`.
+- The Maps key ships inside the APK at `assets/flutter_assets/.env`, not only
+  in git history at `5403769` — rotation alone is insufficient; it needs an
+  Android package + cert-SHA1 restriction, or a server-side proxy.
+
+## §194 — The audit's refutation pass: 53 raised, 7 killed, and a correction to §193 (2026-08-29)
+
+Still read-only. Nothing modified, nothing committed. This section CORRECTS §193 —
+read both.
+
+### The adversarial pass, run properly
+
+- 65 agents, 0 errors, 6.7M tokens, 38 min. 12 finder dimensions; every finding
+  handed to an independent skeptic told to REFUTE it and to default to refuted.
+- **53 findings raised → 7 killed → 46 survived**: 1 critical, 6 high, 21 medium,
+  18 low. Finders claimed far more criticals than survived; the mass downgrade IS
+  the pass working, and it is why the finder pass alone must never be reported.
+
+### CORRECTION to §193 — one claim there is WRONG
+
+- §193's last bullet says the Google Maps key "ships inside the APK at
+  `assets/flutter_assets/.env`". **False.** `GOOGLE_MAPS_3D_KEY` is EMPTY in
+  `mobile/.env` (checked per-key: `NEXT_PUBLIC_SUPABASE_URL` 40 chars,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` 208 chars, `GOOGLE_MAPS_3D_KEY` **empty**).
+  I redacted the values when I read that file and then asserted a secret I had
+  not looked at. What IS true: the `.env` asset does ship in the APK, carrying
+  the Supabase URL and anon key, both public by design. The git-history leak at
+  `5403769` is real and unaffected — rotate it, but not for this reason.
+- §193 defect 5 (hydrate telemetry) is **medium, not high**, and two of my
+  sub-claims were killed: `byteaToBytes` already accepts `List<int>` and base64
+  (`closer_crypto.dart:125-146`), so those triggers cannot fire; and the blank
+  bubble needs `chat_cipher_only = true`, which is false, so there is no
+  user-visible data loss today. What survives: a monitoring blind spot on the
+  exact metric the cipher-only rollout is gated on. The verifier ADDED a
+  mechanism I missed — the realtime callback (`chat_repository.dart:1031-1041`)
+  increments the counter then returns without calling hydrate, so counts leak
+  into a later page and `parsed: messages.length - failed - undecodable` can go
+  **negative** (e.g. `parsed: 1 - 0 - 12 = -11`).
+- §193 defect 4 (ungated broadcast plaintext) is likewise **medium**, not high.
+
+### NEW — the one critical, and it compounds §193 defect 2
+
+- **A long farewell note makes the unlink uncancellable by anyone.**
+  `unlink_screen.dart:205-208` is `SafeArea > Padding > Column` and
+  `grep -rn "SingleChildScrollView\|ListView\|CustomScrollView\|Scrollable"
+  lib/features/unlink/` returns **nothing** — no scrollable in the feature, and
+  `router.dart:257` hands the screen straight to a Scaffold body, so there is no
+  scrollable ancestor either. The partner's note renders at `:286-293` as a bare
+  `Text(_note!)` with no `maxLines`, no `overflow`, no `Flexible`. The composer
+  allows **1000 characters** (`:142`). Overflow pushes everything below it off
+  screen — including the Re-link button at `:310-330`, which §193 established is
+  the ONLY cancel control in the app and is shown only to the initiator. So:
+  partner writes a long note → initiator can no longer reach Re-link → partner
+  never had a cancel control → **the 7-day countdown cannot be stopped from
+  inside the app.** A large text-scale accessibility setting triggers it with a
+  far shorter note.
+
+### NEW — high, all verified `certain`
+
+- **Both partners tapping "Create & get a code" is an unrecoverable pairing
+  deadlock.** `create_pairing_invite` mints a couple for a caller who has none
+  (`20260818180000:79-84`), so each ends up owning a couple of one. After the
+  next relaunch `loadProfile` sets `session.couple` and `router.dart:191-198`
+  permanently redirects `/couple` → `/app`. The single redeem call site
+  (`couple_page.dart:103`) lives only on `/couple`. The half-paired Home widget
+  (`home_screen.dart:532-636`) offers only Copy / Get a new code. **This
+  falsifies the comment at `couple_page.dart:128-133`** ("Whoever gives way lands
+  back here"), which holds only before a relaunch.
+- **The note editor silently destroys the partner's farewell note.** The write
+  path gates on `_busy` alone and seeds `_note ?? ''` (`:350-352`); the read path
+  gates on `_noteLoaded && _note != null` (`:264`). The label comes from
+  `row.hasNote`, so the button reads "Edit what you wrote" over a BLANK field,
+  and Save writes empty over the stored note.
+- **The farewell note also destroys what the user just typed.** Extends §193
+  defect 3: `CoupleKey.ready()` (`couple_key.dart:74`) only JOINS an in-flight
+  derive and never starts one — nothing under `lib/features/unlink/` calls
+  `CoupleKey.prime` (only `session_provider.dart:232` and
+  `chat_screen.dart:1103` do), and `:61-66` un-memoizes on failure. The dialog
+  has already popped and discarded its `TextEditingController` before the throw.
+- **A failed cycle load is a PRIVACY regression, not just wrong data.** Worse
+  than §193 defect 6: the default `CycleSettings` has `shareWithPartner = true`
+  (`cycle_repository.dart:8-14`), and all three controls (`:275, :290, :301`)
+  write the WHOLE object via a full-row upsert (`:196-205`). So a swallowed read
+  plus one control tap silently turns partner-sharing ON — a state strictly more
+  permissive than anything she chose.
+- **Android PiP stays armed for the rest of the process after a call.**
+  `call_controller.dart:2095` resets `minimized` with a raw field write inside
+  `_teardown()`, bypassing the setter at `:1371` that owns the only
+  `PipMode.setWanted` call; the `if (minimized == v) return;` guard then makes
+  any later `setMinimized(false)` a no-op, and `MainActivity.kt:184` never
+  resets `pipWanted`. A later Home press puts the real Miles UI in a floating
+  window over the launcher, and `main.dart:368` exempts `PipMode.active` from
+  the cover — **the disguise does not come down.**
+- **The key-escrow tests re-implement the crypto they are meant to pin.**
+  `key_escrow_test.dart:57-87` declares its own `seal`/`open`; all five crypto
+  tests call only those, and `KeyEscrow.backup(` / `KeyEscrow.restore(` appear
+  nowhere in `mobile/test`. The four source pins cover kdf tokens and the wrap
+  label but never the `ct||mac` concat order or the 16-byte tail split, so the
+  escrow layout could invert with the suite green. Latent, not live.
+
+### Killed — do NOT re-raise these
+
+- Reaction decrypt failures ARE counted: `fetchFor`
+  (`chat_reactions.dart:258-269`) files a ParseShortfall with kind
+  `reaction-decrypt` — which is exactly the prod rows §193 cites. The bare
+  `catch (_)` at `:152` is real but not invisible.
+- The stale `app_release` row cannot strand anyone: `UpdateService.available`
+  needs `latestBuild > buildNumber`, and 46 > 64 is false.
+- `presence_status_v2`'s unguarded backfill cannot replay (checked against the
+  live migration ledger).
+- `release.sh` not rolling back the version bump on a failed run is
+  operational cosmetics, not a defect.
+- The capsule claim's mechanism is wrong: postgrest 2.9.1 throws on non-2xx.
+
+### Still open / next step
+
+- Unchanged from §193, plus: the critical above is a layout fix
+  (`SingleChildScrollView` + bounded note), and it should go in BEFORE any
+  further ceremony work, because it is the one defect that can trap a real
+  couple in a countdown they cannot stop.
+- Owner has been asked whether to fix; no answer yet, so nothing is touched.
+
+## §195 — All 46 audited findings fixed; gates green; gradle config proven (2026-08-29)
+
+Owner asked for every finding in §193/§194 fixed. Nothing committed — all of it sits in
+the working tree. The adversarial review OVER these fixes is still running; its result
+lands in §196, and until it does this diff is UNREVIEWED.
+
+### How it was done
+
+- 11 workers, each owning a DISJOINT set of files so no two could edit the same file.
+  46 findings assigned, 0 orphaned. Briefs were generated from the verifiers' own text,
+  not from a paraphrase, so each worker got the exact file:line proof.
+- 36 files changed, +1877/-292. 9 new test files. 1 new migration, NOT APPLIED.
+
+### Gates — run AFTER the fixes, on this tree
+
+```
+flutter analyze --no-pub   → 0 errors/warnings (CI filter), 556 issues, all info
+flutter test --no-pub      → exit 0, "All tests passed!", 1324 tests (was 1288)
+```
+
+- First analyze run was RED: the C2 worker logged `ch.topic`, which is
+  `invalid_use_of_internal_member`. Fixed properly rather than suppressed — the topic is
+  now carried in a `_channelTopic` field and passed to `_removeChannel`, so the log still
+  names the failing channel (`partner_here_badge.dart:49,80-86,205,215-221`). Re-ran: 0.
+- Infos went 550 → 556. Most of the apparent new ones are LINE-SHIFTED duplicates
+  (`session_provider 12→13`, `chat_screen 42→43`, `app_shell 447→490`). Net +6, all
+  cosmetic lints, against a baseline of 550 the repo already tolerates. Gate counts only
+  errors/warnings, so this is green by the CI's own definition.
+
+### The gradle ABI fix — the highest-risk change, and what is actually proven
+
+- `mobile/android/app/build.gradle.kts` now excludes every non-arm64 ABI from
+  `variant.packaging.jniLibs`, scoped by
+  `onVariants(selector().withFlavor("channel","sideload").withBuildType("release"))`.
+- Packaging excludes are the RIGHT lever where `ndk { abiFilters }` was the wrong one:
+  excludes are applied where the APK is written, so they catch AAR-supplied `.so` files
+  that AGP never compiled. That is precisely why the build-47 attempt was inert.
+- Play/AAB is deliberately untouched (filtering an AAB costs reach), and debug is
+  untouched so `flutter run` on an x86_64 emulator still works.
+- **PROVEN:** the Kotlin DSL evaluates. `./gradlew :app:tasks` → **exit 0**, full variant
+  graph intact, with `JAVA_HOME=/c/Program Files/Microsoft/jdk-17.0.20.101-hotspot`. This
+  confirms the selector and `variant.packaging.jniLibs.excludes` exist in AGP 8.13.0.
+  No APK was built.
+- **NOT PROVEN, and this is the headline for this item:** that the exclusion actually
+  removes `lib/armeabi-v7a/` from the packaged APK. Only an assemble shows that, and the
+  standing rule is no APK without being asked. The exact check owed:
+  `bash tool/release.sh` (or `flutter build apk --release --flavor sideload`), then
+  re-list the APK's `lib/` entries and confirm only `arm64-v8a` remains.
+
+### Pinned-client safety — checked by hand, not assumed
+
+- `chat_screen.dart:204` now gates `'body'` on the SAME `omitPlaintext(...)` the row
+  insert uses. `chat_cipher_only` is **false** in prod (§193), so `omitBody` is false and
+  every field build still receives the only key it reads. The flag now moves BOTH wires
+  together instead of half the switch.
+- No column, RPC parameter, enum value or payload key changed anywhere in the diff.
+
+### The SQL is a FILE, not a deployment
+
+- `supabase/migrations/20260829140000_a_write_must_prove_the_couple_it_claims.sql`.
+  Conflict resolved out loud at the time: pinned-client safety outranks "fix it now", so
+  the worker was forbidden from touching any database and the owner applies this.
+- It also CORRECTS §194 and my report to the owner: `redeem_pairing_invite`'s missing
+  guard is **not** an escape from the ceremony, because `leave_couple` and
+  `leave_couple_permanently` are both granted to `authenticated` and end a couple in one
+  call by design (20260826170000). What the bare update does that leaving does not is
+  skip leave_couple's cleanup — `couples.dissolved_at` stays null, so the restore path
+  and the storage reap never run. Least-privilege gap, not an open door.
+
+### Known-unverified, carried forward
+
+- Nothing in this diff has run on a device. The unlink layout fix is structural (a
+  non-flex child is laid out before an Expanded gets space), so it does not depend on dp
+  arithmetic — but a real pass at 360x800 with a 1000-char note AND at 2.0 text scale is
+  the check that settles it. There is still no widget test for UnlinkScreen; the new
+  `unlink_layout_law_test.dart` is a SOURCE-law test, and the C1 worker proved each law
+  fails against `git show HEAD:...unlink_screen.dart`.
+- C1 wrote new user-facing copy without product review (the replacement Accept sentence
+  and four note-state strings). All neutral and non-sexual per the project rule; reword
+  freely.
+- Found, not fixed (C1, outside its files): `UnlinkRepository.cancel()` still has exactly
+  ONE call site in the whole client. The layout fix makes that control reachable, but a
+  crash or bad route on /unlink still leaves the initiator with no second door. Worth a
+  settings entry.
+
+### Exact next step
+
+- Wait for §196 (review of these fixes). Do not commit before reading it — round-2
+  reviews of this repo have historically found defects created by round-1 fixes.
+- Then, if the owner wants it: build once and verify the APK carries only `arm64-v8a`.
+
+## §196 — Round 2: the fixes were reviewed, and six of them were wrong (2026-08-29)
+
+The rule that says a fix is an unreviewed change earned its place again. 33 agents
+reviewed the §195 diff hunting only for defects the FIXES introduced. 24 findings raised,
+17 killed, **7 confirmed — 6 of them created by round 1.** All 7 are now fixed.
+
+### The one that mattered
+
+- **§195's note-editor fix turned a data-loss risk into a permanently dead control.**
+  `_canEditNote` admitted only `absent`/`open`, so a note that would not decrypt landed in
+  `sealed` and the button greyed out for good. Nothing escapes `sealed`: `_retryNote`
+  re-runs the same path, and `CoupleKey.prime` memoizes a COMPLETED TRUE
+  (`couple_key.dart:61-66` — only a false un-memoizes), so when the key derives fine but
+  does not open THIS ciphertext, Try again can never move it. Trigger is real, not
+  hypothetical: `partner_rewrap` rotates the couple key mid-week, and the field already
+  carries 71 decrypt failures. The person being left would spend all seven days looking at
+  a greyed button — worse than the hazard being guarded against.
+  - Fixed: `_canEditNote` is now `_noteLoad != _NoteLoad.pending`. `sealed` stays
+    editable, seeded EMPTY, the button reads **"Replace what you wrote"**, and the
+    destructive branch is refused from exactly that state — an empty Save over unreadable
+    ciphertext is a no-op, not a clear. That was the whole reason barring it looked
+    necessary.
+  - The round-1 test PINNED the defect (`unlink_layout_law_test.dart:88` asserted `sealed`
+    stays out of the gate). Rewritten: it now pins that `sealed` is NOT barred, that the
+    empty-Save refusal exists, and that the label changes.
+
+### The other six
+
+- `session_provider.dart` — the new generation guard lowered `loading` even when a NEWER
+  load had raised it, dropping the router onto the blank `/welcome` form mid-resolve.
+  Added `_loadSeq` beside `_generation`: generation says which SESSION a run belongs to,
+  the sequence says which RUN, and only the newest may lower the flag.
+- `proximity_service.dart:105` — the broadcast callback still built a raw `ProximityStatus`
+  that omitted `serviceEnabled`, taking the constructor's `true`, so the partner's next
+  ping silently repainted "Location is off" and its settings button away. Routed through
+  `_snapshot()` like the other two emit sites.
+- `main.dart:871` — the new `|| !ReleaseGate.channelKnown` sent a SIDELOAD install whose
+  channel query lost the race to the Play listing, and installing from Play replaces the
+  signing identity, taking the X25519 seed with it. Now `channelKnown && channel == 'play'`;
+  the unconditional "Check again" button is the exit for the unresolved case.
+- `reel_queue_repository.dart:200` — the new `rethrow` escaped onto a discarded Future
+  (bound to a `VoidCallback`), landing in the zone handler instead of in front of the
+  person whose tile did not move. Call site now awaits via `_remove()` with a snackbar.
+- `cycle_consent_test.dart:31` — **a new test that could not fail.** `bodyOf` splits on
+  `'\n\n  '`, this repo is CRLF, so the scan never terminated and silently returned the
+  WHOLE FILE; every assertion passed on a hit anywhere in 700 lines. Now normalises line
+  endings and asserts the boundary was actually found.
+- The migration's burner sweep (pre-existing, carried forward) hand-listed 6 tables while
+  **44 carry a couple_id** — so a solo user in a couple of one could leave cycle_events,
+  routine_items, shared_reels and the rest behind, and `delete from couples` would cascade
+  them away uncounted. Replaced with `couple_has_content(uuid)`, which asks pg_attribute
+  and DEFAULTS TO DENY: an unrecognised couple-scoped table counts as content, so a 45th
+  table cannot silently reopen the hole. Four bookkeeping tables are excluded by name
+  (pairing_invites, profiles, couple_members, diag_events) because each is non-empty at
+  exactly that moment. Rollback line added.
+
+### Gates, re-run after the regression fixes
+
+```
+flutter analyze --no-pub   → 0 errors/warnings (CI filter), 556 issues, all info
+flutter test --no-pub      → exit 0, "All tests passed!", 1325 tests
+```
+
+### What the review CLEARED
+
+- 17 of 24 claims were refuted on reading. Notably the chat broadcast gate is correct:
+  `omitPlaintext` with `chat_cipher_only = false` means every field build still receives
+  `'body'`, so builds 49-64 keep rendering. No wire format, column, RPC parameter or
+  payload key changed anywhere in the diff.
+
+### Still open — unchanged, and both are mine to flag rather than close
+
+- **The APK ABI fix is still unproven at the artifact level.** `./gradlew :app:tasks`
+  exits 0, so the Kotlin DSL and `variant.packaging.jniLibs.excludes` are valid on AGP
+  8.13.0 — but only an assemble shows `lib/armeabi-v7a/` actually gone. Owner has not
+  authorised a build.
+- **The migration has never been parsed by Postgres.** It is 300+ lines including a new
+  plpgsql function with dynamic SQL. Staging (`zqltaobarpcuantrqxha`) is the documented
+  first stop and is drifted; applying anywhere is the owner's call, not mine.
+- Nothing in this diff has run on a device. The unlink layout fix remains structural
+  rather than measured; a pass at 360x800 with a 1000-char note and at 2.0 text scale is
+  still the check that settles it.
+
+### Exact next step
+
+- Owner decides: (a) may a build run to prove the ABI strip, and (b) may the migration go
+  to staging. Until both, this tree is complete but not proven at those two edges.
+- Nothing has been committed. 46 files sit in the working tree.

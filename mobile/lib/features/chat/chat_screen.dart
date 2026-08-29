@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/couple_key.dart';
@@ -194,14 +195,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // threading the blob through the send queue to save a few microseconds
     // would couple three layers together for nothing.
     //
-    // 'body' stays in the payload during dual-write. Every build in the field
-    // reads only that key, and this send has to keep rendering on their phones.
+    // 'body' rides the payload under the SAME rule the row does, never
+    // unconditionally. During dual-write — which is the resting state, the flag
+    // is false — it goes exactly as it always has, and every build in the field
+    // keeps rendering this send from the only key it reads. But the flip is
+    // documented as one server-side row, and a broadcast that ignored it would
+    // null `messages.body` at rest while every message kept crossing Realtime
+    // in the clear: the operator would read their own exposure wrong on the
+    // strength of half a switch, and the user-facing "chat is not encrypted"
+    // copy is retired on that reading.
     unawaited(() async {
       final sealed = await ChatRepository.sealBody(body.trim(), id);
+      final omitBody = ChatRepository.omitPlaintext(
+        cipherOnly: ReleaseGate.chatCipherOnly,
+        sealed: sealed != null,
+      );
       await _moodChannel?.sendBroadcastMessage(event: 'msg', payload: {
         'id': id,
         'sender': myUid,
-        'body': body,
+        if (!omitBody) 'body': body,
         if (sealed != null) 'cipher': base64Encode(sealed.blob),
         if (sealed != null) 'nonce': base64Encode(sealed.nonce),
         'createdAt': now.toUtc().toIso8601String(),

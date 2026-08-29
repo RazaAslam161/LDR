@@ -85,7 +85,17 @@ void main() {
     final screen = read('lib/features/auth/offline_screen.dart');
 
     test('retry goes through the same loadProfile the launch used', () {
-      expect(screen, contains('loadProfile'));
+      // Sliced out of _retry, not searched for across the file: the token also
+      // appears in _signOut's doc comment three lines below the only real
+      // call, so a whole-file contains() stayed green against a _retry gutted
+      // to nothing — the false pass chat_selection_test.dart already records.
+      // Same slice account_management_test takes of _signOut on this screen.
+      final start = screen.indexOf('void _retry()');
+      expect(start, greaterThan(-1), reason: '_retry was renamed or removed');
+      final fn = screen.substring(start);
+      expect(fn.substring(0, fn.indexOf('\n  }')), contains('loadProfile'),
+          reason: 'a _retry that calls nothing leaves the screen a dead end '
+              'until the user finds sign-out',);
     });
 
     test('it retries on its own, not only on the button', () {

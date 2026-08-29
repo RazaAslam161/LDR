@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,6 +24,37 @@ bool strandedAfterRestore({
   required bool hadPriorIdentity,
 }) =>
     alreadyKeyless || (!hasSeed && hadPriorIdentity);
+
+/// What checking someone's password actually established.
+///
+/// Two failures, because "no" and "we could not ask" are different sentences
+/// and the gates that use this were saying the first one for both.
+enum ReauthOutcome {
+  /// The password is theirs.
+  ok,
+
+  /// The server rejected the credential. This is the only outcome that may be
+  /// shown as "that isn't your password".
+  wrongPassword,
+
+  /// Nobody answered, or answered something that is not about the password —
+  /// a rate limit, a 5xx, a dead socket, no session to check against. The
+  /// caller should offer the gate again, not accuse the user.
+  unavailable,
+}
+
+/// What an auth failure during a password check actually means.
+///
+/// Top-level and pure for the same reason as [strandedAfterRestore]: the input
+/// arrives over a network a unit test cannot have, and the decision is the part
+/// worth pinning. 400 is the only status GoTrue answers with when it rejected
+/// the credential — a 429 from the rate limiter is 429, a server error is 5xx,
+/// and a request that never got a reply carries no status at all. Reading any
+/// of those as a wrong password is how a gate accuses someone who typed it
+/// correctly.
+ReauthOutcome reauthOutcomeFor(AuthException e) => e.statusCode == '400'
+    ? ReauthOutcome.wrongPassword
+    : ReauthOutcome.unavailable;
 
 /// What a password change did to this device's key backup.
 ///
@@ -130,7 +162,7 @@ class SupabaseRepository {
     final uid = res.user?.id;
     if (uid == null) return;
     await CryptoCore.bindAccount(uid);
-    await KeyEscrow.backup(password);
+    await _backupEscrow(password);
   }
 
   static Future<void> signIn({
@@ -205,9 +237,32 @@ class SupabaseRepository {
       if (!stranded && published == false && await KeyEscrow.isMissing()) {
         await CryptoCore.ensureSeed();
       }
-      await KeyEscrow.backup(password);
+      await _backupEscrow(password);
       if (stranded) await CryptoCore.markKeyless();
     }
+  }
+
+  /// Seals the key under [password], and says so when it does not.
+  ///
+  /// Neither caller can show a failure: signUp has not drawn a screen yet, and
+  /// a `context.go` from the sign-in page loses the race with the redirect the
+  /// auth event has already started — which is why the bool was dropped on the
+  /// floor at both. Dropping it left the one write that protects every
+  /// encrypted row this couple owns with no field-visible trace at all, so
+  /// "how many accounts have no escrow row" was a question nobody could answer
+  /// from anywhere but a cable. EscrowPrompt still heals the user's side on the
+  /// next launch; this is the half that reaches the maintainer.
+  ///
+  /// The account is not named here and does not need to be: `client_errors`
+  /// defaults `user_id` to `auth.uid()` (20260601007800), so the row that lands
+  /// already carries whose escrow it was.
+  static Future<void> _backupEscrow(String password) async {
+    if (await KeyEscrow.backup(password)) return;
+    ErrorReporter.report(
+      StateError('escrow backup did not take'),
+      StackTrace.current,
+      kind: 'escrow-backup',
+    );
   }
 
   /// Whether this account has ever published a real X25519 public key.
@@ -261,14 +316,34 @@ class SupabaseRepository {
   /// wrap it produces can never be checked afterwards by anybody: a typo seals
   /// a row that opens for nobody and looks exactly like a good one. Signing in
   /// again is the only check a client has.
-  static Future<bool> reauthenticate(String password) async {
+  ///
+  /// True only for [ReauthOutcome.ok]. Screens that can say more than "no"
+  /// should call [reauthenticateOutcome] instead — this narrowing is what
+  /// makes an emergency exit look inert during a rate limit.
+  static Future<bool> reauthenticate(String password) async =>
+      await reauthenticateOutcome(password) == ReauthOutcome.ok;
+
+  /// Why the check did not pass, so a caller can stop blaming the user.
+  ///
+  /// Every failure used to collapse to a bare false, unlogged, and every
+  /// caller renders that as "that isn't your password" — which is a lie for a
+  /// 429 from the rate limiter, for a 5xx, and for a socket that died
+  /// mid-request. GoTrue answers 400 for a credential it rejected and
+  /// something else for everything that is not the user's fault, so those are
+  /// the two answers this returns.
+  static Future<ReauthOutcome> reauthenticateOutcome(String password) async {
     final email = _c.auth.currentUser?.email;
-    if (email == null) return false;
+    // No session to check against is not a wrong password either.
+    if (email == null) return ReauthOutcome.unavailable;
     try {
       await _c.auth.signInWithPassword(email: email, password: password);
-      return true;
-    } on AuthException {
-      return false;
+      return ReauthOutcome.ok;
+    } on AuthException catch (e) {
+      // The status and the machine code, never the message and never the
+      // address — this runs on the emergency gate and logcat is readable over
+      // a cable by whoever holds the phone.
+      debugPrint('[auth] reauthenticate refused: ${e.statusCode} ${e.code}');
+      return reauthOutcomeFor(e);
     }
   }
 

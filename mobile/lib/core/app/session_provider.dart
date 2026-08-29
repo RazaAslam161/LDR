@@ -5,6 +5,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/app/router.dart';
 import 'package:miles/core/data/couple_key.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
@@ -99,9 +100,31 @@ class SessionNotifier extends StateNotifier<SessionState> {
   StreamSubscription<AuthState>? _authSub;
   RealtimeChannel? _presenceChannel;
 
+  /// The access token [init] already took responsibility for loading.
+  ///
+  /// Read by the replay guard below, and set before the subscription rather
+  /// than beside the load: the buffered event lands on the next microtask and
+  /// would otherwise race the assignment.
+  String? _seededToken;
+
+  /// Bumped by every couple- or session-end, so a [loadProfile] whose reads
+  /// were already in flight cannot publish what it fetched afterwards.
+  ///
+  /// A generation rather than a cancellation because there is nothing to
+  /// cancel: the fetches are plain awaited requests, and the only question that
+  /// matters is whether the session that asked for them still exists when they
+  /// answer.
+  int _generation = 0;
+
+  /// Bumped per loadProfile call. `_generation` says which SESSION a run
+  /// belongs to; this says which RUN it is, so an abandoned one can tell
+  /// whether the `loading` flag on screen is still the one it raised.
+  int _loadSeq = 0;
+
   void init() {
     // Seed initial state from any stored session.
     final current = SupabaseService.client.auth.currentSession;
+    _seededToken = current?.accessToken;
     // Same reason as the listener below: a restored session has a profile and
     // an acceptance still to fetch, and false here is the router's cue to
     // decide things it does not yet know.
@@ -113,6 +136,22 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // way it goes when the user asks.
       if (event.event == AuthChangeEvent.signedOut) {
         await _endSession();
+        return;
+      }
+      // gotrue's onAuthStateChange is an unbounded ReplaySubject, and
+      // supabase_flutter emits `initialSession` for a stored session during
+      // Supabase.initialize() — before this notifier is built. So a cold start
+      // with a session delivers that buffered event here for the very session
+      // seeded above, and BOTH doors then loaded it: two profile reads, two
+      // couples selects, two fetchPartner reads, two terms reads and up to four
+      // presence writes, on every launch. The explicit call below stays the
+      // reliable door; this replay is the redundant one.
+      //
+      // Dropped before the state write, not just before the load: that write
+      // republishes loading:true, and if the seeded load had already finished
+      // nothing would ever set it false again and the router would hold.
+      if (event.event == AuthChangeEvent.initialSession &&
+          event.session?.accessToken == _seededToken) {
         return;
       }
       // loading stays TRUE while a session exists and the profile has not been
@@ -168,6 +207,12 @@ class SessionNotifier extends StateNotifier<SessionState> {
   }
 
   Future<void> loadProfile() async {
+    final gen = _generation;
+    // Which LOAD this is, beside which SESSION it belongs to. The generation
+    // alone cannot answer "may I lower the flag": two loads can share a dead
+    // generation, and the abandoned one would clear a `loading` the newer one
+    // raised — dropping the router onto /welcome mid-resolve.
+    final load = ++_loadSeq;
     state = state.copyWith(loading: true);
     try {
       // Also here, not just at sign-in: a session restored on launch never
@@ -206,6 +251,28 @@ class SessionNotifier extends StateNotifier<SessionState> {
           partner = await SupabaseRepository.fetchPartner(couple.id)
               .timeout(const Duration(seconds: 10));
         }
+      }
+
+      // The session (or the couple) ended while these reads were in flight.
+      // Nothing below may run: it republishes the ex-couple into the notifier,
+      // stamps its id back into SharedPreferences through SessionScope — after
+      // forgetDevice had cleared it, so pushes already queued behind their 24h
+      // TTL are admitted again — re-subscribes presence to it and writes us
+      // online in it. One ordinary user tapping Sign out on a bad connection
+      // reaches this: nothing here re-read the session after an await, and
+      // signOut() holds no handle to cancel the load.
+      if (gen != _generation) {
+        debugPrint('[session] loadProfile answered after the session ended');
+        // The one thing this run may still publish is the flag it raised
+        // itself. Returning with loading left true strands every guard in the
+        // router, which deliberately decides nothing at all while a session is
+        // resolving — so an unpair that races a load would never reach /couple.
+        //
+        // And only if no LATER load has raised it since: lowering another
+        // run's flag hands the router a half-resolved session, which renders
+        // the blank /welcome form over an account that is still signing in.
+        if (load == _loadSeq) state = state.copyWith(loading: false);
+        return;
       }
 
       state = SessionState(
@@ -388,6 +455,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// one and still cannot. Null is tolerated: everything else here is
   /// couple-agnostic and must still run.
   Future<void> endCouple(String? coupleId) async {
+    // First, before anything is torn down: a load still in flight for the
+    // couple being ended must not publish it back over everything below.
+    _generation++;
     final ch = _presenceChannel;
     _presenceChannel = null;
     if (ch != null) {
@@ -395,6 +465,20 @@ class SessionNotifier extends StateNotifier<SessionState> {
         await SupabaseService.client.removeChannel(ch);
       } catch (_) {}
     }
+    // What the partner was last TOLD about our room. The observer is built once
+    // per process (router.dart) and nothing invalidates it, so its dedupe
+    // outlived the identity that filled it: the first room the next account
+    // lands on matched the last room this one published and was skipped — no
+    // current_screen for the new couple, no broadcast, until that user happened
+    // to navigate somewhere else. Signing out from the drawer makes it certain
+    // rather than unlucky, because the drawer is not a route and the shell's
+    // tab is still whatever it was.
+    presenceRouteObserver?.reset();
+    // And the last thing the socket said about the partner's liveness. It is
+    // kept ordered by the SENDER's clock, so a hint left behind by this couple
+    // silently swallows the first arrivals of the next one until that person's
+    // clock passes it.
+    PresenceService.resetLiveHint();
     // Both are process-scoped and outlive the couple: a map of live signed
     // URLs to this couple's storage objects, and uploads accepted for it.
     // Neither belongs to whoever this account pairs with next.
@@ -485,6 +569,28 @@ class SessionNotifier extends StateNotifier<SessionState> {
     SeveranceState.reset();
     UnlinkState.reset();
     state = const SessionState(loading: false);
+    // The device unbind, and here rather than only in signOut(). A session the
+    // SERVER ended — a revoked or expired refresh token, or "sign out other
+    // devices" — arrives as an event and never passes through signOut(), so
+    // this handset kept the previous account's couple in SessionScope and the
+    // previous account's Reach sitting in pendingReach: that couple's pushes
+    // were still admitted while the phone sat signed out, and the next account
+    // to sign in popped the last one's overlay with an ex-partner's name on it.
+    //
+    // The server half of the unbind cannot run from here — nulling
+    // profiles.fcm_token is an authenticated write and there is no session left
+    // — and forgetDevice already tolerates that: setFcmToken returns without
+    // writing when there is no user. The local half is what is being claimed,
+    // and it is the half that was missing.
+    //
+    // Last and unawaited, after the state is published. The parts that matter
+    // here — the pending notifiers and the stored couple — are set before it
+    // touches the network, and the one slow step, deleting the FCM token, is
+    // something no caller waits on: signOut() already awaited its own
+    // authenticated pass, and a sign-out that hangs on a dead radio is how a
+    // user ends up force-killing the app instead of leaving it. forgetDevice
+    // reports its own failures rather than throwing.
+    unawaited(FcmService.forgetDevice());
   }
 
   @override

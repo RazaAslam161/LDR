@@ -30,6 +30,8 @@ import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/widgets/screen_entrance.dart';
 import 'package:miles/core/widgets/gravity_float.dart';
 import 'package:miles/core/widgets/wordmark.dart';
+import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
@@ -541,6 +543,16 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
   String? _code;
   bool _loading = true;
 
+  /// Why the last read or mint produced nothing.
+  ///
+  /// Both calls used to be wrapped in an empty catch that cleared the spinner
+  /// and bound nothing. A timed-out lookup printed "No live code right
+  /// now." over an invite that was still live, and a failed mint returned the
+  /// screen to its exact prior state — a button that visibly does nothing, on
+  /// the one screen that can still hand the code over. The error has to reach
+  /// the person looking at it, the way the sibling code screen already does it.
+  String? _error;
+
   @override
   void initState() {
     super.initState();
@@ -552,35 +564,54 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
       final invite = await SupabaseRepository.activePairingInvite();
       if (mounted) {
         setState(() {
-        _code = invite?.code;
-        _loading = false;
-      });
+          _code = invite?.code;
+          _error = null;
+          _loading = false;
+        });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      debugPrint('[pairing] invite lookup failed for '
+          '${SupabaseService.currentUserId}: $e');
+      if (mounted) {
+        setState(() {
+          _error = friendlyAuthError(e);
+          _loading = false;
+        });
+      }
     }
   }
 
   /// Mint a new one. The old code may have expired while they were away, and
   /// without this the only recovery is leaving the couple entirely.
   Future<void> _newCode() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final invite = await SupabaseRepository.createPairingInvite();
       if (mounted) {
         setState(() {
-        _code = invite.code;
-        _loading = false;
-      });
+          _code = invite.code;
+          _loading = false;
+        });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      debugPrint('[pairing] mint failed for '
+          '${SupabaseService.currentUserId}: $e');
+      if (mounted) {
+        setState(() {
+          _error = friendlyAuthError(e);
+          _loading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final code = _code;
+    final error = _error;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: Column(
@@ -588,10 +619,16 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
           const Text('Waiting for your partner to join…',
               textAlign: TextAlign.center,
               style: TextStyle(color: MilesColors.cream50, fontSize: 16),),
-          const SizedBox(height: 8),
-          const Text('They need this code. It is still live.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
+          // Claimed only while we are actually holding a code. Unconditional,
+          // it sat directly above "No live code right now." whenever the invite
+          // had been consumed or had expired — the screen contradicting itself
+          // on the one fact the user came here for.
+          if (code != null) ...[
+            const SizedBox(height: 8),
+            const Text('They need this code. It is still live.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
+          ],
           const SizedBox(height: 24),
           if (_loading)
             const CircularProgressIndicator(color: MilesColors.ember)
@@ -621,14 +658,39 @@ class _WaitingForPartnerState extends State<_WaitingForPartner> {
                 ),
               ],
             ),
-          ] else
+          ] else if (error == null)
             const Text('No live code right now.',
                 style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
+          // Under BOTH states, which is the whole point: a lookup that failed
+          // must not be reported as "no live code" — we did not learn that, we
+          // learned nothing — and a mint that failed while an older code is
+          // still on screen must not look like the button did nothing at all.
+          if (error != null) ...[
+            const SizedBox(height: 16),
+            AlertBanner(message: error),
+          ],
           const SizedBox(height: 8),
           TextButton(
             onPressed: _loading ? null : _newCode,
             child: const Text('Get a new code',
                 style: TextStyle(color: MilesColors.emberSoft, fontSize: 13),),
+          ),
+          // The other half of the both-pressed-Create deadlock. Creating a code
+          // makes a couple of one, and from the next relaunch this screen was
+          // the whole app: the redeem field lives on '/couple', which the router
+          // swept away the moment a couple existed. Whoever gives way taps this;
+          // redeem_pairing_invite moves them onto their partner's couple and
+          // retires the one they were holding.
+          TextButton(
+            onPressed: _loading ? null : () => context.go('/couple'),
+            // A real target rather than 13px of text, for the same reason the
+            // couple page's copy of this hatch is one: it is the only way out.
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              foregroundColor: MilesColors.taupe,
+            ),
+            child: const Text('They already have a code? Enter it instead',
+                textAlign: TextAlign.center,),
           ),
         ],
       ),

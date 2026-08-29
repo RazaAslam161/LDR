@@ -42,8 +42,12 @@ this machine.
 - Rule as written: *"When a build IS asked for: ONE universal APK, no `--split-per-abi`."*
   `mobile/tool/release.sh:337` runs `flutter build apk --release --flavor sideload
   --target-platform android-arm64`, and `:321` calls that "the ONLY lever that works". The
-  output is arm64-only, not universal — a 32-bit handset already running Miles cannot
-  install the next one. Do not silently follow either version; ask.
+  output is arm64-only, not universal. **Measured on the real build-64 APK (BRAIN §193),
+  the consequence is worse than "cannot install": `lib/armeabi-v7a/` still ships nine
+  third-party `.so` files and NO `libflutter.so`/`libapp.so`, because `--target-platform`
+  filters only Flutter's own libraries and never the AAR ones. Android matches that ABI
+  directory, installs, and the loader then fails — a 32-bit handset installs a broken app
+  and crashes on launch.** Do not silently follow either version; ask.
 - Rule as written: *"Launcher disguise is intentional — 'News' label + generic icon +
   selectable identities. Never revert."* Both manifests set `android:label="Miles"`,
   `PLAIN_DEFAULT=true` on both flavors, and `.AliasMiles` is the only alias shipping
@@ -78,9 +82,12 @@ this machine.
 
 - Flutter 3.44.2 at `C:\src\flutter`, matching the CI pin. **Not on the permanent PATH** —
   each shell needs `export PATH="/c/src/flutter/bin:$PATH"`.
-- **Android SDK is not installed.** `flutter doctor` reports "Unable to locate Android
-  SDK"; no `adb`, no JDK. Tests and the analyzer run; no APK can be built or pulled from a
-  handset until Android Studio is back.
+- **The Android SDK IS installed** (corrected 2026-08-29, BRAIN §193). `adb` lives at
+  `~/AppData/Local/Android/Sdk/platform-tools/adb` and `adb devices` answers
+  `1896b4b3 device` — the OnePlus 8, on build 64. Device inspection, logcat and installs
+  all work. The older "no SDK, no adb" note here was stale and made several sessions
+  declare device paths unverifiable when they were not.
+- The installed package id is **`com.miles.miles`** — not `com.miles.app`.
 - `mobile/.env` was recreated by hand (gitignored). `mobile/android/maps.properties` is
   still missing — a build from this tree ships the literal `MISSING_MAPS_API_KEY`.
 

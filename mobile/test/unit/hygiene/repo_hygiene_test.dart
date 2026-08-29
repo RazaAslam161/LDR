@@ -24,8 +24,6 @@ class _Call {
 /// opens was the most misleading one in the tree. A rule nobody can check is a
 /// rule that decays, so the rules live here.
 void main() {
-  final root = Directory('..');
-
   List<String> tracked() {
     final r = Process.runSync('git', ['ls-files'], workingDirectory: '..');
     return (r.stdout as String)
@@ -750,15 +748,52 @@ void main() {
         reason: 'use MediaUrls.sign / SignedImage: $offenders');
   });
 
-  test('the launcher disguise is intact', () {
-    // Not cleanup-adjacent, deliberately. The label looks like a placeholder
-    // somebody forgot to change, which is exactly why a well-meaning tidy-up
-    // would "fix" it and quietly undo the app's whole threat model. It lives in
-    // the sideload source set because Play would strike the account for it.
-    final manifest =
-        File('android/app/src/sideload/AndroidManifest.xml').readAsStringSync();
-    expect(manifest, contains('android:label="News"'),
-        reason: 'the launcher name is a disguise and is intentional',);
-    expect(root.existsSync(), isTrue);
+  test('the app installs as itself, with every cover switched off', () {
+    // This used to assert android:label="News" in the sideload manifest and
+    // call that "the disguise is intact". It passed on a string sitting inside
+    // .AliasNews, which ships android:enabled="false" — so it matched a name no
+    // launcher has ever drawn and proved nothing about the shipped identity.
+    // Both channels have installed AS MILES since 2026-08-16 (BRAIN §32/§34):
+    // the covers are a feature the owner opts into from Settings, and Play's
+    // Deceptive Behavior policy is satisfied precisely because no identity the
+    // owner did not choose is enabled at install.
+    //
+    // What is asserted here is the SHIPPED DEFAULT and only that. Once
+    // MainActivity has switched aliases the enabled state lives on the device,
+    // not in this file — build 64 on the connected handset has .AliasMiles
+    // disabled and .AliasWeather enabled, and that is the feature working.
+    for (final channel in ['sideload', 'play']) {
+      final xml = File('android/app/src/$channel/AndroidManifest.xml')
+          .readAsStringSync();
+
+      final app = RegExp(r'<application\b[^>]*>').firstMatch(xml)?[0];
+      expect(app, isNotNull, reason: '$channel: no <application> element');
+      expect(app, contains('android:label="Miles"'),
+          reason: '$channel: the app installs under its own name',);
+
+      final aliases = RegExp(r'<activity-alias\b[^>]*>')
+          .allMatches(xml)
+          .map((m) => m[0]!)
+          .toList();
+      // Without this the check passes by matching nothing — a manifest the
+      // regex has stopped understanding would read as a compliant one.
+      expect(aliases.length, greaterThan(1),
+          reason: '$channel: found ${aliases.length} activity-alias tags',);
+
+      // An alias with no android:enabled attribute defaults to ENABLED, so a
+      // cover added without it ships a second launcher icon nobody chose.
+      // Absent and "true" are the same failure and are counted as one.
+      final enabled = <String>[];
+      for (final tag in aliases) {
+        final name = RegExp(r'android:name="([^"]+)"').firstMatch(tag)?[1];
+        expect(name, isNotNull,
+            reason: '$channel: an activity-alias with no android:name',);
+        if (tag.contains('android:enabled="false"')) continue;
+        enabled.add(name!);
+      }
+      expect(enabled, ['.AliasMiles'],
+          reason: '$channel: one launcher alias ships enabled and it is the '
+              'honest one; every cover is opt-in: $enabled',);
+    }
   });
 }

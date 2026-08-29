@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -46,6 +47,7 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
 
   final Ref ref;
   RealtimeChannel? _channel;
+  String? _channelTopic;
   String? _coupleId;
 
   void _subscribe() {
@@ -53,17 +55,37 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
     if (couple == null) return;
     final myUid = ref.read(currentProfileProvider)?.id;
 
-    // Fully remove the old channel before recreating (no joined-but-dead dupes).
+    // A DIFFERENT couple is binding, so what we are holding was broadcast by
+    // somebody else's partner. This notifier is not autoDispose and nothing
+    // invalidates it, while partnerPresenceProvider IS — so after an unlink and
+    // a re-pair, or a sign-in as someone else on this handset, the badge took
+    // `partnerScreen` from the previous relationship's broadcast and `fresh`
+    // from the new partner's row, and said "<new partner> is on this screen
+    // with you" on it. Broadcasts have no replay, so it stood until the new
+    // partner next navigated — minutes, on a phone left open.
+    //
+    // Only on a real change of couple, never on the null returned above: the
+    // couple reads null on every resume, and clearing on that would blank a
+    // partner who has not moved. It cannot be driven from
+    // SessionNotifier.endCouple with the other holders either — that notifier
+    // has no ref, and reaching this provider from sessionProvider's own would
+    // be a dependency cycle.
+    if (_coupleId != null && _coupleId != couple.id) state = null;
+
+    // Fully remove the old channel before recreating (no joined-but-dead
+    // dupes). Not awaited — this runs as a listener on realtimeResumed and on
+    // the couple, both of which want a void callback — but never swallowed: a
+    // removal that keeps failing leaves the previous couple's channel joined
+    // and still delivering their screens here, which is the thing above.
     final old = _channel;
+    final oldTopic = _channelTopic;
     _channel = null;
-    if (old != null) {
-      try {
-        SupabaseService.client.removeChannel(old);
-      } catch (_) {}
-    }
+    if (old != null) unawaited(_removeChannel(old, oldTopic));
 
     _coupleId = couple.id;
-    final ch = SupabaseService.client.channel('screen_presence:${couple.id}', opts: RealtimeChannelConfig(private: true));
+    final topic = 'screen_presence:${couple.id}';
+    _channelTopic = topic;
+    final ch = SupabaseService.client.channel(topic, opts: RealtimeChannelConfig(private: true));
     ch
         .onBroadcast(
           event: 'screen',
@@ -178,15 +200,26 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
 
   DateTime? _lastWarm;
 
+  /// The topic is carried in rather than read back off the channel:
+  /// `RealtimeChannel.topic` is package-internal, and naming the failing
+  /// channel is the whole point of the log line.
+  Future<void> _removeChannel(RealtimeChannel ch, String? topic) async {
+    try {
+      await SupabaseService.client.removeChannel(ch);
+    } catch (e) {
+      debugPrint('[presence] screen channel remove failed '
+          '(${topic ?? 'unknown topic'}): $e');
+    }
+  }
+
   @override
   void dispose() {
     realtimeResumed.removeListener(_subscribe);
     final c = _channel;
-    if (c != null) {
-      try {
-        SupabaseService.client.removeChannel(c);
-      } catch (_) {}
-    }
+    final t = _channelTopic;
+    _channel = null;
+    _channelTopic = null;
+    if (c != null) unawaited(_removeChannel(c, t));
     super.dispose();
   }
 }

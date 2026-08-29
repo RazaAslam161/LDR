@@ -130,6 +130,21 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
     }
   }
 
+  /// The long-press removal, awaited HERE rather than on a discarded future.
+  /// The repository rethrows so a failed remove is never silent; bound straight
+  /// to a VoidCallback that rethrow had nowhere to land but the zone handler,
+  /// which reaches the error table and not the person whose tile did not move.
+  Future<void> _remove(String reelId) async {
+    try {
+      await ReelQueueRepository.remove(reelId);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("That didn't remove. Try again.")),
+      );
+    }
+  }
+
   Future<void> _paste() async {
     final controller = TextEditingController();
     final url = await showDialog<String>(
@@ -221,7 +236,7 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
                   seenByMe: r.seen(me),
                   seenByPartner: partner.isNotEmpty && r.seen(partner),
                   onTap: () => _open(r),
-                  onRemove: () => ReelQueueRepository.remove(r.id),
+                  onRemove: () => unawaited(_remove(r.id)),
                 );
               },
             );

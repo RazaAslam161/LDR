@@ -1,14 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/app/feature_flags.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
-import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
 import 'package:miles/features/cycle/love_note_preview_sheet.dart';
@@ -34,17 +38,27 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
   bool _busy = false;
 
   // mine (female)
-  CycleSettings _settings = const CycleSettings();
+  /// Null until her row has actually been READ. Never a default instance: a
+  /// default `CycleSettings` has `shareWithPartner: true`, every control below
+  /// writes the whole row back, and `cycle_events_partner_read` gates her
+  /// partner's SELECT on that column — so a tracker rendered from defaults
+  /// after a failed read turned one stepper tap into consent she never gave.
+  CycleSettings? _settings;
   List<CycleEvent> _events = const [];
   bool _onPeriod = false;
   CyclePrediction _pred = const CyclePrediction();
 
   // partner's (male view)
+  bool _partnerLoaded = false;
   bool _partnerShares = false;
   bool _partnerOnPeriod = false;
   CyclePrediction _partnerPred = const CyclePrediction();
 
-  RealtimeChannel? _channel;
+  /// Set whenever a read fails, cleared by the next one that lands. Rendered:
+  /// a failed read used to be indistinguishable from an empty one.
+  String? _loadError;
+
+  ManagedSubscription? _channel;
 
   @override
   void initState() {
@@ -54,31 +68,38 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     _myUid = s.profile?.id;
     _partnerUid = s.partner?.id;
     _isFemale = s.profile?.isFemale ?? false;
-    _load();
-    _subscribe();
-    realtimeResumed.addListener(_subscribe); // re-arm after background/resume
-  }
-
-  void _subscribe() {
     final cid = _coupleId;
-    if (cid == null) return;
-    _channel?.unsubscribe();
-    _channel = SupabaseService.client
-        .channel('cycle_events:$cid', opts: RealtimeChannelConfig(private: true))
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'cycle_events',
-          callback: (_) => _load(),
-        )
-        .subscribe();
-    _load(); // pull anything missed while the socket was down
+    if (cid == null) {
+      _load();
+    } else {
+      // ManagedSubscription rather than the hand-rolled unsubscribe-then-
+      // re-channel this used to do on every resume: `channel()` never dedupes
+      // by topic and `unsubscribe()` only schedules a leave, so the rebuild
+      // raced a dead duplicate onto the same topic and her partner's edits
+      // stopped arriving with nothing said. The re-read rides with each
+      // rebuild — a row written while the socket was down arrives by no other
+      // path.
+      _channel = ManagedSubscription.start(
+        () {
+          unawaited(_load());
+          return SupabaseService.client
+              .channel('cycle_events:$cid',
+                  opts: RealtimeChannelConfig(private: true),)
+              .onPostgresChanges(
+                event: PostgresChangeEvent.all,
+                schema: 'public',
+                table: 'cycle_events',
+                callback: (_) => unawaited(_load()),
+              )
+              .subscribe();
+        },
+      );
+    }
   }
 
   @override
   void dispose() {
-    realtimeResumed.removeListener(_subscribe);
-    _channel?.unsubscribe();
+    _channel?.dispose();
     super.dispose();
   }
 
@@ -86,7 +107,18 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     try {
       if (_isFemale) {
         final uid = _myUid;
-        if (uid == null) return;
+        if (uid == null) {
+          // Returning here left the spinner up for the life of the screen —
+          // the same silence as the swallowed catch below, one line earlier.
+          if (mounted) {
+            setState(() {
+              _loadError = 'This device lost track of the account. '
+                  'Sign out and back in.';
+              _loading = false;
+            });
+          }
+          return;
+        }
         final events = await CycleRepository.events(uid);
         final settings = await CycleRepository.settings(uid);
         final pred = CyclePrediction.compute(
@@ -97,6 +129,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
             _settings = settings;
             _onPeriod = CycleRepository.onPeriod(events);
             _pred = pred;
+            _loadError = null;
             _loading = false;
           });
         }
@@ -116,15 +149,29 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         }
         if (mounted) {
           setState(() {
+            _partnerLoaded = true;
             _partnerShares = shares;
             _partnerOnPeriod = onP;
             _partnerPred = pred;
+            _loadError = null;
             _loading = false;
           });
         }
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e, st) {
+      // This used to clear the spinner and say nothing, which rendered the
+      // tracker over a default CycleSettings — `shareWithPartner: true` — and
+      // her next stepper tap upserted that default over her real row, silently
+      // re-granting her partner's read on her cycle. _settings now stays null
+      // until a read lands, so there is no settings card to tap, and on his
+      // side a failed read no longer reads as "she keeps it private".
+      ErrorReporter.report(e, st, kind: 'cycle');
+      if (mounted) {
+        setState(() {
+          _loadError = friendlyAuthError(e);
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -139,6 +186,14 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
     try {
       await CycleRepository.setOnPeriod(coupleId: cid, userId: uid, on: on);
       await _load();
+    } catch (e, st) {
+      // The switch moved optimistically and the insert threw into nothing, so
+      // a period that was never logged sat on screen as if it had been.
+      ErrorReporter.report(e, st, kind: 'cycle');
+      if (mounted) {
+        setState(() => _onPeriod = !on);
+        _toast("That didn't save.", onRetry: () => _toggle(on));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -147,10 +202,32 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
   Future<void> _saveSettings(CycleSettings s) async {
     final cid = _coupleId;
     final uid = _myUid;
-    if (cid == null || uid == null) return;
+    final previous = _settings;
+    if (cid == null || uid == null || previous == null) return;
     setState(() => _settings = s);
-    await CycleRepository.saveSettings(userId: uid, coupleId: cid, s: s);
+    try {
+      await CycleRepository.saveSettings(userId: uid, coupleId: cid, s: s);
+    } catch (e, st) {
+      // A failed save left the new value on screen with nothing said, and for
+      // the share switch that is a lie about who can read her cycle: she sees
+      // "Private to you" while the row the RLS policy reads still says shared.
+      ErrorReporter.report(e, st, kind: 'cycle');
+      if (mounted) {
+        setState(() => _settings = previous);
+        _toast("That didn't save.", onRetry: () => _saveSettings(s));
+      }
+      return;
+    }
     await _load();
+  }
+
+  void _toast(String m, {required VoidCallback onRetry}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(m),
+        action: SnackBarAction(label: 'Retry', onPressed: onRetry),
+      ),
+    );
   }
 
   @override
@@ -174,19 +251,68 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
               ? const Center(child: CircularProgressIndicator())
               : ListView(
                   padding: const EdgeInsets.all(16),
-                  children: _isFemale ? _femaleTracker() : _partnerView(),
+                  children: _body(),
                 ),
         ),
       ),
     );
   }
 
+  /// Nothing renders from a default: a screen that never read her row shows
+  /// the failure, not a tracker, and a screen that read it once keeps the last
+  /// good answer with a note saying it is not fresh.
+  List<Widget> _body() {
+    final err = _loadError;
+    if (_isFemale) {
+      final settings = _settings;
+      if (settings == null) return _loadFailed(err);
+      return [
+        if (err != null) ..._stale(err),
+        ..._femaleTracker(settings),
+      ];
+    }
+    if (!_partnerLoaded) return _loadFailed(err);
+    return [
+      if (err != null) ..._stale(err),
+      ..._partnerView(),
+    ];
+  }
+
+  List<Widget> _loadFailed(String? err) => [
+        _wrapCard(Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(err ?? "Couldn't load this — try again.",
+                style: const TextStyle(
+                    color: MilesColors.cream50, fontSize: 13.5, height: 1.4,),),
+            const SizedBox(height: 10),
+            TextButton(onPressed: _load, child: const Text('Try again')),
+          ],
+        ),),
+      ];
+
+  List<Widget> _stale(String err) => [
+        _wrapCard(Row(
+          children: [
+            const Icon(Icons.cloud_off, color: MilesColors.taupe, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Not up to date — $err',
+                  style: const TextStyle(
+                      color: MilesColors.taupe, fontSize: 12, height: 1.35,),),
+            ),
+            TextButton(onPressed: _load, child: const Text('Retry')),
+          ],
+        ),),
+        const SizedBox(height: 14),
+      ];
+
   // ──────────────────────────── Female tracker ───────────────────────────────
-  List<Widget> _femaleTracker() {
+  List<Widget> _femaleTracker(CycleSettings settings) {
     final avgCycle =
-        CycleRepository.avgCycleLength(_events, _settings.avgCycleLength);
+        CycleRepository.avgCycleLength(_events, settings.avgCycleLength);
     final avgPeriod =
-        CycleRepository.avgPeriodLength(_events, _settings.avgPeriodLength);
+        CycleRepository.avgPeriodLength(_events, settings.avgPeriodLength);
     return [
       Container(
         padding: const EdgeInsets.all(18),
@@ -255,13 +381,15 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         _row('Cycles logged', '${CycleRepository.startDates(_events).length}'),
       ]),
       const SizedBox(height: 14),
-      _settingsCard(),
+      _settingsCard(settings),
       const SizedBox(height: 14),
       _disclaimer(),
     ];
   }
 
-  Widget _settingsCard() {
+  /// Takes the loaded settings rather than reading the field, so there is no
+  /// way to build a control that writes a row this screen never read.
+  Widget _settingsCard(CycleSettings settings) {
     final name =
         ref.watch(sessionProvider).partner?.displayName ?? 'your partner';
     return _wrapCard(Column(
@@ -270,13 +398,13 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
         const Text('Settings', style: _h),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          value: _settings.shareWithPartner,
+          value: settings.shareWithPartner,
           activeThumbColor: MilesColors.ember,
-          onChanged: (v) => _saveSettings(_settings.copyWith(share: v)),
+          onChanged: (v) => _saveSettings(settings.copyWith(share: v)),
           title: Text('Share with $name',
               style: const TextStyle(color: MilesColors.cream50, fontSize: 14),),
           subtitle: Text(
-              _settings.shareWithPartner
+              settings.shareWithPartner
                   ? 'They see a gentle heads-up — never the details'
                   : 'Private to you',
               style: const TextStyle(color: MilesColors.taupe, fontSize: 12),),
@@ -286,8 +414,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           title: const Text('Average cycle length',
               style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           trailing: _stepper(
-            _settings.avgCycleLength,
-            (v) => _saveSettings(_settings.copyWith(cycle: v)),
+            settings.avgCycleLength,
+            (v) => _saveSettings(settings.copyWith(cycle: v)),
             min: 20,
             max: 45,
           ),
@@ -297,8 +425,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           title: const Text('Average period length',
               style: TextStyle(color: MilesColors.cream50, fontSize: 14),),
           trailing: _stepper(
-            _settings.avgPeriodLength,
-            (v) => _saveSettings(_settings.copyWith(period: v)),
+            settings.avgPeriodLength,
+            (v) => _saveSettings(settings.copyWith(period: v)),
             min: 2,
             max: 10,
           ),
