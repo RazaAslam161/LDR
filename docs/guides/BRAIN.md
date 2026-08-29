@@ -14370,3 +14370,57 @@ share-quality row).
 - app_release NOT updated (self-updater retired).
 - Awaiting owner field test per §183's checklist; after it, read the
   share-quality row — codec slug must say h264.
+
+## §185 — The sprint is committed and pushed (2026-08-29)
+
+- Owner ordered "commit and push your work" — the standing top-risk
+  (ten builds of uncommitted tree) is closed.
+- Nine commits fce6b20..008b27f on fix-sprint, pushed; remote confirms
+  008b27f at refs/heads/fix-sprint; working tree clean (porcelain 0).
+- Secrets sweep before staging: no key/token literals in the diff; .env and
+  maps.properties confirmed gitignored; vendored fork 2.8MB committed with
+  the pubspec override.
+- This section is itself uncommitted until the next docs commit — expected.
+
+## §186 — Build 63: the black share was a floor at the estimator's birth value (2026-08-29)
+
+Build 62 field test, decoded from evidence (all pasted in session):
+
+- The pipeline WORKS — OP8 logcat showed the partner's share hardware-decoding
+  at 1280x640, 25fps sustained (`renderFps=25 discardFps=0`) at 04:30.
+- The owner's 4:22 attempt died at birth, and the new telemetry caught it:
+  `h264 r0/0 138s c0 f0 cpu0 bw0 fps0 bwe300` — connected 138s, H.264
+  negotiated, encoder emitted ZERO frames, BWE pinned at exactly 300kbps.
+- ROOT CAUSE (one sentence): b62 raised the share's minBitrate floor to
+  300kbps — equal to libwebrtc's INITIAL bandwidth estimate — so on the 4G
+  uplink whose first probe landed at/below the floor, the rate allocator
+  suspended the stream; no media → the estimate never moved → connected and
+  black forever. b61's 150k floor delivered frames on the same phones; WiFi
+  clears 300k instantly, which is why the retry worked. Static capture ruled
+  out (the shared chat screen's ember background animates).
+- FIX: per-rung floors (100/150/250/300k) — the start floor must sit well
+  under the estimator's birth value, law-tested. Plus a NEVER-STARTED watch:
+  10 frameless seconds after negotiation → one-shot retry with the floor
+  dropped to 50k; 20 → the share ENDS VISIBLY instead of hanging black, and
+  the digest now carries an end reason (` e0/e1/e2` = stopped/stalled/never
+  started).
+- ALSO: the sharer no longer flies blind — call_pip.dart's share-hide is
+  replaced by a two-face card (partner + self camera, 200×148, draggable)
+  that stays up during shares. It is captured in the shared frame:
+  deliberate, disclosed in-code, and what every major meeting app does.
+  screenSelfRenderer stays banned there (recursion tunnel).
+- Gates: scoped analyze 0/0; full suite 1266/1266 passed.
+
+Next: build 63 → both phones → owner shares FROM THE 4G PHONE (the case that
+deadlocked); then read client_errors — expect fps>0, bwe≫300, e0.
+
+## §187 — Build 63 shipped to both phones (2026-08-29)
+
+- release.sh --bump completed; sideload sha256 bd9ab51c…ccea95; installs read
+  back from dumpsys: versionCode=63 on 1896b4b3 (OnePlus 8) and a959ee2b
+  (OnePlus 7). One new analyze info (escaped quote in a new test name) was
+  caught and fixed back to the 550 baseline; profile test re-run green.
+- Awaiting the owner's decisive test: share FROM THE 4G PHONE (OnePlus 8 —
+  the exact deadlock case). Then read client_errors share-quality: expect
+  fps>0, bwe≫300, e0. An e2 row means the never-started watch fired — the
+  share ended visibly and named its own death.
