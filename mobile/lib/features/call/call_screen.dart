@@ -393,11 +393,15 @@ class CallScreen extends ConsumerWidget {
                                   // other, so the image nests inside itself
                                   // until both encoders give up. The controller
                                   // refuses it; this says so before the tap.
-                                  disabled:
-                                      call.remoteScreen && !call.sharingScreen,
+                                  // Reads the ANNOUNCEMENT, not the pixels:
+                                  // the button must lock the moment they say
+                                  // they are sharing, not seconds later when
+                                  // their first frame lands.
+                                  disabled: call.remoteSharePending &&
+                                      !call.sharingScreen,
                                   label: call.sharingScreen
                                       ? 'Stop'
-                                      : call.remoteScreen
+                                      : call.remoteSharePending
                                           ? 'Sharing'
                                           : 'Screen',
                                   onTap: () => call.sharingScreen

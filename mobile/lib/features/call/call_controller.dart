@@ -88,7 +88,34 @@ class CallController extends ChangeNotifier {
   bool frontCamera = true; // drives the local preview mirror
   bool minimized = false; // call screen dismissed but call still running
   bool sharingScreen = false; // my display is going out in place of my camera
-  bool remoteScreen = false; // theirs is — render it letterboxed, not cropped
+  bool remoteScreen = false; // theirs is ON MY SCREEN — real pixels arrived
+
+  /// They ANNOUNCED a share; it has not necessarily arrived.
+  ///
+  /// These were one flag, and that was the black screen. `screen{on:true}` is
+  /// broadcast before the offer is even created, so the instant it landed the
+  /// big view swapped to an empty screenRenderer and the partner's face was
+  /// gone — whether or not the share ever negotiated, with nothing to put it
+  /// back. Announcement drives the "they are sharing" affordances; only real
+  /// pixels ([remoteScreen], set from onRemoteStream) may take the big view.
+  bool remoteSharePending = false;
+
+  /// Share ICE that arrived before the receive session existed.
+  ///
+  /// _receiveShare can take hundreds of milliseconds to publish _shareSession
+  /// (stopScreenShare -> dropScreenShare polls the foreground service for up
+  /// to 500ms), and the sharer's candidates arrive within a few ms of the
+  /// offer. They were being dropped on the floor in exactly that window, which
+  /// can cost the whole host candidate set. Bounded: a share that needs more
+  /// than this is not going to connect on the ones after it either.
+  final List<Map<dynamic, dynamic>> _pendingShareIce = [];
+  static const int _maxPendingShareIce = 64;
+
+  /// Serialises _receiveShare against itself. It is invoked unawaited from the
+  /// signal switch, so two offers in flight ran two concurrent bodies, the
+  /// second closing the first's session while the first was suspended inside
+  /// onOffer — then operating on a disposed connection.
+  Future<void> _receiveGate = Future<void>.value();
   String? peerName; // who's calling / being called
 
   final List<RTCIceCandidate> _pendingRemote = [];
@@ -1086,7 +1113,7 @@ class CallController extends ChangeNotifier {
     // a busy screen: each display contains a live picture of the other, so the
     // image nests inside itself until both encoders fall over. Nothing used to
     // stop it — this guard and the disabled button are the two halves of that.
-    if (remoteScreen) {
+    if (remoteScreen || remoteSharePending) {
       Diag.record(DiagArea.call, 'screen_share_refused', corr: _callId);
       return;
     }
@@ -1176,7 +1203,13 @@ class CallController extends ChangeNotifier {
       await CallForegroundService.dropScreenShare();
       return;
     }
+    // Close before overwrite. _receiveShare does this; this path did not, so
+    // a live receive session here was orphaned — never closed, still holding
+    // an ICE agent and sockets for the rest of the call.
+    final displaced = _shareSession;
     _shareSession = session;
+    if (displaced != null) await displaced.close();
+    _pendingShareIce.clear();
     sharingScreen = true;
     _shareStartedAt = DateTime.now();
     _screenStopHinted = false;
@@ -1694,18 +1727,30 @@ class CallController extends ChangeNotifier {
         if (session != null) unawaited(session.onAnswer(map));
       case 'share-ice':
         final session = _shareSession;
-        if (session != null) unawaited(session.onIce(map));
+        if (session != null) {
+          unawaited(session.onIce(map));
+        } else if (_pendingShareIce.length < _maxPendingShareIce) {
+          // Held, not dropped. Flushed the moment the session is published.
+          _pendingShareIce.add(map);
+        }
       case 'screen':
-        remoteScreen = map['on'] == true;
-        // While sharingScreen the held session is my SEND side — a stray
-        // 'off' from the far side must not close it.
-        if (!remoteScreen && !sharingScreen) {
-          // Their share ended: drop the receive connection and the last frame,
-          // or the next share would letterbox around a stale picture.
-          final session = _shareSession;
-          _shareSession = null;
-          if (session != null) unawaited(session.close());
-          screenRenderer.srcObject = null;
+        final announced = map['on'] == true;
+        remoteSharePending = announced;
+        // Deliberately NOT `remoteScreen = announced`. The big view follows
+        // frames, never an announcement — see [remoteSharePending].
+        if (!announced) {
+          remoteScreen = false;
+          _pendingShareIce.clear();
+          // While sharingScreen the held session is my SEND side — a stray
+          // 'off' from the far side must not close it.
+          if (!sharingScreen) {
+            // Their share ended: drop the receive connection and the last
+            // frame, or the next share would letterbox a stale picture.
+            final session = _shareSession;
+            _shareSession = null;
+            if (session != null) unawaited(session.close());
+            screenRenderer.srcObject = null;
+          }
         }
         notifyListeners();
       case 'hangup':
@@ -1718,27 +1763,74 @@ class CallController extends ChangeNotifier {
   /// Any session already held is superseded — either their previous share's
   /// receive side that a lost 'screen off' never closed, or a dead send side.
   Future<void> _receiveShare(Map<dynamic, dynamic> map) async {
+    // Serialised against itself: this is called unawaited from the signal
+    // switch, so two offers in flight ran two concurrent bodies and the second
+    // closed the first's session while the first was still suspended inside
+    // onOffer — which then operated on a disposed connection.
+    final gate = _receiveGate.then((_) => _receiveShareLocked(map));
+    _receiveGate = gate.catchError((_) {});
+    return gate;
+  }
+
+  Future<void> _receiveShareLocked(Map<dynamic, dynamic> map) async {
     // Both pressed Share inside one round trip: the guards never saw each
-    // other. Their offer is already on the wire, so yield — end mine cleanly
-    // rather than strand a send session the UI still calls live.
-    if (sharingScreen) await stopScreenShare();
+    // other and both offers are on the wire.
+    //
+    // This was an unconditional "if (sharingScreen) stopScreenShare()", which
+    // is SYMMETRIC — so both sides yielded, and simultaneous share killed both
+    // shares every time, deterministically. The call already solved this exact
+    // problem; reuse its tie-break so that exactly one side yields.
+    if (sharingScreen) {
+      final theirs = map['call_id']?.toString();
+      final glare = callGlareFor(mine: _callId, theirs: theirs);
+      if (glare == CallGlare.keepMine) {
+        Diag.record(DiagArea.call, 'share_glare_keep', corr: _callId);
+        return;
+      }
+      Diag.record(DiagArea.call, 'share_glare_yield', corr: _callId);
+      await stopScreenShare();
+    }
     final old = _shareSession;
     _shareSession = null;
     if (old != null) await old.close();
-    final session = ScreenShareSession(
+    final iceConfig = await _iceConfig();
+    late final ScreenShareSession session;
+    session = ScreenShareSession(
       send: _send,
-      iceConfig: await _iceConfig(),
+      iceConfig: iceConfig,
       onRemoteStream: (stream) {
+        if (!identical(session, _shareSession)) return;
+        // ONLY here, on real pixels, does their display take the big view.
         screenRenderer.srcObject = stream;
         remoteScreen = true;
         notifyListeners();
       },
-      // Receive side: the sharer announces the end via 'screen off'; a failed
-      // connection here has nothing to stop.
-      onEnded: () {},
+      // Their share failed, timed out, or never produced a frame.
+      //
+      // This was an empty callback, and that is why a failed negotiation left
+      // the viewer holding a black full-screen letterbox with their partner's
+      // face gone and nothing in existence able to bring it back.
+      onEnded: () {
+        if (!identical(session, _shareSession)) return;
+        _shareSession = null;
+        remoteScreen = false;
+        remoteSharePending = false;
+        screenRenderer.srcObject = null;
+        notifyListeners();
+        unawaited(session.close());
+      },
       stopHinted: () => false,
     );
+    // Published BEFORE the negotiation await, so share-ice arriving mid-offer
+    // reaches the session's own pending queue instead of the floor.
     _shareSession = session;
+    if (_pendingShareIce.isNotEmpty) {
+      final held = List<Map<dynamic, dynamic>>.from(_pendingShareIce);
+      _pendingShareIce.clear();
+      for (final c in held) {
+        unawaited(session.onIce(c));
+      }
+    }
     await session.onOffer(map);
   }
 
@@ -2103,6 +2195,11 @@ class CallController extends ChangeNotifier {
       unawaited(PipMode.setWanted(false));
       sharingScreen = false;
       remoteScreen = false;
+      remoteSharePending = false;
+      _pendingShareIce.clear();
+      // The projection is gone with the call. Without this the foreground
+      // service keeps claiming mediaProjection for the rest of the process.
+      unawaited(CallForegroundService.dropScreenShare());
       // Hangup mid-share is a common share end, so the digest is taken here
       // too (null on the receive side). No camera restore on purpose: the
       // peer connection is disposed below, and the next call builds fresh

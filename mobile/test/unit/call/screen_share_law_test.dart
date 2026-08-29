@@ -46,9 +46,16 @@ void main() {
           reason: 'an exit path stopped releasing the session',);
       final off = controller.indexOf("case 'screen':");
       expect(off, greaterThan(-1));
+      // Bounded by the case BLOCK, not by a character count. The old window
+      // was a fixed 700 chars, which made this assertion a function of comment
+      // length: adding a comment above the assignment failed the test while
+      // deleting the assignment entirely could still pass if something else
+      // nearby matched. The block is the thing being asserted about.
+      final blockEnd = controller.indexOf("case '", off + 6);
+      expect(blockEnd, greaterThan(off));
       expect(
           controller
-              .substring(off, off + 700)
+              .substring(off, blockEnd)
               .contains('screenRenderer.srcObject = null'),
           isTrue,
           reason: 'screen-off must drop the last frame, not letterbox it',);

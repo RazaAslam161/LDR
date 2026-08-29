@@ -99,6 +99,25 @@ class ScreenShareSession {
   int _neverStarted = 0;
   bool _floorDropped = false;
 
+  /// Whether the encoder profile has ever actually reached the sender, and how
+  /// many attempts found nothing to write to.
+  ///
+  /// Kept because the failure this guards against was invisible: a share can
+  /// run to completion with the profile never applied, which is a black or
+  /// unwatchable picture with nothing in any log to say why. [_sampleOnce]
+  /// retries while this is false.
+  bool _rungApplied = false;
+  int _rungSkips = 0;
+
+  /// Every share state transition, on one greppable tag: `adb logcat | grep MilesShare`.
+  ///
+  /// Not decoration. `Diag` records nothing in production
+  /// (core/diag/diag.dart:349) and this handset's logcat ring is 256 KiB
+  /// drowned in OS freeze/unfreeze spam, so an untagged debugPrint is not a
+  /// diagnostic — it is a hope. Five builds shipped an unverified share partly
+  /// because nothing it did could be seen from outside.
+  static void _log(String msg) => debugPrint('MilesShare $msg');
+
   /// How this share ended, for the digest: 0 stopped, 1 stalled after frames,
   /// 2 never produced a frame at all.
   int _endReason = 0;
@@ -183,10 +202,25 @@ class ScreenShareSession {
       debugPrint('[share] codec preference: $e');
     }
     await _applyRung();
-    final offer = await pc.createOffer({});
-    if (!identical(pc, _pc)) return;
-    await pc.setLocalDescription(offer);
-    send('share-offer', {'sdp': offer.sdp, 'type': offer.type});
+    try {
+      final offer = await pc.createOffer({});
+      if (!identical(pc, _pc)) {
+        // The session was closed underneath us mid-negotiation. Returning
+        // quietly here used to leave the controller with sharingScreen true
+        // and no offer ever sent — a share that is "on" forever and does
+        // nothing. Say so, and let the controller unwind.
+        _log('send superseded during createOffer');
+        onEnded();
+        return;
+      }
+      await pc.setLocalDescription(offer);
+      send('share-offer', {'sdp': offer.sdp, 'type': offer.type});
+      _log('send offered');
+    } catch (e) {
+      _log('send offer FAILED: $e');
+      onEnded();
+      return;
+    }
     _shareStart = DateTime.now();
     _stats = Timer.periodic(const Duration(seconds: 1), (_) => _sample());
   }
@@ -199,26 +233,75 @@ class ScreenShareSession {
   }
 
   Future<void> _applyRung({int? floorKbps}) async {
-    final sender = _sender;
-    if (sender == null) return;
+    final pc = _pc;
+    if (pc == null) return;
     final r = climb[_rung];
     try {
+      // Re-read the sender from the connection. NEVER reuse the one captured
+      // at addTrack.
+      //
+      // This is the defect that made the share black. In the vendored plugin
+      // `RTCRtpSender.parameters` is a plain field
+      // (third_party/flutter_webrtc/lib/src/native/rtc_rtp_sender_impl.dart:138)
+      // filled once from the addTrack response and thereafter written only by
+      // our own setParameters — it is never re-read from native. Before
+      // negotiation that response usually carries NO encodings, so the guard
+      // below returned early; and because the snapshot could not refresh, the
+      // onAnswer re-assert that exists precisely to cover that case returned
+      // early too, for the entire life of the share. The sender then ran
+      // completely unprofiled: no scale, no fps cap, no ceiling and — the one
+      // that kills — no floor. That is the unfunded start of BRAIN §180 and
+      // the connected-and-black share of §186, reintroduced through a cache.
+      //
+      // getSenders() rebuilds each sender with RTCRtpParameters.fromMap of a
+      // fresh native read, which is what every other setParameters site in
+      // this app (call_controller.dart:1271) already did.
+      final senders = await pc.getSenders();
+      if (!identical(pc, _pc)) return;
+      RTCRtpSender? sender;
+      for (final s in senders) {
+        if (s.track?.kind == 'video') {
+          sender = s;
+          break;
+        }
+      }
+      if (sender == null && senders.isNotEmpty) sender = senders.first;
+      sender ??= _sender;
+      if (sender == null) {
+        _rungSkips++;
+        _log('rung$_rung SKIP no-sender n=$_rungSkips');
+        return;
+      }
       final params = sender.parameters;
       final encodings = params.encodings;
-      if (encodings == null || encodings.isEmpty) return;
+      if (encodings == null || encodings.isEmpty) {
+        // Not a no-op worth swallowing: an unprofiled screencast sender opens
+        // at the whole panel's pixel rate with no floor under it. Counted and
+        // announced so _sampleOnce retries it, and so this can never again be
+        // silent for the life of a share.
+        _rungSkips++;
+        _log('rung$_rung SKIP no-encodings n=$_rungSkips');
+        return;
+      }
+      final scale = scaleFor(_captureSize, r.longEdge);
+      final floor = floorKbps ?? r.minKbps;
       for (final e in encodings) {
         e
-          ..scaleResolutionDownBy = scaleFor(_captureSize, r.longEdge)
+          ..scaleResolutionDownBy = scale
           ..maxFramerate = r.fps
           ..maxBitrate = r.maxKbps * 1000
-          ..minBitrate = (floorKbps ?? r.minKbps) * 1000;
+          ..minBitrate = floor * 1000;
       }
       params.degradationPreference = RTCDegradationPreference.BALANCED;
       await sender.setParameters(params);
+      _sender = sender;
+      _rungApplied = true;
+      _log('rung$_rung APPLIED scale=${scale.toStringAsFixed(2)} '
+          'fps=${r.fps} max=${r.maxKbps}k min=${floor}k');
     } catch (e) {
       // The share still runs at whatever libwebrtc picked; a profile is an
       // improvement, never a precondition.
-      debugPrint('[share] rung $_rung apply: $e');
+      _log('rung$_rung apply failed: $e');
     }
   }
 
@@ -330,6 +413,16 @@ class ScreenShareSession {
     _fpsRing.add(fps);
     if (_fpsRing.length > 300) _fpsRing.removeAt(0);
 
+    // Keep trying to profile the sender until it takes.
+    //
+    // Encodings do not exist on the sender until negotiation has built them,
+    // so the pre-offer apply legitimately finds nothing. What must never
+    // happen again is giving up there: an unprofiled screencast sender runs at
+    // the whole panel's pixel rate with no floor, which is a share that is
+    // black or unwatchable for its entire life. One retry per second, free,
+    // and it stops the moment it succeeds.
+    if (!_rungApplied) await _applyRung();
+
     // The stall check — the only thing that may END a share, and only on the
     // real evidence of frames having stopped. Thresholds are sample counts at
     // a 1s cadence: the same 2s hinted / 6s unhinted wall clock that survived
@@ -431,45 +524,100 @@ class ScreenShareSession {
 
   // ── Receiver ──────────────────────────────────────────────────────────
 
+  /// How long the receiver waits for the partner's display before giving up.
+  ///
+  /// The receiving side previously had NO watchdog of any kind: `onOffer` set
+  /// no connection-state handler and started no timer — only the sharer did.
+  /// So every way this negotiation could fail ended the same way, with the
+  /// viewer holding a black full-screen letterbox that had already replaced
+  /// their partner's face, forever, with nothing to clear it.
+  static const receiveDeadline = Duration(seconds: 15);
+
+  Timer? _receiveWatch;
+
   Future<void> onOffer(Map<dynamic, dynamic> map) async {
     _isSharer = false;
     await close();
-    final pc = await createPeerConnection(iceConfig);
-    _pc = pc;
-    _wireIce(pc);
-    pc.onTrack = (event) {
-      if (event.track.kind != 'video') return;
-      final stream = event.streams.isNotEmpty
-          ? event.streams.first
-          : null;
-      if (stream != null) onRemoteStream(stream);
-    };
-    await pc.setRemoteDescription(RTCSessionDescription(
-      map['sdp']?.toString(),
-      map['type']?.toString(),
-    ),);
-    _remoteSet = true;
-    await _flushIce();
-    final answer = await pc.createAnswer();
-    if (!identical(pc, _pc)) return;
-    await pc.setLocalDescription(answer);
-    send('share-answer', {'sdp': answer.sdp, 'type': answer.type});
+    RTCPeerConnection? pc;
+    try {
+      pc = await createPeerConnection(iceConfig);
+      _pc = pc;
+      _wireIce(pc);
+      final self = pc;
+      pc.onConnectionState = (s) {
+        if (!identical(self, _pc)) return;
+        _log('recv state=${s.name}');
+        if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+            s == RTCPeerConnectionState.RTCPeerConnectionStateClosed ||
+            s == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+          onEnded();
+        }
+      };
+      pc.onTrack = (event) {
+        // Guarded: without an identity check a late event from a superseded
+        // connection re-points the renderer at a dead track.
+        if (!identical(self, _pc)) return;
+        if (event.track.kind != 'video') return;
+        final stream = event.streams.isNotEmpty ? event.streams.first : null;
+        if (stream == null) {
+          _log('recv track with NO stream — nothing to render');
+          return;
+        }
+        _receiveWatch?.cancel();
+        _receiveWatch = null;
+        _log('recv first stream');
+        onRemoteStream(stream);
+      };
+      await pc.setRemoteDescription(RTCSessionDescription(
+        map['sdp']?.toString(),
+        map['type']?.toString(),
+      ),);
+      if (!identical(pc, _pc)) return;
+      _remoteSet = true;
+      await _flushIce();
+      final answer = await pc.createAnswer();
+      if (!identical(pc, _pc)) return;
+      await pc.setLocalDescription(answer);
+      send('share-answer', {'sdp': answer.sdp, 'type': answer.type});
+      _log('recv answered');
+      // Nothing arriving is a failure with a deadline, not a wait forever.
+      _receiveWatch = Timer(receiveDeadline, () {
+        if (!identical(pc, _pc)) return;
+        _log('recv DEADLINE — no display in ${receiveDeadline.inSeconds}s');
+        onEnded();
+      });
+    } catch (e) {
+      // Every one of these awaits used to throw straight out of an
+      // `unawaited(...)` call with no catch — an invisible unhandled async
+      // error, and a viewer left black with no signal that anything failed.
+      _log('recv FAILED: $e');
+      onEnded();
+    }
   }
 
   Future<void> onAnswer(Map<dynamic, dynamic> map) async {
     final pc = _pc;
     if (pc == null || !_isSharer) return;
-    await pc.setRemoteDescription(RTCSessionDescription(
-      map['sdp']?.toString(),
-      map['type']?.toString(),
-    ),);
-    _remoteSet = true;
-    await _flushIce();
-    // Re-assert the rung now that negotiation is done. Before the answer the
-    // sender often reports NO encodings, so the pre-offer apply can no-op —
-    // and an unprofiled screencast sender opens at the full display's pixel
-    // rate, which is the unfunded start this design exists to end.
-    await _applyRung();
+    try {
+      await pc.setRemoteDescription(RTCSessionDescription(
+        map['sdp']?.toString(),
+        map['type']?.toString(),
+      ),);
+      if (!identical(pc, _pc)) return;
+      _remoteSet = true;
+      await _flushIce();
+      _log('send answered, negotiated');
+      // Re-assert the rung now that negotiation is done. Before the answer the
+      // sender often reports NO encodings, so the pre-offer apply can no-op —
+      // and an unprofiled screencast sender opens at the full display's pixel
+      // rate, which is the unfunded start this design exists to end. This only
+      // became true once _applyRung stopped reading a snapshot that could
+      // never refresh; see the note there.
+      await _applyRung();
+    } catch (e) {
+      _log('send answer FAILED: $e');
+      onEnded();
+    }
   }
 
   Future<void> onIce(Map<dynamic, dynamic> map) async {
@@ -518,6 +666,8 @@ class ScreenShareSession {
   Future<void> close() async {
     _stats?.cancel();
     _stats = null;
+    _receiveWatch?.cancel();
+    _receiveWatch = null;
     final pc = _pc;
     _pc = null;
     _sender = null;
@@ -540,6 +690,8 @@ class ScreenShareSession {
     _fpsRing.clear();
     _neverStarted = 0;
     _floorDropped = false;
+    _rungApplied = false;
+    _rungSkips = 0;
     _endReason = 0;
     if (pc != null) {
       try {
