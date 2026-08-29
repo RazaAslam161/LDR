@@ -71,6 +71,18 @@ class MemoryTap {
 
 final ValueNotifier<MemoryTap?> pendingMemory = ValueNotifier<MemoryTap?>(null);
 
+/// The four beats of the unlinking ritual, as reach-notify labels them.
+///
+/// One predicate rather than four literals in three places: the tap router
+/// below defaults to REACH for anything it does not recognise, so a beat that
+/// is missed here does not go quiet — it rings the loudest alert in the app,
+/// during a breakup, with somebody else's id in the reach slot.
+bool _isUnlink(Object? type) =>
+    type == 'unlink' ||
+    type == 'unlink_lastcall' ||
+    type == 'unlink_relinked' ||
+    type == 'unlink_ended';
+
 /// An unlink push, foreground or tapped. Carries nothing but the fact —
 /// the ceremony row itself is fetched over RLS; AppShell routes to /unlink.
 final ValueNotifier<bool?> pendingUnlink = ValueNotifier<bool?>(null);
@@ -335,9 +347,11 @@ class FcmService {
           MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: false);
       return;
     }
-    if (type == 'unlink') {
-      // Foreground: the realtime channel is already telling AppShell; this
-      // only covers the race where the push wins.
+    if (_isUnlink(type)) {
+      // Foreground: realtime usually gets there first, and while the ritual
+      // holds the screen UnlinkScreen is refetching on its own. This covers
+      // the race where the push wins — and all four beats, because a kind
+      // without a branch here falls through to the Reach overlay below.
       pendingUnlink.value = true;
       return;
     }
@@ -367,7 +381,7 @@ class FcmService {
           MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: true);
       return;
     }
-    if (type == 'unlink') {
+    if (_isUnlink(type)) {
       pendingUnlink.value = true;
       return;
     }

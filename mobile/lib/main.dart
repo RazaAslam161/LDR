@@ -42,7 +42,6 @@ import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
-import 'package:miles/features/unlink/unlink_banner.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
@@ -1053,9 +1052,6 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // screen is sending the partner a black rectangle, and neither of
               // them could previously tell that from a broken share.
               const ScreenShareBanner(),
-              // The unlinking ceremony's presence, app-wide and tappable —
-              // a seven-day clock must not depend on which page is open.
-              const UnlinkBanner(),
               // Presence used to float here, top-centre over every screen. It
               // covered titles and buttons, interrupted whatever was being
               // read, and looked like a system alert instead of a person. It

@@ -50,7 +50,9 @@ import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
+import 'package:miles/features/unlink/unlink_chat_page.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
+import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
 import 'package:miles/features/watch/watch_together_screen.dart';
 
@@ -60,6 +62,44 @@ import 'package:miles/features/watch/watch_together_screen.dart';
 /// the disguise cover is up, and the lifecycle handler runs from the very first
 /// frame. Backgrounding from the cover must not throw.
 PresenceRouteObserver? presenceRouteObserver;
+
+/// What is still reachable while the unlinking ritual is open.
+///
+/// The whole access policy, in one pure function, because the alternative is
+/// a condition spread across a redirect and every screen that has to agree
+/// with it. Everything not named here resolves to the ritual.
+///
+/// Three groups, and each is here for a reason that outranks the ritual:
+///
+///  * THE EXITS. Deleting the account and the permanent leave are never gated
+///    on the ceremony — that is assertion #4 of 20260829120000, it is Play
+///    policy, and trapping somebody inside a screen about leaving is the
+///    precise failure this feature exists to stop being. /rewrap and /call go
+///    with them: a phone that cannot read its own history must always be able
+///    to fix that.
+///  * THEIR MEMORIES. Export stays open to both of them at every stage. A
+///    ritual that holds your photographs hostage is a threat, not a pause.
+///  * THE PARTNER'S CHAT. Only for the person who did NOT start it. The window
+///    exists to give the two of them a chance, and the chance is a
+///    conversation — a single sealed note cannot repair a fight. It also
+///    closes the obvious abuse: without it, one tap silently cuts your partner
+///    off from you for a day.
+///
+/// The initiator does not get chat back. They closed the door; the room they
+/// closed is closed to them too, and Re-link is the way back into it. That
+/// asymmetry is the ritual having a cost, which is the point of one.
+@visibleForTesting
+bool unlinkAllows(UnlinkRow row, String uid, String path) {
+  if (path == '/unlink') return true;
+  const always = {
+    '/app/settings/export',
+    '/app/settings/account',
+    '/rewrap',
+    '/call',
+  };
+  if (always.contains(path)) return true;
+  return path == '/unlink/chat' && !row.iAmInitiator(uid);
+}
 
 /// Routes the user based on auth + onboarding state.
 GoRouter buildRouter(Ref ref) {
@@ -72,6 +112,11 @@ GoRouter buildRouter(Ref ref) {
       // decided once, against whatever was loaded when the router was built,
       // and a state that arrives afterwards never reopens the route.
       SeveranceState.held,
+      // The unlinking ritual takes the app away, and gives it back the instant
+      // somebody taps Re-link. Both directions have to move the router, and
+      // both arrive asynchronously — realtime on the far phone, the RPC's own
+      // reload on the near one.
+      UnlinkState.current,
     ],),
     // Presence is published from here rather than from each screen, so every
     // route reports — including the 31 that never did, and any added later.
@@ -187,6 +232,29 @@ GoRouter buildRouter(Ref ref) {
         return '/rewrap';
       }
 
+      // ── The unlinking ritual takes the app away. ──
+      //
+      // This is the difference between the ceremony people ignored and a
+      // ceremony. The shipped version left both of them inside the app behind
+      // a 4mm banner, and the tap that is meant to be the heaviest in the
+      // product read as nothing happening at all.
+      //
+      // A redirect, not an AppShell push behind a SharedPreferences latch: a
+      // latch is dismissible, survives one viewing, and raced the shell's own
+      // lifecycle. This is the TermsGate shape — one `if`, above thirty-five
+      // routes, unskippable — and the same reasoning applies, that checking at
+      // each screen is how thirty-four end up unchecked.
+      //
+      // Below the keyless gate on purpose: a phone that cannot read a word of
+      // the history has a worse problem than a countdown, and /rewrap is
+      // reachable from the ritual anyway.
+      final ceremony = UnlinkState.current.value;
+      if (ceremony != null &&
+          session.profile != null &&
+          !unlinkAllows(ceremony, session.profile!.id, path)) {
+        return '/unlink';
+      }
+
       // A couple of ONE is not "fully set up", and the sweep below used to
       // treat it as if it were.
       //
@@ -268,14 +336,22 @@ GoRouter buildRouter(Ref ref) {
         path: '/rewrap',
         builder: (context, state) => const RewrapScreen(),
       ),
-      // The unlinking ceremony. Deliberately NO redirect branch and NO
-      // refreshListenable entry for it: a paired session already reaches any
-      // path, the landing is an AppShell push (the rewrap-offer pattern), and
-      // after execution the needsCouple gate sweeps this route to /couple like
-      // any other. The screen self-guards against a stale deep link.
+      // The unlinking ritual. It HAS a redirect branch and a refreshListenable
+      // entry now (both above) — the note in this place used to say it
+      // deliberately had neither, which was true of a banner and is the reason
+      // the ceremony read as nothing happening. After the couple dissolves the
+      // needsCouple gate sweeps this route to /couple like any other.
       GoRoute(
         path: '/unlink',
         builder: (context, state) => const UnlinkScreen(),
+      ),
+      // The one door the ritual leaves open, and only for the partner —
+      // unlinkAllows() is what enforces that. Chat lives as a TAB inside the
+      // shell, so reaching it without also reaching Touch, Closer, the games
+      // and the gallery needs its own route.
+      GoRoute(
+        path: '/unlink/chat',
+        builder: (context, state) => const UnlinkChatPage(),
       ),
       GoRoute(
         path: '/app',

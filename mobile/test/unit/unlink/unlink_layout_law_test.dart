@@ -57,12 +57,21 @@ void main() {
         isTrue,
         reason: 'the flexible child IS the viewport, or nothing scrolls',);
 
-    final relink = screen.indexOf("'Re-link',");
-    expect(relink, greaterThan(end),
-        reason: 'inside the viewport, Re-link is one long note away from '
-            'being scrolled off a screen nobody can scroll back',);
+    // The CALL SITES, not the button's definition — it is a helper now,
+    // shared by the held state and the last call so the two moments that
+    // matter most cannot drift apart. `_relinkButton(),` is the invocation;
+    // `_relinkButton() =>` is the declaration, which legitimately sits higher
+    // up the file. EVERY invocation has to clear the viewport: one of the two
+    // being safe is exactly the half-fix this law exists to catch.
+    final calls = '_relinkButton(),'.allMatches(screen).toList();
+    expect(calls, isNotEmpty, reason: 'the only cancel control has gone');
+    for (final m in calls) {
+      expect(m.start, greaterThan(end),
+          reason: 'inside the viewport, Re-link is one long note away from '
+              'being scrolled off a screen nobody can scroll back',);
+    }
     // The export link dies with the same overflow, so it lives with it.
-    expect(screen.indexOf("'Save your memories'"), greaterThan(end));
+    expect(screen.indexOf("'Save our memories'"), greaterThan(end));
   });
 
   test('everything that can grow is inside the viewport', () {

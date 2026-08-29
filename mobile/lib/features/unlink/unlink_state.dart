@@ -32,7 +32,7 @@ class UnlinkState {
     } catch (e) {
       // Named, not swallowed: a banner that silently fails to appear looks
       // identical to a couple with nothing going on, and the difference is a
-      // seven-day clock somebody is not being shown.
+      // ritual somebody is being held inside without being shown.
       debugPrint('[unlink] state unreadable, showing nothing: '
           '${e.runtimeType}');
       applyRow(null);
@@ -67,6 +67,8 @@ class UnlinkRow {
     required this.coolingEndsAt,
     required this.lastLookEndsAt,
     required this.acceptedAt,
+    required this.relinkOpensAt,
+    required this.partnerGateOpensAt,
     required this.noteCipherBytea,
     required this.noteNonceBytea,
     required this.noteAuthor,
@@ -86,6 +88,13 @@ class UnlinkRow {
         acceptedAt: row['accepted_at'] == null
             ? null
             : DateTime.parse(row['accepted_at'] as String).toUtc(),
+        // Both gates default to started_at + 15 minutes when the column is
+        // absent or null — which is exactly what a row written by the previous
+        // server means, and what the server itself falls back to in
+        // unlink_accept(). A missing gate must never read as "open now".
+        relinkOpensAt: _gate(row['relink_opens_at'], row['started_at']),
+        partnerGateOpensAt:
+            _gate(row['partner_gate_opens_at'], row['started_at']),
         noteCipherBytea: row['note_cipher'] as String?,
         noteNonceBytea: row['note_nonce'] as String?,
         noteAuthor: row['note_author'] as String?,
@@ -93,6 +102,13 @@ class UnlinkRow {
             ? null
             : DateTime.parse(row['note_updated_at'] as String).toUtc(),
       );
+
+  /// A gate, or the 15 minutes after [started] that a null one stands for.
+  static DateTime _gate(Object? raw, Object? started) => raw == null
+      ? DateTime.parse(started! as String).toUtc().add(_gateWait)
+      : DateTime.parse(raw as String).toUtc();
+
+  static const _gateWait = Duration(minutes: 15);
 
   final String coupleId;
   final String initiatedBy;
@@ -103,6 +119,13 @@ class UnlinkRow {
   final DateTime coolingEndsAt;
   final DateTime? lastLookEndsAt;
   final DateTime? acceptedAt;
+
+  /// When the initiator's Re-link button appears, and when the partner may
+  /// agree. Both anchored to the ceremony's own start on the SERVER clock —
+  /// never to when a screen was first opened, so a partner who first looks
+  /// twenty hours in does not get a fresh fifteen-minute wait.
+  final DateTime relinkOpensAt;
+  final DateTime partnerGateOpensAt;
 
   /// The sealed note halves exactly as PostgREST hands them over (bytea wire
   /// form); decoding belongs to the repository so its byteaToBytes rules live
@@ -121,6 +144,19 @@ class UnlinkRow {
   /// Against the SERVER's clock — the deadline was computed by Postgres, and
   /// a handset an hour out would otherwise execute an hour early.
   bool get due => !endsAt.isAfter(ServerClock.now());
+
+  /// The initiator's way back is visible. The wait is a ritual and lives here,
+  /// in the UI: unlink_cancel() is deliberately ungated on the server, because
+  /// cancelling destroys nothing and a gated cancel would be a button that
+  /// throws for the first fifteen minutes of every ceremony.
+  bool get relinkOpen => !relinkOpensAt.isAfter(ServerClock.now());
+
+  /// The partner may agree. This one IS enforced by the server, because this
+  /// direction destroys.
+  bool get partnerGateOpen => !partnerGateOpensAt.isAfter(ServerClock.now());
+
+  /// Both of them chose it. Five minutes, one button.
+  bool get lastCall => state == 'last_look';
 
   bool iAmInitiator(String uid) => initiatedBy == uid;
 

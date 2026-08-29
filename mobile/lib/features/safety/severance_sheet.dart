@@ -16,10 +16,10 @@ import 'package:miles/core/ui/theme.dart';
 /// Play-mandated route out, so neither ever ends up behind the other.
 ///
 /// There is NO immediate-exit row. "Leave right now" was removed on 2026-08-29
-/// by the owner: the ceremony IS the way out, and a second door that skipped
-/// its seven days meant the sheet offered two endings with different rules and
-/// a proof-of-owner prompt that said nothing when it failed. One ending, one
-/// set of rules.
+/// by the owner: the ritual IS the way out, and a second door that skipped its
+/// window meant the sheet offered two endings with different rules and a
+/// proof-of-owner prompt that said nothing when it failed. One ending, one set
+/// of rules.
 ///
 /// What deliberately is NOT here: an undo. There is no SnackBarAction anywhere
 /// in this file and there must never be one. An "Undo" chip sitting on screen
@@ -126,16 +126,17 @@ class _SeveranceSheet extends StatelessWidget {
                 style: TextStyle(color: MilesColors.cream50),
               ),
               subtitle: const Text(
-                'Seven days, visible to both of you. One tap undoes it, '
-                'any day.',
+                'A day apart, and a way back. Both of you step out of the '
+                'app while it runs.',
                 style: TextStyle(color: MilesColors.taupe, fontSize: 12),
               ),
               onTap: () => _openCeremony(context),
             ),
           ] else
-            // Nobody on the other end. Pausing notifications from a partner who
-            // is not there, and beginning a seven-day goodbye with nobody to
-            // read it, are both refused by the server — so neither is offered.
+            // Nobody on the other end. Pausing notifications from a partner
+            // who is not there, and beginning a goodbye with nobody to read
+            // it, are both refused by the server — unlink_start() raises
+            // no_partner since 20260830120000 — so neither is offered.
             // What IS offered is the way out of the empty connection, because
             // this state otherwise has no exit from this screen at all.
             ListTile(
@@ -145,9 +146,9 @@ class _SeveranceSheet extends StatelessWidget {
                 style: TextStyle(color: MilesColors.cream50),
               ),
               subtitle: const Text(
-                'Nobody is on the other side of it any more. There is nothing '
-                'to wait seven days for, so this ends it now and frees you to '
-                'connect again.',
+                'Nobody is on the other side of it any more. There is nobody '
+                'to wait for, so this ends it now and frees you to connect '
+                'again.',
                 style: TextStyle(color: MilesColors.taupe, fontSize: 12),
               ),
               onTap: () => _confirmLeaveEmpty(context),
@@ -176,9 +177,9 @@ class _SeveranceSheet extends StatelessWidget {
 
   /// Leaving a connection that has nobody in it. Confirmed rather than
   /// instant — it is still an ending, and the row sits where "End the
-  /// connection" sits — but there is no seven-day window to offer, because a
-  /// waiting period exists so the other person can object and there is no
-  /// other person.
+  /// connection" sits — but there is no window to offer, because a waiting
+  /// period exists so the other person can object and there is no other
+  /// person.
   ///
   /// Popped upward like every other row: the caller owns what follows, and
   /// leaveCouple must run in the caller's context so the local wipe and the
@@ -288,14 +289,23 @@ class _CeremonySheetState extends State<_CeremonySheet> {
             ),
             const SizedBox(height: 10),
             // Every sentence checked against the code, as the old dialog's
-            // copy never was. Seven days is unlink_start()'s interval; the
-            // one-tap cancel is unlink_cancel(); the note is
-            // unlink_write_note(); what happens at the end is leave_couple().
+            // copy never was. The one day and the fifteen-minute gate are both
+            // intervals inside unlink_start. The way back is unlink_cancel,
+            // deliberately ungated on the server, so it works the moment the
+            // button appears. The note is unlink_write_note. What closes it at
+            // the end is dissolve_couple, reached either by unlink_execute or
+            // by the unlink-expire-due job.
+            //
+            // The copy this replaces promised that both of them keep the app,
+            // the messages and the calls for the whole week. Every clause of
+            // that is now false. The ritual TAKES the app, and saying
+            // otherwise on the one screen somebody reads before deciding is
+            // the worst place in the product to be wrong.
             const Text(
-              'A seven-day unlinking begins, and they will see it begin. '
-              'Both of you keep the app, the messages and the calls for the '
-              'whole week — and one tap from you brings everything back, '
-              'any day.',
+              'The app closes for both of you for one day. They are told you '
+              'need space — not that you asked to unlink — and they can write '
+              'to you. After fifteen minutes a Re-link button appears on your '
+              'screen; one tap and none of this happened.',
               style: TextStyle(
                 color: MilesColors.taupe,
                 fontSize: 13,

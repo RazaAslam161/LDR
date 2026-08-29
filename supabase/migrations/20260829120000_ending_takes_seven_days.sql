@@ -1,5 +1,26 @@
 -- Ending takes seven days.
 --
+-- SUPERSEDED IN PART by 20260830120000_the_window_is_one_day_wide.sql
+-- (2026-08-30). Read that file's header before trusting the two laws below
+-- that it overturns:
+--
+--   * The window is 24 HOURS, not seven days, and the last look is 5 MINUTES,
+--     not 24 hours. unlink_start() and unlink_accept() were replaced there.
+--   * "There is deliberately NO cron ... a scheduled robot never ends a
+--     relationship" IS NO LONGER TRUE. `unlink-expire-due` runs every minute.
+--     The law was written to stop a machine DECIDING; what it produced was a
+--     ceremony that could not FINISH, so the person who did not start it was
+--     held inside someone else's unfinished decision for as long as that
+--     person stayed away from the app. Two humans decide; the job is only what
+--     is present at a deadline neither of them is.
+--
+-- Everything else here still stands, including assertion #4 — the exits are
+-- never gated on the ceremony — which 20260830120000 re-runs after splitting
+-- leave_couple() into an identity wrapper over dissolve_couple(uuid).
+--
+-- The table, the RLS, the note crypto and the triggers are all still THIS
+-- file's; the newer one only alters and adds.
+--
 -- The hold-to-end gesture dissolved a couple in 1200 milliseconds, which is
 -- exactly the speed of a fight. This replaces it with a ceremony: starting an
 -- unlink opens a 7-day window BOTH people can see; the partner can write one

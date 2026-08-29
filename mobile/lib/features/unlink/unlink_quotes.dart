@@ -97,3 +97,20 @@ const List<({String text, String author})> unlinkQuotePool = [
       utc.difference(DateTime.utc(utc.year)).inDays;
   return unlinkQuotePool[dayOfYear % unlinkQuotePool.length];
 }
+
+/// THIS ceremony's quote — the same on both phones, and the same all the way
+/// through.
+///
+/// The by-day form above was written for a seven-day window, where a new quote
+/// each morning was the point. A ceremony is one day wide now, so by-day gives
+/// it either one arbitrary quote or — for anything started in the evening — a
+/// quote that changes under both of them at midnight, mid-ritual. Anchoring to
+/// the ceremony's own start keeps the words still and still agreed.
+///
+/// Seeded from whole minutes, not the raw timestamp: both phones parse the
+/// same `started_at` string, but only whole minutes are safe to assume equal
+/// across a value that has been through Postgres, PostgREST and two clients.
+({String text, String author}) unlinkQuoteForCeremony(DateTime startedAt) {
+  final minutes = startedAt.toUtc().millisecondsSinceEpoch ~/ 60000;
+  return unlinkQuotePool[minutes % unlinkQuotePool.length];
+}

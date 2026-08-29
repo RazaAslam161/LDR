@@ -239,7 +239,14 @@ Deno.serve(async (req) => {
       | "memory"
       | "ritual"
       | "msg_sync"
-      | "unlink" = payload.kind ?? payload.type ?? "reach";
+      | "unlink"
+      // The three later beats of the unlinking ritual. 'unlink' says it began;
+      // these say the partner agreed, the initiator came back, and it is over.
+      // The middle one is the reason the ritual works at all — "she is ready
+      // to let go" arrives while there is still a Re-link button.
+      | "unlink_lastcall"
+      | "unlink_relinked"
+      | "unlink_ended" = payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
 
@@ -256,7 +263,12 @@ Deno.serve(async (req) => {
       ? row?.proposer
       // An unlink ceremony names its initiator; the recipient is the partner
       // being told, resolved by the standard other-member lookup below.
-      : kind === "unlink"
+      // unlink_relinked rides the same shape. The other two carry an explicit
+      // recipient instead, because 'lastcall' goes BACK to the initiator and
+      // 'ended' goes to both — and by the time 'ended' is sent the couple has
+      // been dissolved, so the other-member lookup would find nobody at all.
+      : kind === "unlink" || kind === "unlink_relinked" ||
+          kind === "unlink_lastcall" || kind === "unlink_ended"
       ? row?.initiated_by
       : row?.from_user;
     // A ritual has no author — the couple set it, and it goes to BOTH of them.
@@ -265,7 +277,8 @@ Deno.serve(async (req) => {
     // other five kinds have always used it.
     const explicitRecipient: string | undefined = kind === "call"
       ? row?.callee_id
-      : kind === "ritual"
+      : kind === "ritual" || kind === "unlink_lastcall" ||
+          kind === "unlink_ended"
       ? payload.recipient
       : undefined;
     const rowId: string = row?.id ?? "";
@@ -277,6 +290,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "ritual needs a recipient" }), {
         status: 400,
       });
+    }
+    // Same rule, same reason: without a recipient these two would silently
+    // fall through to the other-member lookup and reach the wrong person —
+    // 'lastcall' would tell the partner what the initiator was supposed to
+    // hear, which is the one sentence this ritual must never leak.
+    if (
+      (kind === "unlink_lastcall" || kind === "unlink_ended") &&
+      !explicitRecipient
+    ) {
+      return new Response(
+        JSON.stringify({ error: `${kind} needs a recipient` }),
+        { status: 400 },
+      );
     }
 
     // Fail clearly if the service-account secret isn't configured (otherwise the
@@ -295,6 +321,33 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "FCM_PROJECT_ID not configured" }),
         { status: 200 },
       );
+    }
+
+    // The robot rail goes quiet while a couple is inside the unlinking ritual.
+    // "Your date night is tonight" landing in the middle of a breakup is the
+    // app failing to read the room, and deliver_rituals() fires every minute.
+    //
+    // This lives here rather than in that function on purpose: production's
+    // rituals table has a `deleted` column, staging's does not, and no
+    // migration in the repo adds it — so a SQL-side clause could not be
+    // applied to both. One query here is schema-independent and covers every
+    // future scheduled rail for free.
+    //
+    // Only the ROBOT rails are muted. A care nudge is a human reaching out,
+    // and the entire point of this window is that reaching out still works.
+    if (kind === "ritual") {
+      const { data: ceremony, error: ceremonyErr } = await admin
+        .from("couple_unlink")
+        .select("couple_id")
+        .eq("couple_id", coupleId)
+        .maybeSingle();
+      // Fails OPEN: a lookup that did not answer must not silently swallow a
+      // ritual the couple asked for. Named, never swallowed.
+      if (ceremonyErr) {
+        console.error("ceremony mute check failed", ceremonyErr.message);
+      } else if (ceremony) {
+        return OK();
+      }
     }
 
     // Recipient: the explicit callee for a call, otherwise the OTHER member of
@@ -374,10 +427,19 @@ Deno.serve(async (req) => {
           // it is worth having whenever the phone next comes back, and a 30s
           // TTL would drop it for anyone whose handset was dozing at 10 PM —
           // which is most people, at 10 PM.
-          // An unlink ceremony runs for seven DAYS — the one push that tells
-          // the partner it began must survive any doze window.
-          ttl: kind === "message" || kind === "memory" || kind === "ritual" ||
-              kind === "msg_sync" || kind === "unlink"
+          // The unlinking ritual is one DAY long now, not seven, and every
+          // beat of it has a different shelf life. A 'lastcall' that arrives
+          // after its five minutes are up is worse than none — it tells
+          // someone they still have a button they no longer have. 'ended' is
+          // the opposite: it is worth having whenever the phone next comes
+          // back, because the couple is already dissolved and nothing about
+          // it goes stale.
+          ttl: kind === "unlink_lastcall"
+            ? "300s"
+            : kind === "unlink" || kind === "unlink_relinked"
+            ? "3600s"
+            : kind === "message" || kind === "memory" || kind === "ritual" ||
+                kind === "msg_sync" || kind === "unlink_ended"
             ? "86400s"
             : "30s",
           // A delivery wake is worth exactly as much as the newest one. Ten

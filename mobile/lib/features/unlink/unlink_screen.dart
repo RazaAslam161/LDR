@@ -3,24 +3,44 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/couple_key.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/countdown_digits.dart';
+import 'package:miles/features/unlink/unlink_completion.dart';
 import 'package:miles/features/unlink/unlink_quotes.dart';
 import 'package:miles/features/unlink/unlink_repository.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 
-/// The ceremony's one screen, worn differently by its two people.
+/// The ritual's one screen, worn differently by its two people.
 ///
-/// The INITIATOR lives here: a quiet page with one love quote, the days
-/// remaining, whatever their partner wrote for them, and one large Re-link
-/// button — cancelling is always one tap, any day. The PARTNER gets the
-/// mirror: the same quote, the clock, a place to write the one note that
-/// appears on the initiator's screen, and Accept for the mutual fast path.
-/// Nothing here blocks anybody; the week exists so two people keep talking,
-/// which is why "continue to app" is always present and chat keeps working.
+/// This is where the app goes while an unlinking is open. It is reached by the
+/// router's own gate, not by a push behind a dismissible latch — the previous
+/// version left both of them inside the app behind a banner, and the tap that
+/// is meant to be the heaviest in the product read as nothing happening.
+///
+/// THE LETTER, for the person who started it: one quote, their partner's note
+/// when there is one, the clock, and — after fifteen minutes — one large
+/// Re-link button. Before those fifteen minutes the slot holds a live count,
+/// never a greyed button: the wait is the ritual, and a disabled control is
+/// how a ritual reads as a bug.
+///
+/// THE SPACE, for the person who did not: the same quote, a place to write the
+/// one sealed note that appears on the other screen, a door to chat that stays
+/// open the whole time, and — after fifteen minutes — a quiet way to agree.
+/// It never names what the other person did. It does say what happens if
+/// nothing changes, because being unlinked with no warning is worse than being
+/// told softly.
+///
+/// LAST CALL, for both: five minutes and one button, once they have both
+/// chosen it.
+///
+/// What is deliberately NOT here any more: "Continue to app". The ritual takes
+/// the app away — that is the whole design. What replaces it is narrower and
+/// safer: export, the account exit, and (for the partner only) chat.
 class UnlinkScreen extends ConsumerStatefulWidget {
   const UnlinkScreen({super.key});
 
@@ -55,6 +75,10 @@ class _NoteKeyUnavailable implements Exception {
 class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   Timer? _tick;
   bool _busy = false;
+
+  /// Set once the ceremony has ended by any door, so the teardown-and-leave
+  /// runs exactly once however many notifiers fire.
+  bool _leaving = false;
   String? _note;
   _NoteLoad _noteLoad = _NoteLoad.pending;
 
@@ -83,21 +107,79 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
 
   void _onState() {
     if (!mounted) return;
+    // The row is gone: re-linked from either side, or the couple dissolved.
+    // Both end with this screen having nothing to say, and "Nothing here
+    // anymore." is a dead end when the gate is what put you here — the shell
+    // that used to notice is unmounted for the whole ritual.
+    if (UnlinkState.current.value == null) {
+      if (!_leaving) {
+        _leaving = true;
+        unawaited(_released());
+      }
+      return;
+    }
     _noteLoad = _NoteLoad.pending;
     unawaited(_loadNote());
     setState(() {});
   }
 
-  /// Server-relative and self-cancelling past the deadline, the rewrap
-  /// pattern: a 1s tick that stops when there is nothing left to count.
+  /// Whichever way it ended, this phone catches up and leaves.
+  ///
+  /// Guarded, because every exit routes through here: a local Re-link, the far
+  /// phone's Re-link over realtime, the deadline, and the cron job. Running the
+  /// teardown twice is survivable; navigating twice is not.
+  Future<void> _released() async {
+    final old = ref.read(currentCoupleProvider)?.id;
+    final session = ref.read(sessionProvider.notifier);
+    await session.loadProfile();
+    if (!mounted) return;
+    // A re-link leaves the couple standing; an execution does not, and this
+    // phone may only be learning that now. Mirror of AppShell's
+    // _onUnlinkChanged, which cannot run while the gate holds this screen up.
+    if (ref.read(currentCoupleProvider) == null && old != null) {
+      await ref.read(sessionProvider.notifier).endCouple(old);
+    }
+    // '/app' either way. If the couple really is gone the funnel's needsCouple
+    // gate turns this into '/couple' on the same redirect pass.
+    if (mounted) context.go('/app');
+  }
+
+  /// The ritual's own heartbeat — and, while it is up, the app's.
+  ///
+  /// The router gate that brings anyone here UNMOUNTS AppShell, and AppShell
+  /// is where the realtime subscription, the push drain and the deadline check
+  /// all lived. Left as it was, this screen would have been the one place in
+  /// the app where nothing was watching: a phone parked here at the deadline
+  /// would show a stale row for ever, and a Re-link from the far side would
+  /// never arrive. The takeover would have disabled its own completion.
+  ///
+  /// So: a 1s tick for the countdowns and the two gates opening, and a refetch
+  /// every fifteenth of them. Fifteen seconds is deliberately unhurried — this
+  /// is a fallback under realtime and the push, not a poll anything depends
+  /// on, and the row is four timestamps.
   void _startTicking() {
     _tick?.cancel();
+    var n = 0;
     _tick = Timer.periodic(const Duration(seconds: 1), (t) {
       final row = UnlinkState.current.value;
-      if (row == null || row.due) t.cancel();
+      if (row == null) {
+        t.cancel();
+        return;
+      }
+      if (row.due) {
+        t.cancel();
+        unawaited(_finish(row.coupleId));
+        return;
+      }
+      if (++n % 15 == 0) unawaited(UnlinkState.load());
       if (mounted) setState(() {});
     });
   }
+
+  /// The deadline passed with this screen open. Either phone may finish it,
+  /// and the per-minute job will too — whichever gets there first, the rest
+  /// no-op.
+  Future<void> _finish(String coupleId) => completeUnlink(ref, coupleId);
 
   /// Derive the couple key for this route, rather than hoping someone else did.
   ///
@@ -178,7 +260,16 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   Future<void> _relink() async {
     await _run(() async {
       await UnlinkRepository.cancel();
-      if (mounted && context.canPop()) context.pop();
+      // Reset rather than reload: the row is gone, and a round trip to learn
+      // that leaves the ritual on screen for the length of it. Clearing the
+      // notifier releases the router gate on this phone immediately; the far
+      // phone is released by realtime and by the unlink_relinked push.
+      //
+      // Navigation is deliberately NOT done here. The reset fires _onState,
+      // which routes every ending — this one, the far phone's, the deadline,
+      // the cron job — through _released(). One door out, so a local Re-link
+      // cannot navigate twice or skip the profile reload the others need.
+      UnlinkState.reset();
     });
   }
 
@@ -187,18 +278,18 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: MilesColors.surface1,
-        title: const Text('Accept the unlink?',
+        title: const Text('Are you sure?',
             style: TextStyle(color: MilesColors.cream50),),
-        // True for the only person who ever reads it. unlink_cancel deletes
-        // `where initiated_by = auth.uid()` and unlink_accept only matches
-        // state = 'cooling', which nothing writes back — so accepting is
-        // one-way for the partner, and the Re-link button belongs to the other
-        // side alone. The old second sentence promised both of them a change
-        // of mind that only one of them has.
+        // Every sentence checked against the server. unlink_accept() clamps to
+        // now() + 5 minutes; unlink_cancel() deletes `where initiated_by =
+        // auth.uid()` in ANY state, so the other person keeps a live Re-link
+        // right through the last call and this person never had one. Saying
+        // "either of you can still stop it" here would be the false promise
+        // the audit found in the version this replaces.
         content: Text(
-          'A final day begins, and there is no taking this back from your '
-          'side. Only $partnerName can still stop it — one tap on their '
-          'Re-link button, any time before the day runs out.',
+          'This starts a five-minute goodbye, and there is no taking it back '
+          'from your side. $partnerName will be told right away, and can '
+          'still bring you both back until the five minutes run out.',
           style: const TextStyle(color: MilesColors.taupe),
         ),
         actions: [
@@ -208,7 +299,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Accept',
+            child: const Text("I'm sure",
                 style: TextStyle(color: MilesColors.danger),),
           ),
         ],
@@ -324,15 +415,52 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   String _countdown(UnlinkRow row) {
     final left = row.endsAt.difference(ServerClock.now());
     if (left.isNegative) return 'The window has closed';
-    final days = left.inDays;
-    final hours = left.inHours % 24;
+    final hours = left.inHours;
     final minutes = left.inMinutes % 60;
-    if (days > 0) {
-      return '$days ${days == 1 ? 'day' : 'days'}, $hours h left';
-    }
-    if (left.inHours > 0) return '${left.inHours} h $minutes m left';
+    if (hours > 0) return '$hours h $minutes m left';
     return '$minutes m left';
   }
+
+  /// The deadline as a wall clock, in this phone's own timezone.
+  ///
+  /// "in 24 hours" is wrong the second the screen is left open, and this is
+  /// the one line on the partner's side that has to stay true — it is the
+  /// whole of what they are told. Local, not UTC and not the couple's primary
+  /// timezone: the person reading it is deciding what to do with their
+  /// evening.
+  String _deadlineClock(UnlinkRow row) {
+    final at = row.endsAt.toLocal();
+    final h24 = at.hour;
+    final h = h24 % 12 == 0 ? 12 : h24 % 12;
+    final m = at.minute.toString().padLeft(2, '0');
+    final ampm = h24 < 12 ? 'am' : 'pm';
+    final sameDay = at.day == DateTime.now().day;
+    return '$h:$m$ampm${sameDay ? '' : ' tomorrow'}';
+  }
+
+  /// The way back. One shape, used by the held state and the last call, so the
+  /// button cannot drift between the two moments it matters most.
+  Widget _relinkButton() => SizedBox(
+        width: double.infinity,
+        height: 56,
+        child: FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: MilesColors.ember,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+          ),
+          onPressed: _busy ? null : _relink,
+          child: const Text(
+            'Re-link',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: MilesColors.cream50,
+            ),
+          ),
+        ),
+      );
 
   /// The initiator's card, in both of the states worth a card.
   ///
@@ -405,8 +533,13 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   @override
   Widget build(BuildContext context) {
     final row = UnlinkState.current.value;
-    final session = ref.watch(sessionProvider);
-    final uid = session.profile?.id;
+    // The NARROWEST providers that answer the question, per providers.dart —
+    // and the reason this screen can be rendered in a test at all. Watching
+    // the whole SessionState pulled SessionNotifier (and with it Supabase and
+    // a live socket) into anything that tried to mount the ritual, which is
+    // why the layout CRITICAL was source-read four times and never rendered.
+    // _primeKey still reads the bundle: CoupleKey.prime needs all of it.
+    final uid = ref.watch(currentProfileProvider)?.id;
     // A deep link with no ceremony, or one that just ended: nothing to show.
     if (row == null || uid == null) {
       return Scaffold(
@@ -420,8 +553,12 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     }
 
     final mine = row.iAmInitiator(uid);
-    final quote = unlinkQuoteForDay();
-    final partnerName = session.partner?.displayName ?? 'Your partner';
+    // This ceremony's quote, not this day's: a one-day window started in the
+    // evening would otherwise change its own words at midnight, under both of
+    // them, halfway through.
+    final quote = unlinkQuoteForCeremony(row.startedAt);
+    final partnerName =
+        ref.watch(partnerProfileProvider)?.displayName ?? 'Your partner';
 
     return Scaffold(
       backgroundColor: MilesColors.night,
@@ -431,16 +568,6 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
           child: Column(
             children: [
               const SizedBox(height: 24),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => context.canPop()
-                      ? context.pop()
-                      : context.go('/app'),
-                  child: const Text('Continue to app',
-                      style: TextStyle(color: MilesColors.taupe),),
-                ),
-              ),
               // The ceremony's words scroll; its controls do not. Re-link is
               // the only cancel control in the whole client, and it used to
               // sit at the bottom of an unscrollable Column beneath an
@@ -468,17 +595,36 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
+                            // The initiator is told plainly, because they did
+                            // it. The partner is NOT told what happened —
+                            // naming it is what turns a fight into a verdict,
+                            // and protecting the other one's pride is half of
+                            // why this window exists. What they ARE told, in
+                            // full, is the consequence: the stakes line below
+                            // the controls says it outright.
                             mine
-                                ? 'You asked to unlink'
-                                : '$partnerName asked to unlink',
+                                ? 'You closed the door.'
+                                : '$partnerName needs a little space '
+                                    'right now.',
+                            textAlign: TextAlign.center,
+                            style: MilesType.fraunces(
+                              fontSize: 24,
+                              height: 1.35,
+                            ).copyWith(color: MilesColors.cream50),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            mine
+                                ? "It isn't locked."
+                                : "They haven't gone anywhere.",
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: MilesColors.taupe,
-                              fontSize: 14,
-                              letterSpacing: 0.4,
+                              fontSize: 15,
+                              height: 1.4,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 14),
                           Text(
                             _countdown(row),
                             textAlign: TextAlign.center,
@@ -521,42 +667,85 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                 ),
               ),
               if (row.due)
-                Text(
-                  mine
-                      ? 'The week has passed. Opening the app again will '
-                          'complete the unlink.'
-                      : 'The window has closed.',
+                const Text(
+                  'The window has closed. This is finishing now.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: MilesColors.taupe),
+                  style: TextStyle(color: MilesColors.taupe),
                 )
-              else if (mine) ...[
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MilesColors.ember,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                    ),
-                    onPressed: _busy ? null : _relink,
-                    child: const Text(
-                      'Re-link',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: MilesColors.cream50,
-                      ),
+              // Both of them chose it. Five minutes, and the only button that
+              // still does anything belongs to the one who started it.
+              else if (row.lastCall) ...[
+                if (mine) ...[
+                  _relinkButton(),
+                  const SizedBox(height: 10),
+                  Text(
+                    '$partnerName is ready to let go. This is the last '
+                    'moment either of you can stop it.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: MilesColors.taupe,
+                      fontSize: 12,
+                      height: 1.4,
                     ),
                   ),
+                ] else
+                  Text(
+                    'You both chose this. It closes on its own — '
+                    '$partnerName can still bring you back until it does.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: MilesColors.taupe,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                Center(
+                  child: CountdownDigits(
+                    until: row.endsAt,
+                    clock: ServerClock.now,
+                    style: const TextStyle(fontSize: 26),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                const Text(
-                  'One tap, any day, and this never happened.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 12),
-                ),
+              ] else if (mine) ...[
+                if (row.relinkOpen) ...[
+                  _relinkButton(),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'One tap, and this never happened.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+                  ),
+                ] else ...[
+                  // NOT a greyed button. A disabled control with no
+                  // explanation is exactly how this feature already read as
+                  // broken once, and the wait is the entire point of the
+                  // first fifteen minutes — so the slot says what it is
+                  // waiting for and counts it down where the button will be.
+                  const Text(
+                    'Give it fifteen minutes.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: MilesColors.cream50,
+                      fontSize: 15,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: CountdownDigits(
+                      until: row.relinkOpensAt,
+                      clock: ServerClock.now,
+                      style: const TextStyle(fontSize: 30),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Then the way back will be right here.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+                  ),
+                ],
               ] else ...[
                 SizedBox(
                   width: double.infinity,
@@ -609,30 +798,106 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                     'replace it with something it can seal.',
                   ),
                 ],
-                const SizedBox(height: 12),
-                if (!row.accepted)
+                const SizedBox(height: 10),
+                // The door the whole window exists for. A single sealed note
+                // is one sentence in one direction; a fight is repaired by a
+                // conversation, and this is the only route to one while the
+                // ritual holds the rest of the app. It is also what stops one
+                // tap from cutting somebody off for a day.
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: MilesColors.ember,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(26),
+                      ),
+                    ),
+                    onPressed: () => context.push('/unlink/chat'),
+                    child: const Text(
+                      'Talk to them',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: MilesColors.cream50,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Soft in tone, honest in substance. The screen never says
+                // what the other person did, but it cannot let somebody be
+                // unlinked with no warning at all — that would be the app
+                // lying by omission at the highest-stakes moment it has.
+                // An absolute wall-clock time, because "in 24 hours" stops
+                // being true the moment this screen is left open.
+                Text(
+                  'If nothing changes by ${_deadlineClock(row)}, Miles will '
+                  'close your shared space — and keep it safe for 30 days.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: MilesColors.taupe,
+                    fontSize: 12,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Low emphasis on purpose. This must never look like the
+                // obvious next step, and it opens on the same fifteen-minute
+                // gate as the other side's Re-link so that nobody can end it
+                // out of the first minute of a fight.
+                if (row.partnerGateOpen)
                   TextButton(
                     onPressed: _busy ? null : () => _accept(partnerName),
                     child: const Text(
-                      'Accept unlink',
-                      style: TextStyle(color: MilesColors.danger),
+                      'I need space too',
+                      style: TextStyle(
+                        color: MilesColors.danger,
+                        fontSize: 13,
+                      ),
                     ),
                   )
                 else
-                  const Text(
-                    'Accepted — a final day is running.',
-                    style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Take a few minutes before you decide anything.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: MilesColors.faint,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
               ],
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => context.push('/app/settings/export'),
-                child: const Text(
-                  'Save your memories',
-                  style: TextStyle(color: MilesColors.taupe, fontSize: 13),
-                ),
+              const SizedBox(height: 12),
+              // Always, for both of them, at every stage. A ritual that holds
+              // your photographs is a threat, not a pause — and the account
+              // exit is never gated on the ceremony (assertion #4 of
+              // 20260829120000, and Play policy besides).
+              Wrap(
+                alignment: WrapAlignment.center,
+                children: [
+                  TextButton(
+                    onPressed: () => context.push('/app/settings/export'),
+                    child: const Text(
+                      'Save our memories',
+                      style:
+                          TextStyle(color: MilesColors.taupe, fontSize: 13),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => context.push('/app/settings/account'),
+                    child: const Text(
+                      'Account',
+                      style:
+                          TextStyle(color: MilesColors.faint, fontSize: 13),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
             ],
           ),
         ),

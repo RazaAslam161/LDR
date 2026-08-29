@@ -20,7 +20,7 @@ void main() {
 
   /// The last definition in replay order is the one production runs. Lexical
   /// order IS replay order here — the 14-digit prefix is the ordering key.
-  String liveDefinitionOf(String function) {
+  String liveDefinitionOf(String function, {String args = ''}) {
     final files = dir
         .listSync()
         .whereType<File>()
@@ -30,7 +30,7 @@ void main() {
     String? live;
     for (final f in files) {
       final src = f.readAsStringSync();
-      final i = src.toLowerCase().indexOf('function public.$function()');
+      final i = src.toLowerCase().indexOf('function public.$function($args)');
       if (i < 0) continue;
       live = src.substring(i);
     }
@@ -38,8 +38,28 @@ void main() {
     return live!;
   }
 
+  /// Where the scrub lives since 20260830120000.
+  ///
+  /// leave_couple() was split so the per-minute `unlink-expire-due` job could
+  /// dissolve a couple nobody is present for — cron has no auth.uid() and the
+  /// ceremony's own migration rejects an impersonation shim by name. The WORK
+  /// moved to dissolve_couple(uuid); leave_couple() kept the identity.
+  ///
+  /// Every assertion below follows it, and one NEW assertion holds the split
+  /// together: a scrub sitting in a function the exit no longer calls would
+  /// pass every check in this file and protect nobody.
+  String theExit() =>
+      liveDefinitionOf('dissolve_couple', args: 'p_couple uuid');
+
+  test('the exit still delegates to the function that does the work', () {
+    final wrapper = liveDefinitionOf('leave_couple');
+    expect(wrapper.contains('dissolve_couple'), isTrue,
+        reason: 'leave_couple() no longer calls dissolve_couple() — the scrub '
+            'below is then dead code and every exit skips it',);
+  });
+
   test('the live leave_couple still scrubs presence', () {
-    final def = liveDefinitionOf('leave_couple');
+    final def = theExit();
     // Every field a next partner would otherwise inherit from the last one.
     const mustClear = [
       'latitude',
@@ -73,7 +93,7 @@ void main() {
     // trg_sync_presence_couple_id nulls presence.couple_id the instant
     // profiles.couple_id changes, so a scrub placed after it matches zero rows
     // and silently does nothing — indistinguishable from a scrub that worked.
-    final def = liveDefinitionOf('leave_couple');
+    final def = theExit();
     final scrub = def.indexOf('update public.presence');
     final profiles = def.indexOf('update public.profiles');
     expect(scrub, greaterThan(-1), reason: 'the presence scrub has gone');
@@ -85,7 +105,7 @@ void main() {
   test('the photographs are queued for the reaper, never deleted directly', () {
     // A `delete from storage.objects` destroys the version column that is the
     // only pointer to the bytes, leaving them billed and un-erasable forever.
-    final def = liveDefinitionOf('leave_couple');
+    final def = theExit();
     expect(def.contains('storage_reap'), isTrue,
         reason: 'body_photo_path / checkin_photo_url objects must be queued',);
     expect(def.contains('delete from storage.objects'), isFalse);
@@ -95,7 +115,7 @@ void main() {
     // location_sharing_mode is NOT NULL, and 'off' is the only value that does
     // not re-arm live sharing the moment the row is re-attached. Two rows in
     // production were measured sitting at a sharing mode nobody turned on.
-    final def = liveDefinitionOf('leave_couple');
+    final def = theExit();
     expect(def.contains("location_sharing_mode = 'off'"), isTrue);
   });
 }

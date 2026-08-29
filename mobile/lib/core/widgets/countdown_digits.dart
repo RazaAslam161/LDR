@@ -14,10 +14,21 @@ import 'package:miles/core/ui/theme.dart';
 /// still UPDATE — a clock must tell the time — they just stop performing the
 /// turn.
 class CountdownDigits extends StatefulWidget {
-  const CountdownDigits({required this.until, this.style, super.key});
+  const CountdownDigits({
+    required this.until,
+    this.style,
+    this.clock,
+    super.key,
+  });
 
   final DateTime until;
   final TextStyle? style;
+
+  /// The clock [until] is measured against. Defaults to the handset's, which
+  /// is right for a deadline the handset itself set. A deadline computed by
+  /// Postgres must pass `ServerClock.now` instead — a phone an hour fast
+  /// otherwise counts a ceremony down an hour early.
+  final DateTime Function()? clock;
 
   @override
   State<CountdownDigits> createState() => _CountdownDigitsState();
@@ -49,7 +60,7 @@ class _CountdownDigitsState extends State<CountdownDigits> {
   }
 
   Duration get _left {
-    final d = widget.until.difference(DateTime.now());
+    final d = widget.until.difference(widget.clock?.call() ?? DateTime.now());
     return d.isNegative ? Duration.zero : d;
   }
 

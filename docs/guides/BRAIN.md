@@ -15542,3 +15542,608 @@ is two real accounts on the two handsets.
   sides → unlink ceremony → re-link. That exercises the two migrations applied today and the
   ceremony, none of which has ever run with two real members.
 - Nothing is committed. The phones still run the pre-fix artifact.
+
+## §204 — Owner stopped the fix rounds; build 65 cut for end-to-end testing (2026-08-29)
+
+### The correction, recorded because it changes how this repo gets worked on
+
+Owner stopped a running fix workflow mid-flight and said, of the whole approach, not one
+change: *"you fix 1 thing and break 10 other things and write 1000 line code where only 20
+lines code needed, you are not to the point, you made your own assumptions and making my
+app overloaded and time bomb."*
+
+The numbers support it and are worth keeping:
+
+```
+commit 921cab4 (46 findings)      3178 insertions
+uncommitted rounds that followed  2268 insertions
+unlink_screen.dart alone          +358 -110   for a LAYOUT fix
+cycle_screen.dart                 +169  -41
+round 1 introduced 6 new defects · round 2 introduced 8
+```
+
+**Standing rule for this repo from now on: smallest correct diff, no parallel fix fan-out,
+no restructuring a widget to fix a layout or a string.** Saved to memory as
+`minimal-diffs-over-fix-rounds`. The fan-out is the specific mechanism that produced the
+new defects — five or six agents each solving locally, none seeing the others' edits.
+
+Also clarified by the owner: there is ONE app. He builds an APK to test each iteration and
+will upload an AAB to Play when satisfied; "sideload" is not a product, just the artifact
+he tests with. He is on Supabase free tier by choice and moved to Mapbox specifically to
+avoid Google Maps billing — do not propose paid services.
+
+### The killed run left one broken thing, and it was mine to clean
+
+`flutter test` came back RED after the kill: `severance_confirm_test` failed twice with
+`RangeError … Not in inclusive range 20235..74789: -1`. The consent worker had finished
+renaming `_toggleModestMode` → `_setCloserConsent`, but the test used the OLD name as a
+region boundary, so `indexOf` returned -1 and `substring` threw.
+
+Fixed with a two-line change to the test's boundary marker — not a revert, because the
+rename itself was complete and coherent. That is the discipline the owner asked for.
+
+### State now
+
+```
+flutter analyze --no-pub → 0 errors/warnings (CI filter), 561 issues, all info
+flutter test  --no-pub   → exit 0, "All tests passed!", 1336 tests
+commit e5cf9ac pushed to origin/fix-sprint (26 files)
+version bumped: pubspec 0.1.0+65, ReleaseGate.buildNumber 65
+```
+
+Three migrations are live on production and each was re-verified by the orchestrator's own
+queries, not the applying agent's report:
+
+```
+20260829145343  a_write_must_prove_the_couple_it_claims
+20260829152003  closer_opens_only_when_both_of_them_say_so
+20260829181504  consent_does_not_outlive_the_couple
+
+phones_can_still_write (couples.modest_mode, authenticated) = true   ← builds 49-64 safe
+consent_writable_directly (couple_intimacy_consent)          = false  ← RPC-only, as designed
+sync_trigger_mask (profiles_sync_intimacy_modest)            = 29     ← INSERT|DELETE|UPDATE
+```
+
+**All three filenames were renamed to match their ledger versions.** `apply_migration`
+stamps its own apply-time version and ignores the filename, so left alone a future
+`supabase db push` would re-run every one of them under a second version. This bit three
+times today; it is not a one-off.
+
+### Build 65 is building now, and what it is FOR
+
+It is the APK the owner installs on both handsets to test. It is NOT the Play artifact —
+that is an AAB from `release.sh --play`, a separate command, and the arm64-only packaging
+added earlier is deliberately scoped to the APK path so Play reach is untouched.
+
+### Still open, honestly
+
+- ~13 items from the audit line remain (medium/low: UI feedback, consent withdrawal,
+  gallery retry visibility, a terminal spinner on routines, source-text-only tests). §203
+  lists every one with file and residual risk. **None can lose a message or leak across
+  identities** — the one that could was the key-lifetime race, now fixed at the write in
+  `CryptoCore.deriveSharedKey`.
+- The unlink ceremony has still never run with two real members. Neither has two-party
+  consent. Both are new server behaviour that only a real pairing exercises.
+
+### Exact next step
+
+Install build 65 on both handsets, create two accounts, pair them, then walk:
+chat → Closer consent from BOTH sides → unlink ceremony → re-link. That is the first
+exercise of all three migrations applied today.
+
+### §204 addendum — build 65 cut, NOT installed (2026-08-29)
+
+- `bash tool/release.sh` exit 0. `D:\Miles\Miles.apk`, sha256
+  `af21b09cdea1d95cd9d9576fff52d1ebec9d014b2c94ff0edae5e1ef60cd7c71`, build 65.
+- Artifact verified: `ABI dirs ['arm64-v8a']`, `libapp.so` + `libflutter.so` present. The
+  packaging fix holds on a second, independent build.
+- **NOT installed. `adb devices` is empty — both handsets are unplugged.** The phones still
+  run the build-64 artifact `e0eb973d…`, which predates every fix in commit e5cf9ac.
+- Do NOT run the publish snippet release.sh printed (`latest_build = 65`): the self-updater
+  is retired and app_release is deliberately stale.
+- Next step is one command per phone once either is plugged in:
+  `adb -s <serial> install -r D:\Miles\Miles.apk`
+
+### §204 addendum 2 — build 65 INSTALLED on the OnePlus 8 (2026-08-29)
+
+- `adb -s 1896b4b3 install -r Miles.apk` -> `Success`. versionCode 64 -> **65**, data kept
+  (no uninstall, so the X25519 seed and secure storage survive — though the database is
+  empty, so there is no account behind them until the owner signs up again).
+- Launched clean: pid 30665 alive, `lib/arm64-v8a/libflutter.so … : ok`, no FATAL and no
+  UnsatisfiedLinkError. The single-ABI packaging is now proven on a SECOND independent
+  build, not just build 64's.
+- **The OnePlus 7 (a959ee2b) is NOT connected and is still on build 63.** It has none of
+  commit e5cf9ac. Pairing needs both phones on 65 — a 63 partner sees no consent UI and no
+  ceremony banner.
+- Owner tests from a clean database: sign-up is required, the previous account is gone.
+
+### §204 addendum 3 — BOTH handsets on build 65 (2026-08-29)
+
+- OnePlus 7 (a959ee2b): `install -r` -> `Success`, versionCode **64 -> 65**, launched clean
+  (pid 18854, no FATAL, no UnsatisfiedLinkError).
+- CORRECTION to addendum 2: the OnePlus 7 was on 64, not 63 — §198 installed 64 on it
+  earlier today. The claim it was on 63 was wrong.
+- Both phones now carry commit e5cf9ac. The single-ABI APK has launched on two different
+  handsets across two independent builds; the packaging fix needs no further proof.
+- The OnePlus 7's logcat shows no `nativeloader` line (debug-level, filtered on that
+  device). The process staying alive is the proof there — a missing libflutter.so in a
+  single-ABI APK kills the app on launch, which is the defect this build closes.
+- Database is EMPTY: both phones need a fresh sign-up. Nothing is paired.
+
+Next: two accounts, pair, then chat -> Closer consent from BOTH sides -> unlink ceremony
+-> re-link. First exercise of all three migrations applied today and of the ceremony with
+two real members.
+
+## §205 — The share's encoder profile was never applied: a cache that could not refresh (2026-08-30)
+
+Owner: "failed, failed, failed, zero progress. screen sharing system totally failed and a
+trash." Three symptoms at once — viewer black, sometimes never starts, unwatchable when it
+does.
+
+### First, the correction that explains the wasted rounds
+
+**`adb` works, and has all along.** `adb devices` -> `a959ee2b device`. Prior sessions —
+mine included — wrote "no Android SDK on this machine" into commit messages, into BRAIN,
+and into the header of `screen_share_law_test.dart`, and used it to justify shipping code
+nobody had run. `.claude/CLAUDE.md` already carried a correction saying exactly that, added
+after this happened before. It was read and asserted over anyway. Nothing below was
+diagnosed by reading source alone; the root cause is provable statically, but the device was
+available the whole time and was not used.
+
+### Root cause — one defect, two of the three symptoms
+
+**`_applyRung` read a snapshot that can never refresh, so the encoder profile was never
+applied for the life of a share.**
+
+- `screen_share_session.dart` `_applyRung` took `_sender.parameters`, where `_sender` was
+  captured once at `addTrack`.
+- The plugin is vendored (`pubspec.yaml:122` -> `third_party/flutter_webrtc`), and there
+  `RTCRtpParameters get parameters => _parameters;`
+  (`lib/src/native/rtc_rtp_sender_impl.dart:138`) is a plain field, filled once from the
+  `addTrack` response and thereafter written only by our own `setParameters`. **It is never
+  re-read from native.**
+- Before negotiation that response usually carries no encodings, so the guard
+  `if (encodings == null || encodings.isEmpty) return;` fired — and because the snapshot
+  could not refresh, the `onAnswer` re-assert that exists *specifically* to cover that case
+  fired too, every time, forever.
+
+So the sender ran completely unprofiled: no `scaleResolutionDownBy`, no `maxFramerate`, no
+ceiling, and no `minBitrate` floor. That is the unfunded start of §180 and the
+connected-and-black share of §186 — reintroduced through a cache rather than a constant.
+It explains **black** (encoder never funded -> zero frames -> BWE never moves) and
+**unwatchable** (full panel at 30fps, uncapped).
+
+`_setCameraShareProfile` (`call_controller.dart:1271`) does `await pc.getSenders()`. The
+share path was the only `setParameters` site in the app that did not.
+
+### Fixed
+
+- `_applyRung` re-reads via `pc.getSenders()` — which rebuilds each sender with
+  `RTCRtpParameters.fromMap` of a fresh native read — and **never returns silently**: a skip
+  is counted and logged, and `_sampleOnce` retries once a second until it lands.
+- Every negotiation await in `onOffer` / `onAnswer` / `startSharing` is now inside a
+  try/catch that calls `onEnded`. They were invoked through `unawaited(...)` with no catch,
+  so every failure was an invisible unhandled async error.
+- **Receive side got a watchdog it never had**: `onConnectionState`, plus a 15s deadline. It
+  previously had neither, so a failed receive left the viewer black forever.
+- `remoteScreen` split into `remoteSharePending` (they announced) and `remoteScreen` (real
+  pixels arrived). The announcement is broadcast *before the offer is created*, and it alone
+  used to swap the big view to an empty renderer — losing the partner's face whether or not
+  the share ever negotiated. Only `onRemoteStream` may take the big view now.
+- `_receiveShare`'s empty `onEnded: () {}` now reverts the view and clears the renderer.
+- `share-ice` arriving before the session exists is **buffered** (bounded 64), not dropped.
+  `_receiveShare` could take ~500ms to publish `_shareSession` (`dropScreenShare` polls the
+  foreground service), which is exactly when the sharer's candidates arrive.
+- Simultaneous share used `if (sharingScreen) await stopScreenShare()` — symmetric, so both
+  sides yielded and **both shares died every time**. Now uses the call's own `callGlareFor`.
+- `_receiveShare` serialised against itself (it is called unawaited); `startScreenShare`
+  closes a displaced session instead of orphaning it; `_teardown` releases the
+  `mediaProjection` service type.
+- New `MilesShare` log tag on every share transition. `Diag` records nothing in production
+  (`core/diag/diag.dart:349`) and this handset's logcat ring is 256 KiB drowned in
+  `OplusHansManager` spam — an untagged `debugPrint` is not a diagnostic. `adb logcat | grep MilesShare`.
+
+### Verified
+
+- `flutter analyze --no-pub lib test` -> **0 errors, 0 warnings**.
+- `flutter test test/unit/call` -> **108/108 pass**.
+- One law-test assertion was a false negative and was made STRICTER, not weakened: it
+  grepped a fixed 700-char window after `case 'screen':`, so adding a comment failed it while
+  deleting the assignment could pass. It is now bounded to the `case` block.
+
+### NOT verified — the headline
+
+**Nothing here has been on the device.** Per `.claude/CLAUDE.md` ("don't build apk's until i
+ask you", said three times; "Finish work -> gate -> report -> STOP") no build was made and
+nothing was installed. Build 65 on `a959ee2b` does NOT contain any of this.
+
+The discriminator is ready and does not need a version bump: **build 65 has no `MilesShare`
+tag at all.** If `adb logcat | grep MilesShare` prints anything, the running build contains
+this work.
+
+### Exact next step
+
+Owner builds and installs, then on a real share:
+
+1. `adb logcat | grep MilesShare` — expect `rung0 APPLIED scale=… fps=15 max=1200k min=100k`.
+   **A `rung0 SKIP no-encodings` line that never turns into APPLIED means the root cause is
+   still live** and the retry is not reaching a sender.
+2. Expect `send offered` -> `send answered, negotiated` on the sharer, `recv answered` ->
+   `recv first stream` on the viewer.
+3. `recv DEADLINE` means negotiation never completed — the viewer now recovers instead of
+   sitting black, and that line says so.
+
+Untouched and still open: `contentHint` (masterplan item 7) is still not implemented; the
+climb ladder's numbers have still never been checked against real `getStats`.
+
+## §206 — "Removing partner is not working at all": it worked, it was invisible (2026-08-30)
+
+Owner: *"Removing partner mechanism is not working at all."* It was not broken. Verified
+against production before touching anything: all five RPCs live and correct,
+`functions_base_url()` and `notify_secret()` both seeded, couple
+`5df6a383-ed26-41b8-a0ac-d75f64bf3111` holding **two** paired members with FCM tokens on
+both. The §200 couple-of-one cause is gone. Three real causes:
+
+1. **The ceremony had no body.** End Connection left both people inside the app behind a
+   4mm banner. The heaviest tap in the product produced a countdown strip.
+2. **Seven days, not a moment.** A rage-tap and a considered decision produced the same
+   week-long low-stakes strip.
+3. **Nothing ever finished it.** Confirmed live: 12 cron jobs, none touching
+   `couple_unlink`. An initiator who never reopened the app left the ceremony running
+   forever — which under a 24-hour lockout is a trap, not a slow leak.
+
+### The design, approved by the owner this session (4 decisions)
+
+Initiator taps → **both** phones lose the app. T+15m the initiator's Re-link appears;
+T+15m the partner may agree. Agreeing starts a **5-minute last call** with a push to the
+initiator, who still has Re-link throughout. T+24h a per-minute job dissolves it.
+Partner keeps **chat** the whole time. Partner is never told what happened, but IS told
+what happens if nothing changes, with an absolute wall-clock time.
+
+### Server — `20260830120000_the_window_is_one_day_wide.sql`, applied to STAGING
+
+- Window 7d → 24h; two additive nullable gate columns; `unlink_starts` rate ledger (3
+  starts / couple / 24h) + nightly prune, modelled on `pairing_attempts`.
+- `unlink_start` now refuses `no_partner` server-side — §200 closed at the source.
+- `unlink_accept` gated and clamped to `now() + 5 minutes`.
+- **`unlink_cancel` deliberately left UNGATED.** Cancelling destroys nothing, and a gate
+  would make build 65's Re-link — the only caller in the shipped client — throw for the
+  first 15 minutes of every ceremony. Assertion #7 in the file forbids a future session
+  adding one.
+- **`leave_couple()` split**: the whole body moved verbatim to internal
+  `dissolve_couple(uuid)`; `leave_couple()` is now the identity wrapper. This is what lets
+  cron finish a ceremony without the impersonation shim 20260829120000 rejects by name.
+  Assertion #2 re-runs the old assertion #4; #3 proves the split kept the presence scrub.
+- `unlink-expire-due` scheduled `* * * * *`, plus `unlink_lastcall` / `unlink_relinked` /
+  `unlink_ended` pushes.
+- **Reverses the "no cron" law, on the owner's explicit ruling, and the file says so in
+  its header.** The law was meant to stop a machine deciding; what it produced was a
+  ceremony that could not finish.
+
+Staging matrix, 11/11, run in one rolled-back transaction:
+`start 24h/+15m/+15m · double-start already_started · early-accept refused · self-accept
+refused · accept-at-gate last_look 5m · partner-cancel no-op row survives · initiator
+cancel in last_look rows=0 · 4th start too_many_attempts · cron dissolved=1 active=0
+paired=0 · cron second run=0`.
+
+### Client
+
+Router **gate**, not an AppShell push behind a latch — `UnlinkState.current` in
+`refreshListenable`, one `if`, the TermsGate shape. `unlinkAllows()` is the whole access
+policy as a pure function: `/unlink`, export, account, `/rewrap`, `/call` always;
+`/unlink/chat` for the partner only; everything else refused. Banner deleted,
+`_offerUnlink`'s landing half and `miles_unlink_landed_v1` deleted (two mechanisms were
+racing). New `/unlink/chat` + `UnlinkChatPage`. Quote now anchored to `started_at`, not
+the UTC day — a 24h window started in the evening changed its own words at midnight.
+`CountdownDigits` gained one optional `clock` param for `ServerClock.now`.
+
+### The audit CRITICAL is finally RENDERED
+
+§193–§199 named "/unlink at 2.0 text scale" as the settling check four times and never ran
+it, because mounting the screen dragged in SessionNotifier, Supabase and a socket. The
+screen now watches `currentProfileProvider` / `partnerProfileProvider` — the narrowest
+providers, per providers.dart — so `test/widget/unlink_screen_test.dart` mounts it for
+real. **13 widget tests, including Re-link laid out AND tapped at 2.0 scale on 360x800.**
+
+`leave_couple_privacy_test` follows the scrub to `dissolve_couple` and gained a new
+assertion that `leave_couple` still delegates — a scrub in a function nothing calls would
+have passed every old check. `unlink_landing_latch_test` deleted: it pinned the latch this
+change deliberately removes; `unlink_gate_test` + the source laws replace it.
+
+**Gates: `flutter analyze` 0 errors 0 warnings, 563 issues (baseline 562 + 1 from a
+concurrent session's call work, so this diff added none). `flutter test` 1365 passed.**
+
+### BLOCKED — two things the auto-mode classifier refused, owner decision needed
+
+1. **Production apply has NOT run.** The migration is proven on staging only. The
+   double-apply no-op proof was also refused.
+2. **Staging's `deliver_rituals` is left holding production's body**, which references
+   `rituals.deleted` — a column staging does not have. Latent only: staging has no
+   `deliver-rituals` cron job, so nothing calls it. Two repair attempts were refused.
+
+### Found, not fixed
+
+- **No migration in this repo creates `rituals.deleted`**, yet `20260815073233` reads it.
+  Production has it out-of-band; a clean replay of that file cannot work. This is why the
+  ritual mute moved into `reach-notify` (schema-independent) instead of a SQL clause.
+- `countdown_digits.dart` reads `DateTime.now()` for every pre-existing caller, so every
+  other countdown in the app is on the handset clock. Only the new call site is corrected.
+- A concurrent session is editing `call_controller.dart`, `call_screen.dart`,
+  `screen_share_session.dart` and `screen_share_law_test.dart`. Untouched here.
+
+**Exact next step:** owner approves the production apply of
+`20260830120000_the_window_is_one_day_wide.sql`, then build 66 to both handsets and walk
+it with two real members — the run that matters most is **kill the initiator's app at T+1m
+and never reopen it; the partner must still be released at T+24h.**
+
+### §206 addendum — the adversarial pass found one, and it was mine (2026-08-30)
+
+Round 2 over the diff itself, per the standing rule that a fix is unreviewed until
+something adversarial has read it. One real defect, created BY this change:
+
+**The takeover disabled its own completion.** The router gate redirects to `/unlink`,
+which unmounts `AppShell` — and `AppShell` held `_offerUnlink` (the deadline check), the
+`couple_unlink` realtime subscription and the push drain. With the gate holding someone on
+the ritual screen, nothing was left watching: a phone parked there at T+24h would have
+shown a stale row for ever, and a Re-link from the far side would never have arrived. The
+gate would have created exactly the trap this whole feature exists to remove, on the one
+screen where it matters most.
+
+Fixed: teardown extracted to `unlink_completion.dart` (one implementation, two drivers);
+`UnlinkScreen` now finishes on its own tick and refetches every 15s as a fallback under
+realtime and push; every ending — local Re-link, far-side Re-link, deadline, cron — routes
+through one guarded `_released()` that reloads the profile, ends the couple if it is gone,
+and navigates once. A new source law pins it so a future session cannot quietly put the
+completion back where the gate can unmount it.
+
+Gates re-run AFTER the fix, not before: `flutter analyze` 0 errors 0 warnings / 563 issues
+(baseline 562 + 1 from the concurrent call-feature session, so this diff adds none),
+`flutter test` **1366 passed**.
+
+Also found, not fixed: on a cold start with a ceremony open, `UnlinkState.load()` is
+unawaited in `session_provider`, so the app renders normally for a frame before the gate
+redirects. Awaiting it would remove the flash at the cost of one indexed query on every
+launch for every couple; not taken unilaterally.
+
+### §206 addendum 2 — "did you complete everything?" — no, and the audit found four (2026-08-30)
+
+Owner asked. Checked the approved plan file line by line instead of answering from
+memory. Four real gaps, all shipped by me in the same session, all now closed.
+
+**1. The severance sheet was lying at the moment of decision.** The ceremony sheet still
+read *"A seven-day unlinking begins ... Both of you keep the app, the messages and the
+calls for the whole week — and one tap from you brings everything back, any day."* After
+this change every clause of that is false: 24 hours, and the ritual TAKES the app. The row
+subtitle said "Seven days ... One tap undoes it, any day" — also false, the way back is
+gated for fifteen minutes. Rewritten against the code, including the no-partner branch's
+"nothing to wait seven days for".
+
+**2. The three new pushes would have fired the LOUDEST alert in the app.** `fcm_service`
+and `reach_notifications` both branched on `type == 'unlink'` only. `unlink_lastcall`,
+`unlink_relinked` and `unlink_ended` fell through to the REACH default — which is not
+silence, it is `Importance.max` with vibration, during a breakup, carrying an id belonging
+to something else. The dispatch's own comment warns about exactly this two lines below the
+branch that was missing. So decision 4's whole point — *"they are ready to let go"*
+arriving while the Re-link button is still on screen — would never have arrived at all.
+Fixed with one `_isUnlink` predicate and per-beat quiet-channel copy.
+
+**3. `20260829120000`'s header still asserted the law this change overturns** — "there is
+deliberately NO cron ... a scheduled robot never ends a relationship" — with a per-minute
+job now scheduled. A migration that asserts a rule the next migration breaks is a trap for
+the next session. Superseded-in-part block added at the top, naming both reversed laws and
+what still stands.
+
+**4. Orphaned comment in `main.dart`** describing the UnlinkBanner that this change
+deletes, plus a stale "seven-day clock" note in `unlink_state.dart`.
+
+New law so #2 cannot regress: `unlink_source_law_test` now reads the kind union out of
+`reach-notify/index.ts` and asserts every kind it finds has a branch in BOTH client
+dispatches. Verified non-vacuous — it parses `unlink, unlink_ended, unlink_lastcall,
+unlink_relinked`. Adding a fifth kind server-side and forgetting the handset fails it.
+
+**Deliberately NOT done, and reported rather than left silent:** plan §4.6's
+secure-storage queue for a note that will not seal. The existing `_noteDraft` already
+holds the text and says so on screen (§196's fix), and decision 1 means chat is open, so
+the note is no longer the partner's only channel — the queue's justification went with it.
+Named here so it is a decision, not a gap.
+
+Gates re-run AFTER all four fixes: `flutter analyze` 0 errors 0 warnings / 563 issues
+(baseline 562 + 1 from the concurrent call-feature session), `flutter test` **1366 passed**.
+A red gate was hit on the way — repo_hygiene's commented-out-code detector flagged the new
+comment — and fixed by rewriting the comment, not by suppressing it.
+
+Still BLOCKED on the same two things: production apply, and the two-phone walkthrough.
+
+### §204 addendum 4 — ANOTHER SESSION is editing this tree (2026-08-30)
+
+- Commit `98291a1` ("fix(share): the encoder profile was never applied") is not mine, and
+  20 files are uncommitted from another session — the unlink ceremony has been REDESIGNED:
+  router gate, 15-minute hold, "last call", new `unlink_completion.dart`,
+  `unlink_banner.dart` deleted, and my `unlink_landing_latch_test.dart` deleted.
+- **My audit's unlink findings are therefore UNKNOWN against that code**, including the
+  layout CRITICAL. It is a different screen than the one §193 audited. Do not report those
+  as closed or open without re-reading the new implementation.
+- My End Connection work SURVIVED their edits: `hasPartner` ×6 in severance_sheet.dart,
+  "Leave right now" gone (only the doc comment naming its removal remains), "Leave this
+  connection" present, and safety_sheets.dart still carries the no-partner pause message.
+- **Build 65 on both handsets was cut from e5cf9ac and does NOT contain their rewrite.**
+- Audit items genuinely left: 11. Two closed today by migration 20260829181504 (consent
+  outliving the couple; no recompute on profile DELETE — `sync_trigger_mask = 29`
+  verified on prod). The remaining 11 are 3 consent-UI, 5 error-state-not-surfaced,
+  2 structural, 1 test-quality. None can lose a message or leak across identities.
+
+### §206 addendum 3 — LIVE on production (2026-08-30)
+
+Owner said go. Sequenced consumer-before-producer, per the standing rule that a new payload
+kind must parse on the deployed consumer before the producer starts sending it.
+
+**1. Staging repair — and my earlier claim was wrong.** I reported "I broke staging's
+deliver_rituals". Checked instead of recalling: staging has neither `ritual_next_at()`
+(42883) nor `rituals.deleted` (42703), so NEITHER 20260815070944 nor 20260815073233 was
+ever applied there. `create or replace` had CREATED a function, not overwritten one, and no
+version of it from the repo can run against staging's schema. Dropped it. Staging is back
+to a coherent state: `deliver_rituals_fns=0, deliver_rituals_jobs=0, unlink_job_active=1`.
+
+**2. Double-apply proven a no-op.** Second run of the migration on staging succeeded, all
+assertions re-passed, nothing errored.
+
+**3. reach-notify v15 -> v16 deployed to PRODUCTION**, `verify_jwt:false` preserved (it is
+called by DB triggers, which carry no JWT — getting that wrong breaks every push in the
+app), status ACTIVE, `ezbr_sha256` changed `6851766a…` -> `dae3b41d…`.
+
+**4. Migration APPLIED TO PRODUCTION.** All 9 assertions passed.
+
+Production verification, read-only:
+```
+active_couples 1 · paired_profiles 2 · dissolved 0 · ceremonies 0
+new_columns 2 · ledger_table 1 · ledger_readable false · dissolve_callable false
+cron_active 1 · leave_delegates true · scrub_intact true
+select public.unlink_expire_due() -> 0
+```
+
+**The destructive matrix was deliberately NOT run on production.** Production holds the
+owner's real two-member couple; the 11-step matrix dissolves a couple as step 10, and a
+mistake in a rolled-back transaction there costs real data. Behaviour is proven on staging;
+production got structural verification plus one safe call of the job.
+
+### Not verified, and it is not a footnote
+
+- **The deployed reach-notify body was never diffed back against disk.** `get_edge_function`
+  and a curl smoke test were both refused by the auto-mode classifier, and no Supabase CLI
+  is installed, so the 519-line file was transmitted by hand through the MCP tool. Evidence
+  it deployed: version 16, status ACTIVE, a changed content hash. Evidence it is
+  byte-identical to `supabase/functions/reach-notify/index.ts`: NONE. If pushes misbehave
+  during the two-phone walkthrough, suspect this first — redeploy from disk with the CLI.
+- The scheduled `unlink-expire-due` had not yet reached a minute boundary at apply time.
+  The function body is proven by the direct call above; the cron INVOCATION is proven by
+  `cron.job_run_details` once it ticks.
+
+**Exact next step unchanged:** build 66 on both handsets, two real members, and the run that
+settles it — kill the initiator's app at T+1m and never reopen it, then confirm the partner
+is released at T+24h by the job rather than by a human.
+
+Cron invocation now proven too, not just the function body:
+```
+jobname            status     return_message  start_time
+unlink-expire-due  succeeded  1 row           2026-08-29 21:20:00.033365+00
+```
+That closes the second "not verified" item above. The first — the undiffed reach-notify
+deploy — stands.
+
+### §205 addendum — the adversarial pass over my own fix found it was dead code (2026-08-30)
+
+Owner asked, plainly, whether the share was fully functional. Re-reading my own
+pushed commit to answer honestly found that **one of its headline fixes could
+never have worked.**
+
+**The glare fix in `98291a1` was dead code.** It reused `callGlareFor(mine: _callId,
+theirs: map['call_id'])`. But `_callId` is documented four lines from its own
+declaration as *"Shared by both devices for one call"*, and `callGlareFor` returns
+`undecidable` when the two ids are equal (`call_controller.dart:2272`). My code
+bailed only on `keepMine`, so `undecidable` fell straight through to
+`stopScreenShare()` — symmetric, both peers yield, **both shares die**, which is
+verbatim the bug the code was written to remove. The commit message claims it
+fixed. It did not.
+
+Replaced with `shareGlareKeepsMine({required bool isCaller})` — pure, top-level,
+and asymmetric by construction: exactly one handset placed the call. No extra
+signalling, unlike a uid exchange.
+
+**Also fixed this round, all previously known and unfixed:**
+
+- **The share could be built STUN-only.** `_iceConfig()` only reads whatever TURN
+  is already cached; the share path never called `_ensureRelay()`. On a cold or
+  expired cache that is a share which cannot connect between two carrier NATs no
+  matter how healthy the call beside it looks. Both the send and receive paths
+  now ensure the relay first.
+- **A share whose `getStats()` always errored had every watchdog disabled.** The
+  catch returned unconditionally, so neither `_stallSamples` nor `_neverStarted`
+  advanced — it could sit connected and black forever with nothing watching.
+  Persistent failure now ends the share (`statsErrorLimit`, 15 consecutive).
+- **`onIce` leaked onto dead sessions.** After `close()` sets `_remoteSet = false`,
+  every late candidate was appended to `_pendingIce` forever. Now requires a live
+  `_pc` and is bounded.
+
+**Why this keeps happening, and the one structural change made about it:** the
+share's decisions live in async methods on a controller that cannot be
+constructed without a device, and its "law" test is 238 lines of `.contains()` on
+source text. That combination passes every defect in §205 and this addendum
+unchanged. The glare decision is now a pure top-level function with a real test
+(`test/unit/call/share_glare_test.dart`) that asserts the PROPERTY that was
+violated — the two peers must never reach the same conclusion — rather than the
+shape of the code. That test fails against the old fix.
+
+**Verified:** `flutter analyze --no-pub lib/features/call test/unit/call` -> 0
+errors, 0 warnings. `flutter test test/unit/call` -> **112/112** (4 new).
+
+**NOT verified, and it is now the whole risk:** owner reports the phones are
+unavailable, so nothing here has run on hardware. Not one frame has been observed
+reaching a viewer across any of this work. Every defect fixed in §205 and here was
+found by reading; the one I could check by reading, I got wrong first. Green gates
+on this subsystem mean the code compiles and the pure functions behave — they do
+not mean the share works.
+
+**Deliberately NOT done:** `contentHint` (masterplan item 7). On Android the
+native source is already created with `isScreencast=true`
+(`GetUserMediaImpl.java`), which carries the same signal to the encoder, and
+degradation is explicitly BALANCED. Adding an untestable patch to the vendored
+plugin for a redundant hint is risk without benefit while no device exists to
+measure it. Likewise the climb ladder's numbers are untouched: tuning them needs
+real `getStats`, and guessing at them is what 26cae00 reverted.
+
+**Exact next step:** unchanged and now the only thing that matters —
+`adb logcat | grep MilesShare` on a real share. `rung0 APPLIED` means the §205
+root cause is dead; `rung0 SKIP no-encodings` that never becomes APPLIED means the
+diagnosis was wrong.
+
+### §206 addendum 4 — the concurrent session committed; clean baseline at last (2026-08-30)
+
+The call-feature session's files left the working tree between runs, so for the first time
+this session the tree holds ONLY this feature's diff. Measured properly rather than
+inferred:
+
+```
+HEAD baseline           564 issues
+HEAD + this diff        563 issues     <- net -1
+errors/warnings           0
+flutter test           1367 passed
+```
+
+Earlier notes in §206 attributed a moved lint count to that session by comparison rather
+than by flipping one variable. That was the right suspicion and the wrong method — the same
+mistake ~/.claude/CLAUDE.md records from 2026-08-27. The stash-and-remeasure above is the
+one-variable test, and it says this diff REMOVES a finding (deleting unlink_banner.dart
+takes one with it). One info that WAS mine — an unnecessary raw string in the new
+cross-boundary law — is fixed.
+
+Gates re-run after that last edit, since an edit after a gate invalidates the gate.
+
+### §206 addendum 5 — committed and pushed to fix-sprint (2026-08-30)
+
+Owner asked for the commit and the push. What went in, and what deliberately did not.
+
+**Staged explicitly, file by file — never `git add -A`.** 24 paths: the new migration, the
+superseded-header edit to 20260829120000, reach-notify, and the client half (router gate,
+the two ritual screens, unlink_completion, unlink_chat_page, state, quotes,
+countdown_digits, severance_sheet copy, app_shell, main.dart, fcm_service,
+reach_notifications) plus six test files.
+
+**LEFT UNSTAGED, because they are not mine:** `mobile/pubspec.yaml` and
+`mobile/lib/core/app/release_gate.dart` — the build 64 -> 65 bump, already dirty when this
+session started. Whoever owns that bump still owns it. Note for them: the client changes in
+this commit need a build 66 to reach a handset, and the two files must move together or
+`tool/release.sh` and its test both fail.
+
+**BRAIN.md was staged WHOLE, and it carries another session's uncommitted handoff.** The
+append is pure — `@@ -15544,0 +15545,575 @@`, zero deletions — but those 575 lines contain
+their §204 addenda 1-4 and their §205 + addendum interleaved with my §206 + addenda 1-5.
+They committed their CODE (98291a1, 3bd4fe8) and left their notes behind. Separating them
+would mean rewriting an append-only file, which is the one thing this doc's rule forbids, so
+their text rides along verbatim and is named here and in the commit body. Nothing of theirs
+was edited or dropped.
+
+Gates immediately before staging, since an edit after a gate invalidates the gate.
+
+Still BLOCKED on the same thing, and committing does not change it: the two-phone
+walkthrough on build 66, and specifically the run where the initiator's app is killed at
+T+1m and never reopened.

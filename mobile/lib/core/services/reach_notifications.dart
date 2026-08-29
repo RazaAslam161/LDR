@@ -443,16 +443,33 @@ Future<void> showMemoryNotification({
   );
 }
 
-/// The one push an unlinking ceremony ever sends: it began. QUIET on purpose
-/// — a seven-day window does not need a buzz, it needs to be discoverable —
-/// and silent entirely under a cover, like everything else here.
+/// Every push the unlinking ritual sends. QUIET on purpose — this is not a
+/// thing to buzz somebody about, it is a thing they must be able to find — and
+/// silent entirely under a cover, like everything else here.
+///
+/// Four beats since 20260830120000: it began, the partner agreed (five minutes
+/// left), somebody came back, it is over. They share one notification id on
+/// purpose, so the newest beat REPLACES the last rather than stacking four
+/// notifications about the same day.
+///
+/// [kind] only ever changes the body, and only when there is no cover — the
+/// early return above guarantees that. `last_call` is the one that has to
+/// arrive: it is what puts "they agreed" in front of the person who started
+/// this while their Re-link button is still on screen.
 Future<void> showUnlinkNotification({
   required FlutterLocalNotificationsPlugin plugin,
   required String coupleId,
+  String kind = 'unlink',
 }) async {
   final profile = await currentDisguiseProfile();
   if (profile.cover != DisguiseCover.none) return;
   final style = notificationStyleFor(profile);
+  final body = switch (kind) {
+    'unlink_lastcall' => 'They are ready to let go. A few minutes left.',
+    'unlink_relinked' => 'They came back.',
+    'unlink_ended' => 'Your shared space is closed. Kept safe for 30 days.',
+    _ => style.body,
+  };
   final android = AndroidNotificationDetails(
     kQuietChannelId,
     kQuietChannelName,
@@ -466,7 +483,7 @@ Future<void> showUnlinkNotification({
   await plugin.show(
     id: 'unlink:$coupleId'.hashCode & 0x7fffffff,
     title: style.title,
-    body: style.body,
+    body: body,
     notificationDetails: NotificationDetails(android: android),
     payload: 'unlink|$coupleId',
   );
@@ -620,11 +637,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
-  if (type == 'unlink') {
+  // All four beats of the ritual, not just the first. Without the other three
+  // named here they fall through to the REACH default below — which is not
+  // "nothing happens", it is the max-importance alert firing during a breakup
+  // carrying an id that belongs to something else, exactly as that comment
+  // warns.
+  if (type == 'unlink' ||
+      type == 'unlink_lastcall' ||
+      type == 'unlink_relinked' ||
+      type == 'unlink_ended') {
     await androidPlugin?.createNotificationChannel(buildQuietChannel());
     await showUnlinkNotification(
       plugin: plugin,
       coupleId: coupleId ?? '',
+      kind: (type as String?) ?? 'unlink',
     );
     return;
   }

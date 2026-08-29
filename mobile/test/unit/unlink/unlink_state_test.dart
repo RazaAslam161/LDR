@@ -13,6 +13,8 @@ void main() {
     String? lastLook,
     String? noteCipher,
     String? noteNonce,
+    String? relinkOpens,
+    String? partnerGateOpens,
   }) =>
       {
         'couple_id': 'cccccccc-0000-0000-0000-000000000003',
@@ -22,6 +24,8 @@ void main() {
         'cooling_ends_at': cooling,
         'last_look_ends_at': lastLook,
         'accepted_at': null,
+        'relink_opens_at': relinkOpens,
+        'partner_gate_opens_at': partnerGateOpens,
         'note_cipher': noteCipher,
         'note_nonce': noteNonce,
         'note_author': noteCipher == null ? null : b,
@@ -122,6 +126,59 @@ void main() {
       expect(UnlinkState.current.value!.due, isTrue,
           reason: 'coalesce(last_look, cooling) is the effective deadline on '
               'this side too',);
+    });
+  });
+
+  group('the two gates', () {
+    tearDown(ServerClock.reset);
+
+    test('a null gate means fifteen minutes after the start, not "now"', () {
+      // The columns are additive and nullable, so a row written by the
+      // PREVIOUS server arrives with both missing. Reading that as an open
+      // gate would hand somebody the end-it button in the first second of a
+      // fight, which is the one thing this whole design exists to prevent.
+      UnlinkState.applyRow(row());
+      final r = UnlinkState.current.value!;
+      expect(r.relinkOpensAt, DateTime.utc(2026, 8, 29, 0, 15));
+      expect(r.partnerGateOpensAt, DateTime.utc(2026, 8, 29, 0, 15));
+    });
+
+    test('a gate the server sent is used verbatim', () {
+      UnlinkState.applyRow(row(
+        relinkOpens: '2026-08-29T00:20:00Z',
+        partnerGateOpens: '2026-08-29T00:40:00Z',
+      ));
+      final r = UnlinkState.current.value!;
+      expect(r.relinkOpensAt, DateTime.utc(2026, 8, 29, 0, 20));
+      expect(r.partnerGateOpensAt, DateTime.utc(2026, 8, 29, 0, 40));
+    });
+
+    test('closed before the gate, open after — on the SERVER clock', () {
+      // A handset an hour fast would otherwise show Re-link an hour early,
+      // and one an hour slow would hide it an hour past its time. The gate is
+      // computed by Postgres; only the server's clock may read it.
+      ServerClock.setOffsetForTest(Duration.zero);
+      UnlinkState.applyRow(row(
+        relinkOpens: DateTime.now().toUtc().add(const Duration(minutes: 10))
+            .toIso8601String(),
+        partnerGateOpens: DateTime.now().toUtc()
+            .add(const Duration(minutes: 10)).toIso8601String(),
+      ));
+      expect(UnlinkState.current.value!.relinkOpen, isFalse);
+      expect(UnlinkState.current.value!.partnerGateOpen, isFalse);
+
+      // The same row, read by a phone the server says is twenty minutes slow.
+      ServerClock.setOffsetForTest(const Duration(minutes: 20));
+      expect(UnlinkState.current.value!.relinkOpen, isTrue);
+      expect(UnlinkState.current.value!.partnerGateOpen, isTrue);
+    });
+
+    test('lastCall follows the state the server wrote', () {
+      UnlinkState.applyRow(row());
+      expect(UnlinkState.current.value!.lastCall, isFalse);
+      UnlinkState.applyRow(
+          row(state: 'last_look', lastLook: '2026-08-29T00:05:00Z'));
+      expect(UnlinkState.current.value!.lastCall, isTrue);
     });
   });
 }

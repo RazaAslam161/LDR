@@ -42,7 +42,7 @@ import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
-import 'package:miles/features/unlink/unlink_repository.dart';
+import 'package:miles/features/unlink/unlink_completion.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/main.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -110,7 +110,6 @@ class _AppShellState extends ConsumerState<AppShell>
   ManagedSubscription? _rewrapSub;
   bool _rewrapOpen = false;
   ManagedSubscription? _unlinkSub;
-  bool _unlinkOpen = false;
   final Set<String> _shownReach = {};
   CallState _lastCallState = CallState.idle;
 
@@ -356,88 +355,32 @@ class _AppShellState extends ConsumerState<AppShell>
           .routerDelegate.currentConfiguration.uri.path ==
       '/rewrap';
 
-  /// Same stateless shape for the ceremony route: the per-State [_unlinkOpen]
-  /// dies with every cover flip, and the route does not.
-  bool _unlinkRouteUp() =>
-      GoRouter.of(context)
-          .routerDelegate.currentConfiguration.uri.path ==
-      '/unlink';
-
-  /// The ceremony this phone has already carried its initiator to, as
-  /// `<coupleId>|<startedAt>` — the pair is what makes it THIS ceremony and not
-  /// the next one, so ending again after a re-link lands again.
-  ///
-  /// PERSISTED, and it has to be. Neither guard below survives long enough to
-  /// be one: [_unlinkOpen] lives only for the awaited push, [_unlinkRouteUp]
-  /// only answers for the route that is up right now, and this State dies on
-  /// every cover flip. The landing is fired from three places that repeat for
-  /// the whole seven days — [_rearmAlwaysOn] on every socket re-open (so every
-  /// doze recovery and every resume), [_onUnlinkChanged] on every write the
-  /// partner makes to the row, and [_onReady] on every mount — so without a
-  /// flag that outlives the process the initiator is yanked off whatever they
-  /// were doing onto /unlink over and over for a week. The screen is still
-  /// reachable by hand: the banner, the drawer and the tapped push all push it.
-  static const _unlinkLandedKey = 'miles_unlink_landed_v1';
-
   /// What an open ceremony means for THIS side, decided on every launch,
-  /// resume and realtime event: past the deadline it executes (on human
-  /// presence — either member's), the initiator lands on the re-link screen
-  /// once per ceremony, the partner keeps the banner.
+  /// resume and realtime event: load the row, and past the deadline finish it
+  /// on human presence.
+  ///
+  /// The LANDING is no longer decided here. It was a `context.push('/unlink')`
+  /// behind a persisted `miles_unlink_landed_v1` latch, which was the right
+  /// shape for a seven-day banner and the wrong one for a ritual: a latch is
+  /// dismissible, fires once per ceremony, and raced three callers. The
+  /// router's own gate owns it now — one `if`, above every route, and it
+  /// re-decides on every change of [UnlinkState.current] instead of once.
+  ///
+  /// This still executes, and must: the per-minute `unlink-expire-due` job
+  /// closes an abandoned ceremony, but a phone that is open at the deadline
+  /// should not wait up to sixty seconds to notice.
   Future<void> _offerUnlink() async {
     await UnlinkState.load();
     if (!mounted) return;
     final row = UnlinkState.current.value;
     if (row == null) return;
-    if (row.due) {
-      await _executeUnlink(row.coupleId);
-      return;
-    }
-    final uid = ref.read(sessionProvider).profile?.id;
-    if (uid == null || !row.iAmInitiator(uid)) return;
-    final ceremony = '${row.coupleId}|${row.startedAt.toIso8601String()}';
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getString(_unlinkLandedKey) == ceremony) return;
-    // Re-asked after the await, exactly as _resumeOwnRewrap re-asks its own:
-    // this runs unawaited from several callers at once and both passing the
-    // entry guard before either sets the flag ends with two /unlink pushes.
-    if (!mounted || _unlinkOpen || _unlinkRouteUp()) return;
-    _unlinkOpen = true;
-    // Written BEFORE the push, not after: the push is awaited for as long as
-    // the user stands on the screen, and every trigger that fires meanwhile
-    // would read a latch that is not there yet.
-    if (!await prefs.setString(_unlinkLandedKey, ceremony)) {
-      debugPrint('[unlink] landing latch unwritable for $ceremony — '
-          'the re-link screen may re-open on the next resume');
-    }
-    if (!mounted) {
-      _unlinkOpen = false;
-      return;
-    }
-    await context.push('/unlink');
-    _unlinkOpen = false;
+    if (row.due) await _executeUnlink(row.coupleId);
   }
 
-  /// The ceremony completes. Mirror of _endConnection's pinned shape with the
-  /// RPC in leaveCouple's seat: the server dissolves (silently no-oping if
-  /// the other phone won the race), then the local teardown and reload.
-  Future<void> _executeUnlink(String coupleId) async {
-    try {
-      await UnlinkRepository.execute();
-    } catch (e) {
-      // not_yet (a clock argument the server wins) or a transient failure —
-      // the next launch or resume simply tries again.
-      debugPrint('[unlink] execute refused: ${e.runtimeType}');
-      return;
-    }
-    UnlinkState.reset();
-    final session = ref.read(sessionProvider.notifier);
-    try {
-      await session.endCouple(coupleId);
-    } finally {
-      await session.loadProfile();
-    }
-    // The router's needsCouple gate carries this phone to /couple.
-  }
+  /// The ceremony completes. Shared with UnlinkScreen, which has to be able to
+  /// do this too — the router gate unmounts this shell for the whole ritual.
+  Future<void> _executeUnlink(String coupleId) =>
+      completeUnlink(ref, coupleId);
 
   /// A realtime event on the ceremony row. Refetch, then decide: a row that
   /// vanished is either a re-link (couple survives — the banner just clears)
@@ -461,12 +404,14 @@ class _AppShellState extends ConsumerState<AppShell>
     }
   }
 
-  /// The push was tapped: an explicit ask to see the ceremony, either role.
+  /// An unlink push arrived, in any of its four beats. Refetch and let the
+  /// gate decide — a push that says the ceremony BEGAN and one that says it
+  /// was called off both reduce to "the row changed", and routing on it here
+  /// would fight the redirect that is already watching the same notifier.
   void _onPendingUnlink() {
     if (pendingUnlink.value == null) return;
     pendingUnlink.value = null;
     unawaited(UnlinkState.load());
-    if (!_unlinkRouteUp()) unawaited(context.push('/unlink'));
   }
 
   /// A link shared from another app while the queue screen was not mounted
