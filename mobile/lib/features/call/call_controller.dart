@@ -1186,6 +1186,9 @@ class CallController extends ChangeNotifier {
     // The share gets its OWN peer connection, built fresh per share and torn
     // down with it. The call's connection is not renegotiated, retuned or even
     // touched — see [ScreenShareSession] for the architecture.
+    // Same reason as the receive side: a share on a STUN-only connection is a
+    // share that never connects between two carrier NATs.
+    await _ensureRelay();
     final session = ScreenShareSession(
       send: _send,
       iceConfig: await _iceConfig(),
@@ -1781,9 +1784,19 @@ class CallController extends ChangeNotifier {
     // shares every time, deterministically. The call already solved this exact
     // problem; reuse its tie-break so that exactly one side yields.
     if (sharingScreen) {
-      final theirs = map['call_id']?.toString();
-      final glare = callGlareFor(mine: _callId, theirs: theirs);
-      if (glare == CallGlare.keepMine) {
+      // NOT callGlareFor. That compares two call ids, and it is right for the
+      // call — where two DIFFERENT calls are competing. A share happens inside
+      // one call, so both peers hold the SAME _callId, and callGlareFor returns
+      // `undecidable` for equal ids. An earlier version of this used it anyway
+      // and treated anything but keepMine as "yield", which is symmetric — so
+      // both sides yielded and simultaneous share still killed both shares,
+      // which is precisely the bug it was written to fix.
+      //
+      // isCaller is the asymmetry that already exists and is guaranteed
+      // opposite on the two handsets: exactly one of them placed this call.
+      if (shareGlareKeepsMine(isCaller: isCaller)) {
+        // They will yield to me; ignore their offer and keep my share.
+        _pendingShareIce.clear();
         Diag.record(DiagArea.call, 'share_glare_keep', corr: _callId);
         return;
       }
@@ -1793,6 +1806,11 @@ class CallController extends ChangeNotifier {
     final old = _shareSession;
     _shareSession = null;
     if (old != null) await old.close();
+    // The share gets its own connection, so it needs its own relay — and
+    // _iceConfig() only reads whatever is already cached. On a cold or expired
+    // cache that yielded a STUN-only share, which cannot connect at all
+    // between two carrier NATs however healthy the call beside it looks.
+    await _ensureRelay();
     final iceConfig = await _iceConfig();
     late final ScreenShareSession session;
     session = ScreenShareSession(
@@ -2360,6 +2378,19 @@ enum CallGlare { keepMine, yieldToPeer, undecidable }
 ///
 /// Pure and top-level for the same reason as [callBindingFor]: the controller
 /// cannot be constructed under test, and this is the part that has to be right.
+/// Who keeps their share when both people press Share at once.
+///
+/// Pure and top-level so it can actually be executed by a test — the thing the
+/// broken version could not be, because it was buried in an async method on a
+/// controller that cannot be constructed off-device.
+///
+/// The caller keeps. Any rule works as long as it is ASYMMETRIC: the failure it
+/// replaces treated both peers identically, so both stopped and neither share
+/// survived. [CallController.isCaller] is guaranteed opposite on the two
+/// handsets — exactly one of them placed the call — and needs no extra
+/// signalling, unlike a uid exchange.
+bool shareGlareKeepsMine({required bool isCaller}) => isCaller;
+
 CallGlare callGlareFor({required String? mine, required String? theirs}) {
   if (mine == null || mine.isEmpty || theirs == null || theirs.isEmpty) {
     return CallGlare.undecidable;

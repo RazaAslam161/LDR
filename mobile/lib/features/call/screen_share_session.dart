@@ -109,6 +109,11 @@ class ScreenShareSession {
   bool _rungApplied = false;
   int _rungSkips = 0;
 
+  /// Consecutive getStats failures. See the catch in [_sampleOnce]: an early
+  /// return there used to disable every watchdog in this class.
+  int _statsErrors = 0;
+  static const int statsErrorLimit = 15;
+
   /// Every share state transition, on one greppable tag: `adb logcat | grep MilesShare`.
   ///
   /// Not decoration. `Diag` records nothing in production
@@ -404,11 +409,23 @@ class ScreenShareSession {
       if (mime != null && mime.contains('/')) {
         _codec = mime.split('/').last.toLowerCase();
       }
-    } catch (_) {
-      // A connection mid-close answers getStats with an error; the next tick
-      // either finds it gone or finds it working.
+    } catch (e) {
+      // A connection mid-close answers getStats with an error, and the next
+      // tick usually finds it gone or working — so one failure is not news.
+      //
+      // But returning unconditionally meant a connection whose stats ALWAYS
+      // error advanced neither the stall counter nor the never-started one, so
+      // nothing was watching it at all: it could sit black and connected
+      // forever with every watchdog in this class disabled by the early
+      // return. Persistent failure is itself a dead share.
+      if (++_statsErrors >= statsErrorLimit) {
+        _log('stats errored ${_statsErrors}x — ending: $e');
+        _endReason = 2;
+        onEnded();
+      }
       return;
     }
+    _statsErrors = 0;
 
     _fpsRing.add(fps);
     if (_fpsRing.length > 300) _fpsRing.removeAt(0);
@@ -629,7 +646,10 @@ class ScreenShareSession {
           : null,
     };
     if (!_remoteSet) {
-      _pendingIce.add(m);
+      // Only while a connection is actually being negotiated. After close()
+      // _remoteSet is false too, and without the _pc check every late
+      // candidate accumulated on a dead session's list forever.
+      if (_pc != null && _pendingIce.length < 128) _pendingIce.add(m);
       return;
     }
     await _addIce(m);
@@ -692,6 +712,7 @@ class ScreenShareSession {
     _floorDropped = false;
     _rungApplied = false;
     _rungSkips = 0;
+    _statsErrors = 0;
     _endReason = 0;
     if (pc != null) {
       try {
