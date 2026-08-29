@@ -87,4 +87,31 @@ void main() {
     // And account deletion is never buried behind ending a connection.
     expect(sheet.contains("'Delete your account'"), isTrue);
   });
+
+  test('ending the connection is the ceremony; the immediate exit is gated',
+      () {
+    // The default way out is the seven-day unlinking, popped upward as its
+    // own outcome; the OLD immediate path survives verbatim behind
+    // proof-of-owner — during a ceremony it is the one control that skips
+    // the protection.
+    expect(sheet.contains('unlinkStarted'), isTrue);
+    expect(sheet.contains('onStartCeremony'), isTrue);
+    expect(sheet.contains('confirmIdentity'), isTrue,
+        reason: "the emergency exit answers only to the phone's owner",);
+    // The pause offramp bubbles as the pause outcome — a rage-quit that
+    // actually wanted distance must find distance on the way.
+    expect(sheet.contains("'Pause instead'"), isTrue);
+  });
+
+  test('settings wires the ceremony and the identity gate', () {
+    expect(settings.contains('onStartCeremony: _startUnlink'), isTrue);
+    expect(
+        settings.contains('confirmIdentity: _confirmEmergencyIdentity'),
+        isTrue,);
+    expect(settings.contains("context.push('/unlink')"), isTrue,
+        reason: 'beginning the ceremony lands the initiator on its screen',);
+    expect(settings.contains('AppLock.'), isTrue,
+        reason: 'device credential first; password fallback keeps the gate '
+            'real on lock-less phones',);
+  });
 }

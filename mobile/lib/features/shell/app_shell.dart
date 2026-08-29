@@ -42,6 +42,8 @@ import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
+import 'package:miles/features/unlink/unlink_repository.dart';
+import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/main.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -107,6 +109,8 @@ class _AppShellState extends ConsumerState<AppShell>
   RealtimeChannel? _reachChannel;
   ManagedSubscription? _rewrapSub;
   bool _rewrapOpen = false;
+  ManagedSubscription? _unlinkSub;
+  bool _unlinkOpen = false;
   final Set<String> _shownReach = {};
   CallState _lastCallState = CallState.idle;
 
@@ -147,6 +151,7 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingCall.addListener(_onPendingCall);
     pendingChat.addListener(_onPendingChat);
     pendingMemory.addListener(_onPendingMemory);
+    pendingUnlink.addListener(_onPendingUnlink);
     realtimeResumed.addListener(_rearmAlwaysOn);
     ReleaseGate.revision.addListener(_onReleaseChanged);
     // Before the first build, not after it: deciding this in a
@@ -337,6 +342,9 @@ class _AppShellState extends ConsumerState<AppShell>
     ref.read(sessionProvider.notifier).reconnectPresence();
     // A share into a still-running app arrives as onNewIntent → resume.
     unawaited(_drainSharedLink());
+    // The ceremony's clock kept running while the app was away; a deadline
+    // that passed in the background executes on this, the human's return.
+    unawaited(_offerUnlink());
   }
 
   /// True when the ceremony route is already on top — the stateless guard the
@@ -347,6 +355,86 @@ class _AppShellState extends ConsumerState<AppShell>
       GoRouter.of(context)
           .routerDelegate.currentConfiguration.uri.path ==
       '/rewrap';
+
+  /// Same stateless shape for the ceremony route: the per-State [_unlinkOpen]
+  /// dies with every cover flip, and the route does not.
+  bool _unlinkRouteUp() =>
+      GoRouter.of(context)
+          .routerDelegate.currentConfiguration.uri.path ==
+      '/unlink';
+
+  /// What an open ceremony means for THIS side, decided on every launch,
+  /// resume and realtime event: past the deadline it executes (on human
+  /// presence — either member's), the initiator lands on the re-link screen
+  /// once per session, the partner keeps the banner.
+  Future<void> _offerUnlink() async {
+    await UnlinkState.load();
+    if (!mounted) return;
+    final row = UnlinkState.current.value;
+    if (row == null) return;
+    if (row.due) {
+      await _executeUnlink(row.coupleId);
+      return;
+    }
+    final uid = ref.read(sessionProvider).profile?.id;
+    if (uid == null || !row.iAmInitiator(uid)) return;
+    if (_unlinkOpen || _unlinkRouteUp()) return;
+    _unlinkOpen = true;
+    await context.push('/unlink');
+    _unlinkOpen = false;
+  }
+
+  /// The ceremony completes. Mirror of _endConnection's pinned shape with the
+  /// RPC in leaveCouple's seat: the server dissolves (silently no-oping if
+  /// the other phone won the race), then the local teardown and reload.
+  Future<void> _executeUnlink(String coupleId) async {
+    try {
+      await UnlinkRepository.execute();
+    } catch (e) {
+      // not_yet (a clock argument the server wins) or a transient failure —
+      // the next launch or resume simply tries again.
+      debugPrint('[unlink] execute refused: ${e.runtimeType}');
+      return;
+    }
+    UnlinkState.reset();
+    final session = ref.read(sessionProvider.notifier);
+    try {
+      await session.endCouple(coupleId);
+    } finally {
+      await session.loadProfile();
+    }
+    // The router's needsCouple gate carries this phone to /couple.
+  }
+
+  /// A realtime event on the ceremony row. Refetch, then decide: a row that
+  /// vanished is either a re-link (couple survives — the banner just clears)
+  /// or the far phone executing (couple gone — run the local teardown).
+  Future<void> _onUnlinkChanged() async {
+    final had = UnlinkState.current.value != null;
+    await UnlinkState.load();
+    if (!mounted) return;
+    final row = UnlinkState.current.value;
+    if (row != null) {
+      unawaited(_offerUnlink());
+      return;
+    }
+    if (!had) return;
+    final oldCoupleId = ref.read(sessionProvider).couple?.id;
+    await ref.read(sessionProvider.notifier).loadProfile();
+    if (!mounted) return;
+    final survives = ref.read(sessionProvider).couple != null;
+    if (!survives && oldCoupleId != null) {
+      await ref.read(sessionProvider.notifier).endCouple(oldCoupleId);
+    }
+  }
+
+  /// The push was tapped: an explicit ask to see the ceremony, either role.
+  void _onPendingUnlink() {
+    if (pendingUnlink.value == null) return;
+    pendingUnlink.value = null;
+    unawaited(UnlinkState.load());
+    if (!_unlinkRouteUp()) unawaited(context.push('/unlink'));
+  }
 
   /// A link shared from another app while the queue screen was not mounted
   /// used to evaporate — ShareIntake drained only inside that screen, and
@@ -451,6 +539,20 @@ class _AppShellState extends ConsumerState<AppShell>
     // through. pending() cannot surface it (it filters own requests out), so
     // the hold is the one record that this phone owes the screen a code.
     unawaited(_resumeOwnRewrap());
+    // The unlinking ceremony: the far phone must see the row appear, the
+    // note land and a re-link clear the banner while foregrounded. Every
+    // event is a REFETCH — realtime bytea is never parsed — and the offer
+    // decides what the row means for this side.
+    _unlinkSub = ManagedSubscription.start(
+      () => RealtimeService.coupleTable(
+        channelName: 'unlink:${couple.id}',
+        table: 'couple_unlink',
+        coupleId: couple.id,
+        onChange: (_) => unawaited(_onUnlinkChanged()),
+      ),
+    );
+    unawaited(_offerUnlink());
+    _onPendingUnlink();
     _onPendingChat();
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
@@ -647,9 +749,11 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingCall.removeListener(_onPendingCall);
     pendingChat.removeListener(_onPendingChat);
     pendingMemory.removeListener(_onPendingMemory);
+    pendingUnlink.removeListener(_onPendingUnlink);
     realtimeResumed.removeListener(_rearmAlwaysOn);
     ReleaseGate.revision.removeListener(_onReleaseChanged);
     _rewrapSub?.dispose();
+    _unlinkSub?.dispose();
     final ch = _reachChannel;
     _reachChannel = null;
     if (ch != null) SupabaseService.client.removeChannel(ch);

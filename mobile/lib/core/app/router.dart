@@ -50,6 +50,7 @@ import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
+import 'package:miles/features/unlink/unlink_screen.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
 import 'package:miles/features/watch/watch_together_screen.dart';
 
@@ -246,6 +247,15 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/rewrap',
         builder: (context, state) => const RewrapScreen(),
+      ),
+      // The unlinking ceremony. Deliberately NO redirect branch and NO
+      // refreshListenable entry for it: a paired session already reaches any
+      // path, the landing is an AppShell push (the rewrap-offer pattern), and
+      // after execution the needsCouple gate sweeps this route to /couple like
+      // any other. The screen self-guards against a stale deep link.
+      GoRoute(
+        path: '/unlink',
+        builder: (context, state) => const UnlinkScreen(),
       ),
       GoRoute(
         path: '/app',

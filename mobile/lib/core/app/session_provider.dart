@@ -27,6 +27,7 @@ import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/features/safety/severance_state.dart';
+import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 
@@ -230,6 +231,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
       // asks next.
       if (partner != null) unawaited(CoupleKey.prime(state));
 
+      // An open unlinking ceremony, if this couple has one. Paired members
+      // read the row straight through RLS; unawaited because the banner and
+      // the screen both re-render off the notifier when it lands.
+      if (couple != null) unawaited(UnlinkState.load());
+
       if (couple == null) {
         // Only ever asked for when there is no couple. A paired account has
         // nothing to restore and the server would answer null for it anyway,
@@ -237,6 +243,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
         // screen renders without it and the sheet re-reads on open, so a slow
         // answer costs nothing and a failed one shows nothing.
         unawaited(SeveranceState.load());
+        // The mirror rule: a ceremony belongs to a LIVING couple, and this
+        // account no longer has one.
+        UnlinkState.reset();
         // No couple (just left, or never paired): clear any stale presence
         // couple_id so a future partner can't inherit a dangling link. The DB
         // trigger + leave_couple() already handle this server-side; this is the
@@ -474,6 +483,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // Describes a couple THIS account used to be in. Left standing, the next
     // person to sign in on this handset is told about somebody else's breakup.
     SeveranceState.reset();
+    UnlinkState.reset();
     state = const SessionState(loading: false);
   }
 

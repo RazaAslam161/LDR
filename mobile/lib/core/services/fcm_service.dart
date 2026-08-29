@@ -71,6 +71,10 @@ class MemoryTap {
 
 final ValueNotifier<MemoryTap?> pendingMemory = ValueNotifier<MemoryTap?>(null);
 
+/// An unlink push, foreground or tapped. Carries nothing but the fact —
+/// the ceremony row itself is fetched over RLS; AppShell routes to /unlink.
+final ValueNotifier<bool?> pendingUnlink = ValueNotifier<bool?>(null);
+
 /// Wires Firebase Messaging: permission, token lifecycle, the local-notification
 /// channel, and the foreground / tapped-notification handlers.
 ///
@@ -331,6 +335,12 @@ class FcmService {
           MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: false);
       return;
     }
+    if (type == 'unlink') {
+      // Foreground: the realtime channel is already telling AppShell; this
+      // only covers the race where the push wins.
+      pendingUnlink.value = true;
+      return;
+    }
     if (type != 'reach') return;
     // Foreground: surface the in-app overlay. AppShell de-dupes by reach_id so
     // this and the Supabase realtime listener never double-show.
@@ -355,6 +365,10 @@ class FcmService {
     if (type == 'memory') {
       pendingMemory.value =
           MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: true);
+      return;
+    }
+    if (type == 'unlink') {
+      pendingUnlink.value = true;
       return;
     }
     if (type != 'reach') return;
@@ -423,6 +437,15 @@ class FcmService {
       if (!SessionScope.allows(field(2), SessionScope.coupleId)) return;
       pendingMemory.value =
           MemoryTap(parts.length > 1 ? parts[1] : '', fromTap: true);
+      return;
+    }
+    if (tag == 'unlink') {
+      // unlink|coupleId — opens the ceremony screen, never the Reach overlay.
+      if (!SessionScope.allows(parts.length > 1 ? parts[1] : null,
+          SessionScope.coupleId,)) {
+        return;
+      }
+      pendingUnlink.value = true;
       return;
     }
     // Untagged by construction: the Reach payload is 'reachId|fromName|coupleId'

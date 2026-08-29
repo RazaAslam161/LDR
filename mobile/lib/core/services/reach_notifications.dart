@@ -443,6 +443,35 @@ Future<void> showMemoryNotification({
   );
 }
 
+/// The one push an unlinking ceremony ever sends: it began. QUIET on purpose
+/// — a seven-day window does not need a buzz, it needs to be discoverable —
+/// and silent entirely under a cover, like everything else here.
+Future<void> showUnlinkNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String coupleId,
+}) async {
+  final profile = await currentDisguiseProfile();
+  if (profile.cover != DisguiseCover.none) return;
+  final style = notificationStyleFor(profile);
+  final android = AndroidNotificationDetails(
+    kQuietChannelId,
+    kQuietChannelName,
+    channelDescription: kQuietChannelDesc,
+    importance: Importance.low,
+    priority: Priority.low,
+    icon: style.smallIcon,
+    ticker: style.ticker,
+    visibility: NotificationVisibility.secret,
+  );
+  await plugin.show(
+    id: 'unlink:$coupleId'.hashCode & 0x7fffffff,
+    title: style.title,
+    body: style.body,
+    notificationDetails: NotificationDetails(android: android),
+    payload: 'unlink|$coupleId',
+  );
+}
+
 /// Background + terminated FCM handler. MUST be a top-level / static function
 /// annotated with @pragma('vm:entry-point') — it runs in its own isolate.
 @pragma('vm:entry-point')
@@ -469,7 +498,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       // say "this handset has it".
       type != 'msg_sync' &&
       type != 'memory' &&
-      type != 'ritual') {
+      type != 'ritual' &&
+      // The ceremony's one push. Builds 63 and older fall out of this list
+      // and return — deliberate: they learn at execution, exactly as
+      // severance has always worked for them.
+      type != 'unlink') {
     return;
   }
 
@@ -582,6 +615,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await showRitualNotification(
       plugin: plugin,
       ritualId: (message.data['ritual_id'] as String?) ?? '',
+      coupleId: coupleId ?? '',
+    );
+    return;
+  }
+
+  if (type == 'unlink') {
+    await androidPlugin?.createNotificationChannel(buildQuietChannel());
+    await showUnlinkNotification(
+      plugin: plugin,
       coupleId: coupleId ?? '',
     );
     return;

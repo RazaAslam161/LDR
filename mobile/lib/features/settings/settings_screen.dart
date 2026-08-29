@@ -39,6 +39,8 @@ import 'package:miles/features/safety/report_service.dart';
 import 'package:miles/features/safety/safety_sheets.dart';
 import 'package:miles/features/safety/severance_sheet.dart';
 import 'package:miles/features/settings/security_code_dialog.dart';
+import 'package:miles/features/unlink/unlink_repository.dart';
+import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -411,7 +413,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// the wording now, and the sheet is in features/safety because it is read
   /// under the same over-the-shoulder rule as the report and pause sheets.
   Future<void> _removePartner() async {
-    final outcome = await showSeveranceSheet(context, onEnd: _endConnection);
+    final outcome = await showSeveranceSheet(
+      context,
+      onEnd: _endConnection,
+      onStartCeremony: _startUnlink,
+      confirmIdentity: _confirmEmergencyIdentity,
+    );
     if (!mounted) return;
     // Both follow-ups are opened from HERE rather than from inside the sheet:
     // a sheet that pops itself and then pushes from its own context is
@@ -421,10 +428,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         await showContactPauseSheet(context);
       case SeveranceOutcome.deleteRequested:
         await _deleteAccount();
+      case SeveranceOutcome.unlinkStarted:
+        await context.push('/unlink');
       case SeveranceOutcome.ended:
       case null:
         break;
     }
+  }
+
+  /// Begins the ceremony. Rethrows so the sheet keeps its own error state —
+  /// the same contract [_endConnection] has always had with it.
+  Future<void> _startUnlink() async {
+    await UnlinkRepository.start();
+    await UnlinkState.load();
+  }
+
+  /// Proof-of-owner for the exit that skips the seven days: the device
+  /// credential first (AppLock arms authInProgress itself, so the disguise
+  /// cover stays down through the OS prompt), the account password when no
+  /// screen lock is enrolled — the gate must exist on every phone, or the
+  /// emergency exit exists on none of the phones that need it most.
+  Future<bool> _confirmEmergencyIdentity() async {
+    if (await AppLock.available()) {
+      if (await AppLock.authenticate()) return true;
+      return false;
+    }
+    if (!mounted) return false;
+    final password = await showDialog<String>(
+      context: context,
+      builder: (_) => const _EmergencyPasswordDialog(),
+    );
+    if (password == null || password.isEmpty) return false;
+    return SupabaseRepository.reauthenticate(password);
   }
 
   /// Enforcement first, and the local wipe second — never the other way round.
@@ -1768,6 +1803,62 @@ class _TimezonePickerState extends State<_TimezonePicker> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Proof-of-owner fallback for phones with no screen lock enrolled — the
+/// reconnect sheet's dialog, worn by the emergency exit.
+class _EmergencyPasswordDialog extends StatefulWidget {
+  const _EmergencyPasswordDialog();
+
+  @override
+  State<_EmergencyPasswordDialog> createState() =>
+      _EmergencyPasswordDialogState();
+}
+
+class _EmergencyPasswordDialogState extends State<_EmergencyPasswordDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: MilesColors.surface1,
+      title: const Text('Your password',
+          style: TextStyle(color: MilesColors.cream50, fontSize: 16),),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Just to be sure it’s you.',
+              style: TextStyle(color: MilesColors.taupe, fontSize: 13),),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            obscureText: true,
+            autofocus: true,
+            style: const TextStyle(color: MilesColors.cream50),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel',
+              style: TextStyle(color: MilesColors.taupe),),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: MilesColors.ember),
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('Continue'),
+        ),
+      ],
     );
   }
 }
