@@ -57,15 +57,22 @@ void main() {
     }
   });
 
-  test('chat stays open for the partner, and only for the partner', () {
-    // The window exists to give the two of them a chance and the chance is a
-    // conversation. It is also what stops one tap from cutting somebody off
-    // for a day. The initiator does not get it back — they closed that room.
-    final at = router.indexOf('bool unlinkAllows(');
-    final body = router.substring(at, at + 900);
-    expect(body.contains("path == '/unlink/chat' && !row.iAmInitiator(uid)"),
-        isTrue,
-        reason: 'the asymmetry is the whole safety argument for the takeover',);
+  test('the ritual leaves no chat door — the note is the channel', () {
+    // Removed on the owner's call, and correctly. Chat was allowed to the
+    // partner and refused to the initiator, so the partner's button opened a
+    // room the other person could not enter and the messages went nowhere
+    // until the ritual was already over. The note reaches the screen that
+    // matters; a second channel that does not is worse than none.
+    expect(router.contains('/unlink/chat'), isFalse,
+        reason: 'the chat door is back, in the shape that did not work',);
+    // The page file's absence is deliberately NOT asserted by name here:
+    // repo_hygiene's "every source path a test names actually exists" law
+    // scans tests for paths and fails on one that is gone, which is the whole
+    // point of deleting it. The route and the button below are what actually
+    // make it unreachable, and neither can be restored without failing this.
+    final screen =
+        File('lib/features/unlink/unlink_screen.dart').readAsStringSync();
+    expect(screen.contains('Talk to them'), isFalse);
   });
 
   test('the shell listens through the managed channel, never hand-rolled',

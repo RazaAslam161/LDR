@@ -40,6 +40,15 @@ class TiltParallax extends StatefulWidget {
   @visibleForTesting
   final Stream<AccelerometerEvent>? debugSource;
 
+  /// Process-wide stand-in for harnesses that mount SCREENS containing this
+  /// widget (per-instance [debugSource] cannot reach one built three layers
+  /// down). Without it, `accelerometerEventStream(samplingPeriod:)` fires a
+  /// fire-and-forget `setAccelerationSamplingPeriod` platform call whose
+  /// MissingPluginException escapes the stream's own onError and fails the
+  /// test from outside it.
+  @visibleForTesting
+  static Stream<AccelerometerEvent>? debugDefaultSource;
+
   final Widget child;
 
   /// Maximum travel in logical pixels, clamped to 6.
@@ -103,6 +112,7 @@ class _TiltParallaxState extends State<TiltParallax>
         TickerMode.of(context); // false under a covered/inactive route
     if (want && _sub == null) {
       _sub = (widget.debugSource ??
+              TiltParallax.debugDefaultSource ??
               accelerometerEventStream(
                 samplingPeriod: SensorInterval.uiInterval,
               ))

@@ -26,6 +26,14 @@ void main() {
     'lib/features/breath/widgets/breath_orb.dart',
     'lib/features/reach/widgets/reach_pulse.dart',
     'lib/features/intro/intro_splash_screen.dart',
+    // The Doorstep. The scene's DRAWING files are in the set; scene_state
+    // (a pure mapper, no widgets) and scene_sync (a realtime subscription)
+    // are not motion code and stay outside it.
+    'lib/features/unlink/scene/ritual_scene.dart',
+    'lib/features/unlink/scene/scene_painters.dart',
+    'lib/features/unlink/scene/character_puppet.dart',
+    'lib/features/unlink/scene/bird.dart',
+    'lib/features/unlink/scene/unlink_end_overlay.dart',
   ];
 
   String read(String path) {
@@ -48,8 +56,10 @@ void main() {
     // listed with its reason; growing a number here is a deliberate act.
     const tolerated = <String, (int, String)>{
       'lib/core/ui/motion.dart': (
-        11,
-        'the token definitions themselves',
+        18,
+        'the token definitions themselves, including the Doorstep scene set '
+            '(slam, shake, birdFlight, spokenWord, letterSlide, boltSlide, '
+            'floodOpen, sceneLoop, duskFall) added 2026-08-30',
       ),
       'lib/core/ui/route_motion.dart': (
         2,

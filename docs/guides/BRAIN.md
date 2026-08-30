@@ -17568,6 +17568,88 @@ NOTE for any session reading the phones: a second build 67 with different conten
 be installed; the discriminator between them is a `MilesShare` line in logcat (only the
 new one can print it — §220 proved the old one cannot).
 
+## §222 — The Doorstep, phase 1: the ritual gets its street, and its ears back (2026-08-30)
+
+Owner's vision (refined and approved as the plan in
+`~/.claude/plans/removing-partner-mechanism-is-quiet-cloud.md`): the unlink ritual becomes
+an animated 2.5D scene — night street, house, door, lamp; a gendered silhouette character
+on the doorstep; a bird that lands on the lamp and speaks the ceremony quote; the
+partner's note as a letter through the door. Locked decisions: all drawn in code (no
+Rive, no video, no new assets — 0 bytes on the APK), the 5-minute last call stays (zero
+server changes), the calm screens stay as the reduce-motion fallback.
+
+### Built this session (phase 1 of 4)
+
+**`mobile/lib/features/unlink/scene/`** — six new files:
+- `scene_state.dart` — pure `SceneModel` mapper + `BeatSequencer`. Beats dedupe by
+  identity (a letter is keyed by `note_updated_at`, so refetch+broadcast collapse to ONE
+  animation and a replaced letter is a new one); a world flip flushes the queue and cuts;
+  the slam is latched per ceremony (`miles_unlink_slam_v1`, keyed coupleId|startedAt) so
+  a cold start six hours in opens on the settled street.
+- `scene_painters.dart` — sky (46 seeded stars via baked-sprite `drawAtlas`, dawn lerp
+  toward ember over the 24h), house (window, door with swing/bolt/handle-glow params),
+  street + lamp cone. EmberBackground's laws verbatim: `shouldRepaint => false`,
+  `repaint:` = the stage's frame notifier, sprites baked once per process.
+- `character_puppet.dart` — 8-segment silhouette rig, poses as const tables (the 4-beat
+  worry loop: arms crossed → look back at the door → look down → restless shift),
+  male/female/neutral as proportion tables over ONE rig, lamp-side rim light, NO faces
+  (at 50px posture reads emotion; faces read uncanny).
+- `bird.dart` — 3 baked wing sprites, landing arc, perch loop with a once-per-loop hop.
+  The one `ember` accent in the frame.
+- `ritual_scene.dart` — the stage: ONE controller (`MilesMotion.sceneLoop`, 8s), 24fps
+  frame quantizer, one RepaintBoundary, `EmberBackgroundHidden` (the root ember field had
+  been burning vsync behind this opaque screen for the whole 24h), beats performed off
+  the controller's own lap clock, per-second model re-push so time gates (Re-link at
+  +15m) flip without a row change, `off()` = settled frame + zero tickers. Speech cloud
+  is REAL text (scales, obeys the measure law) with `TextDecoration.none` per the
+  root-Stack law.
+- `scene_sync.dart` — **the dead-rail fix**: the ritual screen now owns a
+  `ManagedSubscription` on `couple_unlink` (channel `unlink_scene:<id>`, distinct topic
+  from AppShell's so the brief overlap at start/end never leaves a joined-but-dead
+  channel). Until this, the router gate had unmounted AppShell — the app's ONLY
+  couple_unlink subscription — so every beat inside the ritual travelled on the 15s poll.
+  Test seam: `debugDisabled`, the TiltParallax.debugSource pattern.
+
+**Modified:** `motion.dart` (+7 Doorstep tokens + the `strike` curve; hygiene tolerance
+11→16 with the reason written), `motion_hygiene_test` (4 scene drawing files join
+motionSet — scene_state and scene_sync are not motion code), `unlink_screen.dart` (stage
+slotted inside the viewport; `RitualScene.fits()` = animations on AND text scale < 1.6,
+else the calm block, so Re-link-at-2.0-scale wins by construction; sync owned in
+initState/dispose).
+
+### Caught by the new tests before any device saw it
+
+- The mapper read gates through the row's getters, which consult ServerClock internally —
+  the one pure function in the scene secretly depended on the wall clock. The
+  handle-glow test flushed it out; gates now compare against the mapper's own `now`.
+- The severance-sheet class again, in preview: bubble text without a Material ancestor
+  grew yellow double underlines; bubble over the lamp hid the bird entirely; the
+  character rendered TALLER than the door. All three visible only because the goldens
+  were rendered and LOOKED at.
+
+### Verified
+
+- `scene_state_test.dart` (12 tests): slam latch vs freshness, dawn clamp, per-role
+  gates, letter dedupe across three deliveries, replaced-letter identity, bolt
+  exactly-once, world-flip flush.
+- Goldens rendered AND reviewed: settled (male/female/neutral), mid-slam (door caught
+  half-swung, light spilling), relink-open (handle glow), last call (bolt shut), dawn at
+  20h. Screen-level shots regenerated with the scene embedded.
+- Full suite: **1417 passed**; analyzer **0 errors / 0 warnings**, zero infos in scene
+  scope. The only 2 failures are the OTHER session's in-flight files (screen_share
+  commented code, a 4th `// ignore` in their diff) — verified not mine by git status.
+
+### Open (phases 2–4)
+
+- Phase 2: the letter animation both views + `unlink:scene:` broadcast accelerators.
+- Phase 3: inside-view composition, end overlays above the router (light-flood /
+  fade-out), bolt slide watched live.
+- Phase 4: `--profile` on the OnePlus, build, two-phone walk.
+- The stage shows BOTH roles the outside composition in phase 1 (inside view is phase 3).
+- Sound cues fire on beats but MilesSound gates them; unverified on a device.
+
+**Exact next step:** phase 2 — the letter. Or, if the owner wants to SEE it first: build
+66/67 with phase 1 in it and put it on the OnePlus.
 
 ## §223 — The share rebuilt: protocol, survival, audio, UX — and round 2 caught round 1's own killer (2026-08-30)
 
@@ -17651,3 +17733,263 @@ on the next installed build. cap>0/fps=0 = encoder-side; cap=0 = capturer-side. 
 `~/.claude/plans/hey-listen-i-wobbly-spark.md` Phase 5 (12 items incl. audio).
 Concurrent-session note: §222 (Doorstep) landed between my sections and is NOT part of
 this commit; unlink/disguise/router/motion working-tree files are that session's.
+
+## §224 — The Doorstep, phase 2: the letter, and the ~100ms rail (2026-08-30)
+
+### The letter, both views
+
+- **Outside (initiator):** on `note_updated_at` changing, the door cracks (0→0.12→0 on the
+  enter curve), an envelope slips out, arcs to the doorstep and RESTS — cream with a gilt
+  flap, breathing a gilt glow on the scene loop to invite the tap. Tapping it unfolds the
+  screen's own `_noteCard` staged over the street (one card, one set of note states, two
+  stagings); tapping anywhere folds it away. The tap target is a 48dp invisible square
+  over the doorstep, live only while the envelope rests.
+- **Inside (partner):** on their own Save landing, the envelope slides from beside the
+  character to the door seam and fades under. This is the author's FIRST visual of their
+  own note ever — until now their only feedback was a button label change.
+- Steady state: the envelope rests whenever a note exists (outside view), so a cold start
+  shows the letter where it fell — and the sequencer gained the matching law: **an edge
+  needs two samples.** With no previous model there is no arrival, so a mount with an
+  hour-old note never replays its delivery. Unit-tested.
+- The calm layout keeps its always-visible card; it renders ONLY when the stage does not
+  (`!RitualScene.fits`), so the card never appears twice.
+
+### The broadcast rail — `unlink:scene:<coupleId>`
+
+`UnlinkSceneSync` now runs TWO rails, one authority:
+- The managed `couple_unlink` refetch subscription (the §222 dead-rail fix) decides
+  everything.
+- A broadcast channel (the `screen_presence` pattern: `{'from': uid}`, self-echo guard,
+  best-effort) whose only power is starting the refetch early: `letter` fires after
+  `writeNote` lands, `agreed` after `accept` lands. ~100ms instead of 0–15s, and the beat
+  dedupe (keyed on the row's `note_updated_at`) makes the early refetch and the poll's
+  later one collapse to one performance. Own channel, not a squat on screen_presence —
+  that channel's grammar and rate limiter belong to another feature. Rebuilt on
+  `realtimeResumed` (a raw channel dies silently after a doze). Send failures are LOGGED
+  (`[unlink] <event> broadcast failed`), never swallowed.
+
+### Verified
+
+- Goldens rendered and LOOKED at: envelope resting (breathing gilt), arriving (door
+  visibly cracked, light spilling, envelope tilted mid-drift), sliding under from inside.
+  Ten scene shots total now.
+- New unit test: cold-start-with-letter never replays arrival. 59 unlink-scope tests.
+- Full suite **1419 passed, 2 skipped** (the preview suites, by design); analyzer
+  **0 errors / 0 warnings**, zero infos in scene scope. The other session's two hygiene
+  failures from earlier today are gone — they fixed their files.
+- A heredoc corrupted two bytea test literals (`\xde` → `Þ`) on the way; caught by
+  grep, repaired, and the lesson is: bytea literals go through Edit, not shell python.
+
+### Open
+
+- The envelope tap-to-unfold has no widget test: a screen-level test with a note would
+  drag `CoupleKey.prime` → Supabase into the harness. The stage-side logic is a
+  ValueNotifier flip; the real check is the device pass.
+- Phase 3 next: inside-view composition, end overlays (light-flood / fade) above the
+  router, then phase 4: `--profile` on the OnePlus, build 67, two-phone walk.
+
+## §225 — The Doorstep, phase 3: the hearth, and the two endings (2026-08-30)
+
+### The inside of the house — the partner's camera at last
+
+`HearthPainter` joins `DoorstepPainter` in scene_painters.dart: one world, two views.
+- Warm-dark room a tint warmer than the street; the WINDOW left of frame is the room's
+  main light — the street lamp seen from indoors, spilling a painted wedge onto the
+  floor, breathing on the same loop the lamp outside breathes on, and dimming with the
+  same dawn. The slam's flicker reaches it too: it is the same lamp.
+- The DOOR right of frame, seen from within — and the BOLT is on this side, where the
+  partner's hand would be: a plate on the frame, a taupe bar that slides across the seam
+  with `f.bolt`, and a gilt glint when their own gate opens — the exact invitation the
+  outside handle gives the initiator, in mirror.
+- The bird arrives at the window sill, from the street side (BirdPainter gained a `dir`
+  param), smaller, glass between you.
+- Their character stands in the window's pool, rim-lit from the LEFT; the letter slides
+  from beside them to the door seam right of frame (the path was still using outside
+  coordinates — fixed).
+- The unused `seated` pose was DELETED rather than shipped: the rig cannot bend a knee,
+  and a pose nothing renders is dead code.
+
+### The two endings, above the router
+
+`unlink_end_overlay.dart`, mounted in the root builder Stack beside WarmthOverlay
+(`main.dart`), because both endings navigate and navigation unmounts the ritual screen
+mid-flight — a farewell cut off halfway is worse than none.
+- **Re-link:** a warm radial flood (starlight→gilt, centred where the door lives) —
+  `floodOpen`, 900ms. **Dissolution:** nightDeep rises and lifts — new token `duskFall`,
+  1400ms, "relief is quick, grief is not" (tolerance 16→17, reason written).
+- WarmthOverlay's laws, all: IgnorePointer always, RepaintBoundary inside the Positioned
+  slot, `SizedBox.shrink` at rest, one controller, `off()` plays nothing — the navigation
+  IS the ending. In motionSet.
+- Trigger: ONE synchronous line in `_released()` — `UnlinkEndOverlay.play.value =
+  survives ? relink : ended` — set right before `context.go`. The pinned teardown gained
+  ZERO awaits; the overlay plays OVER the navigation, never instead of it.
+
+### Verified
+
+- Goldens rendered and LOOKED at: `inside_settled` (window light, bird at the sill, bolt
+  glinting, her silhouette in the pool) and `inside_last_call` (bolt bar across the
+  seam). Twelve scene shots total.
+- Full suite **1419 passed, 2 skipped**; analyzer **0 errors / 0 warnings**; zero infos
+  in scene scope. Two `directives_ordering` infos in main.dart lines 22/27 are the OTHER
+  session's in-flight imports in that shared file — not touched.
+
+### Open
+
+- The end overlays have goldens for neither ending (they play above the router; the
+  preview harness mounts the stage alone). Their logic is one controller + one gradient;
+  the device pass is the real check.
+- The slam on the INSIDE phone currently shakes the room and flickers the window —
+  deliberate (the door shudders from within); no door swing indoors.
+- Phase 4 remains: `--profile` timeline on the OnePlus, build 67, the two-phone walk.
+
+**Exact next step:** phase 4 — build 67 and put the whole ritual on both handsets.
+
+## §226 — The bird was invisible, not unwanted; the quote learns to speak (2026-08-30)
+
+MISREAD, owned: the owner wrote "there is no bird" and I deleted the bird — they meant
+they COULD NOT SEE it. It rendered ~11px wide on a 344px stage. An actor nobody can see
+is a defect, not subtlety. Restored (bird.dart rewritten from context, `dir` param kept),
+sized w*0.052 outside / w*0.042 inside, and verified VISIBLE in the re-rendered golden.
+
+What the owner actually asked for, kept from the misread work:
+- The quote is now SPOKEN: the speak beat is fly-in → land → words arriving one per
+  `spokenWord` (260ms, new token; birdFlight restored beside it; tolerance 17→18).
+  Unspoken words are laid out transparent so the cloud never resizes mid-sentence; the
+  author fades in after the last word.
+- The cloud is a small thought-cloud (158px, radius 18, two trail dots toward the bird),
+  top-left in the empty sky outside / right of the window inside — the first placement
+  covered the lamp AND the bird, which is why the bird vanished a second time.
+
+Gates: full suite green, analyzer 0/0, goldens re-rendered and LOOKED at (bird clearly
+perched by the lamp, cloud mid-speech "In dreams and in love").
+
+Also this session: owner asked for generation prompts for 3D cute mini characters (male/
+female) to produce with external tools — the Rive/commissioned-art path the plan left
+open. Prompts delivered in-chat; if assets arrive, the puppet layer is the swap point
+(scene driver is renderer-agnostic by design).
+
+## §227 — Owner takes over the art: the painted actors are dead, the engine lives (2026-08-30)
+
+Owner, verbatim: "no stop your characters, house evrything is bullshit, I'll give you
+all." — and supplied a Pixar-class 3D rendered male character (navy sweater, grey
+trousers, waving, black bg) as the app's male character.
+
+**Direction change, owner's call:** the scene's ART becomes generated bitmaps the owner
+produces with external tools. NOT a rewrite — the plan made the renderer swappable on
+purpose, and everything below the paint survives untouched:
+- scene_state.dart (mapper + beat sequencer), scene_sync.dart (both rails), the letter
+  logic, the spoken thought-cloud, the end overlays, the slam latch, all laws and tests.
+- What gets replaced when assets arrive: character_puppet.dart's drawn figures, the
+  painted house/door/lamp in scene_painters (bird's fate = owner's choice).
+
+**Integration constraints given to the owner with the asset list:**
+- The DOOR must be its own image (house with an empty doorway) — a door baked into the
+  facade can never swing, crack for the letter, or take the bolt.
+- PNG with transparency preferred; the session's remove-background tool can cut black
+  bgs otherwise. WebP-compressed on intake; 6MB asset ceiling has ~3.8MB free.
+- Poses over rigs: bitmaps animate by transform + crossfade, so 2-3 poses per character
+  (worried idle set) is what the doorstep needs — not a wave.
+- Drop folder: D:\Miles\art_drop\ — raw generations go there, never straight into
+  mobile/assets (intake = cutout → trim → webp → hygiene: pubspec dir + lib reference).
+
+**Nothing was coded this turn.** The bird/cloud work from §226 stands (suite green,
+analyzer 0/0 at that point). Next step: owner generates batch 1; integration follows.
+
+## §228 — The owner's art is ON the stage: bitmap world, bitmap cast, sensors, sound (2026-08-30)
+
+The 12 WebPs from §227 (401KB, `mobile/assets/scene/`) are composited and animated.
+The painted world survives only as the pre-load frame and the neutral-variant figure.
+
+**What changed**
+- `scene_assets.dart` (new): `SceneArt` — 12 sprites decoded once per process off the
+  bundle; `charFor(variant, mood)`; decode failure falls back to the painted world,
+  logged. `CharMood` = worried / glance / calm / letter.
+- `scene_painters.dart`: `_Cover` (cover-fit + image-fraction→canvas mapping),
+  `SceneGeom` (lamp/sill/door-slice anchors, MEASURED on grid overlays — doorway out
+  x .362–.612 y .565–.945; doorway in x .905→ y .145–.870; knob at .87/.47 of the door
+  sprite). Door leaf = aspect-matched src slice (no stretch; knob kept — knob-CENTERED
+  slice for the hearth's sliver). Lantern head painted in code at the crossarm tip (the
+  matting ate the real one — code glow also flickers with the slam). Fireflies (6,
+  seeded) outside; dust motes (7) riding the window shaft inside; dawn = warm wash.
+- `ritual_scene.dart`: bitmap cast with breathe (scaleY sine) + sway (rotate) + 220ms
+  mood crossfades; bird sprite mirrored on the street so it faces the speaker's side;
+  envelope sprite with the gilt breath; TiltParallax ×2 (world depth 3 inverted +2%
+  overscale, cast depth 5) — the accelerometer "sensors" ask; letter-open taps Cue.tap.
+- `unlink_end_overlay.dart`: endings got voices — relink → Cue.unlock, ended →
+  Cue.seal, fire-and-forget, zero awaits added to teardown.
+- `tilt_parallax.dart`: static `debugDefaultSource` seam — `accelerometerEventStream
+  (samplingPeriod:)` fires a fire-and-forget platform call whose MissingPluginException
+  BYPASSES the stream's onError and fails any test that mounts the stage. Per-instance
+  debugSource can't reach a widget built three layers down.
+- pubspec declares `- assets/scene/`; asset_hygiene_test now SCANS assets/scene
+  (orphan rule + 600KB ceiling + total) — gate strengthened, not weakened.
+
+**The LOOK caught (and fixed): round 1** — cloud sat square on the lit window (moved to
+the dark brick band, Alignment(-0.85,-0.28)); envelope rest hid against the character's
+leg (moved to the top step .53/.925, tap target followed to Align(.06,.86)); outside
+bolt floated on the door's upper rail (down to .55 of the leaf — hand height); dawn wash
+unreadable at 20h (0.16→0.22 out, 0.10→0.14 in); arrival goldens caught the QUEUE, not
+the flight — the speak beat (1400ms + 9×260ms) still held the stage at 2.5s, harness now
+waits 4s. **Round 2 of the screen shots** — every character was the black puppet: the
+harness Profiles had no gender. Real profiles always have one (needsRole gate); harness
+now sets male/female. Verified: all 12 scene + 5 screen goldens re-rendered and LOOKED
+at — world, cast, bird, cloud, envelope, bolt, dawn, fireflies all present and placed.
+
+**Verified**: analyze 0 errors/0 warnings (18 pre-existing infos in tool/generate_icon
+.dart — untouched, found-not-fixed); scene preview 12/12, screen preview 5/5.
+**Open**: full default suite result lands after this entry (running at write time);
+neutral fallback figure reads dark against the bitmap world (rare path — sign-out
+escape only); two-phone walkthrough still THE unverified path (kill initiator at T+1m →
+cron releases partner at T+24h); reach-notify v16 still not byte-verified; everything
+scene-related remains uncommitted by standing rule.
+**Next**: full-suite result → report; then owner decides on build 67 + device pass.
+
+### §228 addendum — the gate verdict, and two defects the suite itself surfaced (2026-08-30)
+
+- **Full suite: 1419 passed, 0 failed, 2 skipped — `All tests passed`.**
+- Two more defects found and fixed after the entry above:
+  1. asset-hygiene orphan rule would have failed — the six character sprites were
+     loaded via `'assets/scene/$n.webp'`, invisible to the literal-path matcher. Six
+     literal `_decode` lines now, one per sprite.
+  2. `unlink_screen_test` went 12-red as a FILE while green in isolation: the stage's
+     initState `SceneArt.ensureLoaded()` completes as REAL async after its test's zone
+     closes and poisons later tests. Fix = `setUpAll(SceneArt.ensureLoaded)` (the
+     preview harnesses already did this). One-variable flip: file 17/17 after.
+     Class checked: no other default-suite file mounts the stage.
+- **`flutter analyze` exits 1 on this tree and always has this session** — 570
+  PRE-EXISTING info-level lints (fatal-infos is flutter's default), 103 in
+  tool/generate_icon.dart, the rest across ~60 untouched files; every earlier "clean"
+  reading piped through `tail`, which masked the exit code. ZERO issues in any file
+  this work touched (machine-format filter, post-fix). Not fixed — 570 drive-by lint
+  fixes across the repo is not this diff, and only the owner changes a gate.
+  `found, not fixed: repo-wide — flutter analyze exit 1 on 570 pre-existing infos`.
+
+### §228 addendum 2 — the MOTION preview, and the two jumps only motion could show (2026-08-30)
+
+Stills cannot show a slam. A scratch harness dumped real frame sequences off the stage
+(pump at fixed steps → `matchesGoldenFile('anim/…')` under `--update-goldens`), stitched
+to GIF/MP4 with Pillow + ffmpeg. Harness and frames DELETED after; artifacts live in
+`D:\Miles\art_drop\preview_*.{gif,mp4}` (untracked scratch, not repo assets).
+
+**Two defects the filmstrip exposed — invisible in every static golden:**
+1. **The door popped.** Frame 0 painted the SETTLED street (leaf shut), then the leaf
+   jumped open at ~100ms and slammed. Cause: the slam latch is an async
+   SharedPreferences read, so the first frames render before the model knows a slam is
+   due. Fix: `_freshAtMount` (one `DateTime.now()` AT MOUNT — not a per-frame wall
+   clock, the stage's only clock is still its controller) holds `doorOpen = 0.7` while
+   the latch is unresolved on a ceremony under 45s old. Verified: t=0 now opens WITH the
+   door already open, 100→400ms swings it shut.
+2. **The cloud opened empty.** The bubble appeared, then the first word arrived a
+   `spokenWord` later — a quarter-second empty box on the screen where an empty box was
+   already rejected once (§226). Fix: `said` starts at 1, so word one lands WITH the
+   cloud. Verified on the filmstrip at t=2400ms.
+
+**Regenerate**: rewrite the scratch test (pattern above), run
+`flutter test --tags preview --run-skipped --update-goldens`, then
+`ffmpeg -framerate 10 -i _frames/open_%03d.png -vf scale=720:-2 -c:v libx264 out.mp4`.
+**Verified this pass**: frames re-dumped after both fixes and LOOKED at (filmstrip);
+scene + screen goldens re-rendered; full-suite verdict follows this entry.
+**Still open**: unchanged — device pass (60fps on the OnePlus) and the two-phone
+walkthrough are the untested paths; analyze still exits 1 on 570 pre-existing infos.
+
+**Full suite after both motion fixes: `01:50 +1419 ~2: All tests passed!`** (goldens re-rendered 17/17 first). Tree left as found — scratch harness and frame dumps deleted; nothing committed.

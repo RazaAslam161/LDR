@@ -151,6 +151,11 @@ flutter:
     # and crop are not reproducible from this repo — see BRAIN §141. 69KB for
     # five against a 2.5MB ceiling.
     - assets/art/
+    # The Doorstep's cast and world — twelve WebP layers the OWNER generated
+    # (BRAIN §227: characters, backdrops, door, lamp, bird, envelope), matted
+    # and sized by tool; ~400KB total. Composited and animated in
+    # features/unlink/scene/ — the sprites are stills, all motion is code.
+    - assets/scene/
     # The OFL texts ship because the license requires them to travel with the
     # font software; theme.dart registers both with LicenseRegistry so they
     # surface in the standard licenses page.

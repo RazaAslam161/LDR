@@ -14,6 +14,7 @@ void main() {
     'assets/sound',
     'assets/fonts',
     'assets/art',
+    'assets/scene',
   ]) {
     final d = Directory(dir);
     if (!d.existsSync()) continue;
@@ -85,11 +86,14 @@ void main() {
         reason: 'assets/sound over its 1.5MB ceiling');
     expect(dirSize('assets/fonts'), lessThanOrEqualTo(600 * 1024),
         reason: 'assets/fonts over its 600KB ceiling');
+    expect(dirSize('assets/scene'), lessThanOrEqualTo(600 * 1024),
+        reason: 'assets/scene over its 600KB ceiling');
     expect(
         dirSize('assets/emoji') +
             dirSize('assets/sound') +
             dirSize('assets/fonts') +
             dirSize('assets/art') +
+            dirSize('assets/scene') +
             dirSize('assets/motion'),
         lessThanOrEqualTo(6 * 1024 * 1024),
         reason: 'assets/ total over its 6MB ceiling',);

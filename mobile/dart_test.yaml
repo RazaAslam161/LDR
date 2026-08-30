@@ -1,0 +1,8 @@
+# The preview suite renders the unlinking ritual to PNGs so the design can be
+# looked at. It writes files instead of asserting, so it is excluded from the
+# default run — a gate that rewrites images every time is not a gate.
+#
+#   flutter test --tags preview --update-goldens test/widget/unlink_screen_preview_test.dart
+tags:
+  preview:
+    skip: "run explicitly: flutter test --tags preview --update-goldens"

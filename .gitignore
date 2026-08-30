@@ -74,3 +74,9 @@ scripts/film-shoot/out/
 
 .vercel
 .env*
+
+# Art staging and rendered previews — regenerable, and heavy (art_drop alone
+# is ~119MB of raw generations and preview video). The shipped cutouts live in
+# mobile/assets/scene/ and ARE tracked; these are the workbench, not the work.
+art_drop/
+mobile/test/widget/preview/

@@ -50,7 +50,6 @@ import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
-import 'package:miles/features/unlink/unlink_chat_page.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
@@ -69,7 +68,7 @@ PresenceRouteObserver? presenceRouteObserver;
 /// a condition spread across a redirect and every screen that has to agree
 /// with it. Everything not named here resolves to the ritual.
 ///
-/// Three groups, and each is here for a reason that outranks the ritual:
+/// Two groups, and each is here for a reason that outranks the ritual:
 ///
 ///  * THE EXITS. Deleting the account and the permanent leave are never gated
 ///    on the ceremony — that is assertion #4 of 20260829120000, it is Play
@@ -79,17 +78,22 @@ PresenceRouteObserver? presenceRouteObserver;
 ///    to fix that.
 ///  * THEIR MEMORIES. Export stays open to both of them at every stage. A
 ///    ritual that holds your photographs hostage is a threat, not a pause.
-///  * THE PARTNER'S CHAT. Only for the person who did NOT start it. The window
-///    exists to give the two of them a chance, and the chance is a
-///    conversation — a single sealed note cannot repair a fight. It also
-///    closes the obvious abuse: without it, one tap silently cuts your partner
-///    off from you for a day.
 ///
-/// The initiator does not get chat back. They closed the door; the room they
-/// closed is closed to them too, and Re-link is the way back into it. That
-/// asymmetry is the ritual having a cost, which is the point of one.
+/// There was a third: chat, for the partner only. It is GONE, and it must not
+/// come back in that shape. The initiator was locked out of chat, so the
+/// partner's "Talk to them" opened a room the other person could not enter —
+/// messages nobody would read until the ritual was already over, with message
+/// pushes switched off so not even a notification escaped. A button promising
+/// a conversation and delivering a monologue.
+///
+/// The note is the channel, and unlike chat it actually arrives: the partner
+/// writes it, and it renders on the initiator's screen beside the Re-link
+/// button. One channel that works beats two where one is theatre.
+///
+/// Takes only the path now. Both roles get the same set, so the row and the
+/// uid stopped deciding anything the moment chat left.
 @visibleForTesting
-bool unlinkAllows(UnlinkRow row, String uid, String path) {
+bool unlinkAllows(String path) {
   if (path == '/unlink') return true;
   const always = {
     '/app/settings/export',
@@ -97,8 +101,7 @@ bool unlinkAllows(UnlinkRow row, String uid, String path) {
     '/rewrap',
     '/call',
   };
-  if (always.contains(path)) return true;
-  return path == '/unlink/chat' && !row.iAmInitiator(uid);
+  return always.contains(path);
 }
 
 /// Routes the user based on auth + onboarding state.
@@ -251,7 +254,7 @@ GoRouter buildRouter(Ref ref) {
       final ceremony = UnlinkState.current.value;
       if (ceremony != null &&
           session.profile != null &&
-          !unlinkAllows(ceremony, session.profile!.id, path)) {
+          !unlinkAllows(path)) {
         return '/unlink';
       }
 
@@ -344,14 +347,6 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/unlink',
         builder: (context, state) => const UnlinkScreen(),
-      ),
-      // The one door the ritual leaves open, and only for the partner —
-      // unlinkAllows() is what enforces that. Chat lives as a TAB inside the
-      // shell, so reaching it without also reaching Touch, Closer, the games
-      // and the gallery needs its own route.
-      GoRoute(
-        path: '/unlink/chat',
-        builder: (context, state) => const UnlinkChatPage(),
       ),
       GoRoute(
         path: '/app',

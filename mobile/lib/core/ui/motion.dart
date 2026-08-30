@@ -66,6 +66,49 @@ class MilesMotion {
   /// these run forever and any sharpness becomes a metronome.
   static const Curve breathe = Curves.easeInOutSine;
 
+  // ── The Doorstep. The unlinking ritual's scene has its own tempo family:
+  // slower than interaction, more deliberate than ambience, because it is a
+  // performance both phones watch together. Same law as everything above —
+  // the scene widgets carry no raw Duration; the beat picks the token.
+
+  /// The door closing behind somebody. Fast enough to be final.
+  static const Duration slam = Duration(milliseconds: 700);
+
+  /// The breath of camera shake after the slam — one shudder, not an
+  /// earthquake. Short, because the stillness after it is the point.
+  static const Duration shake = Duration(milliseconds: 480);
+
+  /// The bird's flight in to the lamp post.
+  static const Duration birdFlight = Duration(milliseconds: 1400);
+
+  /// One word of the spoken quote arriving in the bird's cloud. The cadence
+  /// of somebody saying it, not a block of text appearing.
+  static const Duration spokenWord = Duration(milliseconds: 260);
+
+  /// A letter sliding under the door, either direction.
+  static const Duration letterSlide = Duration(milliseconds: 800);
+
+  /// The bolt sliding shut — the one moment played with weight.
+  static const Duration boltSlide = Duration(milliseconds: 550);
+
+  /// The door opening from inside and light flooding the street.
+  static const Duration floodOpen = Duration(milliseconds: 900);
+
+  /// The other ending: the lamp dies and the night takes the street back.
+  /// Slower than the flood on purpose — relief is quick, grief is not.
+  static const Duration duskFall = Duration(milliseconds: 1400);
+
+  /// One cycle of the scene's ambient loop: the idle acting crossfade, the
+  /// lamp's slow warmth, the parallax drift. Everything at rest rides this
+  /// one clock, which is what keeps the scene one system instead of seven
+  /// widgets.
+  static const Duration sceneLoop = Duration(seconds: 8);
+
+  /// Impacts accelerate; arrivals decelerate. The door slam and the bolt use
+  /// this — the mirror of [enter], because a thing gaining speed reads as
+  /// force and a thing losing speed reads as care.
+  static const Curve strike = Curves.easeInQuart;
+
   /// True when the platform has been asked to stop animating.
   ///
   /// Checked at every call site rather than once at startup: it is a system

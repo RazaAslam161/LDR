@@ -43,6 +43,7 @@ import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
+import 'package:miles/features/unlink/scene/unlink_end_overlay.dart';
 import 'package:miles/firebase_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
@@ -1066,6 +1067,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // so it reaches the whole screen, above the page and below the
               // lock.
               const Positioned.fill(child: WarmthOverlay()),
+              // The unlinking ritual's two endings — the light flood and the
+              // dusk — played above the router, because both endings navigate
+              // and a farewell cut off mid-flight is worse than none.
+              const Positioned.fill(child: UnlinkEndOverlay()),
                     ],
                     ),
                     ),
