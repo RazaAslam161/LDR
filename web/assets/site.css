@@ -66,24 +66,25 @@ a:hover{color:var(--cream)}
 .t-d3{font:400 1.875rem/1.1 var(--f-display);color:var(--cream);margin:0}
 .t-h1{font:400 1.625rem/1.15 var(--f-display);color:var(--cream);margin:0}
 .t-h2{font:400 1.375rem/1.2 var(--f-display);color:var(--cream);margin:0}
-.t-accent{font:italic 400 1.25rem/1.35 var(--f-display);color:var(--ember-soft);margin:0}
+.t-accent{font:italic 400 1.375rem/1.35 var(--f-display);color:var(--ember-soft);margin:0}
 .t-eyebrow{font:600 .8125rem/1.4 var(--f-body);letter-spacing:.08em;
   text-transform:uppercase;color:var(--taupe);margin:0}
 .t-body-l{font:400 1.0625rem/1.65 var(--f-body);color:var(--cream-92)}
 .t-body-s{font:400 .875rem/1.55 var(--f-body);color:var(--taupe)}
-.t-caption{font:500 .75rem/1.4 var(--f-body);color:var(--faint)}
+.t-caption{font:500 .75rem/1.4 var(--f-body);color:var(--taupe)}
 
 /* ---------- shell: header ---------- */
 .shell-head{position:sticky;top:0;z-index:40;background:var(--night);
   border-bottom:1px solid var(--edge-14)}
 .shell-head-in{max-width:72rem;margin:0 auto;padding:var(--s3) var(--s4);
   display:flex;align-items:center;justify-content:space-between;gap:var(--s4)}
-.wordmark{font:italic 400 1.5rem/1.1 var(--f-display);letter-spacing:.015em;
+.wordmark{font:italic 400 1.625rem/1.1 var(--f-display);letter-spacing:.015em;
   background:linear-gradient(180deg,#FCEFE6 0%,#D9A86C 100%);
   -webkit-background-clip:text;background-clip:text;color:transparent;
   -webkit-text-fill-color:transparent}
 .shell-nav{display:flex;align-items:center;gap:var(--s4)}
-.shell-nav a{font:600 .875rem/1 var(--f-body);color:var(--taupe)}
+.shell-nav a{display:inline-flex;align-items:center;min-height:44px;
+  font:600 .9375rem/1 var(--f-body);color:var(--cream-92)}
 .shell-nav a:hover{color:var(--cream)}
 @media (max-width:640px){.shell-nav .hide-s{display:none}}
 
@@ -106,6 +107,9 @@ a:hover{color:var(--cream)}
 .band-deep{background:var(--night-deep)}
 .stack>*+*{margin-top:var(--s4)}
 .stack-s>*+*{margin-top:var(--s3)}
+/* the status line explains the CTA above it — it needs air, not adjacency */
+.stack>.hero-cta+.t-caption{margin-top:var(--s5)}
+.block-link{margin:var(--s6) 0 0}
 .head-block{margin-bottom:var(--s6)}
 .head-block .t-eyebrow{margin-bottom:var(--s3)}
 
@@ -113,12 +117,18 @@ a:hover{color:var(--cream)}
 .hero{position:relative;min-height:92vh;display:flex;align-items:center;
   overflow:hidden;background:var(--ambient)}
 .hero-canvas{position:absolute;inset:0;width:100%;height:100%}
+/* the plate and the embers are decoration: this scrim keeps them behind the
+   words instead of beside them. Sits above both, below .hero-in. */
+.hero::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:linear-gradient(100deg,rgba(18,10,12,.88) 0%,rgba(18,10,12,.6) 34%,
+    rgba(18,10,12,.1) 64%,rgba(18,10,12,0) 80%)}
+@media (max-width:860px){.hero::before{background:rgba(18,10,12,.6)}}
 .hero-in{position:relative;z-index:2;max-width:72rem;margin:0 auto;
   padding:var(--s7) var(--s4);display:grid;gap:var(--s6);align-items:center;
   grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}
 @media (max-width:860px){.hero-in{grid-template-columns:1fr;text-align:center;
   justify-items:center;padding-top:var(--s6)}}
-.hero-mark{width:min(480px,78vw)}
+.hero-mark{width:min(440px,74vw);opacity:.82}
 .hero-sub{max-width:36rem;font:400 1.0625rem/1.65 var(--f-body);color:var(--taupe)}
 .hero-cta{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:center}
 @media (max-width:860px){.hero-cta{justify-content:center}.hero-sub{margin:0 auto}}
@@ -161,6 +171,9 @@ a:hover{color:var(--cream)}
   border-radius:16px;padding:var(--s4)}
 .card h3,.card-s h3{margin:var(--s3) 0 var(--s2)}
 .card p,.card-s p{margin:0}
+/* two lines of headroom while the row is side-by-side, so a heading that wraps
+   does not push its own body copy out of line with the rest of the row */
+@media (min-width:561px){.grid-4 .card-s h3{min-height:2.4em}}
 .panel{background:var(--surface-1);border:1px solid var(--edge-14);
   border-radius:24px;padding:var(--s6)}
 @media (max-width:640px){.panel{padding:var(--s5) var(--s4)}}
@@ -181,17 +194,20 @@ a:hover{color:var(--cream)}
 .btn-ghost{background:none;border:1px solid var(--edge-30)}
 .btn-ghost:hover{border-color:var(--gilt)}
 .chip-play{display:inline-flex;align-items:center;gap:var(--s2);height:52px;
-  padding:0 var(--s5);border-radius:999px;background:var(--surface-2);
-  border:1px solid var(--edge-18);font:600 .875rem/1 var(--f-body);
-  color:var(--taupe);cursor:default}
-.chip-play svg{opacity:.6}
+  padding:0 var(--s5);border-radius:999px;background:var(--cta);border:0;
+  font:600 .875rem/1 var(--f-body);color:var(--cream);cursor:default}
 .arrow-link{font:600 .875rem/1 var(--f-body);color:var(--ember-soft)}
 
 /* definition list (security section) */
-.deflist{display:grid;gap:var(--s4)}
-.deflist dt{font:600 .9375rem/1.4 var(--f-body);color:var(--gilt);margin:0}
+/* two columns above ~1024px so the measure stays inside 60–80ch: one column
+   across this panel runs past 110ch. The 48px row gap is what groups each
+   term with its own definition. */
+.deflist{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(22rem,100%),1fr));
+  gap:var(--s6)}
+.deflist dt{font:600 .9375rem/1.4 var(--f-body);color:var(--gilt);margin:0;
+  max-width:60ch}
 .deflist dd{margin:var(--s1) 0 0;color:var(--cream-92);
-  font:400 .9375rem/1.6 var(--f-body)}
+  font:400 .9375rem/1.6 var(--f-body);max-width:60ch}
 .code-chip{font:600 .8125rem/1 var(--f-body);color:var(--gilt);
   background:var(--surface-2);border:1px solid var(--edge-12);
   border-radius:12px;padding:3px 8px;white-space:nowrap}
@@ -202,10 +218,14 @@ details.qa{background:var(--surface-1);border:1px solid var(--edge-12);
   border-radius:16px;padding:var(--s4) var(--s5)}
 details.qa summary{cursor:pointer;list-style:none;display:flex;
   justify-content:space-between;align-items:center;gap:var(--s3);
-  font:400 1.125rem/1.3 var(--f-display);color:var(--cream)}
+  font:400 1.0625rem/1.3 var(--f-display);color:var(--cream)}
 details.qa summary::-webkit-details-marker{display:none}
-details.qa summary::after{content:"+";font:300 1.4rem/1 var(--f-display);
-  color:var(--gilt);transition:transform var(--t-quick) var(--ease-enter)}
+/* drawn, not typed: a 2px cross reads at a glance where a 300-weight "+" did not */
+details.qa summary::after{content:"";flex:none;width:26px;height:26px;
+  border-radius:999px;border:1px solid var(--edge-18);
+  background:linear-gradient(var(--gilt),var(--gilt)) center/12px 2px no-repeat,
+             linear-gradient(var(--gilt),var(--gilt)) center/2px 12px no-repeat;
+  transition:transform var(--t-quick) var(--ease-enter)}
 details.qa[open] summary::after{transform:rotate(45deg)}
 details.qa p{margin:var(--s3) 0 0;color:var(--taupe);
   font:400 .9375rem/1.6 var(--f-body)}
@@ -331,7 +351,7 @@ details.qa:hover summary{color:var(--starlight)}
 .foot-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
   gap:var(--s5);max-width:56rem;margin:0 auto;width:100%}
 @media (max-width:640px){.foot-cols{grid-template-columns:1fr;text-align:center}}
-.foot-col h4{font:600 .8125rem/1.4 var(--f-body);letter-spacing:.08em;
+.foot-col h3{font:600 .8125rem/1.4 var(--f-body);letter-spacing:.08em;
   text-transform:uppercase;color:var(--faint);margin:0 0 var(--s3)}
 .foot-col ul{list-style:none;margin:0;padding:0;display:flex;
   flex-direction:column;gap:var(--s2)}
@@ -353,4 +373,4 @@ details.qa:hover summary{color:var(--starlight)}
 
 /* ---------- v3: the Higgsfield plates ---------- */
 .hero-plate{position:absolute;inset:0;width:100%;height:100%;
-  object-fit:cover;opacity:.32;pointer-events:none}
+  object-fit:cover;opacity:.24;pointer-events:none}

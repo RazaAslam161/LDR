@@ -16147,3 +16147,63 @@ Gates immediately before staging, since an edit after a gate invalidates the gat
 Still BLOCKED on the same thing, and committing does not change it: the two-phone
 walkthrough on build 66, and specifically the run where the initiator's app is killed at
 T+1m and never reopened.
+
+---
+
+## §208 — Floto web usability audit: 12 of 13 fixed, 1 disproved, 1 regression caught (2026-08-30)
+
+**Source:** `Floto Audit Report - Usability.pdf`, scan of `https://miles-legal.vercel.app/`
+on 2026-08-29. Score 70/100, 13 findings (0 critical, 2 major, 9 minor, 2 suggestion).
+Everything below is the landing page — `web/index.html` + `web/assets/site.css`.
+
+**Reproduced Floto's numbers before touching anything** (DOM measurement at 1440×900,
+local `npx serve web -l 3100`):
+- 12 distinct rendered font sizes — Floto said 12. Exact match.
+- Heading outline ended `H2 "One space, for the two of you." → H4 "Product"`. Skip confirmed.
+- `.deflist dd` measured **111 probe-ch / ~133 characters** per line. Floto's "excessively wide" was an understatement.
+
+**What changed**
+
+| # | Finding | Fix | Before → after (measured) |
+|---|---|---|---|
+| 1 | CTA is a ghost pill (Major) | `.chip-play` → solid `--cta` gradient, cream text, no border; play glyph filled `#FCEFE6` instead of a 1.3px gilt stroke | `background:#2F1620` + 0.8px border → `linear-gradient(135deg,#F2956F…)`, `color:#B8909A` → `#FCEFE6` |
+| 2 | Background glow competes with hero text | new `.hero::before` 100° scrim (above plate/canvas, below `.hero-in`; flat 0.6 below 860px), mark dimmed + shrunk, plate dimmed | mark `opacity 1→.82`, `width 480→440px`, plate `.32→.24` |
+| 3+4 | Body copy line length (Major + Minor) | `.deflist` → `repeat(auto-fit,minmax(min(22rem,100%),1fr))`, `gap:48px`, `max-width:60ch` on dt/dd | 111ch/~133 chars → **503px ≈ 67 chars** (768px: 568px ≈ 76) |
+| 5 | 12 distinct font sizes | `.t-accent` 20→22px, `.wordmark` 24→26px, `details.qa summary` 18→17px, footer wordmark inline `1.25rem` deleted on all 7 pages | 12 → **9** (12/13/14/15/17/22/26/40/72) |
+| 6 | H2→H4 skip | footer `<h4>` → `<h3>` on all 7 pages; CSS `.foot-col h4` → `.foot-col h3` | skip list → **none**, on index, faq and privacy-policy |
+| 7 | Status text crowded under CTA | `.stack>.hero-cta+.t-caption{margin-top:var(--s5)}` | 20px → **32px** |
+| 8 | 4th card heading wraps, breaks row rhythm | `@media (min-width:561px){.grid-4 .card-s h3{min-height:2.4em}}` | body tops `2869/2869/2869/2895` → **2902 ×4** |
+| 9 | "All questions" cramped under the list | inline `margin:32px 0 0` → `.block-link{margin:var(--s6)}` (both the FAQ and the security link) | 32px → **48px**, matching the 48px above the list |
+| 11 | Subheading grouping ambiguous | absorbed by the `.deflist` 48px row gap | separation 20px / binding 4px → **48px / 4px** |
+| 12 | Nav links small and faint | `.shell-nav a` 14→15px, `--taupe`→`--cream-92`, `min-height:44px` inline-flex | 14px tall → **44px** tap target |
+| 13 | '+' icon too thin | `summary::after` is now a drawn 26px circle with two 2px bars, not a 300-weight glyph | `font-weight:300` text "+" → 2px strokes, rotate-45 on open still works |
+
+**Not fixed — Floto is wrong (#10, Suggestion).** It claims the "Small rituals" heading and
+the card grid "are both centered in the viewport but have different widths". Measured:
+`h2.left = 137, grid.left = 137, h2.width = 1152, grid.width = 1152`. Identical. The only
+real offset is the 20px the card's own padding insets its text — which is how every card
+grid works. Changing it would trade a correct alignment for a wrong one. Left alone
+deliberately; it may re-appear on a re-scan.
+
+**One extra fixed, one found and left**
+- Fixed alongside #7 because it is the same element: `.t-caption` was `--faint #7A5560` on
+  `#120A0C` = **3.07:1**, below WCAG AA for 12px text. Now `--taupe` = **6.99:1**.
+- found, not fixed: `web/assets/site.css` `.foot-copy` and `.foot-links a` still use
+  `--faint` on `--night-deep`, so they are below 3:1. Same defect class, different elements.
+
+**A regression I introduced and caught before reporting.** First cut used
+`minmax(22rem,1fr)` — the classic auto-fit trap. At 375px the column stayed 352px inside a
+295px panel, and `.panel{overflow:hidden}` would have *clipped* the security copy on every
+phone. Caught by measuring at the mobile preset, not by looking at the desktop shot.
+`min(22rem,100%)` fixes it: 293px column, `scrollWidth === clientWidth` at 375, 768 and 1440.
+
+**Verified:** DOM measurement + screenshots at 375 / 768 / 1440 on `localhost:3100`;
+`index.html`, `faq.html`, `privacy-policy.html` all report zero heading skips, zero
+horizontal overflow, zero console errors.
+
+**Not verified:** nothing is deployed. `git status` shows the changes only in the working
+tree; `miles-legal.vercel.app` still serves the audited version.
+
+**Still open / exact next step:** owner reviews the diff (`git diff web/`), then deploys —
+only after that is a Floto re-scan meaningful. Expect 12 of 13 cleared and #10 to possibly
+re-appear.
