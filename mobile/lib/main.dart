@@ -36,6 +36,7 @@ import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/call/call_pip.dart';
+import 'package:miles/features/call/call_route_bridge.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_banner.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
@@ -1045,6 +1046,10 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // whole overlay layer down, which greys out the entire app and
               // swallows every touch. The boundary lives inside CallPip.
               const CallPip(),
+              // Reaching a call must not depend on the shell being mounted:
+              // the unlink ceremony redirects out of /app for a whole day, and
+              // AppShell was the only thing listening. Draws nothing.
+              const CallRouteBridge(),
               // Same rule as CallPip — returns a Positioned, so it must stay a
               // direct child of this Stack. Root-level because the moments it
               // exists for are precisely the ones where the call screen is not

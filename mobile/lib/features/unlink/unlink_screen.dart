@@ -79,6 +79,15 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   /// Set once the ceremony has ended by any door, so the teardown-and-leave
   /// runs exactly once however many notifiers fire.
   bool _leaving = false;
+
+  /// A completion attempt is in flight, so the next tick does not stack a
+  /// second one on top of it.
+  bool _finishing = false;
+
+  /// The tick a completion was last attempted on. Starts far enough behind that
+  /// the first due tick attempts immediately; a refusal then retries on the same
+  /// unhurried cadence as the refetch rather than hammering once a second.
+  int _lastFinishAt = -15;
   String? _note;
   _NoteLoad _noteLoad = _NoteLoad.pending;
 
@@ -161,17 +170,32 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     _tick?.cancel();
     var n = 0;
     _tick = Timer.periodic(const Duration(seconds: 1), (t) {
+      final at = ++n;
       final row = UnlinkState.current.value;
       if (row == null) {
         t.cancel();
         return;
       }
       if (row.due) {
-        t.cancel();
-        unawaited(_finish(row.coupleId));
+        // Deliberately does NOT cancel before the RPC. This ticker IS the
+        // retry, and cancelling first meant a refused execute — a transient
+        // socket, or a clock argument the server wins — left nothing running:
+        // the screen sat on a stale row for ever, past a deadline that had
+        // already passed, with no way to notice the couple had been dissolved
+        // from the other phone or by the job. It stops when the work is done.
+        if (!_finishing && at - _lastFinishAt >= 15) {
+          _lastFinishAt = at;
+          _finishing = true;
+          unawaited(
+            _finish(row.coupleId).then((done) {
+              if (done) t.cancel();
+            }).whenComplete(() => _finishing = false),
+          );
+        }
+        if (mounted) setState(() {});
         return;
       }
-      if (++n % 15 == 0) unawaited(UnlinkState.load());
+      if (at % 15 == 0) unawaited(UnlinkState.load());
       if (mounted) setState(() {});
     });
   }
@@ -179,7 +203,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   /// The deadline passed with this screen open. Either phone may finish it,
   /// and the per-minute job will too — whichever gets there first, the rest
   /// no-op.
-  Future<void> _finish(String coupleId) => completeUnlink(ref, coupleId);
+  Future<bool> _finish(String coupleId) => completeUnlink(ref, coupleId);
 
   /// Derive the couple key for this route, rather than hoping someone else did.
   ///

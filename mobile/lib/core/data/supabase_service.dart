@@ -19,6 +19,19 @@ class SupabaseService {
       // connection leaves whichever screen is awaiting it spinning forever,
       // with no error to show and nothing for the user to do.
       httpClient: TimeoutHttpClient(http.Client()),
+      // The retry policy is stated rather than inherited. postgrest defaults to
+      // retryCount 3 with no requestTimeout, and it retries on ANY exception —
+      // including the ClientException TimeoutHttpClient throws — so a dead
+      // socket cost four 30s attempts plus 1/2/4s of backoff on EVERY read in
+      // the app, not just the slow one someone noticed. requestTimeout is the
+      // half that matters: it aborts a stalled attempt instead of waiting out
+      // the ceiling and then trying again. One retry still absorbs a transient
+      // blip. Storage transfers are not governed here — they keep their own
+      // much larger ceiling in TimeoutHttpClient.
+      postgrestOptions: const PostgrestClientOptions(
+        retryCount: 1,
+        requestTimeout: Duration(seconds: 10),
+      ),
     );
     client = Supabase.instance.client;
   }

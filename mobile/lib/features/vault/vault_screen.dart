@@ -184,8 +184,8 @@ class _VaultScreenState extends State<VaultScreen> {
     if (choice == 'media') return _addMedia();
   }
 
-  /// Copies the picked files INTO the vault, encrypted, under this user's own
-  /// folder — it does not bookmark them where they already live.
+  /// Copies the picked files INTO the vault, under this user's own folder — it
+  /// does not bookmark them where they already live.
   Future<void> _addMedia() async {
     // The picker is a full-screen system window: Android reports `paused`, the
     // disguise cover raises, the vault gate auto-locks, and this widget is

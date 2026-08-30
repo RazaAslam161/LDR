@@ -234,8 +234,9 @@ class ChatReactionRepository {
       Uint8List nonce;
       try {
         cipher = byteaToBytes(row['emoji_cipher']);
-        nonce = byteaToBytes(row['emoji_nonce']);
-      } catch (_) {
+        nonce = byteaToBytes(row['emoji_nonce'], expect: kNonceLength);
+      } catch (e) {
+        debugPrint('[reactions] row cipher unreadable: ${e.runtimeType}');
         failed++;
         continue;
       }
@@ -316,7 +317,7 @@ class ChatReactionRepository {
     Uint8List nonce;
     try {
       cipher = byteaToBytes(row['emoji_cipher']);
-      nonce = byteaToBytes(row['emoji_nonce']);
+      nonce = byteaToBytes(row['emoji_nonce'], expect: kNonceLength);
     } catch (e) {
       debugPrint('[reactions] row cipher unreadable: ${e.runtimeType}');
       return null;

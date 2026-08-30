@@ -14,16 +14,19 @@
 //   values ('MAPBOX_PUBLIC_TOKEN', 'pk.…')
 //   on conflict (key) do update set value = excluded.value;
 //
-// JWT-gated: verify_jwt stays TRUE for this function. A signed-in ACCOUNT gets
-// the token — there is no couple-membership check here, and this comment used
-// to claim one. Holding an account is the whole bound, which is the same bound
-// turn-credentials starts from.
+// JWT-gated: verify_jwt stays TRUE for this function. Signed in AND in a couple
+// — the membership check is below. Holding an account used to be the whole
+// bound, which was defensible while the only two accounts belonged to people
+// who had been handed an APK by hand. It stops being defensible the day the
+// Play listing is public and signup is open to everyone, because this returns a
+// billable third-party token. Membership cannot be reached without an invite
+// redeemed by someone already inside, so it is the bound that survives launch.
 //
-// Unlike turn-credentials this is not rate-limited, and that is a decision
-// rather than an omission: every caller receives the SAME long-lived Mapbox
-// token, so an attacker who wants to spend the tile budget fetches it once and
-// never comes back. Counting the fetches would bound nothing. What bounds this
-// is rotating the row in app_secrets, which is why the token lives there.
+// Still not rate-limited, and that remains a decision rather than an omission:
+// every caller receives the SAME long-lived Mapbox token, so an attacker who
+// wants to spend the tile budget fetches it once and never comes back. Counting
+// the fetches would bound nothing. What bounds this is who may ask at all, plus
+// rotating the row in app_secrets — which is why the token lives there.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const CORS = {
@@ -52,6 +55,26 @@ Deno.serve(async (req) => {
     );
     const { data: { user } } = await caller.auth.getUser();
     if (!user) return json({ error: "unauthenticated" }, 401);
+
+    // Holding an account is not entitlement. Signup is open, so the day the
+    // listing goes public "any authenticated user" stops meaning the two people
+    // who were handed an APK and starts meaning everyone — and this hands out a
+    // billable third-party token that is deliberately not rate limited. Couple
+    // membership is the real bound: it cannot be reached without an invite
+    // redeemed by someone already inside. Every caller of this endpoint lives
+    // behind the shell (home/, chat/), which the router only reaches once a
+    // couple exists, so nothing legitimate is refused here.
+    const { data: prof, error: profErr } = await caller
+      .from("profiles")
+      .select("couple_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profErr) {
+      // Same rule as the secret read below: a failed check is not a verdict.
+      console.error("membership read failed for map-token", profErr.message);
+      return json({ error: "membership_check_failed" }, 500);
+    }
+    if (!prof?.couple_id) return json({ error: "not_in_a_couple" }, 403);
 
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,

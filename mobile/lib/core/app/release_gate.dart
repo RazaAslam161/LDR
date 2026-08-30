@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -25,7 +27,7 @@ class ReleaseGate {
   /// This build. Bump with every release that a server change will depend on.
   /// Kept here rather than read from pubspec because the number that matters is
   /// the one the SERVER compares against, and it has to be legible in a diff.
-  static const buildNumber = 64;
+  static const buildNumber = 66;
 
   /// The human-facing version, shown in Settings > About. Kept beside
   /// [buildNumber] and mirrored from pubspec's `version:` — the About card used
@@ -166,7 +168,18 @@ class ReleaseGate {
   /// Fails OPEN. If the check itself cannot run (offline, project paused, table
   /// missing on a fresh environment) the app carries on: locking everyone out
   /// because a gate was unreachable is a worse outage than the one it guards.
-  static Future<void> check() async {
+  /// [budget] bounds the whole read, because the first frame waits on this.
+  ///
+  /// Nothing here is worth a long wait: every failure path already falls open,
+  /// so a gate that times out allows exactly what a gate that answers "no row"
+  /// allows. Left unbounded it is the slowest thing before runApp — three
+  /// column sets tried in series, each one four postgrest attempts with 1/2/4s
+  /// backoff under a 30s ceiling, so a socket that is open but dead (captive
+  /// portal, half-open TCP) held the launch drawable for minutes with no UI and
+  /// no error. An ordinary offline launch spent ~21s of that in backoff alone.
+  static Future<void> check({
+    Duration budget = const Duration(seconds: 6),
+  }) async {
     _lastCheck = DateTime.now();
     // Settled before the row is read — the row's meaning depends on it.
     await _loadChannel();
@@ -184,6 +197,15 @@ class ReleaseGate {
     const legacy = 'min_build, latest_build, message, '
         'apk_url, apk_sha256, latest_version_name';
     const columnSets = [withSoundKill, withCipher, legacy];
+    try {
+      await _readRow(columnSets).timeout(budget);
+    } on TimeoutException {
+      debugPrint('[release] gate did not answer within '
+          '${budget.inSeconds}s, allowing');
+    }
+  }
+
+  static Future<void> _readRow(List<String> columnSets) async {
     for (final columns in columnSets) {
       try {
         final row = await SupabaseService.client

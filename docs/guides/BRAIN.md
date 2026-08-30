@@ -16148,6 +16148,45 @@ Still BLOCKED on the same thing, and committing does not change it: the two-phon
 walkthrough on build 66, and specifically the run where the initiator's app is killed at
 T+1m and never reopened.
 
+## §207 — Build 66 cut; the stale-snapshot guard fired, and it exits 0 (2026-08-30)
+
+- Bumped `pubspec.yaml` and `ReleaseGate.buildNumber` together, 65 -> **66**. (The dirty
+  64->65 bump left by another session is subsumed: the working diff is now 64 -> 66.)
+- **First build was STALE and the script caught it:**
+  `STALE SNAPSHOT: lib/arm64-v8a/libapp.so has no miles-build-66`. Flutter reused a cached
+  AOT snapshot — versionCode 66 on the outside, older Dart inside. Exactly the class this
+  repo already shipped once ("releases went out carrying build-31 code under fresh version
+  numbers").
+- **DEFECT IN `tool/release.sh`, found not fixed:** that refusal prints
+  `REFUSING TO SHIP THIS ARTIFACT` and then **exits 0**. Verified: the wrapper recorded
+  `EXIT=0`. Any `release.sh && adb install` chain would treat the refusal as success and
+  ship the stale APK — the guard defeated by its own exit code. Release scripts are the
+  owner's to change; not touched.
+- Fixed the build the script's own way: `gradlew --stop`, `flutter clean`, rebuild. Clean
+  asserted by POSTCONDITION (`build` and `.dart_tool` both gone), not by exit code.
+- Second build passed: `checked 1 libapp.so: stamped miles-build-66, updater present`.
+
+Artifact verified independently of the script:
+```
+Miles.apk  94 MB  2026-08-30 03:09
+sha256(16) 7cc6730f316209d8      (build 65 was af21b09cdea1d95c — genuinely rebuilt)
+ABI dirs   ['arm64-v8a']   libapp.so=True  libflutter.so=True  (11 .so)
+badging    com.miles.miles  versionCode='66'  versionName='0.1.0'  minSdk 24
+```
+
+- `app_release` NOT touched. The self-updater is retired; the publish snippet the script
+  prints is deliberately not run.
+- Single-ABI arm64 remains the known, owner-undecided packaging question in `.claude/CLAUDE.md`.
+  Both handsets are arm64 and builds 64/65 launched clean on them, so it is not a blocker here.
+
+**Still open / exact next step:** `adb devices` is EMPTY — neither handset is plugged in, so
+build 66 is NOT installed and nothing has been tested on a phone. Next:
+`adb -s <serial> install -r D:\Miles\Miles.apk` on both, then the walkthrough. The run that
+settles it is still: initiator taps End, kill that app at T+1m and never reopen it, confirm
+the partner is released at T+24h by `unlink-expire-due` rather than by a human. That last
+step does not need a real 24-hour wait — backdating `cooling_ends_at` in production and
+watching the job tick proves the same thing in a minute.
+
 ---
 
 ## §208 — Floto web usability audit: 12 of 13 fixed, 1 disproved, 1 regression caught (2026-08-30)
@@ -16208,6 +16247,126 @@ tree; `miles-legal.vercel.app` still serves the audited version.
 only after that is a Floto re-scan meaningful. Expect 12 of 13 cleared and #10 to possibly
 re-appear.
 
+## §208 — Strict pre-Play-production audit: 187 findings, 51 verified adversarially (2026-08-30)
+
+Read-only audit of the whole app before the Play production submission. 27 agents: 15
+parallel finders, live read-only probes against prod, then 12 refuters whose mandate was
+to KILL each top-tier finding. No file in the repo was changed by this audit except this
+section. Tree frozen at `87abdd3`, working diff `cd8238d6f38f…` (the 64->66 bump + §207).
+
+**Gates, run fresh:** `flutter analyze` -> `563 issues found`, `grep -cE "^ *(error|warning) - "` -> **0**.
+`flutter test` -> `05:19 +1371: All tests passed!`, EXIT=0. `adb devices` -> **empty**.
+
+**Final tally after verification:** P0 1 · P1 13 · BLOCKED 1 · P2 78 · P3 57, plus 37 new
+findings raised in round 2. Of the 51 findings that got an adversarial verdict, **12 were
+REFUTED** — a 24% kill rate that matches this repo's own history and is the reason the
+double-check is not optional.
+
+### The one P0, and this file was wrong about it
+`android/key.properties` does not exist, so no signed AAB can be built (`build.gradle.kts:266-278`).
+**§30/§31 and BRAIN.md:4004 record "Keystore blocker is cleared". IT IS NOT** — the keystore
+died with the E: drive. That line is hereby retracted. Following this doc, the blocker would
+have been discovered at upload time.
+
+### Chat decryption: ROOT CAUSE NAMED, and §201's mechanism is wrong
+Supabase `postgres_changes` **double-hex-encodes bytea and keeps the `\x` prefix**, so
+`byteaToBytes` takes its hex branch and returns exactly TWICE the stored byte count. A
+24-byte nonce arrives as 48, XChaCha20 raises ArgumentError, and **nothing validates a
+decoded bytea's length** (`closer_crypto.dart:134-140`). Verified: prod row `016fbaa4…` is
+byte-perfect (cipher 18, nonce 24); `client_errors` 490/491 both `first=ArgumentError`
+0.46s after the send; 490's user_id IS the sender, so the sender could not open what it had
+sealed. `first=ArgumentError` proves byteaToBytes did not throw, so this is a DECRYPT
+failure, not a DECODE failure.
+
+**§201 is wrong on both halves and must not be trusted:** ArgumentError is NOT
+`_maybeBytes` catching (that yields `cipher column unreadable`), and `int.parse` throws
+FormatException, not ArgumentError. Do not edit §201; this section corrects it.
+
+**Two proposed fixes were REFUTED and would have hurt:**
+- "Drop the base64 branch, accept only `\x` hex" leaves the bug fully in place — the
+  realtime payload IS `\x`-prefixed. Fix the LENGTH contract, not the branch.
+- "Flip chat_cipher_only and null out messages.body" would strip the only fallback the read
+  path has and turn every decrypt failure into permanent loss. Do not run it.
+
+Reactions hit the same bug and have no plaintext column to fall back to.
+
+### Other confirmed P1s
+- **Personal Vault media is stored in the clear** while FIVE places (two live pages, the
+  in-app FAQ, the Play-linked privacy policy) say those files are E2EE. Round 2 found two
+  more: doc comments directly above the plaintext write.
+- **Cold start blocks runApp on ReleaseGate.check()**, and postgrest's retry layer (default
+  retryCount=3, requestTimeout=null, never overridden) makes it 4x worse than first
+  measured: ~6m23s worst case, **~21s blank splash on an ordinary offline launch**.
+- **Unlink: server half is live in prod, client half is an unbuilt working tree**, and
+  `partner_gate_opens_at` in `unlink_accept()` BREAKS the Accept button on build 64 — the
+  build actually on both handsets. Calls are unreachable for the whole 24h ritual (the
+  router gate unmounts AppShell, the only widget that navigates to /call, even though
+  `unlinkAllows` whitelists it). A failed `unlink_execute` strands the screen permanently.
+- **Screen share: buffered receive-side ICE is discarded, never applied.** 98291a1's
+  headline fix never runs, and 3bd4fe8 added a second mechanism dropping them earlier.
+  Third consecutive round in which a share fix was dead code.
+- **map-token / giphy-key hand billable credentials to any account holder**, no couple
+  check, no rate limit on map-token. Bounded to 2 people today; bounded to everyone the
+  moment the listing is public.
+- FGS (microphone, mediaProjection) + USE_FULL_SCREEN_INTENT need Console declarations with
+  demo videos — blocks rollout, not build.
+- PLAY-RELEASE-RUNBOOK.md says release.sh has no `--play` mode (it does, `:294`) and that
+  nothing enforces the lockstep (it does), and runs ten commands on the dead `/e/LDR` prefix.
+
+### Refuted — do not re-open these
+Chat plaintext is NOT a listing misdeclaration (five surfaces already say chat is
+server-readable). Missing `onUnknownRoute` does NOT crash (Flutter's binding catches it —
+that is how the telemetry row exists). A redeploy does NOT flip verify_jwt (reach-notify was
+redeployed from this tree 2026-08-29 21:15 UTC and it stayed false). Schema-snapshot
+staleness is fail-safe (a bare `.select()` is `select=*`, cannot raise PGRST204). The `anon`
+grants on `storage_usage` are dead (RLS on, SELECT-only policy). Secure-storage enum names
+are never persisted under `encryptedSharedPreferences: true`.
+
+**And a method correction: "BLOCKED — needs a third identity" was wrong.** RLS negative
+tests ARE runnable read-only from here via `set local role authenticated` + `set local
+request.jwt.claims` inside a rolled-back transaction. It was run: a stranger sees ZERO rows
+across all 60 RLS-protected tables. Couple isolation passes. This should become a committed
+gate rather than an auditor's one-off.
+
+### Verified strong
+All 71 tables RLS'd, 6/6 buckets private, 203 policies all identity-bound bar one deliberate
+config read, ZERO SECURITY DEFINER functions without a search_path pin, anon holds EXECUTE on
+no app RPC. keyEpoch fencing from e5cf9ac fully intact (`git diff e5cf9ac..HEAD` over the
+seven crypto files is EMPTY). No service-role or private key in 461 commits. targetSdk 36.
+
+### Still open / exact next step
+Nothing was fixed — this was an audit, and the owner picks what to take. The blocking
+sequence: (1) `mobile/tool/make-keystore.sh` + `./gradlew :app:signingReport`; (2) first play
+AAB = first R8 run ever, attended, capture mapping.txt, then device-walk WebRTC, share,
+Mapbox, ML Kit, image_cropper and **voice-note record/play** (`record` 7.1.1 is the one
+reflection-capable plugin with no keep rules from either side); (3) rehearse the
+uninstall->Play-install->escrow-recover migration asserting on CONTENT, not on `restore()`
+returning true — a stand-in seed would restore "successfully" over an unrecoverable history;
+(4) two-handset walkthrough, capturing one raw realtime `body_nonce` (predicted `\x` + 96 hex
+chars) which confirms or kills the decrypt root cause in one reading.
+
+Full report, not committed: `<scratchpad>/MILES-PLAY-AUDIT-2026-08-30.md`.
+
+**Audit blind spots, stated:** 99 of 187 findings (all P2/P3) carry no individual verdict.
+The tree was NOT frozen — a full Android build ran during the audit, so any finding citing a
+`mobile/build/` listing read a moving directory. The write-path RLS negative test was not run.
+Nothing device-dependent was exercised.
+
+### §208 addendum 1 — another session is editing this tree (2026-08-30)
+
+Discovered at report time, after §208 was written. `git status` now shows eight `web/` files
+modified that this audit did not touch: `assets/site.css`, `csae/delete-account/faq/index/
+privacy-policy/security/terms.html`, all mtime **05:08**, inside the audit window.
+
+Checked before reporting, because it bears on finding D12-01: the changes are **purely
+presentational** — inline `style=` attributes moved to classes, footer `<h4>`->`<h3>`, a Play
+badge SVG switched from `stroke` to `fill`. `git diff web/ | grep -iE '(encrypt|vault|
+end-to-end)'` returns **nothing**, so no encryption wording moved and D12-01 stands exactly
+as written.
+
+Left untouched and unstaged — they are not mine. The only file this audit wrote in the repo
+is this BRAIN section. Whoever owns the web/ styling work: your changes are intact.
+
 ---
 
 ## §209 — The web fixes are LIVE; the push deployed them, not the CLI (2026-08-30)
@@ -16246,6 +16405,106 @@ finding #10 was disproved rather than fixed, so a re-scan may report 1 of 13 aga
 offered follow-up — `web/tool/audit.mjs` as a repeatable gate for font-size census, heading
 outline, measure, contrast, tap targets and overflow — is designed but not built; owner has
 not asked for it.
+
+## §209 — The audit's fixes: seven defects closed, two waiting on an owner ruling (2026-08-30)
+
+Sequential, smallest-diff, one hypothesis per edit — NOT a parallel fix fan-out, per the
+standing rule from §204. Every fix below is in the working tree, uncommitted.
+
+**Gates after the last edit:**
+`flutter test` -> `04:24 +1373: All tests passed!` (1371 before; +2 new regression tests).
+`flutter analyze --no-pub` -> `564 issues found`, `grep -cE "^ *(error|warning) - "` -> **0**.
+
+### 1. Chat decrypt — the realtime path no longer parses bytea (D5B-01)
+Root cause: the chat realtime insert path decoded `bytea` straight off the
+postgres_changes payload, which does not use PostgREST's encoding, and nothing re-checked
+the decoded length — so a wrong-sized nonce reached XChaCha20 and surfaced as an
+ArgumentError that read like a missing key.
+- `chat_repository.dart` subscribe: a ciphered row is now **refetched via `fetchById`**,
+  never opened from the realtime payload. This is the policy `app_shell.dart:532` already
+  states for `couple_unlink` ("Every event is a REFETCH — realtime bytea is never parsed").
+  A refetch that cannot be made delivers the row unhydrated: no worse than before, never
+  garbage. **This fix does not depend on the exact realtime encoding being what we inferred**
+  — it removes the hop entirely, which is why it was chosen over decoding the doubled form.
+- `closer_crypto.dart`: `byteaToBytes(value, {int? expect})` + `kNonceLength`. Every branch
+  decoded *something* from a well-formed string, so a changed wire never failed at the
+  decode. Now it does. Applied at `body_nonce` and both reaction nonce reads.
+- `chat_reactions.dart:238`: the bare `catch (_)` now logs the class (reactions previously
+  captured none, so modes 1 and 2 were indistinguishable there).
+- New test `message_cipher_codec_test.dart` builds the doubled shape the way the wire
+  builds it and asserts the decode refuses it. Verified running: `+1 All tests passed`.
+
+### 2. Cold start no longer hangs (D8-02 / D7-06 + round-2 retry finding)
+- `ReleaseGate.check({budget = 6s})` — the read is bounded and times out into the same
+  fail-open it already had. Kept awaited before runApp, because
+  `startup_order_test.dart:56-71` pins that and it exists for a real reason.
+- `supabase_service.dart`: postgrest retry policy is now **stated, not inherited** —
+  `retryCount: 1`, `requestTimeout: 10s`. The defaults are retryCount 3 with NO
+  requestTimeout, and postgrest retries on any exception including our own 30s
+  ClientException, so a dead socket cost 4x30s + backoff on EVERY read in the app.
+  `requestTimeout` is the half that matters: it aborts a stalled attempt.
+
+### 3. Calls are reachable during the unlink ceremony (round-2 P1)
+New `features/call/call_route_bridge.dart`, mounted in the root builder beside `CallPip`.
+Both halves of answering a call — the FCM hand-off and the `/call` push — lived in
+AppShell, which exists only under `/app/...`; the ceremony redirects out of that subtree
+for a day on both phones, so the handset was unanswerable even though `unlinkAllows`
+names `/call` as never-gated. **Moved, not duplicated**: the removed copies in app_shell
+(`_onPendingCall`, the `ref.listen` block, `_lastCallState`, the listener add/remove and
+the post-login drain) are gone, because the root builder is mounted strictly more often
+than the shell and `pushCallRoute` is already the de-dupe of record.
+
+### 4. A failed unlink_execute no longer strands the screen (round-2 P1)
+The ticker was cancelled BEFORE the RPC, so a refusal left nothing running — and the
+comment promising "the next tick simply tries again" described a tick that no longer
+existed. `completeUnlink` now returns `bool`; `unlink_screen` cancels only on success and
+retries on the same unhurried 15s cadence as the refetch, guarded by `_finishing`.
+
+### 5. Screen share: held ICE is flushed AFTER the offer (round-2 P1)
+Root cause: the controller flushed `_pendingShareIce` into the session BEFORE
+`session.onOffer()`, and `onOffer` is what creates `_pc` — so every held candidate hit
+`screen_share_session.dart:652`'s `_pc != null` guard (which exists to stop a CLOSED
+session accumulating them) and was discarded. The buffer added to save share-ice was
+throwing all of it away, and the receive side negotiated on host candidates alone.
+Third time this fix has been written wrong (98291a1, then 3bd4fe8's cleanup), so it now
+has a law test asserting the ordering — anchored on the unique copy line, because
+`_pendingShareIce.clear()` appears five times and my first attempt at the test matched the
+wrong one and failed. The test was wrong, the fix was right; the test was corrected.
+
+### 6. map-token and giphy-key require couple membership (D4B-06)
+Both handed a billable third-party credential to anyone holding an account, with no
+membership check and no rate limit on map-token. Fine at two users; the day the listing is
+public, "authenticated" means everyone. Both now read the caller's own `profiles.couple_id`
+through the CALLER's client and 403 without one; a failed check is a 500, not a verdict.
+All four call sites live behind the shell, which the router only reaches after pairing, so
+nothing legitimate is refused. **NOT DEPLOYED** — see open items.
+
+### 7. Documents that would mislead on launch day (D12-02 / D1-06 / D12-04)
+- `PLAY-RELEASE-RUNBOOK.md`: ten dead `/e/LDR` paths -> `/d/Miles`; the false "release.sh
+  has no --play mode" replaced with `bash tool/release.sh --play` and why the script's
+  stale-snapshot proof matters; the false "nothing enforces the lockstep" corrected (two
+  things do); the hardcoded build "40" deleted rather than updated.
+- `.claude/CLAUDE.md`: the stale §75 / build-48 / "61 reports" lines replaced, plus a rule
+  forbidding restating section numbers, build numbers or line numbers in that file at all —
+  every one written there has gone stale and then misled an agent that trusted it.
+
+### Still open — two need YOUR ruling, not a guess
+- **Personal Vault (D12-01/D5A-02).** Code writes plaintext; five surfaces incl. the
+  Play-linked privacy policy say those files are E2EE. Fixing the docs is safe and fast;
+  restoring encryption is what users were promised but is a crypto change plus a migration
+  of existing plaintext objects. Not decided unilaterally — global rule: crypto waits.
+- **`partner_gate_opens_at` in `unlink_accept()`** is live in production and breaks the
+  Accept button on build 64, which is what is actually installed on both handsets. Either
+  drop the server gate until 66 is on both phones, or ship 66 first. Touches deployed
+  clients, so it waits.
+- **Keystore (the P0) is still the owner's** — `make-keystore.sh` reads a password
+  interactively and a Play upload key is effectively permanent.
+- **Edge functions not deployed.** giphy-key and map-token in prod are ALSO older than the
+  tree (D9-01), so one redeploy closes both that and fix 6. Deploy is a production action.
+- **Nothing here has run on a phone.** The decrypt fix in particular is settled by one
+  capture: send one ciphered message on two handsets and confirm it opens.
+
+Not touched, not mine: the `web/` files in `git status` are another session's live work.
 
 ---
 
@@ -16397,3 +16656,146 @@ shipping that would have recreated the doc-truth defect this audit exists to rem
 
 Still open and unchanged: the keystore (owner, interactive), the first R8 build, the
 two-handset walkthrough, and the one capture that settles the decrypt fix.
+
+---
+
+## §212 — Round-2 web fixes are LIVE (2026-08-30)
+
+Closes the "still open" of §210 and §211.
+
+- Commit `82cf507` on `fix-sprint`, pushed `0155235..82cf507`. 10 files, +269/−70.
+- BRAIN.md staged by blob surgery again — **five** sections were uncommitted at once
+  (§207, §208-Strict, §209-audit-fixes from other sessions; §210 and §211 mine). Staged
+  mine only: `151 0 docs/guides/BRAIN.md`, hunk `@@ -16248,0 +16249,151 @@`, and
+  `git show :docs/guides/BRAIN.md | grep -c '^## §207'` → 0. Their three sections and all
+  24 non-`web/` dirty entries are untouched.
+- Deploy was the push again (Git-connected). `vercel inspect` → `target production`,
+  `status ● Ready`, created 37s after the push. No CLI deploy run.
+
+**Verified on `https://miles-legal.vercel.app` itself, under `document.hidden: true` —
+the same crawler condition that produced the 62:**
+```
+html "js reveal-now hero-go" · 13/13 reveals opacity 1 · hero 1,1,1,1   <- was all 0
+cta first=A.btn 52px solid · badge dashed 44px
+footer toBrand 133px · columnRowTops [6510,6510,6510] · devColumnHasRD false
+finale above/below 120/84 · cards bodyTops [2902 x4] aligned
+axis heading 157 / card text 158 · fontSizes 9 · headingSkips 0 · bodyAlign left
+overflow false
+```
+All 9 changed files: live md5 == local md5.
+
+**Still open:** finding #11 only — `milesapp.officials@gmail.com`. Needs a domain and
+mailbox bought, then the address updated in 7 footers, `security.html`,
+`.well-known/security.txt` and the Play listing. No code change can close it.
+A Floto re-scan is now meaningful; the score is theirs to give.
+
+### §209 addendum 2 — make-keystore.sh could not find keytool on this machine (2026-08-30)
+
+Owner tried to run the keystore step and hit two walls, neither of them their fault.
+
+1. **The command I gave was for the wrong shell.** `bash ...` is Git
+   Bash; the owner's terminal is PowerShell, where `&&` is rejected and `/d/Miles` is not a
+   path. Correct form is `cd D:\Miles\mobile` then
+   `& "C:\Program Files\Git\bin\bash.exe" tool/make-keystore.sh`. Note `bash` alone in
+   PowerShell resolves to `C:\WINDOWS\system32\bash.exe` — **WSL**, not Git Bash — which
+   would fail on every `/c/Program Files/...` path in the script. Always the full path.
+
+2. **`tool/make-keystore.sh` would then have failed anyway.** Its keytool lookup hardcoded
+   three locations (Java/jdk-17, Android Studio jbr, Eclipse Adoptium) and this machine has
+   none of them. It runs **Microsoft's build of OpenJDK** at
+   `C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot`, with `JAVA_HOME` correctly pointing
+   at it — the authoritative answer the script never consulted.
+
+   Fixed by checking `JAVA_HOME` FIRST (via `cygpath -u`, since Windows sets a backslash
+   path bash cannot test), plus `Program Files/Microsoft/*/bin` in the fallback list, and
+   the error message now names JAVA_HOME. Verified by extracting the lookup block alone and
+   sourcing it — creating nothing:
+   `RESOLVED: /c/Program Files/Microsoft/jdk-17.0.20.101-hotspot/bin/keytool`
+   `Key and Certificate Management Tool`
+
+Class, not instance: the script guessed at JDK locations instead of reading the variable the
+OS already sets, so it would have failed the same way on any machine with a JDK the list did
+not name. The keystore itself is still uncreated — it is the owner's interactive step.
+
+### §209 addendum 3 — THE P0 IS CLOSED: upload key created and wired (2026-08-30)
+
+`android/miles-upload.jks` + `android/key.properties` exist (created 06:23, both gitignored).
+Verified two independent ways.
+
+**keytool, direct:**
+```
+Keystore type: PKCS12   Alias: miles-upload
+Owner: CN=Miles, O=R&D Dev, C=PK
+Valid from: Sun Aug 30 06:23:39 PKT 2026 until: Thu Jan 15 06:23:39 PKT 2054
+Subject Public Key Algorithm: 4096-bit RSA key
+SHA256: A3:7C:59:A5:F3:80:1B:5A:52:CA:16:54:EC:08:8C:C9:0D:4E:E4:60:2E:C7:CD:DE:50:C5:8B:51:5F:BE:9B:B2
+```
+key.properties' stored password opened it, so the Gradle wiring is proven, not assumed.
+
+**gradlew :app:signingReport:**
+```
+Variant: playRelease   Config: release
+Store: D:\Miles\mobile\android\miles-upload.jks   Alias: miles-upload
+SHA-256: A3:7C:59:A5:F3:80:1B:5A:...:9B:B2          <- identical to keytool
+Variant: sideloadRelease  Config: debug  Store: C:\Users\RAZA\.android\debug.keystore
+```
+Exactly the intended split: play signs with the upload key, sideload stays debug-signed.
+
+**The build failure that preceded it was a STALE GRADLE DAEMON.** `./gradlew :app:signingReport`
+failed with `Plugin directory does not exist: …app_links-7.2.1\android`. `gradlew --stop`
+then a rerun succeeded with no other change. Same class as §207's stale-snapshot problem:
+this machine's daemon holds bad state across pub-cache writes (a concurrent `flutter pub get`
+from a test run is the likely trigger, since pub downloads to a temp dir and renames).
+
+**A hypothesis I chased and REFUTED, recorded so nobody repeats it:**
+`.flutter-plugins-dependencies` stores Windows paths with DOUBLED separators
+(`C:\Users\…`, i.e. quadruple-escaped in the raw JSON). That looks like the culprit and is
+not: `File(path, "android").exists()` returns **true** for both the doubled and single forms,
+proven with a throwaway Java program before any of it reached the owner. `flutter pub get`
+regenerates the same doubled form, so it is simply how this Flutter version writes the file.
+
+**Also fixed, and it is the reason the first attempt could not have worked:** two shell
+mistakes of mine — `&&` and `/d/Miles` given to PowerShell, and plain `bash` in PowerShell
+resolving to `C:\WINDOWS\system32\bash.exe` (WSL), which cannot read `/c/Program Files/...`.
+Correct form is `cd D:\Miles\mobile` then
+`& "C:\Program Files\Git\bin\bash.exe" tool/make-keystore.sh`.
+
+**Next:** turn ON Play App Signing at first upload, back the .jks + password off this
+machine, then the first `bash tool/release.sh --play` — the first R8 run this app has ever had.
+
+### §209 addendum 4 — key backed up; full state re-verified before the first AAB (2026-08-30)
+
+Owner confirms `miles-upload.jks` + its password are backed up OFF this machine. That closes
+the single-copy risk §163 named and that had already cost one orphaned signing identity.
+
+Re-ran everything rather than trusting the earlier summary, because several of these claims
+were made in a context window that has since been compacted:
+
+```
+flutter analyze --no-pub   -> 564 issues found; errors/warnings: 0
+flutter test               -> 03:16 +1373: All tests passed!
+```
+
+Live production, read-only (`list_edge_functions`):
+```
+map-token   version 3  verify_jwt true   updated 1788051787244
+giphy-key   version 2  verify_jwt true   updated 1788051819897
+reach-notify version 16 verify_jwt false
+```
+Both credential endpoints are deployed WITH the couple-membership gate and carry the
+`secret_read_failed` fix that production was missing (audit D9-01). Verified by version, not
+by assumption.
+
+Vault honesty confirmed in the tree: `docs/legal/privacy-policy.md` now lists Personal Vault
+as NOT end-to-end encrypted (PIN + screenshot block + access rules are what guard it), and
+`faq_text.dart` no longer claims vault FILES are sealed while notes are not — both files and
+notes are stored unencrypted, and the copy says so.
+
+**Working tree: 24 modified files + 1 new (`call_route_bridge.dart`), 695 insertions.
+Nothing committed, per standing rule.**
+
+**Next, and it is the owner's call to trigger:** `bash tool/release.sh --play`. This is the
+first R8 / resource-shrink run in this app's history, so treat it as a debugging session, not
+a build step. First thing to exercise on the resulting bundle is voice-note record and play:
+`record` 7.1.1 is the one reflection-capable plugin with keep rules from neither side.
+Turn ON Play App Signing at first upload.

@@ -28,6 +28,31 @@ void main() {
           reason: 'the controller must hand the share to a session',);
     });
 
+    test('held share-ice is flushed AFTER the offer, never before', () {
+      // The buffer exists because share-ice can arrive before the receive
+      // session does. It was flushed one line too early, and onIce drops any
+      // candidate reaching it while `_pc` is null — a guard meant for CLOSED
+      // sessions — so the buffer discarded exactly what it was added to save
+      // and the receive side negotiated on host candidates alone. onOffer is
+      // what creates `_pc`, so the flush belongs after it. This has now been
+      // written wrong twice (98291a1, then again in 3bd4fe8's cleanup).
+      // Anchored on the copy, not on `.clear()` — that appears five times for
+      // five different reasons and the first one is nowhere near this path.
+      const copy = 'List<Map<dynamic, dynamic>>.from(_pendingShareIce)';
+      final flush = controller.indexOf(copy);
+      final offer = controller.indexOf('await session.onOffer(map)');
+      expect(offer, greaterThan(-1), reason: 'the offer await must still exist');
+      expect(flush, greaterThan(-1), reason: 'the flush must still exist');
+      expect(controller.indexOf(copy, flush + 1), -1,
+          reason: 'the anchor must stay unique or this ordering check is blind',);
+      expect(flush, greaterThan(offer),
+          reason: 'flushing before onOffer feeds every held candidate to the '
+              'null-_pc drop guard — the bug this buffer exists to prevent',);
+      expect(session.contains('_pc != null && _pendingIce.length'), isTrue,
+          reason: 'the drop guard is load-bearing for the ordering above; if '
+              'it moves, re-derive where the flush belongs',);
+    });
+
     test('share signalling has its own kinds, on the call channel', () {
       for (final kind in ['share-offer', 'share-answer', 'share-ice']) {
         expect(session.contains("'$kind'"), isTrue,

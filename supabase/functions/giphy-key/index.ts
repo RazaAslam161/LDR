@@ -19,8 +19,11 @@
 //   values ('GIPHY_API_KEY', '…')
 //   on conflict (key) do update set value = excluded.value;
 //
-// JWT-gated: verify_jwt stays TRUE. Holding a signed-in account is the bound,
-// the same bound map-token starts from.
+// JWT-gated: verify_jwt stays TRUE, and the caller must also be in a couple —
+// the same bound map-token uses, for the same reason. A signed-in account alone
+// stops meaning anything once the Play listing opens signup to everyone, and
+// this returns a billable key. The only caller is the chat GIF picker, which
+// lives behind a couple, so nothing legitimate is refused.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const CORS = {
@@ -49,6 +52,21 @@ Deno.serve(async (req) => {
     );
     const { data: { user } } = await caller.auth.getUser();
     if (!user) return json({ error: "unauthenticated" }, 401);
+
+    // Same bound as map-token, one directory over, for the same reason: an
+    // open signup means "authenticated" is everyone once the listing is public,
+    // and this returns a billable third-party key. The only caller is the chat
+    // GIF picker, which lives behind a couple.
+    const { data: prof, error: profErr } = await caller
+      .from("profiles")
+      .select("couple_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profErr) {
+      console.error("membership read failed for giphy-key", profErr.message);
+      return json({ error: "membership_check_failed" }, 500);
+    }
+    if (!prof?.couple_id) return json({ error: "not_in_a_couple" }, 403);
 
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,

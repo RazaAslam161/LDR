@@ -64,6 +64,29 @@ void main() {
     expect(byteaToBytes(awkward), awkward);
   });
 
+  test('a doubled bytea is refused at the decode, not inside the cipher', () {
+    // The shape postgres_changes delivers: the hex literal is itself hex-encoded
+    // a second time, prefix intact, so the value still LOOKS like a well-formed
+    // \x literal and decodes without complaint — to exactly twice the bytes.
+    // Built here the way the wire builds it rather than by hand, so this stays
+    // honest if the encoding is ever corrected upstream.
+    final nonce = Uint8List.fromList(List.filled(nonceLen, 0x5a));
+    final onceEncoded = bytesToBytea(nonce); // \x5a5a…  (48 hex chars)
+    final doubled = bytesToBytea(utf8.encode(onceEncoded.substring(2)));
+
+    // Without a length contract this is silently wrong, which is the whole bug:
+    // 48 bytes reach XChaCha20 and it raises an ArgumentError about the nonce,
+    // indistinguishable from a key that never derived.
+    expect(byteaToBytes(doubled).length, nonceLen * 2);
+
+    // With one, it fails where it actually went wrong.
+    expect(
+      () => byteaToBytes(doubled, expect: nonceLen),
+      throwsA(isA<FormatException>()),
+    );
+    expect(byteaToBytes(onceEncoded, expect: nonceLen), nonce);
+  });
+
   test('the column-pair layout is mac || ciphertext, asserted by offset', () {
     // If this ever becomes ciphertext || mac (wish_jar's layout) every message
     // decrypts to noise and the MAC check fails with no useful error.

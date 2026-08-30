@@ -73,7 +73,7 @@ class Message {
         // is sitting in `body` on the very same row. Hydration is a separate
         // pass that cannot drop anything — see [ChatRepository.hydrate].
         bodyCipher: _maybeBytes(j['body_cipher']),
-        bodyNonce: _maybeBytes(j['body_nonce']),
+        bodyNonce: _maybeBytes(j['body_nonce'], expect: kNonceLength),
         imagePath: JsonUtils.parseStringOrNull(j['image_path']),
         voicePath: JsonUtils.parseStringOrNull(j['voice_path']),
         voiceDurationMs: j['voice_duration_ms'] == null
@@ -119,10 +119,10 @@ class Message {
   /// else. `byteaToBytes` rejects null outright and can throw on a value the
   /// driver hands over in an unexpected shape; a row is worth more than its
   /// ciphertext.
-  static Uint8List? _maybeBytes(dynamic v) {
+  static Uint8List? _maybeBytes(dynamic v, {int? expect}) {
     if (v == null) return null;
     try {
-      return byteaToBytes(v);
+      return byteaToBytes(v, expect: expect);
     } catch (e) {
       // Counted, never silent. A cipher column that fails to decode looks
       // downstream EXACTLY like a plaintext-only row from an old client:
@@ -1094,7 +1094,23 @@ class ChatRepository {
               onInsert(m);
               return;
             }
-            unawaited(hydrate([m]).then((r) => onInsert(r.first)));
+            // A ciphered row is REFETCHED, never opened from this payload.
+            // postgres_changes and PostgREST do not hand `bytea` over in the
+            // same encoding, and no decoder downstream re-checks the length it
+            // decoded, so a wrongly-sized nonce reached XChaCha20 and died as
+            // an ArgumentError that reads like a missing key instead of a bad
+            // wire. `couple_unlink` already refetches for exactly this reason
+            // (app_shell.dart). A refetch that cannot be made delivers the
+            // realtime row unhydrated: no worse than before, and never garbage.
+            unawaited(() async {
+              Message? fresh;
+              try {
+                fresh = await fetchById(coupleId, m.id);
+              } catch (e) {
+                debugPrint('[chat] live refetch failed: ${e.runtimeType}');
+              }
+              onInsert(fresh ?? m);
+            }());
           },
         )
         .onPostgresChanges(

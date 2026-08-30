@@ -1842,6 +1842,14 @@ class CallController extends ChangeNotifier {
     // Published BEFORE the negotiation await, so share-ice arriving mid-offer
     // reaches the session's own pending queue instead of the floor.
     _shareSession = session;
+    await session.onOffer(map);
+    // Flushed AFTER the offer, and that ordering is the whole fix. onOffer is
+    // what builds the peer connection, and onIce drops any candidate arriving
+    // while `_pc` is still null — a guard that exists so a CLOSED session stops
+    // accumulating them. Flushing first therefore fed every held candidate to
+    // that guard: the buffer added to stop share-ice being dropped was itself
+    // dropping all of it, and the receive side negotiated on host candidates
+    // alone. Past this line `_remoteSet` is true and each one applies directly.
     if (_pendingShareIce.isNotEmpty) {
       final held = List<Map<dynamic, dynamic>>.from(_pendingShareIce);
       _pendingShareIce.clear();
@@ -1849,7 +1857,6 @@ class CallController extends ChangeNotifier {
         unawaited(session.onIce(c));
       }
     }
-    await session.onOffer(map);
   }
 
   /// Open the window in which this device holds two calls at once.

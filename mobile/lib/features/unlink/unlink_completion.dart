@@ -21,15 +21,19 @@ import 'package:miles/features/unlink/unlink_state.dart';
 /// `unlink_execute()` is silent rather than throwing when there is nothing to
 /// do (the cron job or the other phone got there first), so the local teardown
 /// still runs and this phone catches up either way.
-Future<void> completeUnlink(WidgetRef ref, String coupleId) async {
+///
+/// Returns whether the ceremony actually completed. The caller needs to know:
+/// UnlinkScreen's ticker IS the retry, and it used to stop itself before this
+/// ran, so a refusal stranded the screen on a row that would never change.
+Future<bool> completeUnlink(WidgetRef ref, String coupleId) async {
   try {
     await UnlinkRepository.execute();
   } catch (e) {
     // not_yet is a clock argument the server wins; anything else is transient.
-    // The next tick, resume or launch simply tries again — and past the
-    // deadline the per-minute unlink-expire-due job is doing it regardless.
+    // The caller keeps ticking and tries again — and past the deadline the
+    // per-minute unlink-expire-due job is doing it regardless.
     debugPrint('[unlink] execute refused: ${e.runtimeType}');
-    return;
+    return false;
   }
   UnlinkState.reset();
   final session = ref.read(sessionProvider.notifier);
@@ -39,4 +43,5 @@ Future<void> completeUnlink(WidgetRef ref, String coupleId) async {
     await session.loadProfile();
   }
   // The router's needsCouple gate carries this phone to /couple.
+  return true;
 }

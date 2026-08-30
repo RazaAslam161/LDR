@@ -111,7 +111,6 @@ class _AppShellState extends ConsumerState<AppShell>
   bool _rewrapOpen = false;
   ManagedSubscription? _unlinkSub;
   final Set<String> _shownReach = {};
-  CallState _lastCallState = CallState.idle;
 
   /// Which room a bar index means under the given flags.
   static String _tabIdentity(int index,
@@ -147,7 +146,6 @@ class _AppShellState extends ConsumerState<AppShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     pendingReach.addListener(_onPendingReach);
-    pendingCall.addListener(_onPendingCall);
     pendingChat.addListener(_onPendingChat);
     pendingMemory.addListener(_onPendingMemory);
     pendingUnlink.addListener(_onPendingUnlink);
@@ -482,7 +480,6 @@ class _AppShellState extends ConsumerState<AppShell>
     FcmService.registerToken();
     // A push may have been tapped before the listener attached.
     _onPendingReach();
-    _onPendingCall();
     // Accounts signed in before key escrow existed have no sealed copy of their
     // key, and no reason to ever sign out and acquire one. They lose every
     // encrypted memory on their next reinstall. Asked once, here, because this
@@ -677,17 +674,6 @@ class _AppShellState extends ConsumerState<AppShell>
     _showReach(tap.reachId, name);
   }
 
-  /// An incoming call delivered by FCM (full-screen ring / tapped notification /
-  /// cold start). Hand it to the CallController to fetch the offer + ring.
-  void _onPendingCall() {
-    final tap = pendingCall.value;
-    if (tap == null) return;
-    pendingCall.value = null;
-    ref
-        .read(callControllerProvider)
-        .handlePendingCall(tap.callId, tap.fromName, tap.video);
-  }
-
   /// A tapped message notification. Selects the Chat tab, which is also what
   /// acks delivery — the catch-up fetch there is the only ack path a push has.
   void _onPendingChat() {
@@ -734,7 +720,6 @@ class _AppShellState extends ConsumerState<AppShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     pendingReach.removeListener(_onPendingReach);
-    pendingCall.removeListener(_onPendingCall);
     pendingChat.removeListener(_onPendingChat);
     pendingMemory.removeListener(_onPendingMemory);
     pendingUnlink.removeListener(_onPendingUnlink);
@@ -750,28 +735,10 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   Widget build(BuildContext context) {
-    // Pop the call screen up on an incoming ring or an outgoing call. (For a
-    // ChangeNotifierProvider, prev==next is the same instance, so we track the
-    // last state ourselves to detect the inactive -> active transition.)
-    //
-    // [_lastCallState] is per-State-instance, so it CANNOT be the only guard:
-    // the disguise cover swaps the whole MaterialApp, and the rebuilt shell
-    // starts again at `idle` while the GoRouter — a plain Provider that is
-    // never invalidated — still has /call on its stack. Every cover cycle then
-    // read as a fresh inactive -> active transition and pushed another copy,
-    // which is why a screen share that outlived a trip to another app ended up
-    // drawing itself several times over. [pushCallRoute] asks the router what
-    // is actually on top, which no remount can lie about.
-    ref.listen(callControllerProvider, (_, c) {
-      final now = c.state;
-      bool active(CallState s) =>
-          s == CallState.ringing ||
-          s == CallState.calling ||
-          s == CallState.connected;
-      final fire = active(now) && !active(_lastCallState);
-      _lastCallState = now;
-      if (fire && context.mounted) pushCallRoute(GoRouter.of(context));
-    });
+    // Popping the call screen up on a ring, and handing an FCM ring to the
+    // controller, both moved to CallRouteBridge in the root builder. They were
+    // unreachable from here for every route outside /app — which the unlink
+    // ceremony occupies for a day, on both phones.
 
     // Only rebuild the shell when these specific flags flip — NOT on every
     // partner presence / mood / typing tick (all of which flow through

@@ -69,8 +69,8 @@ not a gap, and §3 says so plainly.
 | **Memory Threads** | `memory_threads` (`title_cipher`, `note_cipher`, `partner_note_cipher`, `place_cipher`), `memory_photos` (`caption_cipher`, encrypted objects) | **Couple (E2EE)** | Contents only. `happened_on`, `photo_count`, `created_at`, `proposer`, `state` are in the clear — the operator cannot read a memory but can see that you have one, and when. |
 | **Wish Jar entry text** | `fantasy_jar_entries.ciphertext` / `nonce` | **Couple (E2EE)** | |
 | **Wish Jar categories** | `fantasy_jar_entries.tag_hashes` | **Couple + operator** | Unkeyed 32-bit FNV-1a over a fixed twelve-item list, so all twelve are computable and reversible by anyone with database access. The words are private; the category is not. |
-| **Private Vault files** | `personal_vault` bucket, keyed by `personal_vault_items.storage_path` + `media_nonce` / `thumb_nonce` | **Owner (E2EE)** | Owner-scoped in both storage policy and RLS — the partner cannot read them either (`20260816150000_personal_vault_owns_its_media.sql`). |
-| **Private Vault notes and labels** | `personal_vault_items.content`, `media_url` (repurposed as the display label) | **Owner + operator** | Written in the clear by `VaultRepository.addNote`. The vault's *files* are encrypted; its *text* is not. This distinction is load-bearing and is stated the same way in the privacy policy. |
+| **Private Vault files** | `personal_vault` bucket, keyed by `personal_vault_items.storage_path` | **Owner + operator** | **Plaintext since build 60**, by the owner ruling of 2026-08-28: the E2EE tile pipeline produced three builds of black tiles, so the vault's guarantee is the PIN gate, FLAG_SECURE and owner-only RLS instead (`VaultRepository.saveMedia` calls `_uploadPlain`). Owner-scoped in both storage policy and RLS — the partner cannot read them either (`20260816150000_personal_vault_owns_its_media.sql`). Legacy `.enc` objects keep their decrypt read-path. |
+| **Private Vault notes and labels** | `personal_vault_items.content`, `media_url` (repurposed as the display label) | **Owner + operator** | Written in the clear by `VaultRepository.addNote`. As of build 60 the vault's files are not encrypted either, so the old files-vs-text distinction is gone: nothing in the Personal Vault is E2EE. The privacy policy, security page, terms, CSAE page and in-app FAQ were corrected to match on 2026-08-30. |
 | **Cycle / health** | `cycle_logs`, `cycle_events`, `cycle_settings` | **Owner + operator**, plus the partner when `share_with_partner` is on | Off until switched on; sharing defaults **on** once it is. The partner-read path is gated on the consent flag on all three tables since `20260817160000`. |
 | **Precise location** | `presence.latitude` / `longitude` / `location_accuracy` / `location_label` | **Couple + operator** | Foreground only, ~15s cadence, no background-location permission. City mode stores a label and no coordinates. Off writes empty values over the stored ones. |
 | **Presence** | `presence.*` — online, last seen, current screen, typing, mood, check-in photo, avatar emoji | **Couple + operator** | |
@@ -270,8 +270,8 @@ Chat text and chat media. The gallery and its captions. Time capsules. Vault
 notes and item labels. Cycle data. Coordinates. Presence. Call metadata. Profiles.
 Wish Jar *categories*. All of it, without breaking anything.
 
-**What they cannot read:** Memory Thread contents, Wish Jar entry text, and
-Private Vault files. Those arrive as ciphertext under a key derived by ECDH +
+**What they cannot read:** Memory Thread contents and Wish Jar entry text.
+Those arrive as ciphertext under a key derived by ECDH +
 HKDF between two X25519 keys that never leave their devices, sealed with
 XChaCha20-Poly1305 (`core/data/crypto_core.dart`).
 
@@ -353,8 +353,8 @@ in §1.1 marked *operator-readable*.
   Agency in Pakistan, where the developer is established, and to NCMEC's
   CyberTipline.
 - A lawful request is complied with *to the extent the data exists and can be
-  read*. Chat text and chat media can be produced. Memory Threads, Wish Jar text
-  and vault files are held only as ciphertext, **and the response says so
+  read*. Chat text, chat media and Personal Vault contents can be produced.
+  Memory Threads and Wish Jar text are held only as ciphertext, **and the response says so
   together with the escrow limit in §2(d)** — rather than letting an authority
   believe the material is further out of reach than it is.
 - Nothing is proactively scanned. There is no automated detection, no hash

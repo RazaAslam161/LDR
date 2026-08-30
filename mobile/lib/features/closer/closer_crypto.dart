@@ -122,7 +122,28 @@ EncryptedPayload unpackFull(Uint8List blob) {
 
 /// Decodes a value that came back from a Supabase `bytea` column. PostgREST
 /// returns `bytea` as a base64-encoded [String]; this normalises to bytes.
-Uint8List byteaToBytes(dynamic value) {
+///
+/// Pass [expect] wherever the byte count is fixed by the format — a nonce, a
+/// MAC. Every branch below decodes SOMETHING from a well-formed string, so a
+/// wire that changes shape does not fail here: it returns the wrong number of
+/// bytes and fails later inside the cipher, as an ArgumentError about a nonce
+/// length that reads like a missing key. That is what made a wire-format bug
+/// look like a crypto bug for eleven days. [expect] is what turns it back into
+/// a decode error, at the hop where it happened.
+Uint8List byteaToBytes(dynamic value, {int? expect}) {
+  final out = _decodeBytea(value);
+  if (expect != null && out.length != expect) {
+    throw FormatException(
+      'bytea decoded to ${out.length} bytes, expected $expect. '
+      'Exactly double means the value was hex-encoded twice, which is what '
+      'postgres_changes delivers — refetch the row through PostgREST rather '
+      'than opening a realtime payload.',
+    );
+  }
+  return out;
+}
+
+Uint8List _decodeBytea(dynamic value) {
   if (value == null) {
     throw ArgumentError('bytea value was null');
   }
@@ -144,6 +165,10 @@ Uint8List byteaToBytes(dynamic value) {
   if (value is List) return Uint8List.fromList(value.cast<int>());
   throw ArgumentError('Unsupported bytea encoding: ${value.runtimeType}');
 }
+
+/// The nonce byte count every payload in this app uses, exported so decoders
+/// can assert it at the boundary instead of discovering it inside the cipher.
+const int kNonceLength = _nonceLength;
 
 /// Serializes raw bytes for a Postgres `bytea` column over PostgREST. We send
 /// the Postgres hex literal (`\x<hex>`) so the bytes are stored VERBATIM. (Both

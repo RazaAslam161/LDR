@@ -223,7 +223,7 @@ is the `gradle.taskGraph.whenReady` block at `build.gradle.kts:208-220`:
 ### 2.1 Create the upload keystore — run the script, do not retype the command
 
 ```bash
-bash /e/LDR/mobile/tool/make-keystore.sh
+bash /d/Miles/mobile/tool/make-keystore.sh
 ```
 
 `mobile/tool/make-keystore.sh` is the whole of steps 2.1 and 2.2. Run it
@@ -255,7 +255,7 @@ today already loses everything.
 This must **not** print the "NO android/key.properties" banner:
 
 ```bash
-cd /e/LDR/mobile/android && ./gradlew :app:signingReport
+cd /d/Miles/mobile/android && ./gradlew :app:signingReport
 ```
 
 `storeFile` is resolved by `rootProject.file(...)`, whose root is
@@ -372,32 +372,42 @@ asserts zero analyzer errors **and** zero warnings, so a dirty analyze reds the
 suite too):
 
 ```bash
-cd /e/LDR/mobile && flutter analyze --no-pub
-cd /e/LDR/mobile && flutter test
+cd /d/Miles/mobile && flutter analyze --no-pub
+cd /d/Miles/mobile && flutter test
 ```
 
 Keep `pubspec.yaml`'s `version:` and `release_gate.dart`'s `buildNumber` in
-lockstep — nothing enforces it, and they have drifted before. Today both read
-**40**.
+lockstep. Two things enforce it — `test/unit/hygiene/version_lockstep_test.dart`
+and `release.sh` itself, which exits on a mismatch — so this is a check, not a
+discipline. The two commands below print the live values; no number is repeated
+here, because a number written into a runbook is stale by the next build.
 
 ```bash
-cd /e/LDR/mobile && grep -n '^version:' pubspec.yaml
-cd /e/LDR/mobile && grep -n 'buildNumber' lib/core/app/release_gate.dart
+cd /d/Miles/mobile && grep -n '^version:' pubspec.yaml
+cd /d/Miles/mobile && grep -n 'buildNumber' lib/core/app/release_gate.dart
 ```
 
-Build:
+Build — through the script, not by hand:
 
 ```bash
-cd /e/LDR/mobile
-flutter build appbundle --release --flavor play
+cd /d/Miles/mobile
+bash tool/release.sh --play
 ```
 
 Output: `mobile/build/app/outputs/bundle/playRelease/app-play-release.aab`.
 
-`tool/release.sh` does **not** build this — it is the sideload pipeline
-(`app-sideload-release.apk`, `--flavor sideload`, R2 upload, `app_release`
-publish) and has no `--play` mode. Either add one or accept the manual path
-above; do not run `release.sh` expecting an AAB.
+`release.sh --play` is the supported path and it is the only one that carries
+the gates: analyze, the full test suite, the version lockstep, the
+production-`.env` wall, and — the one that matters most here — the stale-snapshot
+check, which reads every `libapp.so` inside the AAB and refuses to ship one whose
+Dart is not the Dart just compiled. That guard is not theoretical: it fired on a
+real build on 2026-08-30, and this repo has already shipped releases carrying
+build-31 code under fresh version numbers. A hand-run `flutter build appbundle`
+skips all of it, and a stale AAB on Play costs a review cycle rather than a
+re-upload.
+
+Note it does **not** upload, publish, or touch `app_release` — the `--play` path
+deliberately stops at the artifact.
 
 The `play` flavor turns **R8 minify + resource shrink on** (via the
 `androidComponents.beforeVariants` block at `build.gradle.kts:190-199`) while
@@ -411,7 +421,7 @@ Verify what you actually built before uploading:
 
 ```bash
 # signed with the upload key, not the debug key
-cd /e/LDR/mobile && jarsigner -verify -verbose -certs \
+cd /d/Miles/mobile && jarsigner -verify -verbose -certs \
   build/app/outputs/bundle/playRelease/app-play-release.aab | head -20
 
 # the manifest inside an AAB is protobuf, so read it with bundletool:
@@ -435,14 +445,14 @@ If bundletool is not to hand, the same check against the APK the AAB is built
 from needs no extra tool:
 
 ```bash
-cd /e/LDR/mobile && flutter build apk --release --flavor play
+cd /d/Miles/mobile && flutter build apk --release --flavor play
 aapt2 dump permissions build/app/outputs/flutter-apk/app-play-release.apk
 ```
 
 The sideload channel is unchanged and still builds as before:
 
 ```bash
-cd /e/LDR/mobile && flutter build apk --release --flavor sideload
+cd /d/Miles/mobile && flutter build apk --release --flavor sideload
 ```
 
 ---

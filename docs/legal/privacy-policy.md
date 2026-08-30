@@ -121,7 +121,6 @@ that applies, the server stores ciphertext it cannot open.
 |---|---|
 | Memory Threads | titles, notes, partner notes, places and photographs |
 | Wish Jar | the text of each entry |
-| Personal Vault | the files and thumbnails you save into it |
 
 **NOT end-to-end encrypted — stored so that the server *could* read them:**
 
@@ -130,7 +129,7 @@ that applies, the server stores ciphertext it cannot open.
 | Chat | message text, photos, videos, voice notes, documents |
 | Shared gallery | the images and videos, and their captions |
 | Time capsules | contents and attachments |
-| Personal Vault | the text of notes, and the label on every item |
+| Personal Vault | everything in it — the files and thumbnails you save, the text of notes, and the label on every item. Only you can reach the Vault, not even your partner, and it is additionally guarded by its PIN and by a block on screenshots — but it is not end-to-end encrypted |
 | Closer, apart from the two rows above | dice rolls and their tags, warmth scores, body-map touches and their positions, intimacy signals |
 | Location | coordinates and place labels |
 | Cycle tracker | logs, events and settings |

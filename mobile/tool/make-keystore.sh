@@ -36,11 +36,26 @@ fi
 # keytool ships with the JDK and is not on PATH on this machine. Look where it
 # actually is before asking the user to fix their environment.
 if ! command -v keytool >/dev/null; then
+  # JAVA_HOME first, because it is the answer the machine already has. The
+  # hardcoded list below is a guess and it guessed wrong here: this machine runs
+  # Microsoft's build of OpenJDK, which installs under Program Files/Microsoft
+  # and matched none of the three. cygpath converts the Windows path Windows
+  # sets into the one bash can test.
+  java_home_bin=""
+  if [ -n "${JAVA_HOME:-}" ]; then
+    java_home_bin="$JAVA_HOME"
+    command -v cygpath >/dev/null 2>&1 &&
+      java_home_bin="$(cygpath -u "$JAVA_HOME")"
+    java_home_bin="${java_home_bin%/}/bin"
+  fi
   for candidate in \
+    "$java_home_bin" \
     "/c/Program Files/Java/jdk-17/bin" \
+    "/c/Program Files/Microsoft"/*/bin \
     "/c/Program Files/Android/Android Studio/jbr/bin" \
     "/c/Program Files/Eclipse Adoptium"/*/bin
   do
+    [ -n "$candidate" ] || continue
     if [ -x "$candidate/keytool.exe" ] || [ -x "$candidate/keytool" ]; then
       PATH="$candidate:$PATH"
       break
@@ -48,8 +63,9 @@ if ! command -v keytool >/dev/null; then
   done
 fi
 command -v keytool >/dev/null || {
-  echo "keytool not found. It ships with the JDK — add its bin/ to PATH:" >&2
-  echo '  export PATH="/c/Program Files/Java/jdk-17/bin:$PATH"' >&2
+  echo "keytool not found. It ships with the JDK — set JAVA_HOME, or add its" >&2
+  echo "bin/ to PATH:" >&2
+  echo '  export PATH="$(cygpath -u "$JAVA_HOME")/bin:$PATH"' >&2
   exit 1
 }
 

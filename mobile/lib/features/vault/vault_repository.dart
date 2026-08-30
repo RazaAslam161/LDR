@@ -166,8 +166,13 @@ class VaultRepository {
   static String thumbAdFor(String itemId) => '${itemId}_vault_thumb';
 
 
-  /// Copies [bytes] INTO the vault: encrypted, under the owner's own folder,
-  /// with a thumbnail so a grid never decodes an original.
+  /// Copies [bytes] INTO the vault, under the owner's own folder, with a
+  /// thumbnail so a grid never decodes an original.
+  ///
+  /// The bytes are stored PLAINTEXT in a private bucket — see the decision
+  /// recorded at the upload below. This doc said "encrypted" for two builds
+  /// after that stopped being true, directly above the line that writes it in
+  /// the clear.
   ///
   /// The old `saveMediaToVault` stored a string — a public URL, or
   /// `intimate:<path>` pointing at the couple's shared bucket. That gave the
