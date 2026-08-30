@@ -16799,3 +16799,187 @@ first R8 / resource-shrink run in this app's history, so treat it as a debugging
 a build step. First thing to exercise on the resulting bundle is voice-note record and play:
 `record` 7.1.1 is the one reflection-capable plugin with keep rules from neither side.
 Turn ON Play App Signing at first upload.
+
+### §209 addendum 5 — committed and pushed (2026-08-30)
+
+Supersedes addendum 4's "Nothing committed, per standing rule" — the owner asked.
+
+```
+4523bb3 fix(audit): the wire hop that broke chat, and eight more the audit found
+82cf507..4523bb3  fix-sprint -> fix-sprint     (github.com/RazaAslam161/LDR)
+## fix-sprint...origin/fix-sprint              (no ahead/behind)
+```
+
+25 files staged BY NAME, never `-A`. Gates run immediately before staging, with no edit
+between them and the commit: `analyze` errors/warnings **0**, `flutter test` **1373 passed**.
+
+Carried but NOT mine, named in the commit body: the `64 -> 66` bump in `pubspec.yaml` +
+`release_gate.dart` (another session's — `version_lockstep_test` requires the pair to move
+together, so committing one without the other would red the gate on a fresh clone), and
+§207 itself.
+
+Production edge functions are AHEAD of nothing now — `map-token` v3 and `giphy-key` v2 were
+deployed before this commit and the committed source matches what is live.
+
+**Unchanged and still the headline: not one line of this has run on a phone.** Next is
+`bash tool/release.sh --play`, the first R8 run in this app's history. Exercise voice notes
+first (`record` 7.1.1 has keep rules from neither side), and turn ON Play App Signing at the
+first upload.
+
+## §213 — THE FIRST AAB EXISTS: R8 ran, all three ABIs, signed with the upload key (2026-08-30)
+
+Numbered 213 because §§210-212 are a concurrent session's web work, interleaved with this
+session's §209 addenda. Read the tail, do not assume your own last number is the last one.
+
+`bash tool/release.sh --play`, EXIT 0. The gate set ran first (pub get, analyze, full test
+suite) and the script's own stale-snapshot check passed on the first attempt this time — no
+`flutter clean` needed, unlike §207.
+
+```
+√ Built build\app\outputs\bundle\playRelease\app-play-release.aab (161.4MB)
+sha256 02c6dda0adf454a6ea53cc24ca61739dc66a6ca792ff86b92a7085efe7604934
+checked 3 libapp.so, all stamped miles-build-66
+```
+
+**Verified beyond what the script checks — these are exactly the D13-01/D1-01 gaps the audit
+said nobody was asserting:**
+
+- **R8 genuinely ran.** `build/app/outputs/mapping/playRelease/` holds `mapping.txt`
+  **71,322,168 bytes / 654,224 lines**, plus `usage.txt` (5.7 MB, what was stripped),
+  `resources.txt` (786 KB, the resource shrinker) and `seeds.txt`. This is the first
+  minified build in the app's history and it completed without a keep-rule failure.
+- **All three ABIs ship**: `lib/arm64-v8a/`, `lib/armeabi-v7a/`, `lib/x86_64/`. The
+  arm64-only hazard that makes the SIDELOAD APK install-and-crash on a 32-bit handset
+  (`.claude/CLAUDE.md`, BRAIN §193) does NOT apply to the Play bundle — Play splits per
+  device from these three.
+- **Signed with the upload key, not the debug key**: `jarsigner -verify` →
+  `jar verified.` / `Signed by "CN=Miles, O=R&D Dev, C=PK"`, SHA-256 digest. The
+  `BUNDLE-METADATA … signed in JarFile but is not signed in JarInputStream` warnings are a
+  jarsigner streaming artifact on AABs, not a signing defect.
+- **Native debug symbols are in the bundle** (`BUNDLE-METADATA/com.android.tools.build.debugsymbols/*/lib*.so.sym`),
+  so native crashes will symbolicate in the Console.
+
+**Not measured, and worth measuring before upload:** 161.4 MB is the whole bundle across
+three ABIs. The number Play enforces is the generated per-device APK set, not this. Run
+`bundletool build-apks --connected-device` (or `get-size total`) to get the real figure
+rather than guessing from 161 MB.
+
+**Build warnings, none fatal, all pre-existing:** Gradle 8.13.0 and Kotlin 2.2.0 are both
+below the floors Flutter says it will soon require; nine plugins still apply KGP and will
+fail to build on a future Flutter. Not this release's problem, but it is a dated fuse.
+
+**STILL THE HEADLINE: not one line of build 66 has run on a phone.** `adb devices` has been
+empty all session. The artifact exists and is correctly formed; that is a statement about the
+file, not about the app. Next: install it from the bundle (bundletool, not the sideload APK,
+so what is tested is what Play ships), then exercise **voice-note record and play FIRST** —
+`record` 7.1.1 is the one reflection-capable plugin carrying keep rules from neither side and
+is the most likely silent R8 casualty — then WebRTC call, screen share, Mapbox, ML Kit,
+image_cropper, and the launcher-cover switch. Then one chat message, to settle the decrypt fix.
+
+Turn ON Play App Signing at the first upload.
+
+## §214 — Build 66 IS ON THE PHONE, R8 and all. The decrypt fix works; the telemetry lied (2026-08-30)
+
+First Play-signed, R8-minified build ever installed on hardware. `adb devices` was no longer
+empty — OnePlus 8 `1896b4b3`.
+
+**Install.** `bundletool` is absent, so the bundle was not the install vehicle: built
+`flutter build apk --release --flavor play` instead — same upload key, same R8 output, all
+three ABIs in one universal APK (224 MB; the AAB's 161 MB splits per device). Artifact proven
+BEFORE anything was destroyed:
+```
+package: name='com.miles.miles' versionCode='66'   application-label:'Miles'
+apksigner: DN CN=Miles, O=R&D Dev, C=PK
+           SHA-256 a37c59a5f3801b5a52ca1654ec088cc90d4ee4602ec7cdde50c58b515fbe9bb2
+lib/arm64-v8a/  lib/armeabi-v7a/  lib/x86_64/      libapp.so stamped miles-build-66
+```
+That SHA-256 is byte-identical to keytool's and signingReport's, so this is genuinely the
+Play-signing path and not a debug artifact.
+
+Uninstall was REQUIRED and is not a precaution: installed signature was `fa3d26f4` (debug),
+new is `74f6ea18`. Verified escrow first — `key_escrow` 2 rows for 2 users, 1 message with a
+plaintext fallback, 3 vault items (plaintext anyway), 0 memory threads — so the blast radius
+of wiping the seed was effectively nil. `adb uninstall` → Success, `adb install` → Success.
+
+**R8 did not break the app.** PID alive after launch, and logcat has ZERO
+`FATAL EXCEPTION` / `ClassNotFoundException` / `NoClassDefFoundError` /
+`UnsatisfiedLinkError`. Launch cost 2498 ms. This was the single largest unknown in the
+release and it is now closed.
+
+**Per-install state was wiped, as predicted:** the phone had been wearing `.AliasWeather`;
+after reinstall the enabled alias is `.AliasMiles`. The cover choice must be re-applied from
+Settings. Component-enabled state does not survive an uninstall — worth knowing before the
+Play migration confuses someone.
+
+### The decrypt result, and it is the good one
+
+A live message was sent from build 66 during the session (seq 4628, 02:42:39Z). It was sealed
+CORRECTLY: `cipher_len 18, nonce_len 24`. Encryption on 66 is sound.
+
+`client_errors` id 493, build 66: `chat decrypt: 0/1, first=cipher column unreadable` —
+and the class CHANGED from build 65's `first=ArgumentError`. Read the arithmetic rather than
+the headline: `first` is the decode string only when `firstError == null`, i.e. **failed = 0**.
+Nothing failed to decrypt. rows=1, failed=0, undecodable=1.
+
+So the refetch introduced in `4523bb3` **worked** — the row was refetched through PostgREST
+and opened. What produced the count was the throwaway `Message.fromJson(payload.newRecord)`
+still sitting at the top of the subscribe callback, decoding the realtime bytea purely to ask
+"is there a cipher here?". That decode fails (the doubled wire), increments
+`cipherDecodeFailures`, and hydrate then drains it and files a shortfall against a fetch that
+had just succeeded. **The counter was accusing the healthy path.**
+
+Fixed: presence is now read off the raw map (`raw['body_cipher'] == null`); no Message is
+built from a realtime payload unless the refetch could not be made, and in that last-resort
+branch the decode failures are DRAINED rather than filed, because they are a property of that
+wire and not the fetch path losing ciphertext. `flutter analyze` 0/0, `test/unit/chat/` 303
+passed.
+
+**Not yet re-verified on device:** this last fix is in the tree, NOT in the installed build 66.
+The next install should show a live ciphered send with NO `chat-decrypt` row at all.
+
+**Also seen, not chased:** id 494 build 66 `MissingPluginException`, and id 492
+`FirebaseException` — both filed within seconds of first launch on a freshly wiped install.
+Neither crashed the app. Found, not fixed.
+
+## §208 — "Nothing happens": Begin was off the right edge of the screen (2026-08-30)
+
+Owner installed build 66, opened Settings -> Remove partner -> End the connection, and
+reported the whole feature did nothing. It was a real defect, and it was mine.
+
+**Root cause, one sentence:** the ceremony sheet's actions were a fixed `Row` of three
+buttons whose combined intrinsic width exceeds a 360dp phone, so the `Spacer` collapsed to
+zero and `Begin` — the ONLY control that starts the ceremony — was laid out past the right
+edge where no pointer event can reach it.
+
+- Reproduced BEFORE fixing, in a new widget test: `RenderFlex` overflow at text scale
+  **1.0**, not just at accessibility sizes. Device confirmed at `font_scale 1.0`,
+  `density 480`, `1080x2400` = **360dp** logical width.
+- **A release build paints no overflow stripes and logs nothing**, which is why logcat was
+  silent and the only symptom was "nothing happens".
+- Evidence it was never pressed: `unlink_starts` = 0 in production. That ledger records
+  every Begin ever. The RPC was never reached.
+- This is the SAME CLASS as the audit CRITICAL of §194 — the one control that matters,
+  pushed out of reach — on the screen immediately BEFORE the one that was fixed for it. The
+  /unlink layout law existed; the sheet in front of it had no law and had never been
+  rendered in a test.
+
+**Fixed:** `Begin` is now a full-width `FilledButton` on its own row; `Not now` and
+`Pause instead` sit below in a `Wrap` that wraps instead of overflowing. Nothing in the
+block has an intrinsic width that can exceed the sheet at any text scale.
+
+**Also fixed:** the third paragraph still read *"If the week passes"* — stale against a
+24-hour window. Caught by a new copy law, not by eye.
+
+New `test/widget/severance_sheet_test.dart`: renders the sheet, taps through to the
+ceremony, and asserts Begin is on-screen AND tappable at text scale 1.0 / 1.3 / 2.0, plus a
+law that the sheet's words never say "week" or "seven day" again, plus the couple-of-one
+branch. **It failed 4 of 5 before the fix and passes 5 of 5 after** — the same test, flipped.
+
+Gates: `flutter analyze` 0 errors 0 warnings; `flutter test` **1378 passed**.
+
+**Still open:** build 67 was NOT built — the owner stopped it mid-run. Source is at 67 with
+the fix; the newest artifact on the phone is build 66, which still has the bug. Nothing of
+the ritual past the Begin button has ever been exercised on a device.
+
+**Exact next step:** build 67, install on both handsets, then tap End the connection ->
+Begin and walk the ritual for the first time.

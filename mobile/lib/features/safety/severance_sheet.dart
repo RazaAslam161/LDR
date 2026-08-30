@@ -324,9 +324,10 @@ class _CeremonySheetState extends State<_CeremonySheet> {
             ),
             const SizedBox(height: 10),
             const Text(
-              'If the week passes, the unlink completes: what the two of you '
-              'made together is kept for 30 days and then erased for good. '
-              'Your own account and your private vault are untouched.',
+              'If the day passes with nothing changed, the unlink completes: '
+              'what the two of you made together is kept for 30 days and then '
+              'erased for good. Your own account and your private vault are '
+              'untouched.',
               style: TextStyle(
                 color: MilesColors.taupe,
                 fontSize: 13,
@@ -344,32 +345,54 @@ class _CeremonySheetState extends State<_CeremonySheet> {
               ),
             ],
             const SizedBox(height: 18),
-            Row(
+            // Begin gets its own full-width row, and the two ways out share
+            // the one below it.
+            //
+            // This was a single Row of all three with a Spacer, and on a
+            // 360dp phone — the OnePlus 8, at font scale 1.0 — the three
+            // intrinsic widths did not fit. A RenderFlex overflow collapses
+            // the Spacer to zero and lays the LAST child out past the right
+            // edge, where no pointer event can reach it. In a release build
+            // that paints nothing and logs nothing, so the only symptom was
+            // the owner tapping "End the connection" and reporting that the
+            // whole feature did nothing. It was the one control that starts
+            // the ceremony, and it was off the screen.
+            //
+            // Nothing here has an intrinsic width that can exceed the sheet:
+            // the button stretches, and the pair below WRAPS rather than
+            // overflowing when the text scale grows.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextButton(
-                  onPressed: _busy ? null : () => Navigator.pop(context),
-                  child: const Text(
-                    'Not now',
-                    style: TextStyle(color: MilesColors.taupe),
-                  ),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => Navigator.pop(context, 'pause'),
-                  child: const Text(
-                    'Pause instead',
-                    style: TextStyle(color: MilesColors.gilt),
-                  ),
-                ),
-                const SizedBox(width: 8),
                 FilledButton(
                   style: FilledButton.styleFrom(
                     backgroundColor: MilesColors.danger,
+                    minimumSize: const Size.fromHeight(48),
                   ),
                   onPressed: _busy ? null : _begin,
                   child: const Text('Begin'),
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  children: [
+                    TextButton(
+                      onPressed: _busy ? null : () => Navigator.pop(context),
+                      child: const Text(
+                        'Not now',
+                        style: TextStyle(color: MilesColors.taupe),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.pop(context, 'pause'),
+                      child: const Text(
+                        'Pause instead',
+                        style: TextStyle(color: MilesColors.gilt),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
