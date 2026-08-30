@@ -271,7 +271,11 @@ void main() {
             .where((l) => l.contains('// ignore:'))
             .map((l) => '${f.uri.pathSegments.last}: ${l.trim()}'),)
         .toList();
-    expect(ignores.length, lessThanOrEqualTo(3),
+    // 3 -> 4 on 2026-08-30: logging.dart's `avoid_print` — `print` is the one
+    // channel silenceLogsInRelease() cannot null, and share telemetry must
+    // survive a release build (BRAIN §220: five builds of field tests ran
+    // blind on debugPrint-based instrumentation).
+    expect(ignores.length, lessThanOrEqualTo(4),
         reason: 'each suppression needs a reason in a comment above it, and '
             'this bound moved on purpose: $ignores',);
   });

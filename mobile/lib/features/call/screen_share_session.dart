@@ -3,7 +3,20 @@ import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:miles/core/app/logging.dart' show shareLog;
 import 'package:miles/core/diag/diag.dart' show ShareQualityDigest;
+
+/// The sentence the user sees when a share ended ITSELF, or null when the end
+/// needs no message (a deliberate stop, or a superseded session).
+///
+/// Pure and top-level so a test can pin every mapping. The reasons are
+/// [ScreenShareSession]'s `_endReason` values.
+String? shareEndMessage(int endReason) => switch (endReason) {
+      1 || 4 => 'Screen share ended: the connection dropped.',
+      2 => 'Screen share failed — nothing could be sent. Try again.',
+      3 => "Screen share couldn't connect. Try again.",
+      _ => null,
+    };
 
 /// One screen share = one dedicated RTCPeerConnection.
 ///
@@ -33,7 +46,25 @@ class ScreenShareSession {
     required this.onRemoteStream,
     required this.onEnded,
     required this.stopHinted,
+    this.shareId,
   });
+
+  /// This share's generation. Minted by the sharer, adopted by the receiver
+  /// from the offer, stamped into every share signal by the controller's send
+  /// wrapper. Before it existed, `share-answer`/`share-ice` were routed to
+  /// whatever `_shareSession` happened to be current, so two shares in quick
+  /// succession cross-fed candidates into the wrong connection.
+  final String? shareId;
+
+  /// Whether a signal carrying [sid] belongs to this session. A missing id on
+  /// either side matches — an old client that stamps nothing keeps working
+  /// exactly as before the protocol existed.
+  bool matchesShare(String? sid) =>
+      sid == null || shareId == null || sid == shareId;
+
+  /// Whether negotiation completed (the remote description landed). The
+  /// controller re-offers on channel resubscribe while this is false.
+  bool get negotiated => _remoteSet;
 
   /// Broadcasts one signal to the partner — the call controller's own `_send`,
   /// so share signalling rides the channel the call already trusts.
@@ -114,6 +145,42 @@ class ScreenShareSession {
   int _statsErrors = 0;
   static const int statsErrorLimit = 15;
 
+  // ── Sharer liveness (BRAIN §220 defect B) ─────────────────────────────
+  //
+  // The sharer had NO deadline of any kind on the answer: if `share-offer`
+  // died on the wire — and the start sequence drives the app through paused
+  // for the consent dialog, exactly when the realtime socket resets — the
+  // share sat "on" forever with nothing transmitted and no way to know.
+  // 10s spans one full resubscribe backoff cycle (1+2+4s) plus the subscribe
+  // round trip; three offers total before a loud failure.
+  static const answerDeadline = Duration(seconds: 10);
+  static const int maxOfferRetries = 2;
+  Timer? _answerWatch;
+  int _offerRetries = 0;
+  Map<String, dynamic>? _offerPayload;
+
+  /// The sharer's own candidates, kept so a re-offer can re-broadcast them —
+  /// the call PC caches its own for the same reason. Bounded like
+  /// the controller's share-ice buffer.
+  final List<Map<String, dynamic>> _localCands = [];
+
+  // ── Blip resilience (BRAIN §220 defect A) ─────────────────────────────
+  //
+  // A 1–2s cellular ICE blip is routine. The sharer debounces `Disconnected`
+  // three seconds (libwebrtc already burned ~2.5s of dead ICE reporting it),
+  // then restarts ICE on the SAME connection and re-offers in place; it gives
+  // up loudly after 12s. The receiver holds the last frame for 15s — a
+  // backstop deliberately LONGER than the sharer's give-up, so the sharer
+  // stays the authority — instead of killing the share on the first blink.
+  static const restartDebounce = Duration(seconds: 3);
+  static const disconnectGiveUp = Duration(seconds: 12);
+  static const disconnectGrace = Duration(seconds: 15);
+  static const int maxIceRestarts = 2;
+  Timer? _restartDebounce;
+  Timer? _disconnectGiveUp;
+  Timer? _graceTimer;
+  int _restarts = 0;
+
   /// Every share state transition, on one greppable tag: `adb logcat | grep MilesShare`.
   ///
   /// Not decoration. `Diag` records nothing in production
@@ -121,11 +188,24 @@ class ScreenShareSession {
   /// drowned in OS freeze/unfreeze spam, so an untagged debugPrint is not a
   /// diagnostic — it is a hope. Five builds shipped an unverified share partly
   /// because nothing it did could be seen from outside.
-  static void _log(String msg) => debugPrint('MilesShare $msg');
+  ///
+  /// Routed through [shareLog], NOT `debugPrint`: `silenceLogsInRelease()`
+  /// nulls debugPrint in every release build, so the original version of this
+  /// line could never print on a handset — the exact blindness it was written
+  /// to end (BRAIN §220). Content contract: numbers and state words only.
+  static void _log(String msg) => shareLog(msg);
 
   /// How this share ended, for the digest: 0 stopped, 1 stalled after frames,
   /// 2 never produced a frame at all.
   int _endReason = 0;
+
+  /// Read by the controller's `onEnded` to pick the sentence the user sees
+  /// ([shareEndMessage]). Read it BEFORE `close()`, which resets it.
+  int get endReason => _endReason;
+
+  /// The newest per-second sample line, for the long-press stats overlay.
+  String? _lastSample;
+  String? get hudLine => _lastSample;
 
   // What this share actually did, for the one digest row it reports when it
   // ends. Counters only — nothing user-generated.
@@ -138,6 +218,21 @@ class ScreenShareSession {
   int _lastBweKbps = 0;
   String _codec = '';
   final List<double> _fpsRing = [];
+
+  /// The truth about the captured surface, read off the display track's
+  /// settings — filled by the vendored fork from the exact value the native
+  /// capturer received (`display.getRealSize()`). Falls back (the Flutter
+  /// view's size) only when the settings are absent or malformed — an old
+  /// fork build. The fallback diverges from the capture in split-screen and
+  /// OS PiP, which mis-scales the encoder: the §220 black-share class.
+  static Size captureSizeOf(Map<String, dynamic> settings, Size fallback) {
+    final w = settings['width'];
+    final h = settings['height'];
+    if (w is num && h is num && w > 0 && h > 0) {
+      return Size(w.toDouble(), h.toDouble());
+    }
+    return fallback;
+  }
 
   /// The capture's long edge divided by the rung's target — never below 1
   /// (never upscale).
@@ -162,9 +257,23 @@ class ScreenShareSession {
     _wireIce(pc);
     pc.onConnectionState = (s) {
       if (!identical(pc, _pc)) return;
+      _log('send state=${s.name}');
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        // Still the current PC (close() nulls _pc before closing, so a
+        // deliberate stop never reaches this line): the link is gone. A
+        // straight-to-Failed transition skips Disconnected, so the give-up
+        // timer never armed — without a reason here the death was silent.
+        _endReason = 4;
         onEnded();
+      } else if (s ==
+          RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        _armRestart(pc);
+      } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _restartDebounce?.cancel();
+        _restartDebounce = null;
+        _disconnectGiveUp?.cancel();
+        _disconnectGiveUp = null;
       }
     };
     _sender = await pc.addTrack(track, stream);
@@ -219,15 +328,107 @@ class ScreenShareSession {
         return;
       }
       await pc.setLocalDescription(offer);
-      send('share-offer', {'sdp': offer.sdp, 'type': offer.type});
+      _offerPayload = {'sdp': offer.sdp, 'type': offer.type};
+      send('share-offer', _offerPayload!);
       _log('send offered');
+      _armAnswerWatch();
     } catch (e) {
       _log('send offer FAILED: $e');
+      _endReason = 3;
       onEnded();
       return;
     }
     _shareStart = DateTime.now();
     _stats = Timer.periodic(const Duration(seconds: 1), (_) => _sample());
+  }
+
+  void _armAnswerWatch() {
+    _answerWatch?.cancel();
+    _answerWatch = Timer(answerDeadline, () {
+      if (_remoteSet || _pc == null || !_isSharer) return;
+      unawaited(reoffer());
+    });
+  }
+
+  /// Re-broadcast the standing offer and every cached local candidate — the
+  /// receiver's rebuild path answers it whether or not it saw the first copy.
+  /// Also called by the controller when the signalling channel resubscribes:
+  /// `screen{on:true}` was the only share signal re-announced there, so a
+  /// share whose offer died in a channel outage stayed dead-but-"on" forever.
+  ///
+  /// The retry budget is consumed HERE, not in the deadline timer — the
+  /// resubscribe path used to bypass it, so a flapping channel re-offered
+  /// unboundedly and the give-up could never fire: the §220 hang, recreated
+  /// in exactly the unstable-network scenario this exists for.
+  Future<void> reoffer() async {
+    final payload = _offerPayload;
+    if (!_isSharer || payload == null || _remoteSet || _pc == null) return;
+    if (_offerRetries >= maxOfferRetries) {
+      _log('send answer never arrived after ${_offerRetries + 1} offers — '
+          'ending');
+      _endReason = 3;
+      onEnded();
+      return;
+    }
+    _offerRetries++;
+    _log('send re-offer #$_offerRetries cands=${_localCands.length}');
+    send('share-offer', {...payload, 'attempt': _offerRetries});
+    for (final c in _localCands) {
+      send('share-ice', c);
+    }
+    _armAnswerWatch();
+  }
+
+  void _armRestart(RTCPeerConnection pc) {
+    _disconnectGiveUp ??= Timer(disconnectGiveUp, () {
+      if (!identical(pc, _pc)) return;
+      _log('send link lost for ${disconnectGiveUp.inSeconds}s — ending');
+      _endReason = 4;
+      onEnded();
+    });
+    _restartDebounce?.cancel();
+    _restartDebounce = Timer(restartDebounce, () {
+      if (!identical(pc, _pc)) return;
+      unawaited(_restartIce(pc));
+    });
+  }
+
+  /// New ICE credentials on the SAME connection — the receiver answers in
+  /// place, no rebuild, no black gap. `restartIce()` only flags the need; the
+  /// fresh ufrag/pwd ride the next offer.
+  Future<void> _restartIce(RTCPeerConnection pc) async {
+    if (_restarts >= maxIceRestarts) return; // the give-up timer decides
+    _restarts++;
+    try {
+      await pc.restartIce();
+      final offer = await pc.createOffer({});
+      if (!identical(pc, _pc)) return;
+      await pc.setLocalDescription(offer);
+      send('share-offer', {
+        'sdp': offer.sdp,
+        'type': offer.type,
+        'restart': true,
+      });
+      _log('send ICE restart #$_restarts offered');
+    } catch (e) {
+      _log('send ICE restart FAILED: $e');
+    }
+  }
+
+  /// The receiver said its side died (`share-fail`). Restart if budget
+  /// remains; otherwise stop encoding into the void — without this the sharer
+  /// kept the capture and encoder running forever after a dead receive.
+  Future<void> onShareFail() async {
+    final pc = _pc;
+    if (pc == null || !_isSharer) return;
+    if (_restarts >= maxIceRestarts) {
+      _log('recv reported failure after $_restarts restarts — ending');
+      _endReason = 4;
+      onEnded();
+      return;
+    }
+    _log('recv reported failure — restarting');
+    await _restartIce(pc);
   }
 
   /// Android 14 reported the real captured-content size (an app window is
@@ -363,6 +564,13 @@ class ScreenShareSession {
   Future<void> _sampleOnce() async {
     final pc = _pc;
     if (pc == null) return;
+    // Keep trying to profile the sender until it takes — BEFORE the stats
+    // read, not after it. This retry used to sit below the getStats try, where
+    // the stats-error early return skipped it: a connection with flaky stats
+    // could run its whole life unprofiled, the exact black-share class the
+    // retry exists to close (audit round-2, defect I).
+    if (!_rungApplied) await _applyRung();
+    if (!identical(pc, _pc)) return;
     double fps = 0;
     double captureFps = 0;
     var limitation = '';
@@ -427,18 +635,22 @@ class ScreenShareSession {
     }
     _statsErrors = 0;
 
+    // The per-second field record. One content-free line while a share is
+    // live; this is what turns the next device run from a guess into a
+    // reading. `cap` (media-source fps) is the §220 discriminator: a positive
+    // cap with zero fps means frames reach the WebRTC source and die at the
+    // encoder; a zero cap means they never left the capturer. It feeds the
+    // long-press stats overlay ([hudLine]) — the on-device proof that every
+    // encoder setting actually took, which no share build ever had.
+    _lastSample = 's r$_rung fps=${fps.toStringAsFixed(0)} '
+        'cap=${captureFps.toStringAsFixed(0)} '
+        'lim=${limitation.isEmpty ? '-' : limitation} '
+        'bwe=${_lastBweKbps}k codec=${_codec.isEmpty ? '?' : _codec} '
+        'applied=$_rungApplied skips=$_rungSkips never=$_neverStarted';
+    _log(_lastSample!);
+
     _fpsRing.add(fps);
     if (_fpsRing.length > 300) _fpsRing.removeAt(0);
-
-    // Keep trying to profile the sender until it takes.
-    //
-    // Encodings do not exist on the sender until negotiation has built them,
-    // so the pre-offer apply legitimately finds nothing. What must never
-    // happen again is giving up there: an unprofiled screencast sender runs at
-    // the whole panel's pixel rate with no floor, which is a share that is
-    // black or unwatchable for its entire life. One retry per second, free,
-    // and it stops the moment it succeeds.
-    if (!_rungApplied) await _applyRung();
 
     // The stall check — the only thing that may END a share, and only on the
     // real evidence of frames having stopped. Thresholds are sample counts at
@@ -552,7 +764,65 @@ class ScreenShareSession {
 
   Timer? _receiveWatch;
 
+  /// The receiver's standing answer, kept so a duplicate offer (the sharer
+  /// re-offering because OUR answer died on the wire) is answered by
+  /// RESENDING it. Rebuilding instead — the old behaviour — produced an
+  /// answer with a new DTLS certificate that the sharer's standing PC
+  /// rejects: the retry protocol killing the share it exists to save.
+  Map<String, dynamic>? _answerPayload;
+
+  Future<void> resendAnswer() async {
+    final a = _answerPayload;
+    if (a == null || _isSharer || _pc == null) return;
+    _log('recv re-sent answer cands=${_localCands.length}');
+    send('share-answer', a);
+    for (final c in _localCands) {
+      send('share-ice', c);
+    }
+  }
+
   Future<void> onOffer(Map<dynamic, dynamic> map) async {
+    // An in-place ICE restart from the sharer: same share, same connection,
+    // fresh credentials. Answer on the standing PC — a rebuild here pays full
+    // ICE and a black gap for what is a 2-second blip on the sharer's side.
+    // Every other shape (no PC yet, never negotiated, or a genuinely new
+    // share) falls through to the rebuild below, which also handles a restart
+    // offer arriving after this side already tore down.
+    final restartPc = _pc;
+    if (map['restart'] == true &&
+        !_isSharer &&
+        restartPc != null &&
+        _remoteSet) {
+      try {
+        await restartPc.setRemoteDescription(RTCSessionDescription(
+          map['sdp']?.toString(),
+          map['type']?.toString(),
+        ),);
+        if (!identical(restartPc, _pc)) return;
+        final answer = await restartPc.createAnswer();
+        if (!identical(restartPc, _pc)) return;
+        await restartPc.setLocalDescription(answer);
+        _answerPayload = {'sdp': answer.sdp, 'type': answer.type};
+        send('share-answer', _answerPayload!);
+        _graceTimer?.cancel();
+        _graceTimer = null;
+        _log('recv restart answered');
+      } catch (e) {
+        _log('recv restart FAILED: $e');
+        send('share-fail', {'reason': 'failed'});
+        onEnded();
+      }
+      return;
+    }
+    if (map['restart'] == true) {
+      // A restart offer with no standing negotiated connection must NEVER
+      // take the rebuild path below: the rebuilt answer carries a NEW DTLS
+      // certificate, which the sharer's standing PC rejects — killing the
+      // share it was trying to save. The controller answers this case with
+      // `share-fail` instead; here it is only a guard against re-entry.
+      _log('recv restart offer with no standing pc — ignored');
+      return;
+    }
     _isSharer = false;
     await close();
     RTCPeerConnection? pc;
@@ -565,9 +835,26 @@ class ScreenShareSession {
         if (!identical(self, _pc)) return;
         _log('recv state=${s.name}');
         if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-            s == RTCPeerConnectionState.RTCPeerConnectionStateClosed ||
-            s == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+            s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+          send('share-fail', {'reason': 'failed'});
           onEnded();
+        } else if (s ==
+            RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+          // A blip, until proven otherwise: hold the last frame and give the
+          // sharer's own restart (3s debounce, 12s give-up) time to land.
+          // Killing the receive side here — the old behaviour — destroyed
+          // every share the first time a cellular link blinked, and the
+          // sharer kept encoding into the void with no way to learn.
+          _graceTimer ??= Timer(disconnectGrace, () {
+            if (!identical(self, _pc)) return;
+            _log('recv link lost for ${disconnectGrace.inSeconds}s — ending');
+            send('share-fail', {'reason': 'disconnected'});
+            onEnded();
+          });
+        } else if (s ==
+            RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+          _graceTimer?.cancel();
+          _graceTimer = null;
         }
       };
       pc.onTrack = (event) {
@@ -595,12 +882,17 @@ class ScreenShareSession {
       final answer = await pc.createAnswer();
       if (!identical(pc, _pc)) return;
       await pc.setLocalDescription(answer);
-      send('share-answer', {'sdp': answer.sdp, 'type': answer.type});
+      _answerPayload = {'sdp': answer.sdp, 'type': answer.type};
+      send('share-answer', _answerPayload!);
       _log('recv answered');
       // Nothing arriving is a failure with a deadline, not a wait forever.
       _receiveWatch = Timer(receiveDeadline, () {
         if (!identical(pc, _pc)) return;
         _log('recv DEADLINE — no display in ${receiveDeadline.inSeconds}s');
+        // Tell the sharer: without this it keeps capturing and encoding into
+        // a receive side that no longer exists (§220 — the 20s never-started
+        // suicide was the only thing that ever stopped it).
+        send('share-fail', {'reason': 'deadline'});
         onEnded();
       });
     } catch (e) {
@@ -615,6 +907,14 @@ class ScreenShareSession {
   Future<void> onAnswer(Map<dynamic, dynamic> map) async {
     final pc = _pc;
     if (pc == null || !_isSharer) return;
+    if (_remoteSet) {
+      // The reoffer protocol can legitimately produce a second copy of the
+      // answer (a re-offer crossing the first answer on the wire). Applying
+      // it to a stable connection throws wrong-state, which used to read as
+      // a failure and killed the share right after it connected.
+      _log('send duplicate answer ignored');
+      return;
+    }
     try {
       await pc.setRemoteDescription(RTCSessionDescription(
         map['sdp']?.toString(),
@@ -622,6 +922,8 @@ class ScreenShareSession {
       ),);
       if (!identical(pc, _pc)) return;
       _remoteSet = true;
+      _answerWatch?.cancel();
+      _answerWatch = null;
       await _flushIce();
       _log('send answered, negotiated');
       // Re-assert the rung now that negotiation is done. Before the answer the
@@ -633,6 +935,9 @@ class ScreenShareSession {
       await _applyRung();
     } catch (e) {
       _log('send answer FAILED: $e');
+      // Negotiation failed — say so; endReason 0 here read as a deliberate
+      // stop and the death was invisible.
+      _endReason = 3;
       onEnded();
     }
   }
@@ -656,11 +961,19 @@ class ScreenShareSession {
   }
 
   void _wireIce(RTCPeerConnection pc) {
-    pc.onIceCandidate = (c) => send('share-ice', {
-          'candidate': c.candidate,
-          'sdpMid': c.sdpMid,
-          'sdpMLineIndex': c.sdpMLineIndex,
-        },);
+    pc.onIceCandidate = (c) {
+      final m = <String, dynamic>{
+        'candidate': c.candidate,
+        'sdpMid': c.sdpMid,
+        'sdpMLineIndex': c.sdpMLineIndex,
+      };
+      // BOTH sides keep their candidates so a re-offer (sharer) or re-sent
+      // answer (receiver) can re-broadcast them: the first batch goes out
+      // within ~1s of the SDP, exactly the window a channel outage eats.
+      // Bounded like every other ICE buffer.
+      if (_localCands.length < 64) _localCands.add(m);
+      send('share-ice', m);
+    };
   }
 
   Future<void> _flushIce() async {
@@ -688,6 +1001,20 @@ class ScreenShareSession {
     _stats = null;
     _receiveWatch?.cancel();
     _receiveWatch = null;
+    _answerWatch?.cancel();
+    _answerWatch = null;
+    _restartDebounce?.cancel();
+    _restartDebounce = null;
+    _disconnectGiveUp?.cancel();
+    _disconnectGiveUp = null;
+    _graceTimer?.cancel();
+    _graceTimer = null;
+    _offerPayload = null;
+    _answerPayload = null;
+    _offerRetries = 0;
+    _restarts = 0;
+    _localCands.clear();
+    _lastSample = null;
     final pc = _pc;
     _pc = null;
     _sender = null;

@@ -37,6 +37,7 @@ import androidx.annotation.RequiresApi;
 import com.cloudwebrtc.webrtc.audio.AudioSwitchManager;
 import com.cloudwebrtc.webrtc.audio.AudioUtils;
 import com.cloudwebrtc.webrtc.audio.LocalAudioTrack;
+import com.cloudwebrtc.webrtc.audio.PlaybackAudioMixer;
 import com.cloudwebrtc.webrtc.record.AudioChannel;
 import com.cloudwebrtc.webrtc.record.AudioSamplesInterceptor;
 import com.cloudwebrtc.webrtc.record.MediaRecorderImpl;
@@ -506,8 +507,24 @@ public class GetUserMediaImpl {
                 });
     }
 
+    /**
+     * Miles patch: the display-audio mixer, armed while an {@code audio: true}
+     * screen share runs and read by the ADM's AudioBufferCallback
+     * (MethodCallHandlerImpl) on every mic buffer. Volatile: armed on the
+     * projection flow, read on the audio record thread, released from either.
+     */
+    volatile PlaybackAudioMixer playbackMixer;
+
     void getDisplayMedia(
             final ConstraintsMap constraints, final Result result, final MediaStream mediaStream) {
+        // Miles patch: upstream discarded the whole constraints map here, so
+        // `audio: true` silently produced a video-only share.
+        boolean wantsAudio = false;
+        if (constraints.hasKey("audio")
+                && constraints.getType("audio") == ObjectType.Boolean) {
+            wantsAudio = constraints.getBoolean("audio");
+        }
+        final boolean withAudio = wantsAudio;
         if (mediaProjectionData == null) {
             screenRequestPermissions(
                     new ResultReceiver(new Handler(Looper.getMainLooper())) {
@@ -520,15 +537,15 @@ public class GetUserMediaImpl {
                                 resultError("screenRequestPermissions", "User didn't give permission to capture the screen.", result);
                                 return;
                             }
-                            getDisplayMedia(result, mediaStream, mediaProjectionData);
+                            getDisplayMedia(result, mediaStream, mediaProjectionData, withAudio);
                         }
                     });
         } else {
-            getDisplayMedia(result, mediaStream, mediaProjectionData);
+            getDisplayMedia(result, mediaStream, mediaProjectionData, withAudio);
         }
     }
 
-    private void getDisplayMedia(final Result result, final MediaStream mediaStream, final Intent mediaProjectionData) {
+    private void getDisplayMedia(final Result result, final MediaStream mediaStream, final Intent mediaProjectionData, final boolean withAudio) {
         /* Create ScreenCapture */
         VideoTrack displayTrack = null;
         VideoCapturer videoCapturer = null;
@@ -551,6 +568,18 @@ public class GetUserMediaImpl {
                                 // capturer's texture-helper thread
                                 // (OrientationAwareScreenCapturer registerCallback),
                                 // and the event sink is @UiThread — hence the post.
+                                // Miles patch NOTE: deliberately NO mixer
+                                // release here. This callback fires SPURIOUSLY
+                                // right after capture starts on some OEMs (the
+                                // documented reason upstream's body was empty,
+                                // and why the Dart side treats the event as a
+                                // hint, never a kill) — releasing on it cost an
+                                // audio share its sound for the rest of the
+                                // share with no way back. On a GENUINE stop the
+                                // capturer teardown releases the mixer within
+                                // seconds; until then a capture on a dead
+                                // projection reads errors, which onBuffer
+                                // already ignores.
                                 new Handler(Looper.getMainLooper()).post(() -> {
                                     if (FlutterWebRTCPlugin.sharedSingleton != null) {
                                         ConstraintsMap params = new ConstraintsMap();
@@ -608,6 +637,31 @@ public class GetUserMediaImpl {
         videoCapturer.startCapture(info.width, info.height, info.fps);
         Log.d(TAG, "OrientationAwareScreenCapturer.startCapture: " + info.width + "x" + info.height + "@" + info.fps);
 
+        // Miles patch: arm the display-audio mixer on the projection the
+        // capture just started (same instance — a consent token is single-use
+        // on Android 15+, so it must never be re-derived from the Intent).
+        if (withAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && applicationContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED
+                && videoCapturer instanceof OrientationAwareScreenCapturer) {
+            MediaProjection projection =
+                    ((OrientationAwareScreenCapturer) videoCapturer).getMediaProjection();
+            if (projection != null) {
+                PlaybackAudioMixer old = playbackMixer;
+                playbackMixer = new PlaybackAudioMixer(projection);
+                if (old != null) old.release();
+                Log.d(TAG, "display audio: playback mixer armed");
+            } else {
+                Log.w(TAG, "display audio requested but projection is null");
+            }
+        } else if (withAudio) {
+            // Requested but not armable: say which leg failed rather than
+            // degrading to a silent share with no trace.
+            Log.w(TAG, "display audio requested but not armed: sdk="
+                    + Build.VERSION.SDK_INT + " capturer="
+                    + videoCapturer.getClass().getSimpleName());
+        }
+
         String trackId = stateProvider.getNextTrackUUID();
         mVideoCapturers.put(trackId, info);
 
@@ -634,6 +688,19 @@ public class GetUserMediaImpl {
             track_.putString("label", kind);
             track_.putString("readyState", displayTrack.state().toString());
             track_.putBoolean("remote", false);
+
+            // Miles patch: expose the REAL captured surface size to Dart.
+            // MediaStreamTrack.getSettings() reads map['settings'] and is
+            // otherwise EMPTY for display tracks, so the app scaled the share
+            // encoder from the Flutter view's physicalSize instead — wrong in
+            // split-screen and OS PiP, and those wrong numbers also mis-gated
+            // the app-scoped self-preview. This is the value startCapture just
+            // received; there is no other way to read it from the app side.
+            ConstraintsMap settings = new ConstraintsMap();
+            settings.putInt("width", info.width);
+            settings.putInt("height", info.height);
+            settings.putInt("frameRate", info.fps);
+            track_.putMap("settings", settings.toMap());
 
             videoTracks.pushMap(track_);
             mediaStream.addTrack(displayTrack);
@@ -1021,6 +1088,14 @@ public class GetUserMediaImpl {
                     + " to primary capturer (was " + id + ")");
         } else {
             // No shared tracks - stop and dispose the capturer normally.
+            // Miles patch: the display-audio capture dies with its capturer —
+            // an AudioRecord left running would hold the projection's audio
+            // grant after the share is gone.
+            if (info.capturer instanceof OrientationAwareScreenCapturer) {
+                PlaybackAudioMixer mixer = playbackMixer;
+                playbackMixer = null;
+                if (mixer != null) mixer.release();
+            }
             try {
                 info.capturer.stopCapture();
                 if (info.cameraEventsHandler != null) {

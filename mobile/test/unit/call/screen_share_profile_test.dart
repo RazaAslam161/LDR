@@ -191,4 +191,83 @@ void main() {
       );
     });
   });
+
+  group('captureSizeOf', () {
+    const fallback = Size(1080, 1920);
+
+    test('reads the fork-provided settings', () {
+      expect(
+        ScreenShareSession.captureSizeOf(
+            {'width': 1080, 'height': 2400, 'frameRate': 30}, fallback,),
+        const Size(1080, 2400),
+      );
+    });
+
+    test('an old fork build (empty settings) falls back', () {
+      expect(ScreenShareSession.captureSizeOf({}, fallback), fallback);
+    });
+
+    test('zero, negative and garbage values fall back', () {
+      expect(
+        ScreenShareSession.captureSizeOf({'width': 0, 'height': 2400}, fallback),
+        fallback,
+      );
+      expect(
+        ScreenShareSession.captureSizeOf(
+            {'width': -1, 'height': 2400}, fallback,),
+        fallback,
+      );
+      expect(
+        ScreenShareSession.captureSizeOf(
+            {'width': 'x', 'height': 2400}, fallback,),
+        fallback,
+      );
+    });
+  });
+
+  group('matchesShare', () {
+    ScreenShareSession sessionWith(String? id) => ScreenShareSession(
+          send: (_, __) {},
+          iceConfig: const {},
+          onRemoteStream: (_) {},
+          onEnded: () {},
+          stopHinted: () => false,
+          shareId: id,
+        );
+
+    test('same id matches, different id does not', () {
+      final s = sessionWith('a');
+      expect(s.matchesShare('a'), isTrue);
+      expect(s.matchesShare('b'), isFalse);
+    });
+
+    test('a missing id on either side matches — old clients keep working', () {
+      expect(sessionWith('a').matchesShare(null), isTrue);
+      expect(sessionWith(null).matchesShare('b'), isTrue);
+      expect(sessionWith(null).matchesShare(null), isTrue);
+    });
+  });
+
+  group('shareEndMessage', () {
+    // The sentence shown when a share ends ITSELF (BRAIN §220: two shares
+    // died in the field with no message of any kind). 0 is a deliberate stop
+    // or a superseded session — those need no sentence.
+    test('deliberate ends say nothing', () {
+      expect(shareEndMessage(0), isNull);
+    });
+
+    test('self-inflicted ends each carry a distinct sentence', () {
+      final stalled = shareEndMessage(1);
+      final neverStarted = shareEndMessage(2);
+      expect(stalled, isNotNull);
+      expect(neverStarted, isNotNull);
+      expect(stalled, isNot(neverStarted),
+          reason: 'a dropped link and an encoder that never started are '
+              'different problems with different next moves',);
+    });
+
+    test('an unknown reason stays silent rather than lying', () {
+      expect(shareEndMessage(99), isNull);
+    });
+  });
 }

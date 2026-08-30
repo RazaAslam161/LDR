@@ -21,3 +21,28 @@ void silenceLogsInRelease() {
   if (!kReleaseMode) return;
   debugPrint = (String? message, {int? wrapWidth}) {};
 }
+
+/// Screen-share telemetry that must survive a release build — the one
+/// deliberate exception to the silence above.
+///
+/// The §205 share instrumentation rode `debugPrint` and was therefore nulled
+/// by [silenceLogsInRelease] on every handset it was written for: five builds
+/// of field tests ran blind, and BRAIN §220 caught a share connecting and
+/// dying with zero lines emitted. A diagnostic that cannot be read from the
+/// field is a hope, not a diagnostic.
+///
+/// The privacy contract that justifies the exception: callers pass ONLY
+/// transition words and numbers — rungs, fps, kbps, state names, exception
+/// text from the platform. Never a display name, id, or anything
+/// user-generated. That keeps this quieter than what Android itself already
+/// prints about this package on every freeze/unfreeze.
+void shareLog(String msg) {
+  if (kReleaseMode) {
+    // `print` bypasses the debugPrint override; there is no zone override in
+    // this app (verified: no runZoned/ZoneSpecification anywhere in lib/).
+    // ignore: avoid_print
+    print('MilesShare $msg');
+  } else {
+    debugPrint('MilesShare $msg');
+  }
+}

@@ -250,6 +250,186 @@ void main() {
     });
   });
 
+  group('the field record (BRAIN §220)', () {
+    final logging = File('lib/core/app/logging.dart').readAsStringSync();
+
+    test('share telemetry survives a release build', () {
+      // silenceLogsInRelease() nulls debugPrint in EVERY release build, so the
+      // original `_log => debugPrint(...)` could never print on a handset —
+      // five builds of field tests ran blind on instrumentation that was born
+      // dead. _log must route through shareLog, and shareLog's release branch
+      // must use print, which the override cannot touch.
+      expect(session.contains('static void _log(String msg) => shareLog(msg);'),
+          isTrue,
+          reason: 'share telemetry routed through debugPrint is silenced in '
+              'release — the §220 blindness',);
+      expect(logging.contains("print('MilesShare \$msg');"), isTrue,
+          reason: 'print is the one channel silenceLogsInRelease cannot null',);
+      expect(session.contains("debugPrint('MilesShare"), isFalse,
+          reason: 'the dead channel must not come back',);
+    });
+
+    test('the rung retry runs BEFORE the stats read', () {
+      // The retry sat below getStats, where the stats-error early return
+      // skipped it: a connection with flaky stats ran its whole life
+      // unprofiled — the black-share class, again (audit round-2, defect I).
+      final body = session.substring(session.indexOf('_sampleOnce() async'));
+      final retry = body.indexOf('if (!_rungApplied) await _applyRung();');
+      final stats = body.indexOf('pc.getStats()');
+      expect(retry, greaterThan(-1));
+      expect(stats, greaterThan(-1));
+      expect(retry, lessThan(stats),
+          reason: 'below the stats try, a getStats error skips the retry',);
+    });
+
+    test('a live share prints one field line per second', () {
+      // cap (media-source fps) vs fps (outbound) is the discriminator that
+      // separates "frames never left the capturer" from "frames died at the
+      // encoder" — the exact question §220 could not answer from outside.
+      // One string, two consumers: logcat and the long-press stats overlay.
+      expect(session.contains(r"'s r$_rung fps="), isTrue);
+      expect(session.contains(r'cap=${captureFps.toStringAsFixed(0)}'), isTrue);
+      expect(session.contains('_log(_lastSample!)'), isTrue,
+          reason: 'the HUD line and the logged line must be the SAME string, '
+              'or the two records can disagree about the same second',);
+    });
+
+    test('share failures reach the user, mid-call', () {
+      expect(controller.contains('String? _shareError;'), isTrue);
+      expect(controller.contains('String? takeShareError()'), isTrue);
+      expect(screen.contains('takeShareError()'), isTrue,
+          reason: 'the call screen must consume it on notify — _lastError is '
+              'only read at pop time and a share fails on a screen that '
+              'stays up',);
+      expect(controller.contains('shareEndMessage(session.endReason)'), isTrue,
+          reason: 'a share that ended itself says why on screen',);
+      expect(controller.contains("shareLog('capture FAILED: \$e')"), isTrue,
+          reason: 'the getDisplayMedia catch was catch (_) and cost a field '
+              'session the exception text that named the refusal',);
+    });
+
+    test('the foreground service never fails silently', () {
+      final fgs =
+          File('lib/features/call/call_foreground.dart').readAsStringSync();
+      expect(fgs.contains('fgs start(force='), isTrue);
+      expect(fgs.contains('fgs type swap'), isTrue);
+      expect(RegExp(r'catch \(_\) \{\s*\n\s*// Background-keepalive')
+              .hasMatch(fgs),
+          isFalse,
+          reason: 'a swallowed startForeground failure is a share with no '
+              'mediaProjection type and no trace — §205\'s one unverified '
+              'link',);
+    });
+  });
+
+  group('the share generation protocol (BRAIN §220 defects A/B/C/F/G/H)', () {
+    test('every share signal carries the generation, and dispatch demuxes',
+        () {
+      expect(controller.contains('_shareSend('), isTrue,
+          reason: 'the per-share send wrapper stamps share_id into every '
+              'signal the session broadcasts',);
+      expect(controller.contains("'share_id': shareId"), isTrue);
+      expect(
+          RegExp(r"matchesShare\(map\['share_id'\]\?\.toString\(\)\)")
+              .allMatches(controller)
+              .length,
+          greaterThanOrEqualTo(3),
+          reason: 'share-answer, share-ice and share-fail must all route by '
+              'generation, not by whichever session is current',);
+      expect(session.contains('bool matchesShare(String? sid)'), isTrue);
+    });
+
+    test('the sharer has a deadline on the answer, and re-offers', () {
+      expect(session.contains('answerDeadline'), isTrue);
+      expect(session.contains('Future<void> reoffer()'), isTrue);
+      expect(controller.contains('s.reoffer()'), isTrue,
+          reason: 'the resubscribe hook must re-send the OFFER, not only the '
+              'announce — a share whose offer died in a channel outage was '
+              'dead-but-"on" forever (§220 defect B)',);
+      expect(session.contains('_endReason = 3'), isTrue,
+          reason: 'retries exhausted is a loud failure, not a hang',);
+    });
+
+    test('a blip is a grace window, never an instant kill', () {
+      // The receiver used to treat Disconnected as fatal alongside
+      // Failed/Closed — one cellular blink permanently destroyed the share.
+      final recvKill = RegExp(
+        r'RTCPeerConnectionStateFailed \|\|\s*\n\s*s == RTCPeerConnectionState'
+        r'\.RTCPeerConnectionStateClosed \|\|\s*\n\s*s == RTCPeerConnectionState'
+        r'\.RTCPeerConnectionStateDisconnected',
+      );
+      expect(recvKill.hasMatch(session), isFalse,
+          reason: 'Disconnected inside the immediate-kill condition is the '
+              '§220 defect A',);
+      expect(session.contains('disconnectGrace'), isTrue);
+      expect(session.contains('restartIce()'), isTrue,
+          reason: 'the sharer restarts ICE on the SAME connection',);
+      expect(session.contains("'restart': true"), isTrue);
+      expect(session.contains('recv restart answered'), isTrue,
+          reason: 'the receiver answers a restart IN PLACE — a rebuild pays '
+              'full ICE and a black gap for a 2s blip',);
+      // The in-place path is only real if DISPATCH routes to the standing
+      // session. Round-2 finding D1: every offer went through _receiveShare,
+      // which closed the healthy PC and rebuilt — and a rebuilt answer's new
+      // DTLS certificate kills the sharer's standing PC, so the "resilience"
+      // converted every blip into silent share death.
+      expect(controller.contains('standing.onOffer(map)'), isTrue,
+          reason: 'a restart offer must reach the STANDING session',);
+      expect(controller.contains('standing.resendAnswer()'), isTrue,
+          reason: 'a duplicate plain offer means our answer was lost — '
+              'resend it; a rebuild answers with a new certificate the '
+              'sharer must reject',);
+      expect(session.contains('recv restart offer with no standing pc'),
+          isTrue,
+          reason: 'the rebuild path must be unreachable for restart offers '
+              'even if dispatch regresses',);
+      expect(session.contains('send duplicate answer ignored'), isTrue,
+          reason: 'the reoffer protocol can produce two answers; applying '
+              'the second to a stable connection kills a share that just '
+              'connected (D2)',);
+    });
+
+    test('the reoffer budget cannot be bypassed', () {
+      // Round-2 finding D6: the budget lived in the deadline timer, and the
+      // resubscribe hook called reoffer() directly — a flapping channel
+      // re-offered unboundedly and the give-up never fired: the §220 hang,
+      // recreated in exactly the unstable-network scenario it was built for.
+      final reofferBody = session.substring(
+        session.indexOf('Future<void> reoffer() async'),
+        session.indexOf('void _armRestart('),
+      );
+      expect(reofferBody.contains('_offerRetries >= maxOfferRetries'), isTrue,
+          reason: 'the budget check must live in reoffer() itself — every '
+              'caller pays',);
+      expect(reofferBody.contains('_offerRetries++'), isTrue);
+    });
+
+    test('a dead receive side tells the sharer to stop encoding', () {
+      expect(RegExp(r"send\('share-fail'").allMatches(session).length,
+          greaterThanOrEqualTo(3),
+          reason: 'deadline, hard loss and grace expiry must all report',);
+      expect(controller.contains("case 'share-fail':"), isTrue);
+      expect(session.contains('Future<void> onShareFail()'), isTrue);
+    });
+
+    test('a dead sharer re-enables the partner\'s Screen button', () {
+      expect(controller.contains('remoteSharePendingTimeout'), isTrue);
+      expect(controller.contains('_armRemoteSharePendingTimeout'), isTrue,
+          reason: 'remoteSharePending with no deadline disabled the button '
+              'for the rest of the call after a sharer crash (§220 defect H)',);
+    });
+
+    test('the encoder scales from the CAPTURED surface, not the Flutter view',
+        () {
+      expect(session.contains('static Size captureSizeOf('), isTrue);
+      expect(controller.contains('ScreenShareSession.captureSizeOf('), isTrue);
+      expect(controller.contains('_captureSize ?? _displayPixels()'), isTrue,
+          reason: 'the app-scoped gate must compare against the capture; in '
+              'OS PiP the view is ~400px wide and everything reads as '
+              '"scoped", which wrongly enables the recursion-hazard preview',);
+    });
+  });
+
   group('the vendored fork', () {
     final java = File(
       'third_party/flutter_webrtc/android/src/main/java/com/cloudwebrtc/webrtc/GetUserMediaImpl.java',
@@ -265,6 +445,80 @@ void main() {
       expect(java.contains('getMainLooper'), isTrue,
           reason: 'MediaProjection callbacks arrive on the capture thread; an '
               'un-posted sendEvent throws on the @UiThread sink',);
+      expect(java.contains('track_.putMap("settings", settings.toMap());'),
+          isTrue,
+          reason: 'the display track must expose the real captured surface '
+              'size — getSettings() is otherwise EMPTY for display tracks and '
+              'the app falls back to the Flutter view, wrong in split-screen '
+              'and OS PiP (3rd Miles patch)',);
+    });
+
+    test('display audio is real: audio:true arms the playback mixer', () {
+      final mixerFile = File(
+        'third_party/flutter_webrtc/android/src/main/java/com/cloudwebrtc/webrtc/audio/PlaybackAudioMixer.java',
+      );
+      expect(mixerFile.existsSync(), isTrue,
+          reason: '4th Miles patch: upstream discards audio:true entirely',);
+      final mixer = mixerFile.readAsStringSync();
+      expect(mixer.contains('AudioPlaybackCaptureConfiguration'), isTrue);
+      expect(mixer.contains('READ_NON_BLOCKING'), isTrue,
+          reason: 'a blocking read on the ADM record thread starves the mic',);
+      expect(java.contains('withAudio'), isTrue,
+          reason: 'the audio flag must survive into the private overload — '
+              'upstream dropped the whole constraints map on the floor',);
+      expect(java.contains('getMediaProjection()'), isTrue,
+          reason: 'the mixer must ride the SAME projection as the capture; a '
+              'consent token is single-use on Android 15+',);
+      expect('playbackMixer = null'.allMatches(java).length, 1,
+          reason: 'exactly ONE teardown path: capturer removal. The onStop '
+              'callback fires SPURIOUSLY on some OEMs (the build-59 class) '
+              'and releasing there cost an audio share its sound with no way '
+              'back (round-2 finding F1) — the mixer has its own released '
+              'latch against resurrection instead',);
+      final mixer2 = File(
+        'third_party/flutter_webrtc/android/src/main/java/com/cloudwebrtc/webrtc/audio/PlaybackAudioMixer.java',
+      ).readAsStringSync();
+      expect(mixer2.contains('volatile boolean released'), isTrue,
+          reason: 'an in-flight onBuffer seeing record==null after release '
+              'would lazily START a new capture on an orphaned mixer '
+              '(round-2 finding F2)',);
+      final handler = File(
+        'third_party/flutter_webrtc/android/src/main/java/com/cloudwebrtc/webrtc/MethodCallHandlerImpl.java',
+      ).readAsStringSync();
+      expect(handler.contains('setAudioBufferCallback'), isTrue,
+          reason: 'the mix point is the ADM buffer callback — after mute '
+              'zeroing, so a muted mic keeps the shared media audible',);
+    });
+  });
+
+  group('display audio, Dart side', () {
+    test('the share asks for audio, and mute moves to the ADM during it', () {
+      expect(
+          controller.contains("getDisplayMedia({'video': true, 'audio': true})"),
+          isTrue,);
+      expect('Helper.setMicrophoneMute('.allMatches(controller).length, 1,
+          reason: 'exactly one raw call site — the guarded _setAdmMute '
+              'helper. Raw calls fail silently and cannot keep _admMuted '
+              'true to reality (round-2 findings D4/D5)',);
+      expect('_setAdmMute('.allMatches(controller).length,
+          greaterThanOrEqualTo(5),
+          reason: 'the definition, toggleMic during a share, the start-share '
+              'migration, the stop-share restore, and the teardown clear — '
+              'ADM mute is process-global and any missed path leaves the '
+              'phone muted',);
+      expect(controller.contains('if (_admMuted) {'), isTrue,
+          reason: 'teardown gates on the tracked flag, never on call state: '
+              'stopScreenShare flips sharingScreen before its unmute lands, '
+              'and the race left every later call with a dead mic (D4)',);
+      expect(controller.contains('adm unmute at teardown FAILED'), isTrue,
+          reason: 'hangup mid-share bypasses stopScreenShare; teardown must '
+              'clear the ADM mute itself',);
+      final startAt = controller.indexOf('await _setAdmMute(true);');
+      final enableAt = controller.indexOf('if (_admMuted) {', startAt);
+      expect(startAt, greaterThan(-1));
+      expect(enableAt, greaterThan(startAt),
+          reason: 'the ADM mute must LAND before the track re-enables, or '
+              'the mic is hot for the round trip (D5)',);
     });
   });
 }

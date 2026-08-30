@@ -303,6 +303,19 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
     audioDeviceModuleBuilder.setSamplesReadyCallback(recordSamplesReadyCallbackAdapter);
     audioDeviceModuleBuilder.setPlaybackSamplesReadyCallback(playbackSamplesReadyCallbackAdapter);
 
+    // Miles patch: the display-audio mix point. The callback runs on the
+    // ADM's record thread AFTER its own mute-zeroing, for every mic buffer;
+    // it delegates to whatever mixer GetUserMediaImpl has armed (null outside
+    // an audio-carrying screen share, where this is a no-op per buffer).
+    audioDeviceModuleBuilder.setAudioBufferCallback(
+        (buffer, audioFormat, channelCount, sampleRate, bytesRead, captureTimeNs) -> {
+          com.cloudwebrtc.webrtc.audio.PlaybackAudioMixer mixer = getUserMediaImpl.playbackMixer;
+          if (mixer != null) {
+            mixer.onBuffer(buffer, audioFormat, channelCount, sampleRate, bytesRead);
+          }
+          return captureTimeNs;
+        });
+
     recordSamplesReadyCallbackAdapter.addCallback(getUserMediaImpl.inputSamplesInterceptor);
 
     recordSamplesReadyCallbackAdapter.addCallback(new JavaAudioDeviceModule.SamplesReadyCallback() {

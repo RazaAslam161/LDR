@@ -15,6 +15,19 @@ import 'package:miles/features/call/call_video.dart';
 /// the call screen being minimised to the pill and reopened.
 final ValueNotifier<bool> _showStats = ValueNotifier<bool>(false);
 
+/// Where the face strip floats after the user drags it (global dy of its
+/// top), or null while it is docked above the controls. File-scope like
+/// [_showStats], so a strip parked next to the shared content survives the
+/// screen being minimised to the pill and reopened mid-share.
+final ValueNotifier<double?> _stripTop = ValueNotifier<double?>(null);
+
+/// Which surface holds the big view during a share: 'share' (default),
+/// 'remote' or 'local'. Tap a face tile to give that face the big view —
+/// the share keeps running and moves into the strip as its own tile; tap it
+/// there to swap back. No renegotiation anywhere: the renderers outlive the
+/// screen, so a swap is only textures changing slots.
+final ValueNotifier<String> _bigView = ValueNotifier<String>('share');
+
 class CallScreen extends ConsumerWidget {
   const CallScreen({super.key});
 
@@ -25,6 +38,26 @@ class CallScreen extends ConsumerWidget {
 
     // Leave the screen once the call settles back to idle.
     ref.listen(callControllerProvider, (_, __) {
+      // Share failures happen MID-call, on a screen that stays up — they are
+      // read on every notify, not at pop time like _lastError. Until this
+      // existed the entire user experience of a failed share was "press
+      // Screen, clear the dialog, nothing happens" (BRAIN §220).
+      final shareErr = call.takeShareError();
+      if (shareErr != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(shareErr),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+      // The share is gone: the focus swap and the dragged strip position are
+      // properties of THAT share, not of the call. Left set, the next share
+      // would open with your own face holding the big view.
+      if (!call.sharingScreen && !call.remoteScreen) {
+        if (_bigView.value != 'share') _bigView.value = 'share';
+        if (_stripTop.value != null) _stripTop.value = null;
+      }
       if (call.state == CallState.idle && context.mounted) {
         // Say WHY before the screen disappears. Without this the whole
         // failure is a flash: the call screen appears, the route pops, and
@@ -85,32 +118,57 @@ class CallScreen extends ConsumerWidget {
                 key: const ValueKey('call-remote'),
                 // The share — theirs or mine — takes the big view, and the
                 // faces move to the strip rather than being displaced by it.
-                child: call.sharingScreen
-                    // My own share holds the big view. Live only when Android
-                    // confirmed an app-scoped capture — a whole-display
-                    // self-preview is a mirror inside the captured pixels
-                    // (a tunnel), so that case gets the status panel.
-                    ? call.appScopedShare
-                        ? RTCVideoView(call.screenSelfRenderer,
-                            key: const ValueKey('call-share-self'),
-                            objectFit: RTCVideoViewObjectFit
-                                .RTCVideoViewObjectFitContain,)
-                        // IgnorePointer is load-bearing: ColoredBox hit-tests
-                        // opaque, and full-screen it would sit over the
-                        // long-press layer and make the stats overlay
-                        // untogglable on the one phone mid-share.
-                        : const IgnorePointer(
-                            key: ValueKey('call-share-panel'),
-                            child: _SharingCard(big: true),
+                // Unless a face tile was tapped: then THAT face holds the big
+                // view and the share waits in the strip (Snapchat's focus
+                // model). The swap is a texture changing slots; nothing on
+                // the wire moves.
+                child: ValueListenableBuilder<String>(
+                  valueListenable: _bigView,
+                  builder: (context, focus, _) => AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: anyShare && focus == 'remote'
+                        ? CallVideo(
+                            key: const ValueKey('call-big-remote-face'),
+                            renderer: call.remoteRenderer,
                           )
-                    // The crop follows the frame, not the `screen` broadcast —
-                    // see CallVideo for why the broadcast was the wrong input.
-                    : CallVideo(
-                        renderer: call.remoteScreen
-                            ? call.screenRenderer
-                            : call.remoteRenderer,
-                        portraitHint: call.remoteScreen,
-                      ),
+                        : anyShare && focus == 'local'
+                            ? RTCVideoView(call.localRenderer,
+                                key: const ValueKey('call-big-local-face'),
+                                mirror: call.frontCamera,
+                                objectFit: RTCVideoViewObjectFit
+                                    .RTCVideoViewObjectFitCover,)
+                            : call.sharingScreen
+                                // My own share holds the big view. Live only
+                                // when Android confirmed an app-scoped capture
+                                // — a whole-display self-preview is a mirror
+                                // inside the captured pixels (a tunnel), so
+                                // that case gets the status panel.
+                                ? call.appScopedShare
+                                    ? RTCVideoView(call.screenSelfRenderer,
+                                        key: const ValueKey('call-share-self'),
+                                        objectFit: RTCVideoViewObjectFit
+                                            .RTCVideoViewObjectFitContain,)
+                                    // IgnorePointer is load-bearing: ColoredBox
+                                    // hit-tests opaque, and full-screen it
+                                    // would sit over the long-press layer and
+                                    // make the stats overlay untogglable on
+                                    // the one phone mid-share.
+                                    : const IgnorePointer(
+                                        key: ValueKey('call-share-panel'),
+                                        child: _SharingCard(big: true),
+                                      )
+                                // The crop follows the frame, not the `screen`
+                                // broadcast — see CallVideo for why the
+                                // broadcast was the wrong input.
+                                : CallVideo(
+                                    key: const ValueKey('call-big-default'),
+                                    renderer: call.remoteScreen
+                                        ? call.screenRenderer
+                                        : call.remoteRenderer,
+                                    portraitHint: call.remoteScreen,
+                                  ),
+                  ),
+                ),
               )
             else
               const Positioned.fill(
@@ -142,7 +200,13 @@ class CallScreen extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        st?.line ?? 'waiting for first sample…',
+                        [
+                          st?.line ?? 'waiting for first sample…',
+                          // The share's own line, when one is live — its
+                          // numbers come from the share's dedicated
+                          // connection, which the call monitor never sees.
+                          if (call.shareHud != null) call.shareHud!,
+                        ].join('\n'),
                         style: const TextStyle(
                           color: Color(0xFF7CFF9B),
                           fontSize: 10,
@@ -291,31 +355,21 @@ class CallScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (anyShare) ...[
-                    FaceStrip(
-                      key: const ValueKey('call-face-strip'),
-                      tiles: [
-                        _FaceTile(
-                          key: const ValueKey('call-face-remote'),
-                          height: 150,
-                          child: CallVideo(
-                            renderer: call.remoteRenderer,
-                            filterQuality: FilterQuality.medium,
-                          ),
-                        ),
-                        _FaceTile(
-                          key: const ValueKey('call-face-local'),
-                          height: 150,
-                          child: RTCVideoView(call.localRenderer,
-                              mirror: call.frontCamera,
-                              filterQuality: FilterQuality.medium,
-                              objectFit: RTCVideoViewObjectFit
-                                  .RTCVideoViewObjectFitCover,),
-                        ),
-                      ],
+                  // Docked strip — hides itself while the user has it parked
+                  // elsewhere (the floating twin below the controls cluster).
+                  if (anyShare)
+                    ValueListenableBuilder<double?>(
+                      valueListenable: _stripTop,
+                      builder: (context, top, _) => top != null
+                          ? const SizedBox.shrink()
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _draggableStrip(context, call),
+                                const SizedBox(height: 14),
+                              ],
+                            ),
                     ),
-                    const SizedBox(height: 14),
-                  ],
                   Padding(
                     padding: const EdgeInsets.only(bottom: 44),
                     child: ringing
@@ -419,12 +473,129 @@ class CallScreen extends ConsumerWidget {
                 ],
               ),
             ),
+
+            // The strip when the user has dragged it off the dock: parked
+            // anywhere over the shared content, full-width, still scrollable.
+            // Clamped so it can never sit under the status bar or over the
+            // control cluster.
+            if (anyShare)
+              ValueListenableBuilder<double?>(
+                key: const ValueKey('call-strip-floating'),
+                valueListenable: _stripTop,
+                builder: (context, top, _) {
+                  if (top == null) return const SizedBox.shrink();
+                  return Positioned(
+                    left: 0,
+                    right: 0,
+                    top: _clampStripTop(context, top),
+                    child: _draggableStrip(context, call),
+                  );
+                },
+              ),
           ],
         ),
       ),
     );
   }
 }
+
+/// The floating strip's vertical bounds. `clamp` THROWS when the window is
+/// short enough (split-screen, landscape) that the lower bound passes the
+/// upper — the guard is not decoration.
+double _clampStripTop(BuildContext context, double top) {
+  final minTop = MediaQuery.paddingOf(context).top + 48;
+  final maxTop = MediaQuery.sizeOf(context).height - 380;
+  if (maxTop <= minTop) return minTop;
+  return top.clamp(minTop, maxTop);
+}
+
+/// The face strip plus its drag behaviour — one implementation serving both
+/// the docked slot and the floating overlay. Vertical drags move the strip
+/// (the first one undocks it); horizontal drags still scroll the tiles — the
+/// two gestures live on different axes, so the arena splits them cleanly.
+Widget _draggableStrip(BuildContext context, CallController call) =>
+    GestureDetector(
+      key: const ValueKey('call-strip-drag'),
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragStart: (d) =>
+          _stripTop.value ??= d.globalPosition.dy - FaceStrip.height / 2,
+      onVerticalDragUpdate: (d) {
+        final v = _stripTop.value;
+        // Clamped HERE too, not only at render time: an unclamped value
+        // accumulates invisible overshoot past a bound, and the strip then
+        // ignores the finger until the overshoot unwinds — stick-then-jump.
+        if (v != null) {
+          _stripTop.value = _clampStripTop(context, v + d.delta.dy);
+        }
+      },
+      onVerticalDragEnd: (_) {
+        // Released near its old dock: snap home rather than hover a few
+        // pixels above the controls.
+        final v = _stripTop.value;
+        if (v != null && v > MediaQuery.sizeOf(context).height - 400) {
+          _stripTop.value = null;
+        }
+      },
+      child: ValueListenableBuilder<String>(
+        valueListenable: _bigView,
+        builder: (_, focus, __) => FaceStrip(
+          key: const ValueKey('call-face-strip'),
+          tiles: _shareTiles(call, focus),
+        ),
+      ),
+    );
+
+/// Both faces, always — plus the share itself as a third tile while a tapped
+/// face holds the big view, so the way back is a tap on the thing you sent
+/// away, never a hunt.
+List<Widget> _shareTiles(CallController call, String focus) => [
+      GestureDetector(
+        key: const ValueKey('call-face-remote-tap'),
+        onTap: () => _bigView.value = focus == 'remote' ? 'share' : 'remote',
+        child: _FaceTile(
+          key: const ValueKey('call-face-remote'),
+          height: 150,
+          child: CallVideo(
+            renderer: call.remoteRenderer,
+            filterQuality: FilterQuality.medium,
+          ),
+        ),
+      ),
+      GestureDetector(
+        key: const ValueKey('call-face-local-tap'),
+        onTap: () => _bigView.value = focus == 'local' ? 'share' : 'local',
+        child: _FaceTile(
+          key: const ValueKey('call-face-local'),
+          height: 150,
+          child: RTCVideoView(call.localRenderer,
+              mirror: call.frontCamera,
+              filterQuality: FilterQuality.medium,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,),
+        ),
+      ),
+      if (focus != 'share')
+        GestureDetector(
+          key: const ValueKey('call-face-share-tap'),
+          onTap: () => _bigView.value = 'share',
+          child: _FaceTile(
+            key: const ValueKey('call-face-share'),
+            height: 150,
+            // The self-share preview stays gated on appScopedShare — the
+            // recursion ban holds in the strip exactly as it does in the big
+            // view; a whole-display share shows the status card instead.
+            child: call.sharingScreen
+                ? call.appScopedShare
+                    ? RTCVideoView(call.screenSelfRenderer,
+                        objectFit:
+                            RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,)
+                    : const _SharingCard()
+                : CallVideo(
+                    renderer: call.screenRenderer,
+                    filterQuality: FilterQuality.medium,
+                  ),
+          ),
+        ),
+    ];
 
 class _Avatar extends StatelessWidget {
   const _Avatar({required this.url, required this.name});

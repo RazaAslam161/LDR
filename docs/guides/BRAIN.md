@@ -17437,3 +17437,217 @@ instructions, (c) start the 12×14 closed test now to run the clock, (d) draft l
 no E2EE claims + cover disclosure, (e) file Health declaration. Security items (callee_id,
 turn-credentials) are owner's call to fix pre- or post-launch. Nothing here was committed;
 the audit worktree at d0f7d89 was removed after measurement.
+
+## §220 — Screen share Phase 0: caught live on build 67 — capture works, connection works, THE ENCODER NEVER STARTS (2026-08-30)
+
+Owner brief: share "not working at all", wants Snapchat-grade+. Plan approved (fix A–L
+defect list, then internal audio, quality, draggable strip UX; full plan in
+`~/.claude/plans/hey-listen-i-wobbly-spark.md`). Phase 0 = live instrumented share on both
+handsets BEFORE any edit. Both phones on adb (`1896b4b3` build 67 / Android 13,
+`a959ee2b` build 67 / Android 12), owner drove the phones, full logcat captured from PC.
+
+### The timeline (OnePlus 8, sharer, all from one capture)
+
+- 10:02:18 call #1, mic ran 35s. 10:03:22 call #2 setup, VP8 decode of partner video
+  running by :32 (640x368@17fps — the OnePlus 7 answered THROUGH its Weather cover; the
+  FSI ring bypasses the cover, positive finding).
+- 10:03:23.6 `onAudioFocusChange(-1)` + BT route flap → **mic session died 10:03:30 and
+  NO mic session ever started again** (appops RECORD_AUDIO last use = 10:03:24, 6.5s).
+  Partner heard nothing from :30 on. NEW P1, filed as defect M.
+- 10:03:33 consent dialog; granted ~1.1s later.
+- 10:03:34.57 virtual display `WebRTC_ScreenCapture` 1080x2400 created; :34.61
+  `OrientationAwareScreenCapturer.startCapture: 1080x2400@30`; :34.8 share PC gathers ICE;
+  **10:03:36.39 `onConnectionChangeCONNECTED`** — offer/answer/ICE all healthy in 2s.
+- The ONLY encoder event: camera reconfigures to 320x180 (damp profile working).
+  **No share encoder instance is EVER created** (no OMX/c2 encoder init at any share-ish
+  resolution, either attempt).
+- SurfaceFlinger: `client composition of WebRTC_ScreenCapture in last 60000 ms is: 2365`
+  (~39fps) — **frames WERE flowing into the capture surface the whole minute.**
+- 10:03:54.9 share PC CLOSED ≈18-20s after connect = the `_neverStarted >= 20` watchdog
+  killing a share that sent zero frames. Owner retried: consent #2 ~10:04:05, CONNECTED
+  10:04:12, same silence, hangup 10:04:30 (FGS start living 1.7s = teardown).
+
+### Root cause of "not even 1 percent", one sentence
+
+Capture and negotiation are fully healthy; **frames enter the capture surface but the
+share sender never instantiates an encoder, so nothing is ever transmitted** — the
+§186/§205 disease is still alive in build 67 despite 98291a1+3bd4fe8, and the break is
+between the capturer/VideoSource and libwebrtc encoder init (encodings/parameters/track
+wiring on the share sender).
+
+### Why five builds of field tests were blind — MilesShare never could print
+
+`screen_share_session.dart:124` `_log => debugPrint('MilesShare …')`, but
+`core/app/logging.dart:22` `silenceLogsInRelease()` sets `debugPrint = (){}` in EVERY
+release build. §205's instrumentation was born dead; its "discriminator" (grep MilesShare
+to prove which build you run) can never fire on a release build. Zero MilesShare lines in
+today's capture despite the session demonstrably constructing, negotiating and connecting.
+
+### Also observed, not chased
+
+- Second consent flow at ~10:04:00 was preceded by an `OplusBiometricPrompt` — the cover
+  gate fires when reopening the app from OS PiP mid-call. UX landmine for the share flow.
+- REFUTED for the record: `PROJECT_MEDIA: ignore` in appops looked like an OS veto; it is
+  AOSP's default mode for every app (OnePlus 7 shows `Default mode: ignore`, zero ops) and
+  is NOT the cause. Also ColorOS denies `appops set` from shell (no MANAGE_APP_OPS_MODES).
+- OnePlus 7 logcat capture died 10:01:31 (USB drop) — receive side of the test is unlogged.
+- Both phones now wear `.AliasWeather`; §218's cover-gate lockout is live on installed 67
+  for the OnePlus 7 (no credential enrolled).
+
+### Exact next step
+
+Stage 1 (loudness) from the approved plan, EXPANDED: (1) a release-visible log channel for
+share transitions (plain `print`, after verifying no zone override swallows it — debugPrint
+stays silenced app-wide); (2) `_sampleOnce` logs per-second `framesEncoded /
+qualityLimitationReason / encoderImplementation / bytesSent` from the stats it already
+collects — the direct discriminator for WHY the encoder never starts; (3) the rest of
+Stage 1 (share errors surfaced to UI via _shareError, FGS catches named, _applyRung retry
+hoist, camera-restore continue). Then ONE more live two-phone run reads the answer off
+`adb logcat`. Working tree also carries another session's uncommitted unlink/disguise work
+— untouched here.
+
+## §221 — Share Stage 1: the share can finally speak — loudness shipped, gates green (2026-08-30)
+
+Continues §220 (Phase 0 baseline). Stage 1 of the approved share plan is code-complete in
+the working tree, uncommitted. Root cause it serves: §220 proved the share encoder never
+starts in the field, and proved the app cannot say why — every failure silent, every log
+line dead in release.
+
+### Changed (5 lib files + 2 test files)
+
+- `core/app/logging.dart`: new `shareLog()` — the ONE deliberate exception to
+  `silenceLogsInRelease()`, via `print` (no zone override exists; verified). Privacy
+  contract in the doc comment: transition words and numbers only, nothing user-generated.
+- `screen_share_session.dart`: `_log` routed through `shareLog` (the old
+  `debugPrint('MilesShare…')` could never print on a handset); the `_applyRung` retry
+  HOISTED above the getStats try (defect I — a stats error used to skip it); a per-second
+  field line during every live share:
+  `s r<rung> fps=<encoded> cap=<media-source> lim=<reason> bwe=<kbps> codec=<c> applied=<bool> skips=<n> never=<n>`
+  — `cap` vs `fps` is the §220 discriminator (frames died at the capturer vs at the
+  encoder). New top-level `shareEndMessage(endReason)` + `endReason` getter.
+- `call_controller.dart`: `_shareError`/`takeShareError()` beside `_lastError` (share
+  failures are MID-call; `_lastError` is only read at pop). Set on: capture failure
+  (catch now `catch (e)` + logs the exception text — the `catch (_)` cost §220 the
+  refusal's name), `startSharing` throw, and self-ended shares via
+  `shareEndMessage(session.endReason)` in `onEnded` (`??=` so specific beats generic).
+  Consent-declined stays quiet but logs + Diag. `_setCameraShareProfile`: `return` →
+  `continue` on an encodings-less sender (defect J — restore path could no-op and leave
+  the camera damped forever), plus ONE +2s retry when the restore wrote nothing.
+- `call_foreground.dart`: both `catch (_)` swallows now `shareLog` the exception
+  (§205's "one unverified link" — a failed startForeground during the type swap was
+  invisible).
+- `call_screen.dart`: the existing `ref.listen` consumes `takeShareError()` on every
+  notify → SnackBar mid-call.
+
+### Verified
+
+- `flutter test test/unit/call` → **121 passed** (113 before; +3 `shareEndMessage`
+  mapping tests, +5 new laws in `screen_share_law_test.dart`: telemetry survives release,
+  retry-before-stats ordering, per-second field line exists, failures reach the user,
+  FGS never fails silently).
+- `flutter analyze --no-pub lib test` → **0 errors**. One warning exists and is NOT this
+  work: `lib/features/unlink/scene/ritual_scene.dart:5 unused_import` — a concurrent
+  session's in-flight edit (that session also committed `3c23fd5` cover-gate fix
+  mid-stage). Found, not fixed.
+
+### Law corrections that override the masterplan (for whoever picks up Phase 3)
+
+`screen_share_law_test.dart` bans MAINTAIN_RESOLUTION (shipped "a picture that sticks"
+twice) and bans a VP9 preference (neither phone has a VP9 hardware encoder — build 61's
+laggy share was libvpx software encode). Masterplan items 2 and 4 are therefore DEAD;
+contentHint, QP clamp, playout-delay and the HUD line remain.
+
+### In flight / next
+
+Building `--flavor play` APK from a CLEAN WORKTREE at `3c23fd5` + ONLY these 5 files
+(the main tree carries another session's uncommitted unlink work that must not ship).
+Same upload key, same versionCode 67, `adb install -r` (no wipe — §215 proved it).
+Next: install both handsets, owner runs one share, and `adb logcat | grep MilesShare`
+finally answers WHERE the frames die — `cap=0` (capturer) vs `cap>0 fps=0` (encoder).
+NOTE for any session reading the phones: a second build 67 with different content will
+be installed; the discriminator between them is a `MilesShare` line in logcat (only the
+new one can print it — §220 proved the old one cannot).
+
+
+## §223 — The share rebuilt: protocol, survival, audio, UX — and round 2 caught round 1's own killer (2026-08-30)
+
+Continues §220 (field evidence) and §221 (loudness). Owner: no APK builds; finish, commit,
+push. Everything below is committed on `fix-sprint`; NOTHING here has run on a handset —
+that is the headline, and the first live share on the next installed build reads its own
+verdict off `adb logcat | grep MilesShare` (§221's channel, which release builds cannot
+silence).
+
+### What shipped, by layer (design doc: the §220 plan + protocol design)
+
+- **Generation protocol**: every share signal carries `share_id` (minted by the sharer,
+  adopted by the receiver); dispatch routes by generation, never "whichever session is
+  current"; missing id matches (old client no worse off). New `share-fail` kind: a dead
+  receive side finally tells the sharer to stop encoding into the void.
+- **Sharer liveness**: 10s answer deadline × 3 offers (budget consumed INSIDE reoffer() —
+  see round 2), local candidates cached and re-broadcast, offer re-sent on channel
+  resubscribe (only the announce ever was), exhaustion = loud failure (endReason 3).
+- **Blip survival**: receiver holds the last frame 15s on Disconnected instead of dying;
+  sharer debounces 3s → `restartIce()` → in-place re-offer (`restart: true`), gives up
+  loudly at 12s; receiver answers restarts on the STANDING pc.
+- **Capture truth**: fork patch #3 puts `{width,height,frameRate}` into the display
+  track's settings; `ScreenShareSession.captureSizeOf` scales the encoder from the real
+  surface (the Flutter view lied in split-screen/OS-PiP); the appScopedShare gate reads it.
+- **Internal audio (fork patch #4)**: `getDisplayMedia audio:true` arms a
+  `PlaybackAudioMixer` — AudioPlaybackCapture on the capture's own MediaProjection,
+  saturating-mixed into the mic buffer via the ADM's AudioBufferCallback (the LiveKit
+  pattern; AAR interface verified by javap). Mic mute during a share moves to the ADM
+  level (`_setAdmMute`), so muting yourself keeps the movie audible. DRM/opt-out apps
+  arrive silent by OS policy.
+- **UX**: face strip is draggable (undocks on vertical drag, clamped, snaps home);
+  tap a face tile to give it the big view — the share waits in the strip as its own tile
+  (recursion ban intact); AnimatedSwitcher on the big-view swap; share HUD line in the
+  long-press stats overlay (`s r0 fps=.. cap=.. lim=..`), same string as the logcat line.
+- **Quality rulings**: BALANCED + H.264 stay (law-pinned field lessons; masterplan items
+  2/4 are dead). `isScreencast=true` already gives libwebrtc's screen-content handling —
+  a separate contentHint plumb adds nothing on Android. No public knob clamps HW-encoder
+  QP on this stack; the ladder + floors carry that intent. Stated so nobody re-chases them.
+
+### Round 2 (mandatory adversarial pass) — 10 Dart + 2 Java defects, worst ones MINE
+
+- **D1 CRITICAL, created by round 1**: dispatch sent every offer through _receiveShare,
+  which rebuilds — so the in-place restart branch was dead code, and a rebuilt answer's
+  new DTLS certificate kills the sharer's standing pc: my "blip resilience" converted
+  every blip into silent share death. Fixed: dispatch routes restart/duplicate offers to
+  the STANDING session (`standing.onOffer` / `standing.resendAnswer`); a restart with no
+  standing session is answered with `share-fail`, never a doomed rebuild.
+- D2: duplicate answers (reoffer × cold-TURN 10s receiver stall) killed a just-connected
+  share → dup-answer guard + cached-answer resend + both sides cache candidates.
+- D3: `clamp(min>max)` crash on the floating strip in split-screen/landscape → guard.
+- D4: ADM mute leaked past the call when stopScreenShare raced _teardown (gate read
+  sharingScreen, already false) → `_admMuted` flag is the only gate.
+- D5: hot mic during the mute migration (track enabled before the ADM mute landed) →
+  order inverted, and a failed ADM mute now falls back to track mute (privacy first).
+- D6: resubscribe reoffer bypassed the retry budget → budget moved inside reoffer().
+- D7: straight-to-Failed died silently → endReason 4. D8 drag dead-zone → clamp in the
+  handler. D9 dispose leak. D10 stale _shareError across calls.
+- Java F1: my onStop mixer release trusted the SPURIOUS-capable callback (build-59
+  class) → removed; release lives only on capturer teardown, mixer has a `released`
+  latch (F2) against onBuffer resurrecting a freed capture.
+- Reviewer also COMPILED the fork module for real: `:flutter_webrtc:compileDebugJavaWithJavac`
+  exit 0 (no APK involved).
+
+### Verified (all after the last edit)
+
+- `flutter test` → **1419 passed, 0 failed** (2 pre-existing skips).
+- `flutter analyze --no-pub lib test` → **0 errors, 0 warnings**.
+- `flutter test test/unit/call test/unit/hygiene --concurrency=1` → **197 passed**
+  (25 new tests/laws this work; every round-2 fix is law-pinned so it cannot quietly
+  regress; batch [E] flakes reproduce only when the concurrent session's flutter runs
+  collide — files pass alone).
+- Hygiene suppression bound 3→4, on purpose, for logging.dart's `avoid_print` — print is
+  the one channel `silenceLogsInRelease()` cannot null (§220).
+
+### Still open — the device pass, blocked on a build the owner has not asked for
+
+The §220 encoder mystery (frames enter the capture surface, no encoder ever starts) is
+now INSTRUMENTED but not yet answered: the answer is the first `s r0 fps=.. cap=..` line
+on the next installed build. cap>0/fps=0 = encoder-side; cap=0 = capturer-side. Then the
+§221 exact next step applies unchanged. Device checklist for the full feature: plan file
+`~/.claude/plans/hey-listen-i-wobbly-spark.md` Phase 5 (12 items incl. audio).
+Concurrent-session note: §222 (Doorstep) landed between my sections and is NOT part of
+this commit; unlink/disguise/router/motion working-tree files are that session's.

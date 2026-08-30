@@ -112,6 +112,16 @@ public class OrientationAwareScreenCapturer implements VideoCapturer, VideoSink 
                 Context.MEDIA_PROJECTION_SERVICE);
     }
 
+    /**
+     * Miles patch: the live projection, for AudioPlaybackCapture — the SAME
+     * instance the virtual display runs on. Never re-derive one from the
+     * Intent: a consent token is single-use on Android 15+. Non-null only
+     * after {@link #startCapture}.
+     */
+    public synchronized MediaProjection getMediaProjection() {
+        return mediaProjection;
+    }
+
     @Override
     public synchronized void startCapture(
             final int width, final int height, final int ignoredFramerate) {

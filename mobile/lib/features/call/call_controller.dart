@@ -9,6 +9,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 // behaviour but not re-exported, and the vendored fork (see pubspec) is pinned
 // so the path cannot drift under us.
 import 'package:flutter_webrtc/src/native/event_channel.dart';
+import 'package:miles/core/app/logging.dart' show shareLog;
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -110,6 +111,30 @@ class CallController extends ChangeNotifier {
   /// than this is not going to connect on the ones after it either.
   final List<Map<dynamic, dynamic>> _pendingShareIce = [];
   static const int _maxPendingShareIce = 64;
+
+  /// How long `remoteSharePending` may disable this side's Screen button with
+  /// no pixels arriving. Outlasts the sharer's full offer budget (3 × 10s),
+  /// and is refreshed by every share-offer, so it only ever fires on a sharer
+  /// that is genuinely gone.
+  static const remoteSharePendingTimeout = Duration(seconds: 30);
+  Timer? _remoteSharePendingTimer;
+
+  void _armRemoteSharePendingTimeout() {
+    _remoteSharePendingTimer?.cancel();
+    _remoteSharePendingTimer = Timer(remoteSharePendingTimeout, () {
+      if (remoteSharePending && !remoteScreen) {
+        shareLog('remote share pending timed out — button re-enabled');
+        remoteSharePending = false;
+        notifyListeners();
+      }
+    });
+  }
+
+  /// The per-share send wrapper: stamps this share's generation into every
+  /// signal the session broadcasts, so dispatch can route by share rather
+  /// than by "whatever session is current".
+  void Function(String, Map<String, dynamic>) _shareSend(String shareId) =>
+      (kind, data) => _send(kind, {...data, 'share_id': shareId});
 
   /// Serialises _receiveShare against itself. It is invoked unawaited from the
   /// signal switch, so two offers in flight ran two concurrent bodies, the
@@ -260,7 +285,17 @@ class CallController extends ChangeNotifier {
           // would ever correct it. Cheap, idempotent, and only sent on a call
           // that is actually sharing.
           if (sharingScreen && state == CallState.connected) {
-            _send('screen', {'on': true});
+            final s = _shareSession;
+            _send('screen', {
+              'on': true,
+              if (s?.shareId != null) 'share_id': s!.shareId,
+            });
+            // The announce was re-sent here; the OFFER never was — so a share
+            // whose share-offer died in the outage (the consent dialog drives
+            // the app through paused, exactly when this socket resets) stayed
+            // dead-but-"on" forever, with the partner's button disabled
+            // (BRAIN §220 defect B, the top first-attempt suspect).
+            if (s != null && !s.negotiated) unawaited(s.reoffer());
           }
         } else {
           _scheduleResubscribe();
@@ -656,6 +691,54 @@ class CallController extends ChangeNotifier {
     final e = _lastError;
     _lastError = null;
     return e;
+  }
+
+  /// Why the last SHARE attempt failed, consumed by the call screen's
+  /// listener on the next notify. Separate from [_lastError] because that one
+  /// is only read when the call screen pops — a share fails MID-call, on a
+  /// screen that stays up. Until this existed, every share failure was
+  /// "press Screen, clear the dialog, nothing happens" (BRAIN §220: two
+  /// shares died in the field with no message of any kind).
+  String? _shareError;
+
+  String? takeShareError() {
+    final e = _shareError;
+    _shareError = null;
+    return e;
+  }
+
+  /// The share's newest per-second sample, for the long-press stats overlay —
+  /// rung, encoded fps vs captured fps, limitation, BWE, codec. The on-device
+  /// proof that the encoder profile actually took (masterplan item 6; §78
+  /// could never check it).
+  String? get shareHud => _shareSession?.hudLine;
+
+  /// Whether the process-global ADM mic mute is currently applied. Teardown
+  /// consults THIS, never call state: `stopScreenShare` flips `sharingScreen`
+  /// before its own unmute lands, so a hangup racing it used to skip the
+  /// clear and leave every later call with a dead mic (round-2 finding D4).
+  bool _admMuted = false;
+
+  /// ADM-level mic mute — the HAL silences microphone paths only, so during
+  /// an audio-carrying share a muted mic keeps the shared media audible.
+  /// Never silent on failure (round-2 finding D5): a mute that cannot land
+  /// at the ADM falls back to the track (privacy beats the watch-together
+  /// audio); a failed unmute is surfaced.
+  Future<void> _setAdmMute(bool mute) async {
+    final track = _localStream?.getAudioTracks().firstOrNull;
+    if (track == null) return;
+    try {
+      await Helper.setMicrophoneMute(mute, track);
+      _admMuted = mute;
+    } catch (e) {
+      shareLog('adm mute($mute) FAILED: $e');
+      if (mute) {
+        track.enabled = false;
+      } else {
+        _shareError = "Couldn't unmute the microphone — toggle Mute.";
+        notifyListeners();
+      }
+    }
   }
 
   /// Whether the last ICE config actually contained a relay.
@@ -1088,7 +1171,15 @@ class CallController extends ChangeNotifier {
   // ── Media controls ──────────────────────────────────────────────────────────
   void toggleMic() {
     micOn = !micOn;
-    _localStream?.getAudioTracks().forEach((t) => t.enabled = micOn);
+    if (sharingScreen) {
+      // ADM-level mute while a share carries display audio: the HAL silences
+      // MICROPHONE paths only, and the playback capture reads the remix bus —
+      // so your voice goes quiet and the shared video stays audible. A
+      // track-level disable sits AFTER the mix and would kill both.
+      unawaited(_setAdmMute(!micOn));
+    } else {
+      _localStream?.getAudioTracks().forEach((t) => t.enabled = micOn);
+    }
     notifyListeners();
   }
 
@@ -1147,7 +1238,14 @@ class CallController extends ChangeNotifier {
       // excludes the status bar, notifications, the launcher, the cover and
       // this app's PiP from every captured frame. The echo the owner
       // photographed was largely this one argument.
-      if (!await Helper.requestCapturePermission()) return;
+      shareLog('start requested');
+      if (!await Helper.requestCapturePermission()) {
+        // The user cancelled the system dialog — deliberate, so no SnackBar;
+        // but never again indistinguishable from a failure in the field.
+        shareLog('consent declined');
+        Diag.record(DiagArea.call, 'share_consent_declined', corr: _callId);
+        return;
+      }
       if (attempt != _attempt) return;
       // Before the capture, not after: Android 14+ wants the mediaProjection
       // service already running when the virtual display is created.
@@ -1155,20 +1253,30 @@ class CallController extends ChangeNotifier {
       if (attempt != _attempt) return;
 
       try {
-        // Every constraint is discarded on Android — GetUserMediaImpl's private
-        // getDisplayMedia overload is never handed the constraints map at all,
-        // and starts the capture at display.getRealSize() and a fixed 30fps. So
-        // asking for a size here would be decoration; the size is dealt with on
-        // the ENCODER instead, in [_applyScreenProfile].
-        screen = await navigator.mediaDevices.getDisplayMedia({'video': true});
-      } catch (_) {
+        // Size constraints are discarded on Android — the capture always runs
+        // at display.getRealSize() and a fixed 30fps; the size is dealt with
+        // on the ENCODER instead, in [ScreenShareSession._applyRung].
+        //
+        // `audio: true` is real (4th Miles fork patch): the phone's PLAYBACK
+        // audio — the video being watched together — is mixed into the mic
+        // track via AudioPlaybackCapture, so the partner hears it. No second
+        // audio track, no SDP change: the mix rides the call's existing
+        // audio. DRM/opt-out apps arrive silent (OS policy).
+        screen = await navigator.mediaDevices
+            .getDisplayMedia({'video': true, 'audio': true});
+      } catch (e) {
         // A late failure arrives as a bare String from the plugin, not an
         // Exception. A share that will not start must not take the call with
         // it. The service type is put back so a call does not carry a
         // mediaProjection-typed foreground service for a projection that never
-        // started.
+        // started. Logged AND surfaced: this catch used to be `catch (_)` with
+        // a production-silent Diag row, which cost a field session the exact
+        // exception text that names the platform's refusal.
+        shareLog('capture FAILED: $e');
         Diag.record(DiagArea.call, 'screen_share_failed', corr: _callId);
+        _shareError = "Couldn't start screen sharing. Try again.";
         await CallForegroundService.dropScreenShare();
+        notifyListeners();
         return;
       }
     } finally {
@@ -1176,25 +1284,55 @@ class CallController extends ChangeNotifier {
     }
     final track = screen.getVideoTracks().firstOrNull;
     if (track == null || attempt != _attempt) {
+      shareLog('capture returned no video track (attempt moved: '
+          '${attempt != _attempt})');
       await _dropCapture(screen);
       await CallForegroundService.dropScreenShare();
       return;
     }
     _screenStream = screen;
     screenSelfRenderer.srcObject = screen;
-    track.onEnded = () => unawaited(stopScreenShare());
+    track.onEnded = () {
+      // Guarded like the receive side's callbacks: a queued onEnded from a
+      // superseded capture must not stop the share that replaced it.
+      if (!identical(screen, _screenStream)) return;
+      unawaited(stopScreenShare());
+    };
+    // The REAL captured surface, off the track's settings — the vendored fork
+    // fills them from the exact value startCapture received. The Flutter
+    // view's physicalSize diverges from it in split-screen and OS PiP, and a
+    // wrong size here mis-scales the encoder (the §220 black-share class) and
+    // mis-gates the app-scoped self-preview.
+    final captureSize =
+        ScreenShareSession.captureSizeOf(track.getSettings(), _displayPixels());
+    _captureSize = captureSize;
+    shareLog('capture ${captureSize.width.toInt()}x'
+        '${captureSize.height.toInt()}');
     // The share gets its OWN peer connection, built fresh per share and torn
     // down with it. The call's connection is not renegotiated, retuned or even
     // touched — see [ScreenShareSession] for the architecture.
     // Same reason as the receive side: a share on a STUN-only connection is a
     // share that never connects between two carrier NATs.
     await _ensureRelay();
-    final session = ScreenShareSession(
-      send: _send,
+    final shareId = const Uuid().v4();
+    late final ScreenShareSession session;
+    session = ScreenShareSession(
+      send: _shareSend(shareId),
       iceConfig: await _iceConfig(),
       onRemoteStream: (_) {},
-      onEnded: () => unawaited(stopScreenShare()),
+      onEnded: () {
+        // Identity first — the receive side always had this guard, the send
+        // side did not, and a superseded session's queued callback could stop
+        // the NEW share (§220 defect C).
+        if (!identical(session, _shareSession)) return;
+        // A share that ended ITSELF says why on screen. endReason is read
+        // before stopScreenShare → close() resets it; ??= so a more specific
+        // message already set (e.g. the capture catch) is never overwritten.
+        _shareError ??= shareEndMessage(session.endReason);
+        unawaited(stopScreenShare());
+      },
       stopHinted: () => _screenStopHinted,
+      shareId: shareId,
     );
     // A teardown landing during the awaits above has already disposed the
     // capture and reset these; going on would announce a share on a call that
@@ -1216,7 +1354,20 @@ class CallController extends ChangeNotifier {
     sharingScreen = true;
     _shareStartedAt = DateTime.now();
     _screenStopHinted = false;
-    _send('screen', {'on': true});
+    // A mute set before the share was track-level, which sits AFTER the
+    // display-audio mix and would silence the shared video too. Migrate it
+    // to the ADM level for the life of the share (see toggleMic). ORDER is
+    // load-bearing: the ADM mute must LAND before the track re-enables, or
+    // the mic is hot for the round trip — and hot for the whole share if the
+    // call fails (round-2 finding D5). On failure _setAdmMute leaves the
+    // track muted, so nothing leaks; the share just loses its sound.
+    if (!micOn) {
+      await _setAdmMute(true);
+      if (_admMuted) {
+        _localStream?.getAudioTracks().forEach((t) => t.enabled = true);
+      }
+    }
+    _send('screen', {'on': true, 'share_id': shareId});
     notifyListeners();
     // The faces are thumbnails for the length of the share, so the camera
     // stops paying full price: half resolution, half framerate. That is the
@@ -1224,13 +1375,14 @@ class CallController extends ChangeNotifier {
     // the face tiles, which were starving against an uncapped 720p30 camera.
     await _setCameraShareProfile(damp: true);
     try {
-      await session.startSharing(track, screen, _displayPixels());
+      await session.startSharing(track, screen, captureSize);
     } catch (e) {
       // The capture is already running. Left alone it would keep recording the
       // display into a connection that never opened, with the system cast
       // indicator up and no button state to stop it.
-      debugPrint('[call] share start failed: $e');
+      shareLog('startSharing FAILED: $e');
       Diag.record(DiagArea.call, 'screen_share_failed', corr: _callId);
+      _shareError = 'Screen sharing failed to start. Try again.';
       await stopScreenShare();
     }
   }
@@ -1241,13 +1393,19 @@ class CallController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// The capture is the real panel, in physical pixels — the same value
-  /// `display.getRealSize()` hands the capturer on the native side.
+  /// FALLBACK ONLY — the Flutter view's physical size. It matches the real
+  /// panel when the app fills the display, and silently diverges in
+  /// split-screen and OS PiP (which this app arms on every call minimise) —
+  /// so it must never be the primary source: see
+  /// [ScreenShareSession.captureSizeOf].
   static Size _displayPixels() {
     final views = PlatformDispatcher.instance.views;
     if (views.isEmpty) return const Size(1080, 1920);
     return views.first.physicalSize;
   }
+
+  /// The live share's captured-surface size; null outside a share.
+  Size? _captureSize;
 
   bool _screenStopHinted = false;
   DateTime? _shareStartedAt;
@@ -1274,7 +1432,11 @@ class CallController extends ChangeNotifier {
       final w = (resize['width'] as num?)?.toDouble();
       final h = (resize['height'] as num?)?.toDouble();
       if (w == null || h == null || w <= 0 || h <= 0) return;
-      final display = _displayPixels();
+      // Compared against the CAPTURED surface, not the Flutter view: with the
+      // app in OS PiP the view is ~400px wide, everything reads as "scoped",
+      // and the gate wrongly enables the live self-preview — the recursion
+      // hazard on a whole-display share.
+      final display = _captureSize ?? _displayPixels();
       // Meaningfully smaller than the panel on either axis = the user picked
       // one app. Exact equality is wrong on purpose: insets and rounding make
       // a full-display capture a few pixels short on some OEMs.
@@ -1300,7 +1462,11 @@ class CallController extends ChangeNotifier {
   /// those pins values that were previously unset, which is harmless
   /// precisely because they equal the defaults; they must track `_openMedia`
   /// if its constraints ever change.
-  Future<void> _setCameraShareProfile({required bool damp}) async {
+  Future<void> _setCameraShareProfile({
+    required bool damp,
+    bool retried = false,
+  }) async {
+    var wrote = false;
     try {
       final pc = _pc;
       if (pc == null) return;
@@ -1308,7 +1474,11 @@ class CallController extends ChangeNotifier {
         if (s.track?.kind != 'video') continue;
         final params = s.parameters;
         final encodings = params.encodings;
-        if (encodings == null || encodings.isEmpty) return;
+        // `continue`, not `return`: a first video sender that momentarily
+        // reports no encodings used to abort the WHOLE pass — and on the
+        // restore direction that left the camera at half resolution and 15fps
+        // for the rest of the call after every share (audit round-2, defect J).
+        if (encodings == null || encodings.isEmpty) continue;
         for (final e in encodings) {
           e
             // Doubles and ints are load-bearing: the Android bridge
@@ -1317,12 +1487,23 @@ class CallController extends ChangeNotifier {
             ..maxFramerate = damp ? 15 : 30;
         }
         await s.setParameters(params);
-        return;
+        wrote = true;
+        break;
       }
     } catch (e) {
       // Best effort in both directions — a camera at full price is a worse
       // share, not a broken call.
       debugPrint('[call] camera profile damp=$damp: $e');
+    }
+    // The restore must eventually land or the damage outlives the share: one
+    // retry, once, when the un-damp wrote nothing and the call is still up.
+    if (!wrote && !damp && !retried) {
+      shareLog('camera restore wrote nothing — retrying in 2s');
+      Timer(const Duration(seconds: 2), () {
+        if (!sharingScreen && state == CallState.connected) {
+          unawaited(_setCameraShareProfile(damp: false, retried: true));
+        }
+      });
     }
   }
 
@@ -1345,13 +1526,23 @@ class CallController extends ChangeNotifier {
     }
     if (session != null) await session.close();
     await _setCameraShareProfile(damp: false);
-    _send('screen', {'on': false});
+    _send('screen', {
+      'on': false,
+      if (session?.shareId != null) 'share_id': session!.shareId,
+    });
     final screen = _screenStream;
     _screenStream = null;
     screenSelfRenderer.srcObject = null;
     appScopedShare = false;
     _screenStopHinted = false;
     _shareStartedAt = null;
+    _captureSize = null;
+    // Put the mute back where the rest of the app expects it: track-level
+    // FIRST (so no unmuted gap), then clear the process-global ADM mute.
+    if (_admMuted) {
+      _localStream?.getAudioTracks().forEach((t) => t.enabled = micOn);
+      await _setAdmMute(false);
+    }
     if (screen != null) await _dropCapture(screen);
     // The projection is gone; the service should stop claiming it.
     await CallForegroundService.dropScreenShare();
@@ -1722,19 +1913,80 @@ class CallController extends ChangeNotifier {
         }
         _addIce(map);
       case 'share-offer':
-        // The partner started a share: build the receive side of its
-        // dedicated connection and answer.
-        unawaited(_receiveShare(map));
+        final sid = map['share_id']?.toString();
+        final standing = _shareSession;
+        final restart = map['restart'] == true;
+        // Route to the STANDING session first. Sending every offer through
+        // _receiveShare closed the healthy connection and rebuilt — and a
+        // rebuilt answer carries a NEW DTLS certificate, which the sharer's
+        // standing PC rejects: both the in-place restart and the lost-answer
+        // retry would kill the share they exist to save (round-2 finding D1).
+        if (standing != null &&
+            !sharingScreen &&
+            standing.negotiated &&
+            standing.matchesShare(sid)) {
+          if (restart) {
+            unawaited(standing.onOffer(map));
+          } else {
+            // Same share, already answered: our answer died on the wire.
+            unawaited(standing.resendAnswer());
+          }
+        } else if (restart) {
+          // A restart presumes a standing receive side; ours is gone (it
+          // already reported its death). Answering would negotiate a doomed
+          // certificate mismatch — tell the sharer instead, so its bounded
+          // restart budget converges to a loud stop.
+          _send('share-fail', {
+            if (sid != null) 'share_id': sid,
+            'reason': 'gone',
+          });
+        } else if (standing != null &&
+            !sharingScreen &&
+            sid != null &&
+            standing.shareId == sid) {
+          // Same share, still negotiating (a re-offer overtook our first
+          // answer's round trip). The in-flight build will answer; a second
+          // build would race it for the renderer.
+          shareLog('duplicate share-offer while negotiating — ignored');
+        } else {
+          // A genuinely new share: build the receive side of its dedicated
+          // connection and answer. The offer proves the sharer is alive, so
+          // the pending window earns a refresh.
+          if (!sharingScreen) _armRemoteSharePendingTimeout();
+          unawaited(_receiveShare(map));
+        }
       case 'share-answer':
         final session = _shareSession;
-        if (session != null) unawaited(session.onAnswer(map));
+        if (session != null &&
+            session.matchesShare(map['share_id']?.toString())) {
+          unawaited(session.onAnswer(map));
+        } else {
+          // Routed by generation, not by whoever is current: two shares in
+          // quick succession used to cross-feed the old share's answer into
+          // the new share's connection.
+          shareLog('foreign share-answer dropped');
+          Diag.record(DiagArea.call, 'share_signal_foreign', corr: _callId);
+        }
       case 'share-ice':
         final session = _shareSession;
-        if (session != null) {
+        if (session != null &&
+            session.matchesShare(map['share_id']?.toString())) {
           unawaited(session.onIce(map));
         } else if (_pendingShareIce.length < _maxPendingShareIce) {
-          // Held, not dropped. Flushed the moment the session is published.
+          // Held, not dropped. Flushed — filtered by share_id — the moment
+          // the matching session is published.
           _pendingShareIce.add(map);
+        }
+      case 'share-fail':
+        // The partner's receive side died (deadline, hard loss, restart
+        // failure). Without this signal the sharer kept capturing and
+        // encoding into the void until its own watchdog guessed (§220).
+        final session = _shareSession;
+        if (session != null &&
+            sharingScreen &&
+            session.matchesShare(map['share_id']?.toString())) {
+          shareLog('partner reported share failure: ${map['reason']}');
+          unawaited(session.onShareFail());
         }
       case 'screen':
         final announced = map['on'] == true;
@@ -1743,6 +1995,7 @@ class CallController extends ChangeNotifier {
         // frames, never an announcement — see [remoteSharePending].
         if (!announced) {
           remoteScreen = false;
+          _remoteSharePendingTimer?.cancel();
           _pendingShareIce.clear();
           // While sharingScreen the held session is my SEND side — a stray
           // 'off' from the far side must not close it.
@@ -1754,6 +2007,22 @@ class CallController extends ChangeNotifier {
             if (session != null) unawaited(session.close());
             screenRenderer.srcObject = null;
           }
+        } else {
+          // A NEW share announced while a stale last frame still holds the
+          // big view — the previous share's 'off' was lost. Clear it, or the
+          // partner watches a frozen picture until (unless) new pixels land.
+          final sid = map['share_id']?.toString();
+          final s = _shareSession;
+          if (!sharingScreen &&
+              remoteScreen &&
+              (s == null || !s.matchesShare(sid))) {
+            remoteScreen = false;
+            screenRenderer.srcObject = null;
+          }
+          // And the pending flag gets a deadline: a sharer whose process died
+          // right after announcing left this true for the rest of the call,
+          // which disables the partner's own Screen button the whole time.
+          _armRemoteSharePendingTimeout();
         }
         notifyListeners();
       case 'hangup':
@@ -1812,13 +2081,15 @@ class CallController extends ChangeNotifier {
     // between two carrier NATs however healthy the call beside it looks.
     await _ensureRelay();
     final iceConfig = await _iceConfig();
+    final offeredShareId = map['share_id']?.toString();
     late final ScreenShareSession session;
     session = ScreenShareSession(
-      send: _send,
+      send: offeredShareId == null ? _send : _shareSend(offeredShareId),
       iceConfig: iceConfig,
       onRemoteStream: (stream) {
         if (!identical(session, _shareSession)) return;
         // ONLY here, on real pixels, does their display take the big view.
+        _remoteSharePendingTimer?.cancel();
         screenRenderer.srcObject = stream;
         remoteScreen = true;
         notifyListeners();
@@ -1838,6 +2109,7 @@ class CallController extends ChangeNotifier {
         unawaited(session.close());
       },
       stopHinted: () => false,
+      shareId: offeredShareId,
     );
     // Published BEFORE the negotiation await, so share-ice arriving mid-offer
     // reaches the session's own pending queue instead of the floor.
@@ -1854,6 +2126,10 @@ class CallController extends ChangeNotifier {
       final held = List<Map<dynamic, dynamic>>.from(_pendingShareIce);
       _pendingShareIce.clear();
       for (final c in held) {
+        // A candidate held for a DIFFERENT share generation stays dropped —
+        // feeding it to this connection is the cross-feed the ids exist to
+        // prevent. An id-less candidate (old client) matches, as everywhere.
+        if (!session.matchesShare(c['share_id']?.toString())) continue;
         unawaited(session.onIce(c));
       }
     }
@@ -2178,6 +2454,18 @@ class CallController extends ChangeNotifier {
       _statsMonitor.stop();
       stats = null;
       await CallForegroundService.stop();
+      // A share may have moved the mic mute to the ADM level, which is
+      // process-global — a hangup mid-share must not leave the phone's mic
+      // silently muted for every later call. Gated on _admMuted, NOT on call
+      // state: stopScreenShare flips sharingScreen before its own unmute
+      // lands, so a hangup racing it read the wrong gate and skipped this
+      // (round-2 finding D4). Before the dispose: the call needs a live
+      // track. _setAdmMute logs its own failure ('adm unmute at teardown
+      // FAILED' class).
+      if (_admMuted) {
+        await _setAdmMute(false);
+        if (_admMuted) shareLog('adm unmute at teardown FAILED — mic stuck');
+      }
       try {
         await _localStream?.dispose();
       } catch (_) {}
@@ -2221,6 +2509,12 @@ class CallController extends ChangeNotifier {
       sharingScreen = false;
       remoteScreen = false;
       remoteSharePending = false;
+      _remoteSharePendingTimer?.cancel();
+      _remoteSharePendingTimer = null;
+      _captureSize = null;
+      // A share error nobody consumed (screen minimized) must not surface as
+      // a stale SnackBar at the start of the NEXT call.
+      _shareError = null;
       _pendingShareIce.clear();
       // The projection is gone with the call. Without this the foreground
       // service keeps claiming mediaProjection for the rest of the process.
@@ -2291,6 +2585,7 @@ class CallController extends ChangeNotifier {
   void dispose() {
     _resubscribeTimer?.cancel();
     _connectTimer?.cancel();
+    _remoteSharePendingTimer?.cancel();
     final ch = _chan;
     _chan = null;
     if (ch != null) SupabaseService.client.removeChannel(ch);

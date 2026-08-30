@@ -1,4 +1,5 @@
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:miles/core/app/logging.dart' show shareLog;
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/features/disguise/disguise_notification.dart';
 
@@ -103,8 +104,13 @@ class CallForegroundService {
         notificationIcon: NotificationIcon(metaDataName: style.iconMetaData),
         callback: callTaskCallback,
       );
-    } catch (_) {
+    } catch (e) {
       // Background-keepalive is best-effort; never break the call over it.
+      // But say it out loud: a swallowed startForeground failure during the
+      // share's type swap is a share with no mediaProjection type — on
+      // Android 14+ a REFUSED capture — and this catch used to hide exactly
+      // that with no trace (BRAIN §205 named it the one unverified link).
+      shareLog('fgs start(force=$force) FAILED: $e');
     }
   }
 
@@ -145,8 +151,9 @@ class CallForegroundService {
       // platform declines to create the virtual display.
       await _awaitStopped();
       await start(force: true);
-    } catch (_) {
-      // Background-keepalive is best-effort; never break the call over it.
+    } catch (e) {
+      // Best-effort, but never silent — see the note in [start].
+      shareLog('fgs type swap (sharing=$sharing) FAILED: $e');
     }
   }
 
