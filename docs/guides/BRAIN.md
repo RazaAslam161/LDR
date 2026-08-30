@@ -18014,3 +18014,127 @@ Remote and local HEAD both `ce528c2`; working tree clean.
 **Unchanged and still open**: the device pass (60fps on the OnePlus) and the two-phone
 walkthrough — kill the initiator's app at T+1m, partner released at T+24h by cron —
 remain the untested paths. Source sits at build 67; no APK built (owner's rule).
+
+## §229 — Build 68, and the discovery that BOTH phones left the sideload channel (2026-08-30)
+
+Owner asked for a build and an install on connected devices. **Two** phones are attached
+now, not one: `1896b4b3` OnePlus 8 and `a959ee2b` OnePlus 7 — both arm64-v8a, both were
+on versionCode 67.
+
+**Build.** 67 was already installed (07:41 / 08:36 today) carrying PRE-Doorstep code, so
+shipping the new code under 67 would be two builds sharing one number. Bumped to **68**
+via `bash tool/release.sh --bump` (no `--upload`, no `--publish` — an upload is an
+outward-facing act nobody authorised). Gates ran inside the script and it exits non-zero
+on failure; it reached the end with exit 0. Artifact proof:
+
+    sha256 32ee74af6e6e5ef91f95853d46e245dfe3e1df9c8f5ac110aa8693b7b85e9111
+    checked 1 libapp.so: stamped miles-build-68, updater present
+
+Independently verified: APK 47 seconds old at inspection, all **12 scene assets present
+inside the zip**, and `lib/` carries **arm64-v8a alone** — the §193 partial-ABI hazard is
+GONE, fixed by the `jniLibs.excludes` block in build.gradle.kts (a previous session's
+work). CLAUDE.md's "ONE universal APK" note is stale for the sideload channel and its
+stated consequence no longer reproduces.
+
+**THE FINDING — the sideload APK cannot update either phone.** Both installs failed:
+
+    INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package com.miles.miles
+    signatures do not match newer version; ignoring!
+
+Certificates, compared with apksigner rather than assumed:
+
+    installed 67 : CN=Miles, O=R&D Dev, C=PK   a37c59a5…9bb2   (RELEASE key)
+    my build 68  : CN=Android Debug            5f6a002c…93a5   (DEBUG key)
+
+Root cause: **both handsets are running a `play`-flavor, release-signed build** (the
+pulled base.apk is 224MB and multi-ABI, which only the play channel produces), while
+`sideload` is deliberately ALWAYS debug-signed — build.gradle.kts pins that on purpose so
+a Play packaging decision can never orphan the sideloaded base. The two channels can no
+longer update each other, in either direction, on these phones.
+
+**NOT DONE, deliberately: nobody uninstalled anything.** Uninstall is the only way to
+force the certificate change and it destroys the device's X25519 seed — history
+unreadable for anyone without an escrow row. That is the documented build-45 fleet-brick,
+and it is not a step to take to satisfy an install request.
+
+**Consequence for every future session**: a dev install on THESE phones must be
+`flutter build apk --release --flavor play` (release key present in
+`android/key.properties`, so it signs `CN=Miles` and matches). The sideload channel is
+now a different installed base; treat the two as non-interchangeable until the owner
+decides which channel the phones should live on.
+
+**Uncommitted right now**: the 67→68 bump in `pubspec.yaml` + `release_gate.dart`, made
+by the release script. Left in the working tree — commits happen only when asked — but
+FLAG IT: a build on a phone that exists in no commit is this repo's oldest pathology.
+`app_release.min_build` untouched, correctly.
+
+### §229 addendum — installed, on both phones, via the play channel (2026-08-30)
+
+The sideload APK could not update them (cert mismatch, above). Built the matching
+channel instead: `flutter build apk --release --flavor play` → 214.8MB,
+`build/app/outputs/flutter-apk/app-play-release.apk`.
+
+Proofs run BEFORE it touched a handset:
+- certificate `CN=Miles, O=R&D Dev, C=PK` / `a37c59a5…9bb2` — byte-identical to what
+  was installed, which is why this one installs and the sideload one cannot;
+- stale-snapshot check across ALL THREE ABIs (play keeps them all): `libapp.so count: 3`,
+  `STALE: none — every ABI carries miles-build-68`;
+- 12 scene assets present in the zip; artifact 24s old at inspection.
+
+Installed with `adb install -r` (NO uninstall, so the X25519 seed and app data survive):
+
+    1896b4b3 (OnePlus 8): Success   versionCode=68  lastUpdateTime 21:02:51
+    a959ee2b (OnePlus 7): Success   versionCode=68  lastUpdateTime 21:03:09
+
+Launched both: processes alive after 10s (pids 11615 / 13827), crash buffer empty on
+both. The one error line — `E com.miles.miles: Check failed` — is OnePlus's own
+`libcolorx-loader.so` vendor layer probing for `ColorX_Check`; it fires for every app on
+this hardware and the activity went foreground in the same millisecond. Not ours.
+
+**What is STILL unverified, and it is the important part**: the Doorstep itself has not
+been seen on hardware. `/unlink` is reachable only with a live `couple_unlink` row, and
+creating one starts a REAL ceremony against the real couple and pushes the partner — not
+something to do to satisfy an install. So 60fps under slam+bird+letter, the bitmap
+decode on a cold app, and the two-phone beat sync all remain untested. The exact next
+step: the owner begins a ceremony on 1896b4b3 and watches a959ee2b; while it runs,
+`adb shell dumpsys gfxinfo com.miles.miles` on both gives the frame histogram.
+
+## §230 — "The app is not running on the OnePlus 7" — it was running, wearing a cover (2026-08-30)
+
+Owner reported build 68 not running on `a959ee2b`. **It runs. It is disguised.**
+
+`cmd package resolve-activity --brief com.miles.miles` → `com.miles.miles/.AliasWeather`
+on BOTH phones. PackageManager component state, dumped from each device:
+
+    disabledComponents: AliasNews, AliasConvert, AliasLevel, AliasMiles
+    enabledComponents:  AliasWeather
+
+So the launcher entry is the Weather cover and there is no "Miles" icon to find. That
+state is stored per-install by PackageManager and SURVIVES updates, so it predates build
+68 — nothing in this install changed it. Screenshot at 21:22 shows the cover rendering
+correctly: "Current location / Sunday, August 30 / 23° Cloudy" with the seven-day list.
+The way back is `disguise_profile.dart`: entry = "Hold today's big temperature reading",
+about-sheet handle = "the date under the location". Both present in 68.
+
+**How I nearly got this wrong, twice — worth the rule:**
+1. I reported "installed and running" on the strength of `pidof` returning a number.
+   A live pid proves a process, not an app. `dumpsys gfxinfo … Total frames rendered`
+   is the cheap honest check, and the first three readings were 2, 5, 0 — because the
+   phone was ASLEEP or behind its keyguard, not because the UI was broken.
+2. The first screenshot was pure black and I nearly called it a render failure.
+   `dumpsys power | grep mWakefulness` said `Asleep`. **A screenshot of a sleeping phone
+   is not evidence of anything** — check wakefulness and `mResumedActivity` before
+   reading any pixel. The grey frame that followed was the cover mid-load, caught before
+   its first paint.
+
+Also learned, mechanically: Git Bash rewrites `/sdcard/...` into a Windows path before
+adb sees it (`failed to stat remote object 'C:/Program Files/Git/sdcard/...'`). Device-side
+paths need PowerShell or `MSYS_NO_PATHCONV=1`.
+
+**Not done, deliberately**: did not long-press into the app — that opens the owner's
+private couples app and any screenshot of it captures their content. Did not flip the
+alias back to `.AliasMiles`: that is a visible change to how the app appears on their
+phone and is theirs to choose (Settings, or `pm enable com.miles.miles/.AliasMiles`).
+
+**Still open, unchanged**: the Doorstep has still never been seen on hardware — it needs
+a live ceremony, which pushes the partner for real.
