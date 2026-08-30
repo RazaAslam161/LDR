@@ -1077,11 +1077,18 @@ class ChatRepository {
             value: coupleId,
           ),
           callback: (payload) {
-            final m = Message.fromJson(payload.newRecord);
-            // The overwhelmingly common case, and the only one today: no
-            // ciphertext, so deliver on this turn of the loop exactly as
-            // before. Hydration is async and must not delay a live message.
-            if (m.bodyCipher == null) {
+            final raw = payload.newRecord;
+            // Presence is read off the RAW map, never by decoding it. Building
+            // a Message here first meant every ciphered row was parsed twice:
+            // once off the realtime payload, whose bytea encoding this app does
+            // not trust, and again off the refetch. The throwaway parse still
+            // incremented cipherDecodeFailures, so a row that refetched and
+            // decrypted PERFECTLY was reported as `0/1 cipher column
+            // unreadable` — the shortfall counter accusing the fetch path of
+            // losing ciphertext it had actually opened. Observed on build 66,
+            // first live run.
+            if (raw['body_cipher'] == null) {
+              final m = Message.fromJson(raw);
               // Report it HERE though, because a cipher column that would not
               // decode arrives looking exactly like this row — null cipher —
               // and skipping hydrate left its count in the static for whatever
@@ -1103,13 +1110,23 @@ class ChatRepository {
             // (app_shell.dart). A refetch that cannot be made delivers the
             // realtime row unhydrated: no worse than before, and never garbage.
             unawaited(() async {
-              Message? fresh;
               try {
-                fresh = await fetchById(coupleId, m.id);
+                final fresh = await fetchById(coupleId, JsonUtils.parseString(raw['id']));
+                if (fresh != null) {
+                  onInsert(fresh);
+                  return;
+                }
               } catch (e) {
                 debugPrint('[chat] live refetch failed: ${e.runtimeType}');
               }
-              onInsert(fresh ?? m);
+              // Last resort, so a message is never lost to a refetch that could
+              // not be made. This one DOES decode the realtime payload, so its
+              // failures are DRAINED rather than filed: they are a known
+              // property of that wire, not the fetch path losing ciphertext,
+              // and reporting them is what made a healthy fetch look broken.
+              final m = Message.fromJson(raw);
+              _takeDecodeFailures();
+              onInsert(m);
             }());
           },
         )

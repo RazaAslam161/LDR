@@ -16983,3 +16983,225 @@ the ritual past the Begin button has ever been exercised on a device.
 
 **Exact next step:** build 67, install on both handsets, then tap End the connection ->
 Begin and walk the ritual for the first time.
+
+## §215 — Build 67 on the phone; a false R8 alarm I caught, and a build failure that was a file lock (2026-08-30)
+
+Continues §214. The tree moved under this session: another session committed `3316773`
+(unlink Begin laid out off the right edge) and bumped 66 -> 67, so the APK built here is
+**build 67 plus this session's uncommitted chat telemetry fix**.
+
+**Install:** same upload certificate as the previous install, so `adb install -r` succeeded
+with NO data wipe — the owner stayed signed in. Only the FIRST play install costs a wipe;
+every one after it is an ordinary update. Worth knowing before the Console migration.
+`versionCode='67'`, signer SHA-256 `a37c59a5…9bb2`, launch clean, PID alive, and logcat shows
+no `FATAL EXCEPTION` / `NoClassDefFoundError` / `UnsatisfiedLinkError`.
+
+### A false R8 casualty, caught before it was reported as one
+
+logcat shows a wall of `java.lang.ClassNotFoundException: com.mapbox.common.*`
+(`LifecycleMonitorInterface`, `LifecycleObserver(+Native)`, `LocationService(+Native)`,
+`ReachabilityInterface(+Native)`, `LogWriterBackend`, `LoggingLevel`). `proguard-rules.pro`
+has **zero** Mapbox rules (`grep -ci mapbox` -> 0), so this looked exactly like the R8
+casualty the audit predicted for Mapbox.
+
+**It is not.** The classes are in the shipped APK — binary grep over the three dex files:
+`LifecycleMonitorInterface 1 · ReachabilityInterface 2 · LocationServiceNative 1 ·
+LogWriterBackend 4 · MapboxMap 10`. The `common-ndk27-24.29.0.aar` ships a consumer rule
+`-keep class com.mapbox.common.** {*;}` which R8 honoured. These are Mapbox's own native
+probes resolving through a classloader that cannot see app classes; they are caught, which is
+why they are `W System.err` and not a crash.
+
+**Do not add a `-keep class com.mapbox.**` rule on the strength of these log lines** — the
+keep already exists, from the AAR, and the warnings would not stop. The audit's D13 prediction
+for Mapbox is REFUTED against build 67 on hardware.
+
+### The rebuild failure was a Windows file lock, not R8
+
+`flutter build apk --release --flavor play` failed after 8m36s:
+```
+Execution failed for task ':permission_handler_android:writeReleaseLintModelMetadata'.
+> java.io.IOException: Failed to delete D:\Miles\mobile\build\permission_handler_android\
+  intermediates\lint_model_metadata\release\writeReleaseLintModelMetadata\lint-model-metadata.properties
+```
+`./gradlew --status` found **five** daemons alive. Stopped them, removed the directory and
+asserted the postcondition (`gone=YES`), rebuilt: `REAL_EXIT=0`, APK 224,284,485 bytes —
+4 bytes different from the previous one, so genuinely recompiled rather than reused.
+
+**Two release-engineering notes from this.** (1) This lock class can hit `release.sh --play`
+intermittently and presents as a mystery rather than as "a daemon held a file"; `--stop`
+before a release build is cheap insurance. (2) My own wrapper printed `EXIT: 0` for a build
+that failed, because `$?` after a pipe reads `tail`, not the build — the exact pipe-masking
+artifact that made §207 mis-record release.sh as exiting 0. Measure the command, never the pipe.
+
+### Still NOT proven, and it is the open item
+
+The chat telemetry fix (raw-map cipher presence check, no bytea decoded from a realtime
+payload) is INSTALLED but UNEXERCISED: `client_errors` has been empty since 03:00Z because no
+ciphered message has been sent on 67. The confirmation to look for is a live ciphered send
+that files **no `chat-decrypt` row at all**. Until that happens the fix is reasoned, not
+verified.
+
+Device interaction stopped here: the owner was mid-dialog in Settings > Account & data
+("Change email?"), and driving input would have fought them for the screen. Also observed
+there, positively: **Recovery backup = On**, so escrow is live on this handset.
+
+## §216 — Both handsets on build 67, and a LIVE unlink ceremony is running (2026-08-30)
+
+**OnePlus 7 (`a959ee2b`, GM1900, Android 12, arm64) is now on build 67.** It had been on 65
+with the debug signature `fa3d26f4`, so the install required an uninstall exactly as the
+OnePlus 8 did. Escrow was verified BEFORE wiping — both rows complete
+(`has_seed true, salt 16, nonce 24`) for **Elsa** `6076edae` and **Steve** `a7a6485c`.
+After: `versionCode=67`, `signatures=[74f6ea18]` (the upload key),
+`firstInstallTime=2026-08-30 08:36:59`, app alive PID 6552, and no
+`FATAL EXCEPTION` / `NoClassDefFoundError` / `UnsatisfiedLinkError`. The single
+`FeatureFlagsImplExport` NoClassDefFoundError is OEM boot-classloader noise, present on the
+OnePlus 8 too, not ours.
+
+**Both phones are now Play-signed and on the same build for the first time.** That is the
+precondition every BLOCKED two-phone item has been waiting on.
+
+### A live ceremony, and it is NOT mine
+
+`couple_unlink`: `state=cooling`, `initiated_by=Steve`, `started_at 03:32:08Z` (08:32 PKT),
+`cooling_ends_at` +24h, `partner_gate_opens_at 03:47:08Z` (start +15m), `accepted_at null`.
+
+Started between this session's launch intent on the OnePlus 8 (08:31:36) and its screenshot
+(08:33). **This session did not cause it:** the only device input sent was
+`monkey -p com.miles.miles -c android.intent.category.LAUNCHER 1`, which delivers one launch
+intent and taps nothing, and the 08:33 screenshot shows the owner hand-navigating
+Settings > Account & data with a "Change email?" dialog open. The owner started it, on the
+phone they were holding. Recorded explicitly because "the agent ended my relationship" is not
+a claim to leave ambiguous.
+
+**Free evidence for the audit's unlink findings, on real hardware:** the ceremony screen
+renders correctly on 67 — this is the screen carrying the four-times-named layout CRITICAL,
+and the one `3316773` just fixed ("Begin was laid out off the right edge"). Elsa's side shows
+the countdown, the quote, "Edit what you wrote" and "Talk to them", and correctly shows NO
+Accept button, because `partner_gate_opens_at` (08:47) had not passed at 08:37. The 15-minute
+partner gate is behaving as designed.
+
+### One observation worth settling, not yet explained
+
+The OnePlus 7 was wiped at 08:36:59 and was already signed in as Elsa, sitting on the
+ceremony screen, by 08:37. Roughly thirty seconds. The benign explanation is password-manager
+autofill. The non-benign one — a session surviving an uninstall — would be a real finding, so
+it should be confirmed rather than assumed. **Ask whether someone signed in by hand.**
+
+### Still unproven
+
+No ciphered message has been sent on 67 by either phone, so the chat telemetry fix remains
+reasoned rather than verified. `client_errors` empty since 03:00Z. The confirmation is a live
+ciphered send that files NO `chat-decrypt` row.
+
+### §216 addendum 1 — the Play migration is PROVEN survivable, on content not on a boolean (2026-08-30)
+
+Owner confirms the OnePlus 7 sign-in was manual, so no session survived the uninstall — the
+open security question from §216 is closed, benignly.
+
+That answer turns today's two wipes into the migration rehearsal the audit filed as BLOCKED,
+and it PASSES — with the assertion the audit demanded (content, not `restore()` returning true).
+
+Both handsets had their `flutter_secure_storage` seed destroyed today (OnePlus 8 ~07:41,
+OnePlus 7 08:36:59 — `firstInstallTime` confirms a fresh install) and both were signed back
+in. Yet:
+
+```
+partner_keys
+  Elsa  6076edae  pubkey CJjtt9cH5cVPOjpMoq6R5F…  updated_at 2026-08-29 18:49:28Z
+  Steve a7a6485c  pubkey akfB+ebQCz9MQdNLvU736X…  updated_at 2026-08-29 18:49:50Z
+```
+
+Both published keys are unchanged from YESTERDAY, before either wipe.
+
+Why that is decisive rather than merely suggestive: `CoupleKey.ensure()`
+(couple_key.dart:90-96) calls `SupabaseRepository.publishMyPublicKey()` unconditionally, once
+per process, guarded only by `_publishedThisProcess`. Both phones loaded a profile with a
+partner after reinstall (both render couple state — chat on one, the ceremony screen on the
+other), so `_primeCoupleKey` -> `ensure()` -> publish ran on each. A device holding a NEWLY
+generated X25519 seed would therefore have written a DIFFERENT public key and stamped
+`updated_at` today. Neither did.
+
+**So key_escrow restored the ORIGINAL private seed on both devices.** The cryptographic
+identity survived a full uninstall twice, which is exactly what the first Play install will
+do to every user. The audit's D1-03 worst case — "escrow recovery has never been executed
+once" — is retired: it has now been executed twice, on two different handsets, and the proof
+is a byte-stable published key rather than a success boolean.
+
+Residual assumption, named rather than buried: that the publish actually executed is read off
+the code path, not off a log line. The cheap way to convert it to direct evidence is the test
+already outstanding — one ciphered message. If the seeds were wrong, that send fails with
+`SecretBoxAuthenticationError` or a `pin_mismatch`, not silence.
+
+## §217 — THE CHAT DECRYPT BUG IS FIXED, PROVEN ON TWO HANDSETS (2026-08-30)
+
+Open since 2026-08-19. Closed on hardware, in both directions, with the seeds that escrow
+had just restored.
+
+**What was sent, on build 67, after BOTH phones were wiped and escrow-recovered:**
+```
+seq 4631  Steve -> 03:47:40Z  cipher_len 19  nonce_len 24
+seq 4630  Elsa  -> 03:38:28Z  cipher_len 18  nonce_len 24
+```
+Elsa's send is 90 seconds after her wipe (`firstInstallTime 08:36:59` = 03:36:59Z), so it was
+sealed with an escrow-restored seed.
+
+**What was filed:**
+```
+select … from public.client_errors where received_at > '2026-08-30 03:30:00+00'  ->  []
+```
+**Nothing. Zero rows.**
+
+The progression across three builds, same couple, same code path:
+- build 65: every ciphered message -> `chat decrypt: 0/1, first=ArgumentError`, on BOTH
+  handsets, 0.46s after the send. The nonce reached XChaCha20 at 48 bytes instead of 24.
+- build 66 (refetch + `expect` length contract): `first=cipher column unreadable` —
+  reclassified from a crypto error to a decode error at the hop where it happened, and
+  `failed=0` meant the refetch had actually opened the row. The count came from the
+  throwaway `Message.fromJson(payload.newRecord)` still parsing the realtime payload.
+- build 67 (presence read off the raw map; no bytea decoded from a realtime payload):
+  **silence.**
+
+Silence is the right proof here rather than an absent signal, because
+`_reportDecryptShortfall` early-returns only when failed AND undecodable are both zero, and
+the reporting path is demonstrably alive on this build lineage — it filed ids 492-494 from
+build 66 on this same phone. And a row whose cipher failed to DECODE would have been counted;
+a row whose cipher failed to OPEN would have carried an error class. Neither exists, so the
+ciphertext was decoded and opened.
+
+**This also converts §216 addendum 1's named residual assumption into direct evidence.** That
+entry inferred "escrow restored the original seed" from a byte-stable `partner_keys` row plus
+a code path. If either restored seed had been wrong, these two sends would have produced
+`SecretBoxAuthenticationError` or `couple-key: pin_mismatch`. They produced nothing. The
+migration is proven on content, twice, in both directions.
+
+**Two audit items close together:** the chat-decrypt root cause (wire-format, not keys — the
+theory this repo carried for eleven days), and D1-03's "escrow recovery has never been
+executed once".
+
+`.claude/CLAUDE.md` still instructs that `chat_cipher_only` must stay false. That instruction
+was correct while decryption was failing; it is now the last thing standing between this app
+and no plaintext at rest. The flip is a separate, deliberate decision — it needs a soak with
+real traffic first, and it must NOT be paired with nulling `messages.body`, which would
+destroy the fallback that has been carrying the couple all along.
+
+## §215 — Pre-Play-production strict audit STARTED (2026-08-30)
+
+Owner asked for a double-check strict audit with ultra-deep QA before Play production:
+attack every assumption, steelman, then honest verdict. Findings only — no fixes, no
+commits, no device installs.
+
+- Owner rulings taken this session: Play dev account is PERSONAL, CREATED RECENTLY (the
+  12-tester/14-day closed-test requirement applies before production access); Supabase
+  will be upgraded to Pro at launch (auto-pause becomes a pre-submission gate); builds
+  ARE approved for this audit (rebuild AAB at 67 + bundletool size measurement, nothing
+  installed to any phone).
+- In flight: multi-agent audit across 14 workstreams (build/signing, chat crypto incl.
+  the uncommitted chat_repository.dart diff, prod RLS/flags/drift, encryption coverage
+  matrix + vault write-path adjudication, edge functions, pairing, legal-page liveness,
+  manifest declarations, Data-Safety reconciliation, account-deletion E2E + OTP
+  deliverability, secrets, client_errors 492/494, CSAE/content-rating, Play program
+  requirements), then an adversarial verify pass over every launch-blocking candidate.
+  `release.sh --play` at 67 runs in parallel as the artifact under audit.
+- Working tree at start: single modified file `mobile/lib/features/chat/chat_repository.dart`
+  (+25/−8, the §214 telemetry fix). This audit will not add tree changes.
+- Next step: findings report (attack → steelman → verdict) + closing BRAIN section.
