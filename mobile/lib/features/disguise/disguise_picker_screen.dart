@@ -42,44 +42,52 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
     final choice = _selected;
     if (choice == null || _applying) return;
 
-    // Every way back — the hidden gesture, and the Open button on the cover's
-    // About panel — runs the same entry gate, and that gate only stops a
-    // stranger when App Lock stands behind it. Without the lock a cover is one
-    // tap from the app for whoever holds the phone, so the lock is a
-    // precondition of applying one, not a suggestion beside it.
+    // App Lock is what makes the way back SAFE — with it on, the hidden
+    // trigger lands on your lock rather than straight in the app. It is not,
+    // however, what makes the way back EXIST, and treating it as a precondition
+    // made the whole feature unavailable to anyone who does not want a second
+    // lock on their own phone. So the trade is stated once, plainly, and the
+    // choice is the user's.
+    //
+    // It was also a requirement this app could not keep: forced on a handset
+    // with no enrolled credential, it produced a cover whose entry gate could
+    // never open — see CoverGate._passesAppLock, fixed in the same change.
     if (choice.cover != DisguiseCover.none && !await AppLock.isEnabled()) {
       if (!mounted) return;
-      await showDialog<void>(
+      final goOn = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Turn on App Lock first'),
+          title: const Text('Apply without App Lock?'),
           content: Text(
-            'Every cover keeps a way back into this app — that is your '
-            'guarantee against being locked out. App Lock is what makes that '
-            'way back safe: with it on, it lands on your lock, not the app.'
-            '\n\n'
-            'Turn on App Lock in Settings, then apply the cover.'
-            '${widget.isOnboarding ? ' You can do both any time after '
+            'A cover always keeps a way back into this app. Without App Lock '
+            'that way back opens straight into Miles, so anyone holding your '
+            'unlocked phone who finds the gesture is in. With App Lock on, it '
+            'lands on your lock instead.'
+            '${widget.isOnboarding ? ' You can turn it on any time after '
                 'setup.' : ''}',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Not now'),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
             ),
             if (!widget.isOnboarding)
               TextButton(
                 onPressed: () {
-                  Navigator.pop(ctx);
+                  Navigator.pop(ctx, false);
                   ctx.go('/app/settings');
                 },
-                child: const Text('Open Settings'),
+                child: const Text('Turn on App Lock'),
               ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Apply anyway'),
+            ),
           ],
         ),
       );
-      return;
+      if (goOn != true || !mounted) return;
     }
 
     // Applying a cover changes the launcher icon and name, and the way back in

@@ -280,5 +280,36 @@ void main() {
         }
       }
     });
+
+    test('the entry gate can never become a door with no key', () {
+      // A OnePlus 7 with no fingerprint, no face and no screen lock applied the
+      // Weather cover and could not get back in: the gesture fired, nothing
+      // appeared, and the phone stayed on the cover. The gate was
+      // `!enabled || await AppLock.authenticate()` — which reads that method's
+      // `false` as a verdict, when its own doc says false means the CALLER
+      // falls back to the PIN. On a handset where no credential is enrolled it
+      // can only ever return false, so the way back in was a control that did
+      // nothing. Same build, same code, worked on a OnePlus 8 that had a lock.
+      // Comments stripped: the fix's own doc quotes the broken one-liner it
+      // replaced, and the check below would match that quotation.
+      final gate = _code(
+        File('lib/features/disguise/cover_gate.dart').readAsStringSync(),
+      );
+
+      expect(gate.contains('AppLock.hasPin()'), isTrue,
+          reason: 'the gate must know whether a PIN exists before refusing',);
+      expect(gate.contains('AppLock.availableBiometrics()'), isTrue,
+          reason: 'the gate must know whether any biometric is enrolled',);
+      expect(gate.contains('LockScreen'), isTrue,
+          reason: 'the PIN fallback belongs to LockScreen, which already '
+              'prompts biometrics, retries, and drops to the pad — the gate '
+              'must not re-implement a worse half of it',);
+      expect(
+        RegExp(r'!enabled\s*\|\|\s*await AppLock\.authenticate\(\)')
+            .hasMatch(gate),
+        isFalse,
+        reason: 'the one-line gate that caused the lockout is back',
+      );
+    });
   });
 }

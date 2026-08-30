@@ -17242,3 +17242,198 @@ one report. The four device claims listed there stand.
 Exact next step: whoever owns unlink updates `unlink_source_law_test.dart` to stop naming the
 deleted page. For voice notes, sideload and confirm the chip now appears only on the note being
 played.
+
+## §218 — A cover with no key: the entry gate locked the owner out of their own app (2026-08-30)
+
+Reported from the field, on hardware, on build 67: OnePlus 7 wearing the **Weather** cover,
+no fingerprint / face / screen lock enrolled. The hidden trigger fires and **nothing
+happens** — no prompt, no message, the cover just stays up. Same build, same cover, works on
+the OnePlus 8, which has a lock enrolled. That difference is the whole diagnosis.
+
+**Root cause, one sentence:** `CoverGate.runEntryGate` read `AppLock.authenticate()`'s
+`false` as a verdict — `final passed = !enabled || await AppLock.authenticate();` — when that
+method's own documentation says the opposite ("on any failure returns false (caller falls
+back to the PIN)"), so on a handset where no credential is enrolled and `authenticate()` can
+only ever return false, the way back in was a control that did nothing.
+
+Three things made it invisible until a real phone met it:
+- The file's own doc header already promised the right behaviour — *"2. The app lock —
+  biometric, **with the PIN as the fallback**"*. The code never did it. Doc and code diverged
+  in the direction that reads as safe.
+- `LockScreen` — the app's real unlock surface — already handles all of this correctly
+  (*"Always offers a way in… falls back to the 4-digit app-lock PIN"*, and `_init()` goes
+  **straight to the PIN when no biometric is enrolled**). The gate re-implemented a worse half
+  of it instead of using it.
+- Every dev handset has a lock enrolled, so the failing branch is unreachable on the machines
+  anyone tests on. This is the "machines you can see are not the users" rule, exactly.
+
+**Fixed** (`cover_gate.dart`, new `_passesAppLock`):
+- No App Lock -> in, as before.
+- App Lock on, but **no biometric enrolled AND no app PIN set** -> in. A lock with no key
+  protects nobody and the only person it holds out is the owner. This is the designed
+  fallback the global rulebook demands instead of a refusal.
+- Otherwise -> push `LockScreen`, which prompts biometrics, allows retry, and drops to the PIN
+  pad. Pushed rather than toggled, because the overlay that normally renders it lives in the
+  real app's tree, which does not exist while a cover is up.
+
+**Also fixed, on the owner's explicit ruling:** App Lock is no longer a PRECONDITION of
+applying a cover. `disguise_picker_screen._apply` blocked with "Turn on App Lock first" and no
+way past. It now states the trade once — without the lock the way back opens straight into
+Miles — and offers **Cancel / Turn on App Lock / Apply anyway**. The owner's words: *"it
+should be user's choice, app don't need to force it."* Noted honestly: a cover without App
+Lock is one discovered gesture from the app for whoever holds the unlocked phone. That is now
+a disclosed trade rather than a wall — and it was a requirement the app could not keep
+anyway, since forcing it on a lock-less handset is what produced the lockout above.
+
+**Pinned** by a new law in `test/unit/disguise/disguise_test.dart` — the gate must consult
+`hasPin()` and `availableBiometrics()`, must reach `LockScreen`, and must not contain the
+one-line gate again. (The law reads the source through `_code()`, because the fix's own
+comment quotes the broken line it replaced and matched the check on the first run.)
+
+Gates: `flutter analyze lib/features/disguise/` 0 errors 0 warnings;
+`flutter test test/unit/disguise/` **51 passed** (was 50).
+
+**NOT yet on a phone.** The fix is in the tree only. The OnePlus 7 is still locked out on the
+installed build and was unplugged at the time of writing. Cheapest way back in, in order:
+plug it in and `adb install -r` a rebuilt APK (same certificate now, so data and session
+survive); or enrol any screen lock in Android settings, which makes the existing gate work;
+or re-enable `.AliasMiles` over adb to drop the cover.
+
+## §219 — The chat door removed, and the ritual screen redesigned (2026-08-30)
+
+Two owner findings, both correct, both mine.
+
+### 1. "Talk to them" was baseless — and it was
+
+`unlinkAllows` granted `/unlink/chat` to the partner and refused it to the INITIATOR. So
+the partner's button opened a chat the other person could not enter: messages nobody would
+read until the ritual was already over, with message pushes switched off so not even a
+notification escaped. A control promising a conversation and delivering a monologue.
+
+My original justification — that it stopped one partner cutting the other off for a day —
+was weak too. They both have phones. Losing in-app chat for 24 hours is not being cut off.
+
+Removed end to end: the button, the `/unlink/chat` route, `unlink_chat_page.dart`, and the
+gate branch. `unlinkAllows` now takes only a path — with chat gone there is no per-role
+branch left, so the row and uid stopped deciding anything. The NOTE is the channel, and
+unlike chat it actually arrives: it renders on the initiator's screen beside Re-link.
+
+### 2. The partner had no clock
+
+The initiator got a live countdown while their Re-link was closed. The partner got the
+sentence "Take a few minutes before you decide anything" and nothing else — no way to tell
+two minutes from twenty, on a screen they are reading while upset. Both sides now get the
+same `_wait(label, until)`: a label and a ticking `CountdownDigits` on the server clock.
+
+### 3. The screen was overcrowded — owner: "totally disaster"
+
+Root causes, and what each became:
+
+- **Two ticking clocks.** A loud gilt `23 h 44 m left` under the headline AND the gate
+  countdown below, both moving. The long deadline is one quiet line now (`Ends 9:32am
+  tomorrow`); only the clock you can act on ticks. `_countdown()` deleted.
+- **No rank.** The borrowed quote was 22 against a 24 headline, so both fought for the
+  same level and the screen read as a block. Headline 26 Fraunces, quote 18 italic.
+- **No measure.** Lines ran the full 312dp of a 360dp phone. Everything prose is now
+  inside `_measure` — max 300.
+- **Four sizes and three colours** doing the job of "small explanatory text". One `_quiet`.
+- One 40dp hairline replaces what would otherwise need a second heading.
+
+### Verified by looking, not by assertion
+
+`test/widget/unlink_screen_preview_test.dart` renders the REAL widget to PNGs with the
+app's bundled Fraunces/Inter loaded (without the FontLoader every glyph is a blank box).
+Five states shot and reviewed: initiator waiting / Re-link open, partner waiting / decide
+open, last call. Tagged `preview` and skipped by `dart_test.yaml` in the default run —
+a suite that rewrites images every run is not a gate.
+
+```
+flutter test --tags preview --run-skipped --update-goldens \
+  test/widget/unlink_screen_preview_test.dart
+```
+
+Three new design laws in `unlink_screen_test.dart`, so the crowding cannot return: never
+more than one `CountdownDigits` on screen in any of the five states; every prose line under
+300dp; and no overflow at 2.0 text scale for EITHER role.
+
+**Gates: analyze 0 errors 0 warnings / 564 issues; `flutter test` 1386 passed, 1 skipped**
+(the skip is the preview suite, by design).
+
+### Open
+
+- Nothing here is committed yet.
+- Build 67 still does not exist; the phone has build 66, which has neither this redesign nor
+  the Begin-button fix. **Nothing past Begin has ever run on a device.**
+- Removed from a test on purpose: the `existsSync` check on the deleted chat page.
+  repo_hygiene's "every source path a test names actually exists" law fails on a named path
+  that is gone, which is the point of deleting it — the route and button assertions cover
+  the law without naming the file.
+
+## §219 — Pre-Play-production strict audit COMPLETE: 7 confirmed blockers, artifact rebuilt & sized (2026-08-30)
+
+Follows my §215 (audit start). Numbered 219 because a concurrent session appended §217/§218
+and is mid-edit across unlink/disguise — read the tail, its lines are untouched here.
+
+**Method:** 14 read-only workstreams (28 agents, 0 errors) over tree + live prod
+(sopictusdonlvuezmfep, ACTIVE_HEALTHY) + web + live Play policy fetches, then an
+adversarial verify pass that re-attacked every launch-blocking candidate (staleness /
+policy-reality / severity). Findings only — nothing edited, nothing committed, nothing
+installed. The one working-tree file at audit start (chat_repository.dart) turned out to be
+committed as d0f7d89 by another session; the shared tree was RED (repo_hygiene: a test names
+the deleted unlink_chat_page.dart), so the audit artifact was built in an ISOLATED WORKTREE
+at d0f7d89, not the live tree.
+
+**Artifact (built at d0f7d89 in a clean worktree, gitignored secrets copied in):**
+- `flutter analyze` 0/0, `flutter test` **1378 passed** (release.sh gates).
+- `app-play-release.aab` **161.5MB**, sha256 `259fa88a9cd6b64af520549519427100c21f7c7a22fd2d0ae3c617b44ab15060`, 3 libapp.so all stamped miles-build-67, EXIT 0.
+- **Per-device download measured with Google bundletool 1.18.3** (this settles §213's open
+  size question): armeabi-v7a 42.4MB · arm64-v8a 46.1MB · x86_64 47.7MB. The 161MB AAB /
+  224MB universal-APK figures are NOT what a user downloads — real install is ~46MB, far
+  under Play's 200MB base limit.
+- 16KB page-size: all 22 arm64/x86_64 .so pass PT_LOAD p_align>=16KB (measured; the ML Kit
+  scare is refuted — only libxeno_native.so is native ML Kit and it is aligned).
+
+**7 CONFIRMED launch-blockers (all Console/process, none are code defects):**
+1. App access — reviewers cannot pass the pairing wall; needs two PRE-PAIRED demo accounts +
+   cover-unlock instructions. Prod has exactly 2 users / 1 couple (owner's own E2EE pair).
+2. Closed testing — personal post-Nov-2023 account: 12 testers × 14 continuous days, then a
+   production-access review. ~4-5 week calendar path; clock not started.
+3. Health apps declaration — mandatory for ALL apps; cycle tracking ships (route /app/cycle,
+   drawer + home card), so must declare "Period Tracking" + Health in Data Safety.
+4. Auth email on Supabase built-in dev SMTP — confirmation + deletion OTP won't deliver to
+   non-team mailboxes; a stranger cannot even sign up. (auth_logs: mail_from
+   noreply@mail.app.supabase.io, both sends followed by 403 expired.) Fix = custom SMTP.
+5. Store listing does not exist anywhere; when written, must NOT claim E2EE (chat/gallery/
+   vault are plaintext — chat_cipher_only=false live).
+6. Cover-disguise disclosure — 9 dormant aliases compiled into the AAB; legal only if the
+   listing discloses them (full-desc paragraph + picker screenshot + App-access note).
+7. (same class as 1) App access demo accounts — permanently valid, needed at every update.
+
+**Elevated to SECURITY (finder put it prescale; I confirmed the DB half live):**
+- `call_invites.callee_id` is client-writable and bound to NOTHING (INSERT with_check
+  validates only caller_id + couple_id; sole constraint is PK on id). reach-notify pushes a
+  full-screen call ring to profiles.id = callee_id with no couple filter → an authenticated
+  user can ring ANY user's phone IF they know the target UUID (UUIDs aren't enumerable, which
+  is the only mitigation). Found, not fixed.
+- `turn-credentials` mints Cloudflare TURN with NO couple-membership check (map-token has one)
+  and the quota RPC FAILS OPEN → any signed-up stranger can spend relay bandwidth. Prescale/
+  billing. Found, not fixed.
+
+**Notable prescale:** chat_cipher_only has no server guard tying it to fleet build (one
+UPDATE breaks pinned phones); repo migration history not proven equal to prod's 217-entry
+ledger; 2 security-advisor WARNs (dissolution_window mutable search_path, pg_net in public)
++ leaked-password protection OFF; Maps key still live in tracked file + history; first-run
+FCM permission throw + unattributable MissingPluginException (ids 492/494); screen-share
+digest has NEVER recorded a non-zero frame.
+
+**Verdict:** the CODE is in good shape to ship (pairing lock solid, RLS 70/71, encrypted
+intimate core, escrow proven on 2 handsets, gates green, ~46MB, R8 clean on hardware). What
+blocks production is ~100% Console/process + the SMTP wall, not the app. No-go until the 7
+are closed; realistic path is ~4-6 weeks driven by the closed-testing clock.
+
+**Still open / exact next step:** owner decisions — (a) configure custom SMTP (blocker 4,
+also gates every future signup), (b) create+pair two demo accounts and write App-access
+instructions, (c) start the 12×14 closed test now to run the clock, (d) draft listing with
+no E2EE claims + cover disclosure, (e) file Health declaration. Security items (callee_id,
+turn-credentials) are owner's call to fix pre- or post-launch. Nothing here was committed;
+the audit worktree at d0f7d89 was removed after measurement.

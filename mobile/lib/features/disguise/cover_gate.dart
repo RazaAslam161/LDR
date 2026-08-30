@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
@@ -100,6 +101,52 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
     runEntryGate();
   }
 
+  /// Gate 2, doing what the contract at the top of this file already says:
+  /// biometric, WITH THE PIN AS THE FALLBACK.
+  ///
+  /// This was `!enabled || await AppLock.authenticate()`, which read that
+  /// method's `false` as a verdict. Its own documentation says the opposite —
+  /// "on any failure returns false (caller falls back to the PIN)" — and this
+  /// caller never did. On a handset with no fingerprint, face or screen lock
+  /// enrolled, `authenticate()` can only ever return false, so the way back in
+  /// was a control that did nothing: the trigger fired, no prompt appeared, and
+  /// the cover simply stayed up. Reported from a OnePlus 7 with no enrolled
+  /// lock, while the same build behaved on a OnePlus 8 that had one.
+  Future<bool> _passesAppLock() async {
+    if (!await AppLock.isEnabled()) return true;
+    final bio = await AppLock.availableBiometrics();
+    final hasPin = await AppLock.hasPin();
+    // Nothing on this device can EVER satisfy the lock. Refusing forever is a
+    // lockout, not security: a lock with no key protects nobody, and the only
+    // person it holds out is the owner. Let them through rather than hand them
+    // a door that cannot open.
+    if (bio.isEmpty && !hasPin) return true;
+    if (!mounted) return false;
+    // LockScreen is this app's real unlock surface — it prompts biometrics,
+    // lets the prompt be retried, and drops STRAIGHT to the PIN pad when no
+    // biometric is enrolled. Pushed rather than toggled, because the overlay
+    // that normally renders it (main.dart) belongs to the real app's tree, and
+    // that tree does not exist while a cover is up.
+    final nav = Navigator.of(context);
+    AppLock.locked.value = true;
+    void popWhenOpen() {
+      if (!AppLock.locked.value && nav.canPop()) nav.pop();
+    }
+
+    AppLock.locked.addListener(popWhenOpen);
+    try {
+      await nav.push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => const LockScreen(),
+        ),
+      );
+    } finally {
+      AppLock.locked.removeListener(popWhenOpen);
+    }
+    return !AppLock.locked.value;
+  }
+
   /// Runs gates 2 and 3. Call from whatever hidden trigger the cover provides.
   Future<void> runEntryGate({bool forCall = false}) async {
     if (_entering) return;
@@ -108,8 +155,7 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
       // authInProgress stops the biometric prompt's own `inactive` lifecycle
       // event from dropping the cover out from under the prompt.
       MilesApp.authInProgress = true;
-      final enabled = await AppLock.isEnabled();
-      final passed = !enabled || await AppLock.authenticate();
+      final passed = await _passesAppLock();
       MilesApp.authInProgress = false;
 
       if (!passed || !mounted) return;
