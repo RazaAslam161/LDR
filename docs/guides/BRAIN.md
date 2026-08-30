@@ -16207,3 +16207,42 @@ tree; `miles-legal.vercel.app` still serves the audited version.
 **Still open / exact next step:** owner reviews the diff (`git diff web/`), then deploys —
 only after that is a Floto re-scan meaningful. Expect 12 of 13 cleared and #10 to possibly
 re-appear.
+
+---
+
+## §209 — The web fixes are LIVE; the push deployed them, not the CLI (2026-08-30)
+
+Follows §208 (Floto audit). Owner approved after previewing, then asked for commit + push
++ deploy.
+
+- Commit `fe06411` on `fix-sprint`, pushed `87abdd3..fe06411`. 9 files, +129/−49.
+- **Staged by hand, not by `git add`.** `docs/guides/BRAIN.md` held three uncommitted
+  sections at once: another session's §207 (build 66), my §208, and a *second* §208 from a
+  third session (pre-Play audit — a real number collision, the class `.claude/CLAUDE.md`
+  warns about). Staged only my own §208 by rebuilding the blob from `git show :` + my 57
+  lines and `git update-index --cacheinfo`. Verified append-only: `60 0 docs/guides/BRAIN.md`,
+  hunk `@@ -16149,0 +16150,60 @@`. §207 and the colliding §208 are untouched in the tree.
+- `mobile/pubspec.yaml` and `release_gate.dart` deliberately left dirty — they belong to
+  §207's build-66 work.
+
+**The deploy needed no CLI.** The Vercel project is Git-connected, so the push itself built
+production. `vercel inspect https://miles-legal.vercel.app` → `target production`, created
+`3m ago`, immediately after the push. Running `vercel --prod` would have made a redundant
+second deployment; it was not run.
+
+**Verified on the live origin, not on localhost:**
+```
+all 8 changed files: live md5 == local md5   (index f02513b4…, site.css 924e5c25…)
+https://miles-legal.vercel.app measured in-browser at 1440×900:
+  distinctFontSizes [12,13,14,15,17,22,26,40,72]   headingSkips none
+  deflist "503px 503px"  ddWidth 503 ≈ 67 chars    horizontalOverflow false
+  cta linear-gradient(135deg,…) border 0px color rgb(252,239,230)
+  nav 15px, 44px tap target
+```
+
+**Still open:** nothing on this thread. Two carry-overs from §208 that were not part of it:
+`.foot-copy` / `.foot-links a` are still `--faint` on `--night-deep` (under 3:1), and Floto
+finding #10 was disproved rather than fixed, so a re-scan may report 1 of 13 again. The
+offered follow-up — `web/tool/audit.mjs` as a repeatable gate for font-size census, heading
+outline, measure, contrast, tap targets and overflow — is designed but not built; owner has
+not asked for it.
