@@ -16246,3 +16246,154 @@ finding #10 was disproved rather than fixed, so a re-scan may report 1 of 13 aga
 offered follow-up — `web/tool/audit.mjs` as a repeatable gate for font-size census, heading
 outline, measure, contrast, tap targets and overflow — is designed but not built; owner has
 not asked for it.
+
+---
+
+## §210 — Floto re-scan 70 → 62: the CTA fix was mine to answer for, and a page that paints at opacity 0 (2026-08-30)
+
+Second scan of `https://miles-legal.vercel.app/`, 2026-08-30, after §208/§209 shipped.
+**Score fell 70 → 62.** Issues 13 → 11, but majors **2 → 4**, and majors are what the score
+weighs. Numbering below is the NEW report's.
+
+**The regression I caused.** §208 turned the "Coming to Google Play" pill from a ghost
+button into a solid `--cta` fill, because scan 1 called the primary CTA visually
+understated. Scan 2 calls the same element a **Major false affordance**: a
+high-emphasis, non-interactive button. Both scans are right; §208 answered the first by
+putting the page's heaviest styling on the one element that does nothing. New #10 is the
+same mistake seen from the other side — the only working action in the hero, "See how it
+protects you", was a plain text link beside it.
+Resolution: **weight belongs on the functional element.** `See how it protects you` is now
+`.btn` (solid, 52px) and comes FIRST; the Play item is a 44px dashed, muted badge that
+reads as informational. The closing section got the same real action, which it never had.
+
+**The root cause under #9, and probably #2 and #6.** Floto called
+`One space, for the two of you.` "nearly invisible". Measured contrast of that heading:
+**11.6:1**. It was not a contrast problem — the block was captured at `opacity: 0`.
+Every entrance on this page reaches its visible state only by RUNNING a CSS transition,
+and **a document that is never rendered never advances one**. Reproduced exactly:
+```
+document.hidden = true
+hero h1/sub/cta/caption opacity = 0,0,0,0     (html class already "js hero-go")
+13/13 .reveal blocks       opacity = 0        (.in already applied)
+```
+`hero-go` and `.in` land on schedule and the page still paints blank — forever. Any
+crawler, screenshot service, offscreen render or hidden tab sees an empty page.
+Fix: `.reveal-now` sets the finished state *declaratively* (`opacity:1;transition:none`),
+applied immediately when `document.hidden` at load. Same conditions after:
+```
+13/13 reveals opacity 1 · hero h1/sub/cta/caption all 1 · html "js reveal-now hero-go"
+```
+Reveal choreography is unchanged for a rendering visitor; `rootMargin` now starts each fade
+a fifth of a viewport early, and a block *jumped past* rather than scrolled to skips the
+fade instead of starting one nobody will watch.
+
+**A fix I "verified" that was width-specific.** §208's `min-height:2.4em` on the ritual
+cards hard-codes two lines. I measured it at 1440 and called it done. At a container of
+**880px the fourth heading takes three lines** (`heights=[53,53,53,79]`) and the row broke
+again — new #7. `min-height` was the wrong mechanism. Cards now drop to 2-up below 941px,
+where a 4-up card is too narrow for two lines. Swept 902→1152px container in 4-up and
+940/561/375 viewports in 2-up: aligned everywhere.
+
+**A finding I wrongly dismissed.** §208 called old-#10 a false positive because heading and
+grid measure identically (both left=137, width=1152). Scan 2 restates it precisely — the
+heading sits left of the *card's text*, not its box — and it is **right**. The card chrome
+is deliberately faint, so the eye reads ink edges. `.head-block` now takes the inset of
+whatever sits under it (`:has()`, graceful without): 137 → **157 vs card text 158**.
+
+**Measured, before → after**
+
+| # | Finding | Before → after |
+|---|---|---|
+| 1+10 | Major: solid button that does nothing; real link suppressed | badge `--cta`/52px/first → dashed `--surface-1`/44px/second; `.btn` solid, functional, first |
+| 2 | Major: dead space before the footer | caption→brand **301 → 133px**, →columns **443 → 259px** |
+| 3 | Major: footer email off the column grid | rowTops `[6682,6715,6749]` vs `[6678,6707,6736]` → **identical in all three columns** |
+| 4+5 | 5 centred lines of body copy | `text-align: left` (measure was already 66 chars — never the problem) |
+| 6 | card floats, page bottom-heavy | above/below **240/84 → 120/84** |
+| 7 | 4th card heading wraps, row breaks | 4-up now ≥941px; aligned at every width swept |
+| 8 | heading off the card's ink axis | 137 → **157**, card text 158 |
+| 9 | Major: heading "nearly invisible" | opacity **0 → 1** under `document.hidden` |
+
+**Not fixed — needs the owner, not code (#11, Suggestion).** `milesapp.officials@gmail.com`
+on an "official" developer contact. Fixing it means buying a domain and a mailbox, then
+updating the address in all 7 footers, `security.html`, `.well-known/security.txt` and the
+Play listing. Not something to invent.
+
+**Verified:** 9 distinct font sizes, zero heading skips on all 9 pages, 67-char measure,
+44px nav target, no horizontal overflow at 375/561/940/1440, zero console errors, all 9
+pages 200. Footer grid confirmed visually.
+
+**Not verified:** nothing is committed or deployed — this is working-tree only, and
+`git status` shows another session mid-flight across `mobile/`, `supabase/` and both docs.
+Only `web/` is mine.
+
+**Still open / exact next step:** owner reviews `git diff web/`, then commit + push (the
+Vercel project is Git-connected, §209 — the push IS the deploy). Then re-scan. The score is
+Floto's to give; 10 of 11 are closed in code and #11 needs a domain.
+
+---
+
+## §211 — "RD Developers" out of the footer address block (2026-08-30)
+
+Owner's call, on top of §210's still-uncommitted `web/` diff.
+
+- Checked before deleting, because a developer name on a store-facing site is a
+  disclosure, not decoration. It survives in five other places:
+```
+csae.html:270        <tr><td>Publisher</td><td>RD Developers</td></tr>
+security.html:312    <tr><td>Publisher</td><td>RD Developers</td></tr>
+privacy-policy.html:43   Miles is published by <strong>RD Developers</strong>
+privacy-policy.html:508  <p>RD Developers<br>
+*.html (7 pages)     <p class="foot-copy">© 2026 Miles · Developed by RD Developers</p>
+```
+- Removed only `<span><strong>RD Developers</strong></span>` from `<address class="foot-dev">`
+  on all 7 pages. Postal address and mailto untouched.
+- Rendered check: Developer column is now email → address; `stillSaysRD:false` inside
+  `.foot-dev`, copyright line unchanged. Footer row tops still share a baseline
+  (`Product [6510,6539,6568]`, `Legal [6510,…]`, `Developer [6510,6539]`), no overflow.
+
+**Still open:** unchanged from §210 — `web/` is working-tree only, and #11 (the gmail
+address) still needs a domain purchase.
+
+### §209 addendum 1 — owner rulings applied, and two edge functions deployed (2026-08-30)
+
+Three decisions taken by the owner in-session, and what was done with each.
+
+**1. Personal Vault -> "make the docs honest".** Verified the premise myself before touching
+a published page: `vault_repository.dart` calls `_uploadPlain` for both the original and
+the thumbnail, and the comment beside it records the OWNER RULING of 2026-08-28 — the E2EE
+tile pipeline produced three builds of black tiles, so the vault's guarantee became the PIN
+gate, FLAG_SECURE and owner-only RLS. So the code was deliberate; only the documents were
+never updated. Corrected in nine places: `web/security.html` (moved from the E2EE table to
+the not-E2EE row), `web/privacy-policy.html`, `docs/legal/privacy-policy.md`,
+`web/terms.html`, `web/faq.html`, `web/csae.html` (it told authorities vault files were
+ciphertext — they are producible), `faq_text.dart` (ships inside the APK),
+`THREAT-MODEL.md` (four claims), and the two Dart doc comments that sat directly above the
+plaintext write. Verified afterwards: a grep for vault + encrypted/ciphertext/E2EE returns
+only the dead legacy `vault_items` table and the chat ciphertext cache, both correct.
+
+**2. `partner_gate_opens_at` -> "leave it".** Production untouched. Accept stays broken on
+build 64 until 66 is installed; it only bites if a ceremony is started before upgrading.
+
+**3. Edge functions -> "deploy both now".** Done, and read back rather than assumed:
+- `map-token` version 2 -> **3**, `giphy-key` version 1 -> **2**, `verify_jwt: true` on both
+  (checked before and after — the deploy did not flip it, which is the thing §209 worried
+  about for a CLI deploy).
+- Readback confirms both deployed bodies now carry `not_in_a_couple`,
+  `membership_check_failed` and `secret_read_failed`.
+- This also closes D9-01: the deployed map-token v2 was missing the `secret_read_failed`
+  fix AND still had the latching `return json({ token: "", configured: false })` catch. Its
+  header comment ALSO claimed "Only a signed-in member of a couple gets a token" while no
+  such check existed — the comment was aspirational; it is now true.
+- Scope of proof: readback of the returned body, not a byte-diff — the tool returns content,
+  and transcribing it back to disk to run `diff` would have been the transcription risk it
+  was meant to remove. All three guard markers and the corrected headers are present.
+
+**Gates after every edit above:** `flutter test` -> `02:42 +1373: All tests passed!`;
+`flutter analyze --no-pub` -> `564 issues found`, errors+warnings **0**.
+
+Two `map-token`/`giphy-key` header comments were rewritten in the same change, because both
+asserted "holding an account is the whole bound" directly above the new membership check —
+shipping that would have recreated the doc-truth defect this audit exists to remove.
+
+Still open and unchanged: the keystore (owner, interactive), the first R8 build, the
+two-handset walkthrough, and the one capture that settles the decrypt fix.

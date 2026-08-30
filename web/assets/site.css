@@ -89,8 +89,8 @@ a:hover{color:var(--cream)}
 @media (max-width:640px){.shell-nav .hide-s{display:none}}
 
 /* ---------- shell: footer ---------- */
-.shell-foot{border-top:1px solid var(--divider);margin-top:var(--s8);
-  padding:var(--s6) var(--s4) var(--s7);background:var(--night-deep)}
+.shell-foot{border-top:1px solid var(--divider);margin-top:0;
+  padding:var(--s6) var(--s4) var(--s6);background:var(--night-deep)}
 .shell-foot-in{max-width:72rem;margin:0 auto;display:flex;flex-direction:column;
   gap:var(--s4);align-items:center;text-align:center}
 .shell-foot .tag{font:italic 400 1.0625rem/1.4 var(--f-display);color:var(--taupe)}
@@ -102,15 +102,32 @@ a:hover{color:var(--cream)}
 /* ---------- landing structure ---------- */
 .band{padding:var(--s8) var(--s4)}
 @media (max-width:640px){.band{padding:var(--s7) var(--s4)}}
+/* The finale is one unit — the film, the line, the badge — and it was floating
+   in 240px of dark while the page ended 84px below it: bottom-heavy. Pull in
+   the floor of the section above and the ceiling of this one. The footer
+   supplies its own top padding, so the last band need not floor the page too. */
+main>section:nth-last-child(2){padding-bottom:var(--s7)}
+main>section:last-child{padding:var(--s6) var(--s4) var(--s7)}
 .band-in{max-width:72rem;margin:0 auto}
 .band-tight{max-width:34rem;margin:0 auto;text-align:center}
+/* Headings and one-liners centre well. A five-line paragraph does not — the eye
+   has to hunt for the start of every line. */
+.band-tight .t-body-l{text-align:left}
 .band-deep{background:var(--night-deep)}
 .stack>*+*{margin-top:var(--s4)}
 .stack-s>*+*{margin-top:var(--s3)}
 /* the status line explains the CTA above it — it needs air, not adjacency */
 .stack>.hero-cta+.t-caption{margin-top:var(--s5)}
 .block-link{margin:var(--s6) 0 0}
-.head-block{margin-bottom:var(--s6)}
+.head-block{margin-bottom:var(--s6);padding-left:var(--axis,0)}
+/* The card chrome is deliberately faint, so the eye reads TEXT edges, not box
+   edges — a heading at the box edge stair-steps against copy inset by padding.
+   Each section adopts the inset of whatever sits beneath it. */
+.band-in:has(> .grid-4) .head-block{--axis:var(--s4)}
+.band-in:has(> .grid-2 > .card) .head-block{--axis:var(--s5)}
+.band-in:has(> .faqset) .head-block{--axis:var(--s5)}
+.band-in:has(> .panel) .head-block{--axis:var(--s6)}
+@media (max-width:640px){.band-in:has(> .panel) .head-block{--axis:var(--s4)}}
 .head-block .t-eyebrow{margin-bottom:var(--s3)}
 
 /* hero */
@@ -162,8 +179,10 @@ a:hover{color:var(--cream)}
 /* cards */
 .grid-2{display:grid;gap:var(--s5);grid-template-columns:repeat(2,minmax(0,1fr))}
 .grid-4{display:grid;gap:var(--s4);grid-template-columns:repeat(4,minmax(0,1fr))}
-@media (max-width:860px){.grid-2,.grid-4{grid-template-columns:1fr}
-  .grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:860px){.grid-2{grid-template-columns:1fr}}
+/* Below ~940px a 4-up card is too narrow for "Games & Watch Together" to fit in
+   two lines; it took three and dragged its own body copy out of the row. */
+@media (max-width:940px){.grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:560px){.grid-4{grid-template-columns:1fr}}
 .card{background:var(--surface-1);border:1px solid var(--edge-12);
   border-radius:18px;padding:var(--s5)}
@@ -193,9 +212,13 @@ a:hover{color:var(--cream)}
 .btn:hover{transform:translateY(-2px);color:var(--cream)}
 .btn-ghost{background:none;border:1px solid var(--edge-30)}
 .btn-ghost:hover{border-color:var(--gilt)}
-.chip-play{display:inline-flex;align-items:center;gap:var(--s2);height:52px;
-  padding:0 var(--s5);border-radius:999px;background:var(--cta);border:0;
-  font:600 .875rem/1 var(--f-body);color:var(--cream);cursor:default}
+/* Informational, and it must LOOK informational: a dashed edge and a muted
+   fill are the difference between "coming soon" and a button that does
+   nothing when you press it. The primary weight belongs to .btn beside it. */
+.chip-play{display:inline-flex;align-items:center;gap:var(--s2);height:44px;
+  padding:0 var(--s4);border-radius:999px;background:var(--surface-1);
+  border:1px dashed var(--edge-30);font:600 .875rem/1 var(--f-body);
+  color:var(--taupe);cursor:default}
 .arrow-link{font:600 .875rem/1 var(--f-body);color:var(--ember-soft)}
 
 /* definition list (security section) */
@@ -278,6 +301,16 @@ details.qa p{margin:var(--s3) 0 0;color:var(--taupe);
   color:#fff;background:var(--cta);border:0;border-radius:16px;
   padding:16px 28px;cursor:pointer}
 
+/* Finished state, arrived at without animating. Used when the document is not
+   being rendered (hidden tab, headless crawler, screenshot service) — there a
+   transition never advances, so anything that only becomes visible BY
+   transitioning would stay at opacity 0. Also used per-block when the reader
+   jumped past it rather than scrolling to it. */
+.js.reveal-now .h-near,.js.reveal-now .h-far,.js.reveal-now .h-rise,
+.js.reveal-now .reveal{opacity:1;transform:none;transition:none}
+.js.reveal-now .h-thread{stroke-dashoffset:0;transition:none}
+.js .reveal.in.now{transition:none}
+
 /* ---------- reduced motion: finished states, never faster ---------- */
 @media (prefers-reduced-motion:reduce){
   .js .h-near,.js .h-far,.js .h-rise,.js .reveal{opacity:1;transform:none;transition:none}
@@ -345,7 +378,7 @@ details.qa summary{transition:color var(--t-instant) var(--ease-enter)}
 details.qa:hover summary{color:var(--starlight)}
 
 /* ---------- footer v2: three columns + the developer block ---------- */
-.shell-foot-in{align-items:stretch;text-align:left;gap:var(--s6)}
+.shell-foot-in{align-items:stretch;text-align:left;gap:var(--s5)}
 .foot-top{display:flex;flex-direction:column;gap:var(--s2);align-items:center;
   text-align:center}
 .foot-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
@@ -355,10 +388,13 @@ details.qa:hover summary{color:var(--starlight)}
   text-transform:uppercase;color:var(--faint);margin:0 0 var(--s3)}
 .foot-col ul{list-style:none;margin:0;padding:0;display:flex;
   flex-direction:column;gap:var(--s2)}
-.foot-col a{font:400 .875rem/1.5 var(--f-body);color:var(--taupe)}
+/* The link lists and the address block are three columns of one grid, so they
+   have to share a row pitch: same box type, same line-height, same gap. */
+.foot-col li,.foot-dev>*{display:block;font:400 .875rem/1.5 var(--f-body)}
+.foot-col a{display:block;font:400 .875rem/1.5 var(--f-body);color:var(--taupe)}
 .foot-col a:hover{color:var(--cream)}
-.foot-dev{font:400 .875rem/1.6 var(--f-body);color:var(--taupe);
-  font-style:normal}
+.foot-dev{display:flex;flex-direction:column;gap:var(--s2);font-style:normal;
+  font:400 .875rem/1.5 var(--f-body);color:var(--taupe)}
 .foot-dev strong{font-weight:600;color:var(--cream-92)}
 .foot-dev a{color:var(--ember-soft)}
 .foot-dev a:hover{color:var(--cream)}

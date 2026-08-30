@@ -85,10 +85,12 @@ other. It is not assumed for anything involving a third person.</p>
 
 <p>This decides what enforcement is even possible, so it is stated plainly.</p>
 
-<p>Some of Miles is end-to-end encrypted: Memory Threads, the text of Wish Jar
-entries, and files you put in the private Vault are encrypted on your phone
-before they leave it, and the server stores ciphertext it cannot open. Nobody
-operating the service can read those out of the database.</p>
+<p>Some of Miles is end-to-end encrypted: Memory Threads and the text of Wish Jar
+entries are encrypted on your phone before they leave it, and the server stores
+ciphertext it cannot open. Nobody operating the service can read those out of
+the database. The private Vault is not in that set — it is guarded by its PIN,
+by a block on screenshots, and by access rules that admit nobody but you, but
+its contents are stored unencrypted.</p>
 
 <p>That is not the same as a promise they can never be read, and the difference
 is yours to know. So that reinstalling the app does not destroy your history,
@@ -233,10 +235,8 @@ who else touches the data, and how long any of it survives.</p>
       <div class="foot-col">
         <h3>Developer</h3>
         <address class="foot-dev">
-          <strong>RD Developers</strong><br>
-          <a href="mailto:milesapp.officials@gmail.com">milesapp.officials@gmail.com</a><br>
-          Sector C Commercial Area,<br>
-          Bahria Town, Lahore
+          <a href="mailto:milesapp.officials@gmail.com">milesapp.officials@gmail.com</a>
+          <span>Sector C Commercial Area,<br>Bahria Town, Lahore</span>
         </address>
       </div>
     </div>

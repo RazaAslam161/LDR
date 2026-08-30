@@ -26,17 +26,36 @@
   requestAnimationFrame(function () { requestAnimationFrame(go); });
   setTimeout(go, 400);
 
-  /* ---- scroll reveals: one per section, once ---- */
+  /* ---- scroll reveals: one per section, once.
+     Everything on this page becomes visible by RUNNING a transition, and a
+     document that is never rendered never advances one — a hidden tab, a
+     headless crawler, an offscreen screenshot. hero-go and .in get added on
+     schedule and the page still paints at opacity 0, forever. So the finished
+     state has to be reachable without animating: that is .reveal-now, and a
+     document that is hidden at load gets it immediately.
+     For a document that IS rendering, rootMargin starts each fade a fifth of a
+     viewport early so it has finished by the time the block is read, and a
+     block that was jumped PAST rather than scrolled to skips the fade — nobody
+     is watching an animation they arrived below. ---- */
   var revealed = document.querySelectorAll(".reveal");
-  if ("IntersectionObserver" in window && revealed.length) {
+  function showEverything() {
+    document.documentElement.classList.add("reveal-now");
+    revealed.forEach(function (el) { el.classList.add("in"); });
+  }
+  if (document.hidden) {
+    showEverything();
+  } else if ("IntersectionObserver" in window && revealed.length) {
     var ro = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
-        if (e.isIntersecting) { e.target.classList.add("in"); ro.unobserve(e.target); }
+        if (!e.isIntersecting) return;
+        if (e.boundingClientRect.top < 0) e.target.classList.add("now");
+        e.target.classList.add("in");
+        ro.unobserve(e.target);
       });
-    }, { threshold: 0.2 });
+    }, { threshold: 0, rootMargin: "0px 0px 20% 0px" });
     revealed.forEach(function (el) { ro.observe(el); });
   } else {
-    revealed.forEach(function (el) { el.classList.add("in"); });
+    showEverything();
   }
 
   /* ---- ambient canvas ---- */
