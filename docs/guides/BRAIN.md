@@ -17993,3 +17993,24 @@ scene + screen goldens re-rendered; full-suite verdict follows this entry.
 walkthrough are the untested paths; analyze still exits 1 on 570 pre-existing infos.
 
 **Full suite after both motion fixes: `01:50 +1419 ~2: All tests passed!`** (goldens re-rendered 17/17 first). Tree left as found — scratch harness and frame dumps deleted; nothing committed.
+
+### §228 addendum 3 — committed and pushed (2026-08-30)
+
+`ce528c2` on `fix-sprint`, pushed to origin — 38 files, +4643/−354. Verified before
+the commit, against the exact STAGED tree (repo_hygiene reads `git ls-files`, so the
+index is what it tests): `flutter test` → `01:49 +1419 ~2: All tests passed!`.
+Remote and local HEAD both `ce528c2`; working tree clean.
+
+- Staged BY NAME, never `-A`. Shared files hunk-checked first: pubspec carried only
+  the `assets/scene/` hunk (no concurrent version bump to trample), BRAIN was 342 pure
+  insertions with §223 — the other session's — untouched. `release_gate.dart` had been
+  committed by that session in `052be27` and was already clean.
+- `.gitignore` gained `art_drop/` (~119MB of raw generations and preview video) and
+  `mobile/test/widget/preview/` (3.3MB of regenerable preview PNGs; the repo tracks no
+  goldens anywhere, and nothing asserts against these — `--update-goldens` rewrites
+  them). The shipped cutouts in `mobile/assets/scene/` (428KB, 12 files) ARE tracked.
+- One amend, pre-push, message typo only. No history shared at the time.
+
+**Unchanged and still open**: the device pass (60fps on the OnePlus) and the two-phone
+walkthrough — kill the initiator's app at T+1m, partner released at T+24h by cron —
+remain the untested paths. Source sits at build 67; no APK built (owner's rule).
