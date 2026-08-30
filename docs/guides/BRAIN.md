@@ -17205,3 +17205,40 @@ commits, no device installs.
 - Working tree at start: single modified file `mobile/lib/features/chat/chat_repository.dart`
   (+25/−8, the §214 telemetry fix). This audit will not add tree changes.
 - Next step: findings report (attack → steelman → verdict) + closing BRAIN section.
+
+## §80 — the speed chip was a shared control wearing a private face (2026-08-24)
+
+Reported from a handset with a screenshot: three voice notes on screen, tap 1.5x on one, the
+number changes on all three.
+
+Not a state bug. The rate was never per-note — it is one remembered setting, which is what was
+asked for and what makes it worth having (every other messenger resets to 1x on the next note).
+The defect was that `_speedChip()` was drawn on EVERY voice bubble while reading one global value
+(`voice.speed` -> `VoicePrefs.instance.speed`), so a control that looked like it belonged to one
+message mutated state shared by all of them, and every bubble repainted with the new number. It
+did exactly what it was built to do, and what it was built to do reads as data corruption.
+
+The fix is NOT per-note speed. That would mean setting the rate again on every note, which is the
+annoyance the feature exists to remove. It is to stop drawing the control on notes it is not
+about: `VoiceNotePlayer.isCurrent(id)` is new, `VoiceNoteBubble` takes `current`, and the chip
+renders only on the note the player actually holds — playing or paused. Speed still persists, so
+the next note you play already shows 1.5x, which is where the setting becomes discoverable again.
+
+No layout shift from the chip appearing: the waveform is a fixed 132px and the row beneath it
+(clock + chip) is ~62px at its widest, so the Column's width is pinned by the wave either way.
+
+Verified: `flutter test` 1380 passed / 1 failed, `flutter analyze mobile` 0 errors / 0 warnings
+(564 infos). New `test/widget/voice_speed_chip_test.dart` (5 tests) fails on the old behaviour —
+"exactly one chip appears, on the note the player holds" found two before the change.
+
+The one failure is NOT this work: repo_hygiene's "every source path a test names actually exists"
+is red on `lib/features/unlink/unlink_chat_page.dart`, deleted by `87abdd3` while
+`test/unit/unlink/unlink_source_law_test.dart` still reads it. That is the unlink session's to
+close, and it is mid-flight in this same checkout.
+
+Still open, unchanged from §79: nothing in the voice-note work has run on a handset except this
+one report. The four device claims listed there stand.
+
+Exact next step: whoever owns unlink updates `unlink_source_law_test.dart` to stop naming the
+deleted page. For voice notes, sideload and confirm the chip now appears only on the note being
+played.
