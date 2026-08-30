@@ -125,6 +125,7 @@ class _OriginalBody extends StatelessWidget {
           peaks: VoicePeaks.decode(message.voicePeaks),
           messageId: message.id,
           speed: voice.speed,
+          current: voice.isCurrent(message.id),
           onCycleSpeed: () => unawaited(voice.cycleSpeed()),
           playerTotal: voice.totalOf(message.id),
           onSeek: (at) => unawaited(voice.seek(message.id, url, at)),

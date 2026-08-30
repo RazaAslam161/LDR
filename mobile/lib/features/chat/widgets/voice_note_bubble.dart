@@ -105,6 +105,16 @@ class VoiceNotePlayer extends ChangeNotifier {
   bool isPlaying(String messageId) =>
       _currentId == messageId && _player.playing;
 
+  /// Whether THIS message is the one the player holds — playing or paused.
+  ///
+  /// The speed chip hangs off this rather than off [isPlaying]. Speed is one
+  /// setting for the conversation, not a property of a message, and drawing it
+  /// on all three hundred bubbles made a shared control look like a private
+  /// one: tapping 1.5x on one note visibly changed the number on every other
+  /// note, which reads as a bug however it was meant. On the note actually
+  /// loaded, the same tap reads as what it is.
+  bool isCurrent(String messageId) => _currentId == messageId;
+
   /// The rate every note plays at, remembered across notes and across launches.
   double get speed => VoicePrefs.instance.speed;
 
@@ -340,6 +350,7 @@ class VoiceNoteBubble extends StatefulWidget {
     this.onScrub,
     this.playerTotal,
     this.unplayed = false,
+    this.current = false,
     super.key,
   });
 
@@ -393,6 +404,13 @@ class VoiceNoteBubble extends StatefulWidget {
 
   /// Never listened to. Drawn as a dot, and only ever on the partner's notes.
   final bool unplayed;
+
+  /// This is the note the conversation's player currently holds.
+  ///
+  /// Gates the speed chip, and only the speed chip. The rate is one setting
+  /// shared by every note — showing it on all of them turned a playback control
+  /// into what looked like a per-message one.
+  final bool current;
 
   @override
   State<VoiceNoteBubble> createState() => _VoiceNoteBubbleState();
@@ -658,7 +676,10 @@ class _VoiceNoteBubbleState extends State<VoiceNoteBubble> {
                 // keeps exactly the spacing it has today rather than gaining a
                 // hole where the time would have been.
                 if (time != null) ...[time, const SizedBox(width: 8)],
-                _speedChip(),
+                // Only on the loaded note. The chip changes a setting the whole
+                // conversation shares, so putting one on every bubble meant a
+                // single tap silently rewrote the number on all of them.
+                if (widget.current) _speedChip(),
               ],
             ),
           ],

@@ -3298,6 +3298,7 @@ class _Content extends StatelessWidget {
             peaks: VoicePeaks.decode(m.voicePeaks),
             messageId: m.id,
             speed: voice.speed,
+            current: voice.isCurrent(m.id),
             onCycleSpeed: () => unawaited(voice.cycleSpeed()),
             playerTotal: voice.totalOf(m.id),
             onSeek: (at) => unawaited(voice.seek(m.id, url, at)),
