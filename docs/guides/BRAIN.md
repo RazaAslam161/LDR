@@ -18296,3 +18296,412 @@ a build carrying this diagnostic, then
 received_at desc;` — different `from=` prefixes ⇒ re-derive/republish on the stale device;
 identical prefixes ⇒ the private key behind that public key is gone and the repair is a
 rewrap. **Not shipped yet**: this needs build 70 on both handsets.
+
+## §234 — Presence wears a face: the owner's cast replaces the circle (2026-08-31)
+
+Owner: replace the presence "circle shaped animation" with the 3D characters, by gender,
+on BOTH surfaces — "don't destroy" the realtime sync. Then, on seeing the first result:
+"you still generate character in sheet which is clearly not a 3d motion characters, it
+only pictures of characters pasted in circle! i want real living 3d motion animated."
+
+**The seam, and why the sync survived untouched.** `partner_here_badge.dart` reads every
+provider ABOVE line :299; `_PresenceAvatar` (:385) and `_AuraPainter` (:579) never call
+`ref`. The whole change lives below that line. `PartnerScreenNotifier`, the
+`screen_presence:<coupleId>` channel, `presence_service.dart`, `presence_route_observer`
+and the isHere/canJoin derivation were not opened. Proof, not assertion: every
+`test/unit/presence/*` and `presence_publishes_in_tree_test.dart` passes UNMODIFIED.
+
+**What shipped**
+- `assets/presence/{m,f}_bust.webp` (512px, alpha, 54KB the pair) — head-and-shoulders
+  cut from the full-res originals in `art_drop/cut/` (717x1440 / 895x1536), framed by
+  rendering candidate crops and LOOKING at them: male viewport 500 @ (-55,-45), female
+  470 @ (-30,-49), chosen so the two faces read at the same scale in one circle.
+- `core/widgets/presence_character.dart` (new, in `motionSet`): `PresenceArt` — a lazy
+  PER-VARIANT loader, decoded at 256px. Deliberately not `SceneArt`, which is
+  all-twelve-or-nothing (~400KB) and would decode the whole doorstep on twenty screens.
+  `PresenceCharacter` — takes its clock as a PARAMETER, so it adds no ticker anywhere.
+- The badge: the disc keeps its gradient, ring and glow and becomes the light behind a
+  person. Gender comes from `partnerProfileProvider` (the PARTNER, not the signed-in
+  user) through the existing `puppetVariantOf`. Null gender -> neutral -> the letter,
+  unchanged, and that path is live by design (role-setup's sign-out escape).
+- Home `_Avatar`: precedence is check-in photo -> figure -> letter. A photo they chose to
+  send is not replaced by a stand-in; the figure takes the letter's place.
+- Gates EXTENDED, never widened: `assets/presence` added to asset_hygiene with its own
+  150KB ceiling and into the 6MB total; `presence_character.dart` added to `motionSet`.
+
+**The motion, after the owner's correction.** v1 was a still with a breath and a sway —
+the owner was right, it was a picture in a circle. v2 puts the figure in a projected
+space: `Matrix4..setEntry(3,2,0.0011)` with rotateY/rotateX about the MEASURED neck
+pivot, so the head genuinely turns — one side compresses, the other opens out. Gaze and
+nod are each two sines with non-dividing periods, so the idle never repeats a pattern the
+eye can learn. Breath and sway are the doorstep's own idiom (`ritual_scene.dart:687`).
+
+**Cut, with the evidence that cut it: the blink.** Built three ways — lid sourced from
+the brow strip (dragged the eyebrows down as a dark bar), from the forehead (a flat
+smear), then with a drawn lash line and a snap-hold-release curve (still a smear). Every
+filmstrip is why it is gone rather than dormant; the machinery was deleted. A blink needs
+eyelid geometry a still does not contain.
+
+**A defect I introduced and would have shipped on `exit 0`.** The first
+`flutter test` wrapper exited 0 while the suite printed "Some tests failed" — 11 red in
+`partner_here_badge_test.dart`. Root cause: `PresenceArt.ensureLoaded` is REAL bundle I/O,
+and calling it inside a `testWidgets` body completes in the fake-async zone mid-`pump`,
+which aborts that test and every one after it with "Guarded function conflict". Exactly
+the SceneArt class from §228 addendum. Fix is the repo's own: preload in `setUpAll`.
+Anything that mounts a screen with a GENDERED partner profile must do the same.
+
+**Verified**: `flutter analyze` on all three touched lib files — 0 errors, 0 warnings, and
+0 new infos (the 7 remaining sit outside my diff hunks, checked against `git diff -U0`).
+`partner_here_badge_test.dart` + `test/unit/hygiene/` — 74 passed. Two goldens rendered
+and LOOKED at: `preview/presence_sheet.png` (every state, both genders, both surfaces,
+motion-off, letter fallback) and `preview/presence_motion.png` (a filmstrip of one loop).
+**Open**: full-suite result lands after this entry. NO DEVICE PASS — perf and battery of
+the badge across 17 screens can only be proven on a handset, and that is the risky path.
+**Not done, and blocked on credits, not on code**: true rendered 3D motion (video frames
+generated from the busts, extracted with ffmpeg, played as a sequence). Priced at 14
+credits/clip against a balance of 0.38. That is the only path to a real blink and a real
+wave, and it needs a top-up.
+**Next**: full-suite verdict -> device pass on the OnePlus -> owner decides on credits.
+
+### §234 addendum — the suite verdict (2026-08-31)
+
+**Full default suite: 1426 passed, 3 skipped, `All tests passed!`** — including every
+`test/unit/presence/*` and `presence_publishes_in_tree_test.dart` UNMODIFIED, which is the
+evidence that the realtime seam was never crossed. Device pass still not run.
+
+### §234 addendum 2 — the cylinder mesh, and why pose-swapping was rejected (2026-08-31)
+
+Owner has no video credits, only image credits. Two free routes were evaluated.
+
+**Rejected: animating by swapping the poses already on disk.** `art_drop/cut/` holds a
+genuine second head angle for the MALE (`m_glance` — same character, same light, turned,
+positive expression; bust-cropped and looked at, it is clean). The female has NO usable
+second pose: `f_letter` carries the envelope into frame, and `f_worried` reads
+unmistakably SAD. Presence speaks about a real person who is not there to correct it —
+telling one partner the other is sad when she is not is a lie, and a male who looks
+around beside a female who cannot is a broken cast. Pose-swap is therefore blocked on
+art, not on code.
+
+**Shipped: a deformation mesh — `Canvas.drawVertices` + `ImageShader`.** The head is
+warped over a CYLINDER rather than tilted as a card: each mesh column takes the depth it
+would have on a cylinder (`z = sqrt(1 - x²)`) and rotates about the neck, so the nose
+travels further across the face than the ear does. That redistribution is the cue a rigid
+transform can never give, and it is Live2D's own technique. 9x11 grid, 160 triangles,
+topology built once per process. Weighted by `_rig(v)` so the shoulders stay planted;
+`_hairDrag` samples the same gaze curve slightly earlier in its own history, which is a
+free spring with no state carried between frames. Animations-off draws a plain
+`drawImageRect` — a mesh of an undeformed grid is strictly more work than the blit.
+The previous `Matrix4` perspective plane is deleted, not left beside it.
+
+**Verified**: `flutter analyze` on the file — `No issues found!`. Filmstrip re-rendered
+and looked at: features redistribute across the turn, hair trails, no melting.
+**Open**: full suite re-running after the mesh; device pass still not run.
+**Next**: owner generates the frame set specified in the reply (eyes-closed pair is the
+one that buys a real blink), then frames land as swap targets on top of this mesh.
+
+**Full suite after the mesh: 1426 passed, 3 skipped, `All tests passed!`**
+
+### §234 addendum 3 — generation source plates for the frame set (2026-08-31)
+
+**New: `art_drop/gen_src/{m,f}_bust_src.png`** — 1024x1024, alpha, cut from
+`art_drop/cut/*_calm.png` with the EXACT viewport the shipping busts use (male
+`500x500-55-45`, female `470x470-30-49`, both trimmed first). These are the plates the
+owner feeds the image tool, so anything generated from them is already registered against
+`assets/presence/*.webp` and can be swapped frame-for-frame.
+
+**Registration is the whole risk.** A blink built by swapping frames only works if the
+head does not move between them. The prompts therefore instruct an EDIT of the supplied
+plate, not a re-generation, and forbid every change except the named one. If a tool
+drifts anyway, the fallback is offline alignment on the head bounding box — not yet
+written, and only worth writing if drift actually shows up.
+
+**Wanted, in priority order**: `{m,f}_bust_shut.png` (eyes fully closed — buys a real
+blink and kills the smear problem that killed the painted lid), `{m,f}_bust_half.png`
+(the mid-frame that makes the blink smooth), `f_bust_glance.png` (a second head angle for
+her; the male already has one in `m_glance`, and shipping a look-away for him alone would
+be a broken cast).
+
+**Verified**: plates exported and LOOKED at — both correctly framed, alpha intact
+(`alphamean` 0.366 / 0.504). **Open**: nothing generated yet; blink still absent; device
+pass still not run. **Next**: owner generates at least the two `_shut` plates -> wire a
+frame-swap blink on top of the cylinder mesh -> re-render the filmstrip.
+
+### §234 addendum 4 — first frame delivery: art right, framing wrong (2026-08-31)
+
+Owner generated five plates and showed them in chat; **none were saved to `art_drop/`**,
+so this is a LOOKED-AT assessment, not a measured one — no pixel was processed.
+
+- **Male 5-step blink sheet** — a genuine open→shut progression, more frames than asked
+  for. Unusable as shipped: BLACK background (keying it will eat dark hair at the edges),
+  five INDEPENDENT full-body renders side by side rather than one head edited five times,
+  and the last step never fully closes.
+- **Male eyes-closed, transparent, full body** — correct character and a proper closure,
+  but the head is a small part of a full-body frame, so it must be upscaled into a bust.
+- **Female eyes-closed, transparent, bust** — the best plate of the five. Lids closed with
+  lashes, character and wardrobe intact.
+- **Two female eyes-open gaze variants** — candidates for the missing `f_glance`; the
+  left-looking one is the warmer of the two.
+
+**The one problem, and it is the one that was flagged in advance:** none are registered to
+`art_drop/gen_src/*_bust_src.png`. Framing, zoom and head position all drift. A
+frame-swap blink is only a blink if the head does not move between frames.
+
+**Not a reason to regenerate.** Offline registration (match head bounding box, then
+refine on the non-eye region, which is identical between frames) is cheaper than the
+owner's credits and is the next step — it needs the files on disk first. A subtle hair
+difference across a ~120ms blink is imperceptible; a head that jumps is not.
+
+**Open**: files not on disk; blink still unwired; device pass still not run.
+**Next**: owner saves the five plates into `art_drop/` under the agreed names -> measure
+head height in each (decides whether the male can be cropped from full-body or needs one
+re-gen at bust framing) -> register -> wire the frame swap.
+
+### §234 addendum 5 — the blink is real: rendered frames, registered offline (2026-08-31)
+
+Owner delivered four plates. **None had usable transparency** — `alphamean=1` with grey
+corners on both `_shut` files (the tool's checkerboard baked in as pixels) and
+`alpha=Undefined` on the glance (flattened onto white). None were registered to
+`gen_src/*_bust_src.png` either: different zoom, position and head scale.
+
+**Neither problem mattered, because of the shape of the fix.** A blink only needs the EYE
+BAND, which sits deep inside the silhouette — so nothing near an edge, and no background
+pixel, is ever touched. The eye band is transplanted onto the EXISTING bust, which keeps
+its own alpha and its own outline byte-for-byte. Verified: `alpha_mean` of each output
+equals the base exactly (0.3657 male / 0.5044 female).
+
+**Registration was solved by search, not by eye.** A brow-centroid attempt was skewed by
+her hair (blob pixel counts 10754 vs 32268). What worked: minimise mean-absolute
+difference over the NOSE+MOUTH box — identical whether the eyes are open or shut — across
+a scale/offset grid. Male `scale=1.0200 origin=(1123,44)`, female `scale=0.3260
+origin=(192,-10)`, MAD 3.91 on the female.
+
+**Two defects the previews caught, both mine:**
+1. First female composite left her RIGHT EYE OPEN and gave her a DOUBLE EYEBROW. Cause: I
+   had her eyes at x 232/305 from an early grid; the truth measured on a fine grid is
+   187/272, centre 232 — my ellipse was 36px too far right. Zoomed preview is the only
+   reason this was seen; at badge size it would have shipped.
+2. `turn == 0` fell INSIDE the blink window, so every badge in the app mounted with its
+   eyes shut and opened them a breath later — a wink on every screen change. Fixed with
+   `_blinkPhase = 1.7`; the filmstrip's first frame now pins it open.
+
+**Also corrected**: the mesh cylinder was centred at 0.50 for both figures. It is
+per-figure now (`_faceCentreFor`: male 0.511, female 0.448) — she is framed
+three-quarters, so turning her about the frame's centre swung her head about a point
+beside her own neck.
+
+**Shipped**: `assets/presence/{m,f}_bust_shut.webp` (24-26KB each). Directory now 104,582B
+against its 150KB ceiling. Blink is a two-frame CUT, not a fade — which is what an eyelid
+does at this speed — every ~11s for ~140ms, on a phase that never coincides with the
+breath. A missing shut frame costs only the blink: it is decoded second and its failure
+cannot take the open frame down.
+
+**Verified**: `flutter analyze` on the file — `No issues found!`. Filmstrip re-rendered and
+LOOKED at: turn 0 open, 151.5/151.6/151.7 shut, 151.2/151.85/152.1 open, on both figures.
+**Open**: full suite running at write time; DEVICE PASS STILL NOT RUN — badge perf and
+battery across 17 screens remains the one path a harness cannot prove.
+**Unused so far**: `f_bust_glance.png` (no alpha, flattened on white) and
+`m_bust_sheet.png` (black background, five independent renders). Neither is needed for the
+blink; the glance would give her the look-away the male already has in `m_glance`.
+**Next**: full-suite verdict -> device pass.
+
+**Full suite after the blink: 1426 passed, 3 skipped, `All tests passed!`** — presence sync tests still unmodified.
+
+## §235 — Build 70 on the OnePlus 8, and two build-system traps caught in the act (2026-08-31)
+
+Owner asked for an APK and an install. Version bumped in lockstep (pubspec `0.1.0+70`,
+`ReleaseGate.buildNumber = 70`; `version_lockstep` + `release_gate` tests green,
+`[release] miles-build-70 checked in, server says 70`).
+
+**Trap 1 — the wrong flavor, and why an uninstall was REFUSED.** `tool/release.sh` builds
+the SIDELOAD APK, which `build.gradle.kts:126` signs with the debug key on purpose. The
+install failed `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. The reflex fix — `adb uninstall` —
+was not run and must not be: it destroys the device's X25519 seed and, for anyone without
+an escrow row, their ability to read the couple's history (the rationale is already
+written at `build.gradle.kts:105-127`). Diagnosis instead: pulled the INSTALLED base.apk
+and compared certificates.
+- installed build 69: `CN=Miles, O=R&D Dev, C=PK`, SHA-256 `a37c59a5…` — the RELEASE key.
+- new sideload build 70: `CN=Android Debug`, SHA-256 `5f6a002c…`.
+So both phones are on the **play** flavor, which confirms §229 from the signing side.
+`flutter build apk --release --flavor play` signs with `signingConfigs.release`
+(`build.gradle.kts` play block) and upgrades in place with no data loss.
+
+**Trap 2 — a STALE SNAPSHOT that would have made this whole device pass meaningless.**
+The first play APK carried `miles-build-69` in all three `libapp.so` while claiming to be
+build 70 — the presence code was not in it at all. Caught only because release.sh's stamp
+check was re-run BY HAND against the hand-built APK. Then `flutter clean` printed
+"Failed to remove build" and **still exited 0**, leaving 12 stale `libapp.so` on disk —
+verbatim the failure `~/.claude/CLAUDE.md` warns about. Cleared with `gradlew --stop` then
+`rm -rf build`, and the postcondition asserted (`0 libapp.so`) rather than assumed.
+Rebuild: `stamps=['miles-build-70']`, signer `a37c59a5…`, 4 presence assets present.
+
+**Installed and verified on the OnePlus 8 (1896b4b3)**: `versionCode=70`, upgrade in
+place. Launched clean — logcat has NO `presence:` decode failure, no `E/flutter`, no
+FATAL. Screenshot: the Home card shows the FEMALE bust for the partner (gender routed
+from `partnerProfileProvider`), desaturated because she is offline — the designed "another
+room" state — and crisp at native resolution, so the 256px decode is enough for 64dp.
+`gfxinfo`: 497 frames, 3 janky (0.60%), 90th pct 5ms.
+
+**NOT verified, and it is the headline**: the AppBar badge was never on screen, because it
+only shows when the partner is fresh — so the breathing loop, the blink, the cylinder
+turn and the arrival dolly are all still unexercised ON HARDWARE. The filmstrip goldens
+are the only evidence they behave, and a golden is not a handset. Battery over time is
+likewise unmeasured.
+**Also open**: OnePlus 7 (a959ee2b) is still on build 69 — deliberately untouched, the
+owner asked for one phone. Presence cannot be exercised with one handset.
+**Next**: install 70 on the OnePlus 7 too, bring both online, and watch the badge on a
+busy screen — that is the only way the risky path gets exercised.
+
+### §233 addendum — build 70 checked on both handsets (2026-08-31)
+
+Owner built and installed 70 (it carries the concurrent session's presence work plus the
+69 fixes); this is the CHECK, not the build.
+
+    versionCode=70 on both   1896b4b3 18:55:59   a959ee2b 18:59:14   both processes alive
+
+**Healthy on both, seen not assumed.** Screenshots: the real Emberlight home — OnePlus 8
+"Elsa · Online", partner card, map, "27 m apart", full nav; OnePlus 7 the same from
+Steve's side. No grey window, no ritual takeover.
+
+**Fixed, and proven by absence in production:**
+
+    scene crashes (_paintStreet) since build 69 ....... 0
+    live ceremonies .................................. 0
+    build-70 error rows .............................. 2
+
+Both build-70 rows are the SAME open defect: `Positioned.applyParentData` `_TypeError`,
+now ~2 per launch rather than 6. Still not fatal, still unexplained, still not mine as far
+as three passing tests can show.
+
+**The note diagnostic has not fired yet** — `NoteUnreadable` rows: 0. It cannot: the
+ceremony ended, and the note only opens inside one. **The instrument is shipped and armed;
+answering the note question now needs a NEW ceremony**, with both people opening it once.
+
+**Launcher aliases now DIFFER between the two phones** — `a959ee2b` resolves to
+`.AliasMiles` (the owner got the icon back there), `1896b4b3` still `.AliasWeather`. Not a
+bug, and not something to "correct" without being asked: the cover is per-device and is
+the owner's choice on each.
+
+**Next, and it is one cheap change**: the `_TypeError` message names the actual parentData
+class ("type 'X' is not a subtype of type 'StackParentData'"), which identifies the real
+parent render object and ends the guessing — and it is safe to report, being framework
+TYPE NAMES only, on the same `_detail` whitelist that already carries ParseShortfall's
+counts. Not written yet: the owner said hold.
+
+Gate on that combined tree, finished after the entry above: `07:32 +1426 ~3: All tests
+passed!` — 1426 passed, 3 skipped, run against the working tree that build 70 was cut
+from (my committed 69 fixes plus the concurrent session's uncommitted presence work).
+Note the skip count moved 2 -> 3, which belongs to that session's change, not to mine.
+
+### §235 addendum — build 70 on BOTH phones, and the badge's CPU cost, MEASURED (2026-08-31)
+
+`versionCode=70` now on the OnePlus 8 (1896b4b3) and the OnePlus 7 (a959ee2b), both
+upgraded in place with the release key, no uninstall, no data loss. Both launched clean —
+no `presence:` decode failure, no `E/flutter`, no FATAL on either.
+
+**Gender routing PROVEN on hardware, in both directions**: the OnePlus 8 shows Elsa the
+FEMALE bust for her partner Steve... corrected — the OnePlus 8 (Steve's handset) shows the
+FEMALE bust for Elsa, and the OnePlus 7 (Elsa's handset) shows the MALE bust for Steve.
+Both in the 44dp AppBar badge and the 64dp Home circle. Offline reads desaturated, online
+reads full-colour, exactly as the goldens said.
+
+**THE BLOCKER, and it is not cosmetic.** One-variable test on ONE phone, ONE screen
+(Chat), only the badge's visibility flipped by taking the partner offline:
+
+| badge | frames / 25s | CPU |
+|---|---|---|
+| visible, ticker running | 405 | **86.2%** |
+| hidden, ticker stopped  |  49 | **34.4%** |
+
+~50 percentage points of CPU, sustained, on an idle screen — on a badge that is mounted on
+seventeen screens. Frame TIMING is fine (90th pct 5ms, jank 0.25-1.86%); the problem is
+that frames are produced at all, continuously, forever.
+
+**What is NOT established**: how much of that predates this change. The badge already ran
+a 60fps repeating controller before the character existed (`_AuraPainter` + the breathing
+gradient), and build 69 is no longer on either phone to compare against, so the honest
+statement is "the animating badge costs ~50pp" and NOT "the mesh costs ~50pp". Attributing
+it to the mesh without that baseline would be the exact error §CLAUDE.md warns about.
+
+**Next, in order**: (1) reinstall build 69 on ONE phone and repeat this identical
+measurement to split the cost between the old badge and the new mesh; (2) if the mesh is
+the driver, gate deformation on diameter — the cylinder is nearly invisible at 30dp and
+only earns its cost at the 64dp Home circle, so the badge can draw the plain frame;
+(3) consider whether the badge needs a 60fps ticker at all, or can breathe on a slower
+clock. **Do not raise `app_release.min_build` to 70** — this is not settled.
+
+### §235 addendum 2 — STOPPED: a live unlink appeared mid-session (2026-08-31)
+
+The CPU A/B was NOT run. Setting it up, both handsets were found showing the Doorstep:
+the OnePlus 8 as INITIATOR ("You closed the door"), the OnePlus 7 as the partner side.
+
+Production, read-only:
+
+    couple_unlink: state=cooling  initiated_by=Steve (a7a6485c…)
+    started_at        2026-08-31 14:05:42Z   (6 minutes before the query)
+    relink_opens_at   2026-08-31 14:20:42Z
+    cooling_ends_at   2026-09-01 14:05:42Z
+
+**It began DURING this session and I cannot rule myself out.** Nothing I ran was meant to
+touch the unlink flow — the only taps were the Chat tab (verified by screenshot) and an
+unlock swipe on the lock screen. The one mechanism I cannot clear is
+`adb shell monkey -p com.miles.miles -c android.intent.category.LAUNCHER 1`, used to
+launch the app on each phone: monkey injects an event, and "launch only" is an assumption
+about it, not a guarantee. **Do not use `monkey` to launch this app again — use
+`am start -n <pkg>/<activity>`, which injects nothing.**
+
+**Nothing is lost yet.** State is `cooling`; the relink path opens 14:20:42Z and the
+shared space is not closed until 14:05:42Z tomorrow. NO write was made to
+`couple_unlink` — reversing a couple's unlink is the owner's decision, not an agent's, and
+the row is left exactly as found.
+
+**Open**: the CPU A/B (build 69 vs 70) is unrun and remains the blocker for build 70;
+`app_release.min_build` still must NOT be raised. Both phones are on build 70.
+**Next**: owner decides on the unlink first. The perf A/B follows, and should be run on
+the OnePlus 8 (which already has build-70 numbers: 405 frames/25s @ 86.2% badge-visible,
+49 @ 34.4% badge-hidden) by downgrading THAT phone with `adb install -r -d` and repeating
+the identical measurement.
+
+## §236 — The Positioned error, found and fixed: LockScreen had two mount sites and could only satisfy one (2026-08-31)
+
+Open since §231 and unexplained for two days. **Root cause in one sentence: `LockScreen`
+returned a `Positioned.fill`, and `cover_gate.dart:141` pushes it as a
+`MaterialPageRoute`, where the parent is the route's own Semantics and not a Stack — so
+`Positioned.applyParentData` cast `BoxParentData` to `StackParentData` and threw.**
+
+**Found by enumeration, not by reading**: every widget that RETURNS a Positioned was
+listed with its mount sites. Exactly one had TWO, and one of those was not a Stack.
+Reproduced before touching anything, and debug mode printed what release had been hiding:
+
+    The ParentDataWidget Positioned(...) wants to apply ParentData of type
+    StackParentData to a RenderObject ... of incompatible type ParentData.
+    The offending Positioned is currently placed inside a Semantics widget.
+    chain: Material <- PopScope <- Positioned <- LockScreen <- Semantics <- Builder
+
+Release skips that assert, so the field only ever saw the `_TypeError` at
+`basic.dart:5171` — same defect, no name attached. That is also why `silenceLogsInRelease`
+made it unreadable on a handset while `client_errors` carried the stack.
+
+**Attribution, tested rather than asserted**: the pushing line arrived in `3c23fd5`
+(2026-08-30 09:52), AFTER build 67 was installed at 07:41 — which is exactly why the
+signature starts at 68 and why my Doorstep work looked guilty. `UnlinkEndOverlay` was
+never involved; its three exonerating tests were right.
+
+**The fix is the class, not the call site**: LockScreen no longer imposes a Stack on its
+callers — it fills whatever it is given, and main.dart (the one site that needs it to
+cover the app) wraps it in `Positioned.fill` there. cover_gate is untouched.
+
+**A tripwire test was deliberately inverted.** `lock_screen_overlay_test.dart` asserted
+that a RepaintBoundary between LockScreen and its Stack MUST throw, with its own comment
+asking that the rule be relaxed "deliberately rather than by accident" if LockScreen ever
+stopped being a Positioned. It has, so the file now pins the NEW contract from four
+sides: direct Stack child, behind a render object, pushed as a route, and covering the app
+at main.dart's mount. Not weakened — widened, and the reason is written where the next
+person will read it.
+
+**Verified**: the reproduction failed first and passes after (one variable — the wrapper);
+`flutter test test/widget/lock_screen_overlay_test.dart` → 4/4. Full-suite verdict follows.
+**Open**: the fix is in the tree only. It reaches the phones with build 71, which the
+owner has not asked for. The note (§233) is still unanswered and still needs a ceremony.
+
+Full suite after the fix: `03:44 +1428 ~3: All tests passed!` — 1428 passed, 3 skipped
+(1426 before, +2 net from the LockScreen contract file growing 2 tests to 4).
