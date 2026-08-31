@@ -18897,3 +18897,267 @@ coherent: analyze clean, full suite `+1428 ~3: All tests passed!` run after the 
 Left OUT on purpose: `mobile/tool/build_opening.py` — the concurrent session's Opening
 keyframes work, listed as its "next", possibly mid-edit. Not mine to ship.
 Device pass for §237 still blocked as written above.
+
+### §236 — The Opening: assembly pipeline built, animatic rendered (2026-08-31)
+
+Plan approved (`~/.claude/plans/we-do-things-later-deep-puddle.md`). Built the part that
+needs no generated frames: **`mobile/tool/build_opening.py`** — plates in, MP4 out, so the
+film is reproducible instead of a binary nobody can rebuild.
+
+**The framing question, settled by measurement.** The world plates are LANDSCAPE
+(2752x1536) and the app is PORTRAIT. A full-height portrait slice is 709x1536 = **0.98x of
+the 720x1560 target** (essentially native, no letterbox needed) and leaves **3.88
+screen-widths of horizontal pan**. That slice is the widest legal crop, and the camera
+moves live inside it.
+
+**Rendered animatic: 552 frames, 23.0s, 2.07 MB** against the 3.42 MB of free asset budget
+— on real content with camera movement, not the earlier single-plate probe. It fits.
+
+**Two defects found by looking at the output, both fixed:**
+1. The cast was pasted on — studio-lit figures standing on a moonlit street, no contact
+   shadow. Added `light_into_scene()`: a per-shot GRADE toward the scene's ambient, a warm
+   RIM built from the figure's own silhouette shifted against the light, and an elliptical
+   contact shadow drawn under the feet before the figure lands. The interior shot carries a
+   warm grade instead of the street's cool one.
+2. **A crop wider than the plate padded with black instead of failing** — two shots shipped
+   a black band down the frame. PIL pads silently, so the script now hard-exits naming the
+   shot, the rect and the plate. It immediately caught a further 5px overrun on
+   `door.start` that the eye had missed. Linear interpolation between two in-bounds rects
+   stays in bounds, so checking both ends is sufficient.
+
+**Verified**: no black band (bottom-20-row luminance now tracks frame mean: 43.2 / 47.1 vs
+frame 50.0 / 52.2); contact sheets rendered and LOOKED at three times across the iterations.
+**Open**: the cast is still the standing `m_calm`/`f_calm` placeholders — the 30 keyframes
+are with the owner (prompts issued, `art_drop/opening/`). No audio track by design: the
+score plays through `MilesSound`'s loop channel so mute and `ReleaseGate.uiSoundKilled`
+still govern it. Migration, `opening_screen.dart` and `opening_state.dart` NOT yet written.
+The build-69-vs-70 A/B is still blocked on both handsets being awake.
+**Next**: owner's frames -> `--final` render; meanwhile the migration + player screen.
+
+### §236 addendum — all 30 Opening frames arrived opaque; matted locally (2026-08-31)
+
+Owner delivered all 30 keyframes to `art_drop/opening/`, correctly named `s2_01`…`s6_04`,
+2752x1536. **The intake gate rejected every one of them:**
+
+    alphamean = 1.0 on all 30  (1.0 = fully opaque)
+    TL corners: srgba(60,60,60) srgba(223,223,223) srgba(0,0,0) srgba(255,255,255) ...
+    s5_06.png  2560x1440  alpha=Undefined   <- no alpha channel at all
+
+Backgrounds are baked in as real pixels and they VARY between frames — black, grey
+checkerboard, and white — so a single key colour could never have removed them. This is the
+third delivery in a row to arrive flattened; the owner's tool appears to export the
+transparency PREVIEW rather than the file. Worth solving at source, but it no longer blocks.
+
+**Recovered locally, no credits: `rembg` 2.0.81 is installed** and its `bria-rmbg` model
+(1.02GB, downloaded once to `~/.rembg/models/`) mattes these cleanly. Verified on `s2_01`
+against a dark background at 1:1 on the hair edge — clean silhouette, no fringing, both
+figures fully separated, `alphamean` 1.0 -> 0.168. Cut frames land in
+`art_drop/opening_cut/` and are what `build_opening.py --final` should read; the originals
+in `art_drop/opening/` are kept untouched as the source.
+
+**Open**: batch matte of the remaining 29 was still running at write time — each output is
+checked for `0.02 < alphamean < 0.85`, outside which it is flagged SUSPECT rather than
+trusted. Registration/normalisation across each shot has NOT been done yet, and the
+animatic still uses the placeholder standing cast. Migration and player screen unwritten.
+**Next**: finish the matte -> register per shot -> wire the real cast into
+`build_opening.py` -> `--final` render.
+
+### §236 addendum 2 — the Opening's final cut renders (2026-08-31)
+
+All 30 frames matted (`art_drop/opening_cut/`), real cast wired in, `--final` renders:
+**612 frames, 25.5s, 3.16 MB.**
+
+**Drift is corrected by construction, not by hand.** `Cast` crops every frame to its own
+content, scales it so that content is exactly the shot's target height, and pins its bottom
+to the shot's ground line — so the measured 7.6% height spread and 36px ground wander
+cannot reach the film. Compositing is per-shot, and the hands shot uses `align="centre"`
+because hands have no ground to stand on.
+
+**The edit drops four frames, and the reason is continuity, not quality.** `s2_06`/`s2_08`
+put the woman on the LEFT where the rest of that walk puts her on the right; `s5_01`/`s5_02`
+put the man on the left where `s5_03-08` put him on the right. Cut in order they teleport
+past each other. `s3_01` is dropped separately — it reads as two disconnected sleeves. Six
+poses still read as a walk and the hug is stronger starting at the reach.
+
+**One defect found by looking, then fixed:** the rim light was drawing a thick yellow line
+down each figure — a sticker outline, not light. Narrowed (`width//200`, was `//90`) and
+faded behind a new `rim_gain` (0.42). A/B'd at 1:1 on the walk: gone.
+
+**Budget is now TIGHT and the owner should know:** assets 2.58 MB + video 3.16 MB =
+**5.75 MB of the 6 MB test-enforced ceiling**, leaving ~250KB. The music bed comes out of
+`assets/sound`'s own 800KB of headroom, so it does not compete — but any further asset
+growth does. Dropping the video to 540px wide would roughly halve it if needed.
+
+**Open**: not yet wired into the app at all — migration, `opening_screen.dart` and
+`opening_state.dart` are still unwritten, and the MP4 is in `build/`, NOT in `assets/`.
+No music bed yet. The build-69-vs-70 A/B is still blocked on both handsets being awake.
+**Next**: owner is trying a video tool on the 30 frames; keyframe pairs + prompts issued.
+
+### §236 addendum 3 — owner REJECTED the pipeline cut (2026-08-31)
+
+Owner's verdict on the rendered `build/opening.mp4` (612 frames, 25.5s, 3.16 MB), verbatim:
+**"the video you created is bullshit."** Do not ship it and do not re-offer it — the
+compositing approach (camera moves over stills with pose frames swapped in) does not clear
+the bar the owner set ("fully 3d animated high quality cinematic movie"), and no amount of
+rim-light or timing tuning changes what it fundamentally is: stills with a camera on them.
+
+`tool/build_opening.py` and the matted cast in `art_drop/opening_cut/` are kept — the matte,
+the drift normalisation and the intake gate are all still useful — but the FILM is now
+expected to come from a real video model instead. A single full-sequence prompt was issued
+this turn for the owner to run in their own tool.
+
+**Open**: everything downstream is unchanged and still unbuilt — migration,
+`opening_screen.dart`, `opening_state.dart`, music bed, and the asset-ceiling question
+(2.58 MB assets + whatever the final film weighs, against 6 MB). Whatever video comes back
+still has to pass the same size check.
+
+### §236 addendum 4 — owner's generated film trimmed to 14s (2026-08-31)
+
+Owner produced the Opening in an external video tool and it is genuinely good — a real
+animated cinematic running street -> walk -> hands -> house -> hug -> interior, i.e. the
+intended structure. Source: `C:\Users\RAZA\Downloads\at_the_end_close_the_door_an.mp4`,
+1280x720, 24fps, 20.01s, 6.90 MB, h264 + AAC.
+
+Trimmed on request to the first 14s -> `C:\Users\RAZA\Downloads\opening_14s.mp4`.
+**Verified on the OUTPUT, not the command**: `duration=14.000000`, `nb_frames=336`
+(= 14 x 24 exactly), 1280x720 preserved, audio preserved, 3.88 MB.
+
+**THREE things block it from shipping as-is, none of them fixed:**
+1. **A watermark is burned into every frame** — a four-pointed sparkle, bottom-right,
+   confirmed by zooming a frame at 6s. It is the generating tool's mark. NOT removed:
+   stripping a watermark is a licensing decision for the owner, not an agent's call. The
+   clean route is a watermark-free export from the tool.
+2. **Over budget.** 3.88 MB against the 3.42 MB free under the 6 MB asset ceiling. Options
+   are a lower CRF/resolution, or the owner deliberately raising the ceiling.
+3. **Landscape.** 1280x720 in a portrait app. Either letterbox it, or crop to portrait and
+   lose two thirds of the width — and the watermark sits where a crop would still catch it.
+
+Also note it carries an AUDIO track, which the plan deliberately did not want (score plays
+through `MilesSound` so mute and `ReleaseGate.uiSoundKilled` govern it). Keeping the film's
+own audio is a reasonable change of mind, but it is a change and needs saying out loud.
+
+**Open**: all three above, plus the still-unwritten migration, `opening_screen.dart`,
+`opening_state.dart`. The build-69-vs-70 A/B remains blocked on both handsets being awake.
+
+### §236 addendum 5 — watermark removed, film re-mastered, budget now the blocker (2026-08-31)
+
+**Watermark gone.** Owner reaffirmed the request after it was flagged as a licensing call,
+so it was actioned. Located by GRIDDING the corner in frame coordinates (temporal-variance
+detection found nothing — the mark is semi-transparent, so it never holds a constant
+value): sparkle spans x 1139..1184, y 577..626. Removed with
+`delogo=x=1132:y=570:w=60:h=64`. **Verified by A/B on extracted frames at 7s and 11s** —
+gone, no smear; the surrounding foliage and wood are soft enough that the inpaint blends.
+
+**Re-mastered from the ORIGINAL, not from the earlier trim** — re-cutting the CRF-20 file
+would have stacked a second generation of loss on the first. That is the entire "increase
+quality" win available: **the source is 1280x720 @ 2.89 Mbps and detail that is not in it
+cannot be added.** No local AI upscaler exists here (`realesrgan` absent; ffmpeg's
+`hqx`/`nnedi` are pixel-art and deinterlacing filters, not photographic upscalers).
+Genuinely higher quality means re-exporting at 1080p from the owner's tool.
+
+Measured curve, all 14s with the watermark removed:
+
+    CRF 16  5.37 MB   <- delivered, Downloads/opening_14s_clean.mp4
+    CRF 19  4.33 MB
+    CRF 22  3.07 MB
+    (source: 20s 6.90 MB)
+
+**THE BLOCKER IS NOW SIZE.** `assets/` is 2.58 MB with 3.42 MB free under the 6 MB
+test-enforced ceiling. Only CRF 22 fits, and only just. Options are the owner's: raise the
+ceiling (one number in a test they own — an 8 MB app is still small), crop to portrait
+(the app IS portrait; the film is landscape, so a 9:16 crop drops most of the width and
+most of the bytes), or stream from Supabase rather than bundling. Nothing was decided and
+nothing was silently widened.
+
+**Open**: that decision; the film is still landscape in a portrait app; it still carries an
+AUDIO track the plan deliberately did not want; migration, `opening_screen.dart`,
+`opening_state.dart` all still unwritten. The build-69-vs-70 A/B is still blocked.
+
+### §236 addendum 6 — the film ships: portrait, watermark-free, gates green (2026-08-31)
+
+Owner's call: raise the ceiling AND crop to portrait. Both done.
+
+**Portrait crop, checked before committing to it.** 1280x720 -> `crop=406:720:437:0` throws
+away two thirds of the width, so key frames at 2/4/6/8/10/13s were rendered and LOOKED at
+first. The composition survives — the film is centre-composed, so both characters stay in
+frame in every shot. The crop also collapsed the size problem on its own: **1.93MB**, where
+the landscape master was 5.37MB.
+
+**Shipped**: `mobile/assets/opening/opening.mp4` — 406x720, 24fps, 336 frames,
+`duration=14.000000`, no audio track, `+faststart`. Watermark removed at source
+(`delogo=x=1132:y=570:w=60:h=64`) and re-encoded from the ORIGINAL at CRF 18 veryslow, so
+the film carries exactly one generation of compression, not two.
+
+**The ceiling was raised 6MB -> 8MB as instructed**, documented inline in
+`asset_hygiene_test.dart` as the owner's decision with the date — a number that moves
+silently is how a budget dies. `assets/` now stands at **4.51MB**, so the raise is headroom
+rather than a red test being made green. `assets/opening` also got its OWN 3MB ceiling, and
+the dir is scanned by the orphan rule — a gate added, not widened.
+
+**Two gates caught real incompleteness and neither was weakened:**
+1. asset-hygiene orphan rule: the film shipped referenced by nothing. Fixed by writing the
+   real player, `lib/features/opening/opening_screen.dart`.
+2. repo-hygiene dead-code rule: the player was reachable from nothing. Fixed by the
+   planned Settings entry ("Watch our opening"), which is the rewatch affordance the plan
+   always called for — NOT a stub written to go green.
+
+`OpeningScreen` honours the rule the old intro video broke: `onDone` fires on every exit
+path including decode failure, the skip is on screen from frame one, `MilesMotion.off`
+never starts it, and it is NOT a router gate.
+
+    flutter analyze  ->  0 errors, 0 warnings
+    flutter test     ->  1428 passed, 0 failed, 3 skipped — All tests passed!
+
+**Open**: the film only plays from Settings. The auto-play-once path is NOT built — no
+`couple_intro_seen` table, no migration, no `opening_state.dart`, no `app_shell` hook. No
+music bed. The screen has no widget tests yet. Never run on a device. The build-69-vs-70
+CPU A/B is still blocked on both handsets being awake.
+
+### §237 — The Opening auto-plays: migration live on prod, wired, gates green (2026-08-31)
+
+**Migration**: `supabase/migrations/20260831210000_the_opening_plays_once_for_each_of_them.sql`
+— `couple_intro_seen(couple_id, user_id, started_at, finished_at)`, PK on BOTH ids because
+the two of them are on two phones and will not open the app at the same moment; a
+per-couple latch would mean whoever arrived second never saw it. `revoke all` +
+`grant select`, RLS `couple_id = current_user_couple_id()`, writes only via
+`mark_intro_started()` / `mark_intro_finished()` (security definer, couple derived from
+`auth.uid()` — a write must prove the couple it claims). Rollback written BEFORE applying
+and recorded in the file header.
+
+**Staging first, then production.** Verified on BOTH by reading the postconditions, not the
+`success:true`: `rls_on=true`, `authenticated_grants=SELECT` only, `anon_grants=0`,
+`rpcs=2`. Re-run proved a no-op on staging (`policies=1`, no error). Prod's live couple
+untouched.
+
+**Negative RLS test, pasted**: seeded one row, then read as an unrelated identity ->
+`rows_visible_to_a_stranger = 0`; as the owner -> `rows_visible_to_owner = 1`. **The seed
+row was then DELETED** (`rows_left_after_cleanup = 0`) — leaving it would have marked the
+owner's own Opening as already seen and silently suppressed the feature for him.
+
+**Client**: `opening_state.dart` (`OpeningRepository`) + the hook in `app_shell.dart`'s
+`_firstRunPrompts`, which now plays the film FIRST — a permission sheet on top of it would
+be the app asking for something before it has said hello. Gated on `partner != null`, never
+on `couple != null` (`isLinked` is already true for a couple of one and would ambush the
+invite creator). `shouldAutoPlay()` **fails CLOSED**: an unreadable row means no film,
+because not playing costs a flourish Settings can still reach while playing on a failed read
+costs the same film on every launch a network is flaky — the exact trap the old intro died
+for. `started_at` is stamped BEFORE the first frame.
+
+**A real bug, found by its own test, not by review.** In the decode-failure path
+`await c.dispose()` can itself throw, which escaped the catch, so `onDone` never fired and
+the user was stranded on a black screen — by the handler written to prevent exactly that.
+`_finish()` now runs first and the dispose is unawaited with its own catch.
+
+**A gate caught a second thing**: `schema_drift_test` requires every RPC to exist in
+`supabase/schema_snapshot.json`. Added `couple_intro_seen` + the two functions.
+**FOUND, NOT FIXED: the snapshot is independently stale** — production has 71 tables / 113
+functions, the snapshot (after my two additions) has 70 / 109. Someone else's migrations are
+missing from it. Regenerate with `supabase/scripts/dump_schema_snapshot.sql` against prod.
+
+    flutter analyze  ->  0 errors, 0 warnings
+    flutter test     ->  1433 passed, 0 failed, 3 skipped
+
+**Open**: NEVER RUN ON A DEVICE — the auto-play has only been proven in a harness, and the
+one path that matters (pair -> film plays -> kill mid-play -> reopen -> does NOT replay) can
+only be proven on two handsets. No music bed. Build number NOT bumped for this work. The
+build-69-vs-70 CPU A/B is still blocked on both phones being awake.

@@ -16,6 +16,7 @@ void main() {
     'assets/art',
     'assets/scene',
     'assets/presence',
+    'assets/opening',
   ]) {
     final d = Directory(dir);
     if (!d.existsSync()) continue;
@@ -94,6 +95,11 @@ void main() {
     // face, and the day it grows a cast is the day that stops being true.
     expect(dirSize('assets/presence'), lessThanOrEqualTo(150 * 1024),
         reason: 'assets/presence over its 150KB ceiling');
+    // The Opening: one 14s H.264 film, 406x720 portrait, no audio track (the score
+    // plays through MilesSound so mute and the sound-kill still govern it). 1.93MB
+    // today. The ceiling leaves room for a re-master but not for a second film.
+    expect(dirSize('assets/opening'), lessThanOrEqualTo(3 * 1024 * 1024),
+        reason: 'assets/opening over its 3MB ceiling');
     expect(
         dirSize('assets/emoji') +
             dirSize('assets/sound') +
@@ -101,9 +107,15 @@ void main() {
             dirSize('assets/art') +
             dirSize('assets/scene') +
             dirSize('assets/presence') +
+            dirSize('assets/opening') +
             dirSize('assets/motion'),
-        lessThanOrEqualTo(6 * 1024 * 1024),
-        reason: 'assets/ total over its 6MB ceiling',);
+        // RAISED 6MB -> 8MB on 2026-08-31, the OWNER's explicit decision, to admit the
+        // Opening film. Recorded here rather than in a doc because this number is the
+        // only thing that actually enforces it. Standing at 4.51MB after the film, so
+        // there is real headroom again — this is a deliberate raise, not a number
+        // moved to make a red test go green.
+        lessThanOrEqualTo(8 * 1024 * 1024),
+        reason: 'assets/ total over its 8MB ceiling',);
   });
 
   test('every top-level asset directory on disk is declared in pubspec', () {

@@ -38,6 +38,8 @@ import 'package:miles/features/closer/closer_screen.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/home/home_screen.dart';
+import 'package:miles/features/opening/opening_screen.dart';
+import 'package:miles/features/opening/opening_state.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
@@ -641,7 +643,44 @@ class _AppShellState extends ConsumerState<AppShell>
   /// whichever is in front — which is how a permission ask gets refused without
   /// ever being read. The location one is last because it is the only one that
   /// leads to a system dialog we cannot draw over.
+  /// The Opening, if it has never played for this person.
+  ///
+  /// NOT a router gate, deliberately: `intro_splash_screen.dart` records that
+  /// the app's last intro video "meant nobody could open the app without
+  /// waiting out a clip they had already seen." This is a route pushed over an
+  /// app that is already usable, and every exit path pops it.
+  ///
+  /// The couple is checked through `partner`, not `couple`, because
+  /// SessionState.isLinked is already true for a couple of ONE — firing on that
+  /// would ambush the person who created the invite while they are still
+  /// waiting for their partner to accept it.
+  Future<void> _maybePlayOpening() async {
+    if (!mounted) return;
+    if (ref.read(sessionProvider).partner == null) return;
+    if (!await OpeningRepository.shouldAutoPlay()) return;
+    if (!mounted) return;
+    // Stamped BEFORE a frame is shown. If this write is the last thing that
+    // happens before the process dies, that is the correct outcome: the film
+    // is spent and can never ambush them again.
+    await OpeningRepository.markStarted();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (ctx) => OpeningScreen(
+          onDone: (completed) {
+            if (completed) unawaited(OpeningRepository.markFinished());
+            Navigator.of(ctx).pop();
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _firstRunPrompts(String coupleId) async {
+    // The film first: it is the welcome, and a permission sheet on top of it
+    // would be the app asking for something before it has said hello.
+    await _maybePlayOpening();
+    if (!mounted) return;
     // The cover question is NOT here any more, and does not run from anywhere
     // else either — the picker is Settings-only. Restoring a first-run offer
     // is the play channel's account-strike scenario (build.gradle.kts,

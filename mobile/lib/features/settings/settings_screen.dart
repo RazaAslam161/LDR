@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -38,6 +39,8 @@ import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/features/safety/report_service.dart';
 import 'package:miles/features/safety/safety_sheets.dart';
 import 'package:miles/features/safety/severance_sheet.dart';
+import 'package:miles/features/opening/opening_screen.dart';
+import 'package:miles/features/opening/opening_state.dart';
 import 'package:miles/features/settings/security_code_dialog.dart';
 import 'package:miles/features/unlink/unlink_repository.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
@@ -851,6 +854,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                         ? null
                         : 'On',
             onTap: () => context.push('/app/settings/notifications'),
+          ),
+          // The Opening is deliberately reachable AFTER its one automatic play.
+          // The film is a keepsake, not a gate — the whole reason it does not
+          // live in the router is that the last intro video trapped people in
+          // it, so the only way back to it is a door they choose to open.
+          _SettingsRow(
+            icon: Icons.movie_outlined,
+            title: 'Watch our opening',
+            subtitle: 'The night you paired',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (ctx) => OpeningScreen(
+                  onDone: (completed) {
+                    if (completed) unawaited(OpeningRepository.markFinished());
+                    Navigator.of(ctx).pop();
+                  },
+                ),
+              ),
+            ),
           ),
           const _SettingsRow(
             icon: Icons.translate,
