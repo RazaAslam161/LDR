@@ -6,12 +6,24 @@ import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/core/widgets/presence_character.dart';
+import 'package:miles/features/unlink/scene/scene_state.dart';
 
 /// Presence is the one thing in this app that speaks about a real person while
 /// they are not there to correct it. Showing them somewhere they are not — or
 /// offering to follow them somewhere private — is not a cosmetic bug, so the
 /// states this widget can be in are pinned here.
 void main() {
+  // The busts are decoded ONCE, here, and never from inside a test body.
+  // `PresenceArt.ensureLoaded` is real bundle I/O: called under testWidgets it
+  // completes inside the fake-async zone and lands mid-`pump`, which aborts
+  // that test AND every one after it with "Guarded function conflict". The
+  // Doorstep's SceneArt learned this the same way (BRAIN §228 addendum).
+  setUpAll(() async {
+    await PresenceArt.ensureLoaded(PuppetVariant.male);
+    await PresenceArt.ensureLoaded(PuppetVariant.female);
+  });
+
   Profile me() => Profile(
         id: 'me',
         displayName: 'Ali',
@@ -20,10 +32,12 @@ void main() {
         createdAt: DateTime.utc(2026),
       );
 
-  Profile partner() => Profile(
+  Profile partner({String? gender}) => Profile(
         id: 'p1',
         displayName: 'Rida',
         timezone: 'UTC',
+        gender: gender,
+        genderSet: gender != null,
         presenceStatus: PresenceStatus.awake,
         createdAt: DateTime.utc(2026),
       );
@@ -46,6 +60,7 @@ void main() {
     required String? theirScreen,
     bool fresh = true,
     String at = '/app/care',
+    String? gender,
   }) async {
     router = GoRouter(
       initialLocation: at,
@@ -65,7 +80,7 @@ void main() {
           // Null couple: both notifiers bind on a non-null couple and skip
           // Supabase entirely without one, which is exactly what a test wants.
           currentCoupleProvider.overrideWithValue(null),
-          partnerProfileProvider.overrideWithValue(partner()),
+          partnerProfileProvider.overrideWithValue(partner(gender: gender)),
           currentProfileProvider.overrideWithValue(me()),
           partnerPresenceProvider.overrideWith(
             (ref) => _StubPresence(
@@ -101,6 +116,35 @@ void main() {
     await pump(tester, myScreen: 'Touch', theirScreen: 'Touch');
     expect(scaleOf(tester), 1.0);
     expect(find.text('R'), findsOneWidget); // their initial, no name banner
+  });
+
+  testWidgets('wears the partner face once their bust has decoded',
+      (tester) async {
+    // The mark shows the PARTNER, so it reads the partner's gender — not the
+    // signed-in user's, which is the profile every other gendered feature in
+    // the app happens to read.
+    for (final gender in ['male', 'female']) {
+      await pump(
+        tester,
+        myScreen: 'Touch',
+        theirScreen: 'Touch',
+        gender: gender,
+      );
+      expect(find.byType(PresenceCharacter), findsOneWidget,
+          reason: '$gender should wear a face');
+      expect(find.text('R'), findsNothing,
+          reason: '$gender fell back to the letter',);
+    }
+  });
+
+  testWidgets('keeps the initial when the profile has no gender',
+      (tester) async {
+    // Not a defect state: role-setup has a sign-out escape from a failed save,
+    // so accounts with a null gender exist by design. Asserted with BOTH busts
+    // already decoded (setUpAll), so this proves the neutral branch rather
+    // than proving that an asset had not loaded yet.
+    await pump(tester, myScreen: 'Touch', theirScreen: 'Touch');
+    expect(find.text('R'), findsOneWidget);
   });
 
   testWidgets('still shows when they are somewhere else you can follow',

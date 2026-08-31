@@ -24,6 +24,7 @@ import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
+import 'package:miles/core/widgets/presence_character.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/ember_press.dart';
@@ -36,6 +37,7 @@ import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/cycle/partner_cycle_card.dart';
 import 'package:miles/features/home/partner_location_card.dart';
 import 'package:miles/features/reach/reach_button.dart';
+import 'package:miles/features/unlink/scene/scene_state.dart' show PuppetVariant, puppetVariantOf;
 
 /// The landing screen: how your partner is, right now — plus the Reach button
 /// and quick ways into the rest of the app.
@@ -378,7 +380,9 @@ class _PartnerStatusCard extends StatelessWidget {
                 period: const Duration(seconds: 5),
                 child: _Avatar(
                     photoUrl: presence?.checkinPhotoUrl,
-                    name: partner.displayName,),
+                    name: partner.displayName,
+                    variant: puppetVariantOf(partner.gender),
+                    online: online,),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -467,14 +471,44 @@ class _PartnerStatusCard extends StatelessWidget {
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name, this.photoUrl});
+  const _Avatar({
+    required this.name,
+    required this.variant,
+    this.photoUrl,
+    this.online = false,
+  });
   final String name;
   final String? photoUrl;
+
+  /// Which bust stands in when there is no check-in photo.
+  final PuppetVariant variant;
+
+  /// Drains the colour out of the figure while they are away — the same
+  /// "another room" reading the AppBar mark uses.
+  final bool online;
 
   @override
   Widget build(BuildContext context) {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '🤍';
     final url = photoUrl;
+    // Precedence: their real face, then their figure, then a letter. A
+    // check-in photo is a picture they chose to send; replacing that with a
+    // rendered stand-in would be taking a feature away to add one. The figure
+    // takes the place of the letter, which is what the circle shows the rest
+    // of the time.
+    //
+    // No clock is passed: the BreathingGlow around this circle is already the
+    // breath, and a second one inside it would beat against the first.
+    final face = PresenceCharacter(
+      variant: variant,
+      diameter: 64,
+      here: online,
+      fallback: Center(
+        child: Text(initial,
+            style: const TextStyle(
+                color: MilesColors.cream50, fontSize: 24,),),
+      ),
+    );
     return EmberPress(
       onTap: url == null
           ? null
@@ -486,19 +520,13 @@ class _Avatar extends StatelessWidget {
           height: 64,
           color: MilesColors.surface2,
           child: url == null
-              ? Center(
-                  child: Text(initial,
-                      style: const TextStyle(
-                          color: MilesColors.cream50, fontSize: 24,),),)
+              ? face
               : Hero(
                   tag: 'snap-$url',
                   child: SignedImage(
                       bucket: chatBucket,
                       value: url,
-                      placeholder: Center(
-                          child: Text(initial,
-                              style: const TextStyle(
-                                  color: MilesColors.cream50, fontSize: 24,),),),),),
+                      placeholder: face,),),
         ),
       ),
     );

@@ -20,6 +20,7 @@ void main() {
     'lib/core/widgets/ember_press.dart',
     'lib/core/widgets/gilt_nav_icon.dart',
     'lib/core/widgets/gravity_float.dart',
+    'lib/core/widgets/presence_character.dart',
     'lib/core/widgets/screen_entrance.dart',
     'lib/core/widgets/tilt_parallax.dart',
     'lib/core/widgets/wordmark.dart',

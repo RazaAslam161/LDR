@@ -15,6 +15,7 @@ void main() {
     'assets/fonts',
     'assets/art',
     'assets/scene',
+    'assets/presence',
   ]) {
     final d = Directory(dir);
     if (!d.existsSync()) continue;
@@ -88,12 +89,18 @@ void main() {
         reason: 'assets/fonts over its 600KB ceiling');
     expect(dirSize('assets/scene'), lessThanOrEqualTo(600 * 1024),
         reason: 'assets/scene over its 600KB ceiling');
+    // Two busts, ~54KB. The ceiling is deliberately close to the contents:
+    // this directory exists so a badge on twenty screens decodes ONE small
+    // face, and the day it grows a cast is the day that stops being true.
+    expect(dirSize('assets/presence'), lessThanOrEqualTo(150 * 1024),
+        reason: 'assets/presence over its 150KB ceiling');
     expect(
         dirSize('assets/emoji') +
             dirSize('assets/sound') +
             dirSize('assets/fonts') +
             dirSize('assets/art') +
             dirSize('assets/scene') +
+            dirSize('assets/presence') +
             dirSize('assets/motion'),
         lessThanOrEqualTo(6 * 1024 * 1024),
         reason: 'assets/ total over its 6MB ceiling',);

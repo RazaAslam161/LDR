@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+69
+version: 0.1.0+70
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
@@ -156,6 +156,12 @@ flutter:
     # and sized by tool; ~400KB total. Composited and animated in
     # features/unlink/scene/ — the sprites are stills, all motion is code.
     - assets/scene/
+    # The presence cast: the same two owner-rendered people as assets/scene,
+    # re-cut from the full-resolution originals to a head-and-shoulders
+    # portrait so they read inside a 30dp mark. Their own directory rather
+    # than assets/scene because the Doorstep loads that one whole, and a badge
+    # on twenty screens must not decode a street to draw a face.
+    - assets/presence/
     # The OFL texts ship because the license requires them to travel with the
     # font software; theme.dart registers both with LicenseRegistry so they
     # surface in the standard licenses page.

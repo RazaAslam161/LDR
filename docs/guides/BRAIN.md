@@ -18705,3 +18705,195 @@ owner has not asked for. The note (§233) is still unanswered and still needs a 
 
 Full suite after the fix: `03:44 +1428 ~3: All tests passed!` — 1428 passed, 3 skipped
 (1426 before, +2 net from the LockScreen contract file growing 2 tests to 4).
+
+### §235 addendum 3 — the unlink is gone (it was already gone), and one loose end (2026-08-31)
+
+**Unlink cleared.** Owner said "unlink goes". The app's own `unlink_cancel()` takes no
+args and derives the couple from `auth.uid()`, which is NULL from the SQL console, so its
+state change was replicated scoped to that one couple + initiator. **It matched 0 rows —
+the row had already been deleted before the statement ran**, almost certainly by the owner
+tapping relink once the way back opened at 14:20:42Z. Credit where due: this session did
+not clear it.
+
+    rows_deleted 0 | unlink_rows_remaining 0 | couple_active true
+    dissolved_at null | members_still_linked 2
+
+The couple is intact. The partner-notification half of the RPC (`reach-notify`,
+kind `unlink_relinked`) was deliberately NOT fired from the console — `couple_unlink` is in
+the realtime publication, so both clients clear from the DELETE, and sending a push from a
+SQL console is an outward-facing act that did not need to happen.
+
+**LOOSE END, created by me and not yet closed.** `presence_character.dart:323,330` gained
+`_blinkPhase = 1.7` to stop every badge mounting mid-blink (`turn == 0` fell inside the
+window). The edit is wired, but **nothing was re-run after it**:
+- `test/widget/presence_character_preview_test.dart` picks frames 162.0…162.80 to straddle
+  a blink. Those were computed for the UNSHIFTED phase and now land nowhere near one — the
+  filmstrip no longer proves what its own comment claims. New window is
+  turn 178.44…178.79 (L = 4.3k − 1.7, k = 7).
+- `flutter analyze` and the full suite have NOT been run since that edit.
+
+**Open**: the above; the build-69-vs-70 CPU A/B (badge visible 86.2% vs hidden 34.4% on the
+OnePlus 8) is still unrun, so how much of the badge's cost is the character rig is still
+unknown; `app_release.min_build` must still NOT be raised. Both phones are on build 70.
+**Next**: fix the filmstrip frames -> re-render -> re-run analyze + full suite; then the A/B.
+
+### §235 addendum 4 — the blink loose end is closed, gates green (2026-08-31)
+
+`presence_character.dart` `_blinkPhase = 1.7` (line 323, used at 330) is now PROVEN, not
+just wired. The filmstrip frames had already been moved to the shifted window; the
+arithmetic was re-derived by hand rather than trusted — shut while
+`(turn/2pi + 1.7) % 4.3 < 0.055`, i.e. turn 151.425 … 151.766, so 151.20 / 151.85 / 152.10
+are open and 151.50 / 151.60 / 151.70 are shut.
+
+**Verified by looking at `test/widget/preview/presence_motion.png`:** frame 1 (turn 0) is
+eyes-OPEN on both characters — the defect where every badge in the app mounted mid-blink is
+dead — and the three middle frames of row 2 are shut on both.
+
+    flutter analyze  ->  0 errors, 0 warnings
+    flutter test     ->  1428 passed, 0 failed, 3 skipped — All tests passed!
+
+**Open**: the build-69-vs-70 CPU A/B is STILL unrun (badge visible 86.2% vs hidden 34.4%
+on the OnePlus 8), so the character rig's share of that cost remains unknown and
+`app_release.min_build` must NOT be raised. The presence badge has still never been watched
+on a real screen with a live partner. Both phones on build 70; everything uncommitted.
+**Next**: the A/B; then the Opening's 30 keyframes (prompts issued to the owner this turn,
+spec in `~/.claude/plans/we-do-things-later-deep-puddle.md`).
+
+## §237 — The presence "regression": the avatar was innocent, the kill path was never covered (2026-08-31)
+
+Owner: after the 3D avatar, presence lags — the avatar lingers in chat when the partner
+instantly closes the app, and coming back is not instant either. "I already fixed this
+and it was perfectly synchronized."
+
+**The avatar did not do it, and that is proven, not asserted.** `git diff bcf5a51..HEAD`
+(build 69 → 70) touches NO presence file — the whole live rail (`announceLive` /
+`applyLiveHint` / the `screen_presence` channel, from §`57c97db`) is byte-identical
+between the build that felt instant and the build that does not.
+
+**Root cause in one sentence: an INSTANT swipe-kill runs no Dart at all, so every
+client-side goodbye — the `live:false` broadcast at `paused`, the settled `is_online:false`
+write — never existed for that exit class, and the only thing that ever caught it was the
+45s freshness decay.** Production proves it: at 14:25:14Z Elsa's row froze at
+`is_online=true, current_screen='Chat', updated_at == app_last_active_at` to the
+microsecond — if `paused` had run, `clearChatPresence` would have bumped `updated_at`
+above `app_last_active_at`. Zero lifecycle callbacks ran. The arrival direction is the
+same class's other face: on a COLD start (which a kill forces), `showRealApp` flips true
+before the couple resolves, `_trackHumanPresence` early-returns at `c == null`, and the
+instant announce is simply lost — the partner waits on the couple-gained heartbeat's DB
+write plus a postgres_changes hop. Build 69 felt instant because those tests were warm
+resumes; the kill/cold class was never covered on any build.
+
+**The fix: let the SERVER say goodbye.** The one thing that outlives a killed process is
+its socket, and the OS closes it as the process dies. Realtime channel Presence rides
+exactly that. Additive, no schema change, no new channel, no forced upgrade:
+- `partner_here_badge.dart` (`PartnerScreenNotifier`): the `screen_presence:<coupleId>`
+  channel now also binds `onPresenceJoin`/`onPresenceLeave` (→
+  `applyLiveHint(online:…, at: ServerClock.now())`, filtered by tracked `uid` ≠ mine) and
+  tracks `{'uid': myUid}` from the subscribe callback whenever a join lands while
+  `humanPresent` — so a rejoined channel re-claims, and a cold start claims the moment
+  the join completes, couple race gone. New `trackLive()`/`untrackLive()` (failures
+  logged, never swallowed). The `live` broadcast's sender-clock `at` is now CAPPED at
+  `ServerClock.now()` so a device clock running ahead can never leave a hint from the
+  future that a real server-observed leave could not supersede (Steve's clock measured
+  ~6s BEHIND server today; behind is harmless, ahead was the dangerous direction).
+- `main.dart` `_trackHumanPresence`: `trackLive()` beside the arrival announce,
+  `untrackLive()` on the cover rising (person gone ≠ process gone).
+- Old builds on this channel simply never track and ignore presence events — they keep
+  today's exact behaviour. Pinned-client safe.
+
+**Verified**: `flutter analyze lib/core/widgets/partner_here_badge.dart lib/main.dart` →
+0 errors, 0 warnings, 3 infos ALL outside my hunks (badge :91 `prefer_const_constructors`,
+main :22/:27 `directives_ordering` — pre-existing). Targeted suites:
+`flutter test test/unit/presence test/widget/partner_here_badge_test.dart` →
+`00:04 +53: All tests passed!`. Full suite on the final tree running at write time;
+verdict appended below.
+
+**BLOCKED, and it is the headline: the riskiest path — a real swipe-kill between two
+handsets — can only be proven on devices running THIS code.** Both phones run build 70,
+which predates these edits, and both dropped off adb mid-session (were unplugged), so no
+device pass was possible. Presence-on-private-channel is exercised nowhere in the harness
+(no channel fake exists — flagged gap, the handlers are thin closures like the broadcast
+ones beside them). A rebuild + install on BOTH phones, then: kill one from recents and
+time the other's badge (expect ~1s, not 45s); reopen and time the join (expect <1s).
+Do NOT raise `app_release.min_build`.
+
+**Found, not fixed**: `diag_events` in production has 0 rows EVER — the whole Diag
+pipeline records locally and never uploads, so every field question in this session had
+to be answered from the `presence` table instead. Separate defect, worth its own session.
+
+**Next**: owner asks for the build → install on both phones → run the two timings above
+→ only then call the symptom dead.
+
+### §235 addendum 5 — the A/B is still unrun; phone restored to 70 (2026-08-31)
+
+Attempted the build-69-vs-70 CPU A/B. The OnePlus 8 had left USB, so it was run on the
+OnePlus 7 (same phone, one variable) — **and it did not produce a usable comparison.**
+
+    BUILD 70, idle, app foregrounded, 25s : 4 frames rendered, 6.4% CPU
+    BUILD 69, first attempt               : INVALID — mCurrentFocus=TemporaryFocusWindow,
+                                            0 frames. The downgrade kills the process and
+                                            the launch had not settled.
+    BUILD 69, retries                     : blocked — mWakefulness=Asleep,
+                                            mDreamingLockscreen=true. The handset sleeps
+                                            between commands and KEYCODE_WAKEUP does not
+                                            hold it.
+
+Holding the screen on means `svc power stayon`, which is a system-settings change and was
+NOT made. **A measurement taken while the app is not the focused window is not a
+measurement** — the 0-frame run is recorded here only so nobody mistakes it for a result.
+
+Also note the idle case was never the interesting one: with no partner truly online
+(`Elsa.last_seen` 583s against a 45s window) the badge is HIDDEN and its ticker is stopped
+by the `active: visible` contract, so both builds should read the same by construction.
+**The question that matters — the 86.2%-CPU badge-VISIBLE case — needs both handsets awake
+with the app foregrounded on both at once.**
+
+**The phone was left on build 69 for the duration and has been restored**: reinstalled
+`build/app/outputs/flutter-apk/app-play-release.apk` (verified `miles-build-70`, carrying
+all four presence assets incl. the two blink frames), `versionCode=70` read back off the
+device, package still present, `install -r -d` throughout so no data was touched.
+
+**Open**: the A/B, still. `app_release.min_build` must NOT be raised.
+**Next**: with both phones awake and the app open on each, measure badge-visible on 70,
+downgrade, repeat, restore. Owner asked to keep the phones unlocked for that window.
+
+### §237 addendum — full-suite verdict on the final tree (2026-08-31)
+
+    flutter test  ->  06:49 +1428 ~3: All tests passed!  (1428 passed, 3 skipped)
+
+Run AFTER the last edit (the track/untrack `catchError` guards) — the earlier in-flight
+run was killed and restarted so the gate covers the tree as it stands. Device pass still
+BLOCKED as written above: both phones run pre-fix build 70 and are off adb.
+
+### §235 addendum 6 — Opening shot 2 is a SIDE tracking shot now (2026-08-31)
+
+Owner generated the first frame of shot 2 and it came back as a full-body SIDE view with
+both faces visible, not the rear view the plan specified
+(`~/.claude/plans/we-do-things-later-deep-puddle.md`). Identity, wardrobe (ring pin,
+necklace, rose skirt) and the mid-stride pose were all correct, and the two figures arrived
+as cleanly separated cut-outs on alpha rather than a composed pair — which is BETTER for
+this pipeline, because spacing and scale become a compositing decision instead of a
+generation one.
+
+**Decision: keep the side view and change the plan, not the art.** A camera tracking
+alongside them shows both faces; the rear view throws them away. The cost is that all eight
+frames of shot 2 must now be side-on at identical camera distance and character scale —
+rear and side cannot cut together inside one shot.
+
+Full self-contained per-frame prompts (all 30, identity + camera + pose + negatives in each
+block) were issued to the owner this turn. Frames land in `art_drop/opening/`.
+
+**Still open**: alpha on the delivered frames is UNVERIFIED — the last batch arrived with a
+checkerboard baked in as opaque pixels, so every frame gets `alphamean` checked on intake
+before it is used. The build-69-vs-70 A/B remains blocked on both handsets being awake.
+
+### §237 addendum 2 — committed and pushed, owner's instruction (2026-08-31)
+
+Owner: "commit and push your work." One commit, deliberately BROAD, and here is why: the
+tree interleaves two finished streams — the §234/§235 presence-avatar work (build 70,
+already on both phones) and this session's §237 kill-path fix — inside the SAME file
+(`partner_here_badge.dart`), and hunks cannot be split non-interactively. The tree is
+coherent: analyze clean, full suite `+1428 ~3: All tests passed!` run after the last edit.
+Left OUT on purpose: `mobile/tool/build_opening.py` — the concurrent session's Opening
+keyframes work, listed as its "next", possibly mid-edit. Not mine to ship.
+Device pass for §237 still blocked as written above.

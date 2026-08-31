@@ -13,8 +13,11 @@ import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/realtime/presence_route_observer.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/mood.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/presence_character.dart';
+import 'package:miles/features/unlink/scene/scene_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The screen the LOCAL user is currently on, and the record of what was last
@@ -127,11 +130,91 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
             // The sender's clock, not ours: it orders the sender's own events,
             // which is all that is needed to reject a reordered broadcast.
             if (at == null) return;
-            PresenceService.applyLiveHint(online: online, at: at.toUtc());
+            // Capped at now, though: the hint stream is shared with the
+            // presence events below, which are stamped by OUR ServerClock. A
+            // sender clock running ahead would otherwise leave a hint from the
+            // future that a real, server-observed leave could never supersede.
+            var stamped = at.toUtc();
+            final now = ServerClock.now();
+            if (stamped.isAfter(now)) stamped = now;
+            PresenceService.applyLiveHint(online: online, at: stamped);
           },
         )
-        .subscribe();
+        // The rails above all need the OTHER phone to still be running Dart.
+        // An instant swipe-kill runs none — the only thing that outlives it is
+        // the socket, which the OS closes as the process dies. Presence rides
+        // exactly that: the server sees the close and emits the partner's
+        // leave to this phone, no goodbye required from the dead app. The
+        // other half is track()/untrack(), sent from wherever a person starts
+        // or stops looking (main.dart's humanPresent flip) and re-sent on
+        // every successful join below, because a rejoined channel starts
+        // empty.
+        .onPresenceJoin(
+          (payload) {
+            if (_fromPartner(
+                payload.newPresences.map((p) => p.payload), myUid,)) {
+              PresenceService.applyLiveHint(
+                  online: true, at: ServerClock.now(),);
+            }
+          },
+        )
+        .onPresenceLeave(
+          (payload) {
+            if (_fromPartner(
+                payload.leftPresences.map((p) => p.payload), myUid,)) {
+              PresenceService.applyLiveHint(
+                  online: false, at: ServerClock.now(),);
+            }
+          },
+        )
+        .subscribe((status, error) {
+          // A newer _subscribe may have replaced this channel while the join
+          // was in flight; its own callback will do the tracking.
+          if (status == RealtimeSubscribeStatus.subscribed &&
+              identical(_channel, ch) &&
+              PresenceService.humanPresent) {
+            trackLive();
+          }
+        });
     _channel = ch;
+  }
+
+  /// True when any of [payloads] was tracked by the partner rather than by
+  /// this phone. Tracks carry `{'uid': <sender>}`; an entry with no uid is
+  /// unknown, and unknown must never move an avatar.
+  bool _fromPartner(Iterable<Map<String, dynamic>> payloads, String? myUid) =>
+      payloads.any((p) {
+        final uid = p['uid'];
+        return uid is String && myUid != null && uid != myUid;
+      });
+
+  /// Claim liveness on the channel, so the SERVER can announce this phone's
+  /// death for it. Idempotent — phoenix replaces the previous track for the
+  /// same socket. Failures are logged, never swallowed: a track that never
+  /// lands looks exactly like a partner who never arrives.
+  void trackLive() {
+    final myUid = ref.read(currentProfileProvider)?.id;
+    final ch = _channel;
+    if (ch == null || myUid == null) return;
+    unawaited(ch.track({'uid': myUid}).then((r) {
+      if (r != ChannelResponse.ok) debugPrint('[presence] track failed: $r');
+    }).catchError((Object e) {
+      debugPrint('[presence] track threw: $e');
+    }),);
+  }
+
+  /// The person stopped looking (cover up, app backgrounded). The process and
+  /// its socket can long outlive that moment, and a tracked socket with nobody
+  /// behind it is the "process, not person" lie — so the claim is withdrawn
+  /// explicitly rather than left to die with the process.
+  void untrackLive() {
+    final ch = _channel;
+    if (ch == null) return;
+    unawaited(ch.untrack().then((r) {
+      if (r != ChannelResponse.ok) debugPrint('[presence] untrack failed: $r');
+    }).catchError((Object e) {
+      debugPrint('[presence] untrack threw: $e');
+    }),);
   }
 
   /// Broadcast the local user's current screen to the partner instantly.
@@ -302,6 +385,14 @@ class PartnerHereBadge extends ConsumerWidget {
             typing: typing,
             moodColor: mood?.color,
             where: partnerScreen,
+            // The mark shows the PARTNER, so it wears the partner's face.
+            // (The Doorstep reads `currentProfileProvider` for the same
+            // helper because there each phone casts its own user.) A profile
+            // with no gender resolves to neutral, which has no bust and falls
+            // back to the letter this badge has always drawn.
+            variant: puppetVariantOf(
+              ref.watch(partnerProfileProvider.select((p) => p?.gender)),
+            ),
             // The loop is stopped while nothing is shown. Twenty-odd screens
             // now mount this, and a permanent 60fps rebuild on each of them —
             // for a partner who is usually offline — is exactly the kind of
@@ -390,11 +481,15 @@ class _PresenceAvatar extends StatefulWidget {
     required this.moodColor,
     required this.where,
     required this.active,
+    required this.variant,
     this.onTap,
   });
 
   final String name;
   final bool isHere;
+
+  /// Which of the owner's two busts to wear. Neutral wears none.
+  final PuppetVariant variant;
 
   /// Whether anything is on screen. False stops the loop entirely.
   final bool active;
@@ -543,14 +638,27 @@ class _PresenceAvatarState extends State<_PresenceAvatar>
                                 ]
                               : null,
                         ),
-                        child: child,
+                        // The disc stops being the subject and becomes the
+                        // light behind one: same gradient, same ring, now a
+                        // window with a person in it. The letter stays as the
+                        // fallback and is still what a genderless profile —
+                        // or a failed decode — gets.
+                        child: PresenceCharacter(
+                          variant: widget.variant,
+                          diameter: 30,
+                          turn: turn,
+                          arrive: _arrive.value,
+                          here: here,
+                          tint: tint,
+                          fallback: child!,
+                        ),
                       ),
                     ),
                   ),
                 );
               },
-              // The glyph never changes, so it is built once instead of every
-              // frame.
+              // The fallback glyph never changes, so it is built once instead
+              // of every frame and handed down to whatever needs it.
               child: Center(
                 child: Text(
                   _initial,

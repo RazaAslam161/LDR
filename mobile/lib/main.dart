@@ -666,14 +666,28 @@ class _MilesAppState extends ConsumerState<MilesApp>
   void _trackHumanPresence() {
     final present = MilesApp.showRealApp.value;
     PresenceService.humanPresent = present;
-    if (!present) return;
+    if (!present) {
+      // Withdraw the channel-presence claim as the person leaves. The cover
+      // rises before _goOffline runs, so this rides out on the socket ahead
+      // of the goodbye broadcast; on a kill neither may make it, and the
+      // socket's own close is what tells the server instead.
+      ref.read(partnerScreenProvider.notifier).untrackLive();
+      return;
+    }
     final c = ref.read(currentCoupleProvider);
     if (c == null) return;
     // The socket first — it lands on her phone in ~100ms. The write below is
     // the durable record and takes a database round trip plus a
     // postgres_changes hop to become visible, which is the second-and-a-bit
-    // that made arriving feel slow.
-    ref.read(partnerScreenProvider.notifier).announceLive(online: true);
+    // that made arriving feel slow. track() beside it: the broadcast tells
+    // her we arrived, the track lets the SERVER tell her when we die — a
+    // swipe-killed process sends no goodbye, but the OS still closes its
+    // socket. (On a cold start the couple is still null here and both lines
+    // are skipped; the channel's own subscribe callback tracks instead, the
+    // moment the join lands.)
+    ref.read(partnerScreenProvider.notifier)
+      ..announceLive(online: true)
+      ..trackLive();
     unawaited(PresenceService.setOnline(c.id, online: true));
   }
 
