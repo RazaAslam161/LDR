@@ -1087,7 +1087,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
                   // RepaintBoundary that used to sit here did exactly that;
                   // isolation belongs INSIDE LockScreen, the way CallPip
                   // does it.
-                  if (locked) const LockScreen(),
+                  // Positioned HERE rather than inside LockScreen: the widget
+                  // has a second mount site (cover_gate pushes it as a route)
+                  // where a Positioned is illegal, and the Stack that needs it
+                  // to fill is this one.
+                  if (locked) const Positioned.fill(child: LockScreen()),
                   // Stealth quick-cover: invisible top-right tap zone +
                   // scrim, present on every screen inside the real app.
                   const Positioned.fill(child: StealthLayer()),

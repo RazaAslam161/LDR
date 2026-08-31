@@ -76,8 +76,16 @@ class _LockScreenState extends State<LockScreen> {
     final label = AppLock.biometricLabel(_bio);
     final hasBio = _bio.isNotEmpty;
     final faceIcon = label.startsWith('Face');
-    return Positioned.fill(
-      child: PopScope(
+    // NOT a Positioned. This screen has two mount sites and only one of them
+    // is a Stack: main.dart lays it over the app (and wraps it there), while
+    // cover_gate pushes it as a MaterialPageRoute, where the parent is the
+    // route's own Semantics and a Positioned lands StackParentData on a
+    // RenderObject that cannot take it. Debug catches that as "Incorrect use
+    // of ParentDataWidget"; release skips the assert and throws _TypeError out
+    // of Positioned.applyParentData instead — which is what every launch from
+    // build 68 was reporting. A widget that fills whatever it is given works
+    // in both places; a Positioned only works in one.
+    return PopScope(
         canPop: false,
         child: Material(
           color: MilesColors.night,
@@ -160,7 +168,6 @@ class _LockScreenState extends State<LockScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
