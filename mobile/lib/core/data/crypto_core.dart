@@ -494,6 +494,33 @@ class CryptoCore {
   /// derivation of the same key is recognised as a no-op.
   static String? _derivedFrom;
 
+  /// First 8 characters of the partner PUBLIC key the live shared key came
+  /// from, or 'none'. Diagnostic only, and safe to report: that key is
+  /// published in `partner_keys` and the partner already holds it. Two
+  /// devices reporting different prefixes for the same couple is the proof
+  /// that they derived against different key material — the thing a
+  /// `SecretBoxAuthenticationError` on its own cannot say.
+  static String get derivedFromPrefix {
+    final from = _derivedFrom;
+    if (from == null) return 'none';
+    return from.length <= 8 ? from : from.substring(0, 8);
+  }
+
+  /// Whether a shared key is loaded right now, without exposing it.
+  static bool get hasSharedKey => _sharedKey != null;
+
+  /// How many RETIRED keys the ring holds. A count, never the keys — it says
+  /// whether a rewrap has happened on this device, which decides whether an
+  /// unopenable row is "wrong key" or "key that no longer exists anywhere".
+  /// Zero on any failure: a diagnostic may never be the thing that throws.
+  static Future<int> ringSize() async {
+    try {
+      return (await _loadRing()).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Test-only injection. A unit test has no platform keystore, so the live
   /// derive can never run there — and without this seam the chat round trip
   /// (seal under a real key, open through hydrate) was untestable, which left

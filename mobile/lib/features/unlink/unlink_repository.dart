@@ -82,8 +82,11 @@ class UnlinkRepository {
     final cipher = row.noteCipherBytea;
     final nonceB = row.noteNonceBytea;
     if (cipher == null || nonceB == null) return null;
+    // The bool matters. `ready()` answering false means no couple key could be
+    // derived, which fails a few lines down as a StateError that reads exactly
+    // like a corrupt row — and the repair for the two is not the same.
+    final keyReady = await CoupleKey.ready();
     try {
-      await CoupleKey.ready();
       final blob = byteaToBytes(cipher);
       final nonce = byteaToBytes(nonceB);
       // Refuse the plaintext sentinel on the way OUT too.
@@ -97,7 +100,21 @@ class UnlinkRepository {
         associatedData: noteAd(row.coupleId),
       );
     } catch (e, st) {
-      ErrorReporter.report(e, st, kind: 'unlink');
+      // Reported as the TYPED diagnostic, not the raw crypto exception: a bare
+      // SecretBoxAuthenticationError cannot say whether this phone had no key,
+      // had a key derived from a different partner public key, or met a row
+      // nothing can open — and that is the whole question when a note arrives
+      // unreadable (BRAIN §232).
+      ErrorReporter.report(
+        NoteUnreadable(
+          keyReady: keyReady,
+          derivedFrom: CryptoCore.derivedFromPrefix,
+          ringSize: await CryptoCore.ringSize(),
+          cause: e.runtimeType.toString(),
+        ),
+        st,
+        kind: 'unlink',
+      );
       return null;
     }
   }

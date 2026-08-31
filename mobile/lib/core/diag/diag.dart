@@ -258,6 +258,18 @@ class ErrorReporter {
         // report — the N of M — died right here in the switch.
         ParseShortfall(:final where, :final parsed, :final of, :final first) =>
           '$where: $parsed/$of, first=$first',
+        // Same contract: booleans, a count, a class name, and 8 chars of a
+        // key that is already public.
+        // Key facts FIRST, cause last: `detail` is capped at 64 chars and the
+        // long class name is the part already legible in the stack, so it is
+        // the part that may be truncated without losing the answer.
+        NoteUnreadable(
+          :final keyReady,
+          :final derivedFrom,
+          :final ringSize,
+          :final cause,
+        ) =>
+          'from=$derivedFrom key=${keyReady ? 1 : 0} ring=$ringSize $cause',
         ShareQualityDigest(
           :final codec,
           :final finalRung,
@@ -422,6 +434,46 @@ class ParseShortfall implements Exception {
 
   @override
   String toString() => 'ParseShortfall';
+}
+
+/// Why a stored ceremony note would not open, in facts that cannot leak.
+///
+/// The ritual's note is the only channel the two people have while the
+/// ceremony runs, and on 2026-08-31 one arrived unreadable on the partner's
+/// phone: a `SecretBoxAuthenticationError` on well-formed bytes with the right
+/// nonce length. That exception alone cannot distinguish the three causes —
+/// no key at all, a key derived from a DIFFERENT partner public key, or a
+/// genuinely corrupt row — and the difference decides whether the repair is a
+/// re-derive, a re-publish, or a rewrap.
+///
+/// Safe by construction, on the [ParseShortfall] model: two booleans, a count,
+/// a class NAME, and the first 8 characters of a PUBLIC key. Public keys are
+/// published to `partner_keys` and readable by the partner already; the prefix
+/// is what makes "these two devices derived from different keys" provable from
+/// a row rather than guessable.
+class NoteUnreadable implements Exception {
+  NoteUnreadable({
+    required this.keyReady,
+    required this.derivedFrom,
+    required this.ringSize,
+    required this.cause,
+  });
+
+  /// Whether CoupleKey said a key was available before the attempt.
+  final bool keyReady;
+
+  /// First 8 chars of the partner PUBLIC key the live shared key was derived
+  /// from, or 'none'. Never the shared key, never a private key.
+  final String derivedFrom;
+
+  /// How many retired keys the ring offered.
+  final int ringSize;
+
+  /// runtimeType name of the underlying failure.
+  final String cause;
+
+  @override
+  String toString() => 'NoteUnreadable';
 }
 
 /// How a screen share actually performed, reported once when it ends.
