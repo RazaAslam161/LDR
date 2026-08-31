@@ -26,7 +26,17 @@ class SceneArt {
   static final Map<String, ui.Image> _chars = {};
 
   static Future<void>? _loading;
-  static bool get ready => backdropOut != null;
+  static bool _ready = false;
+
+  /// True only once EVERY layer has decoded.
+  ///
+  /// This used to read `backdropOut != null`, which is the first of twelve
+  /// decodes — so for the rest of the load the painters were told the art was
+  /// ready and then dereferenced `SceneArt.door!` on a null. On a test machine
+  /// the whole load lands before the first paint and it never showed; on the
+  /// owner's handset build 68 threw `_TypeError` out of
+  /// `DoorstepPainter._paintStreet` and greyed the ritual.
+  static bool get ready => _ready;
 
   static Future<void> ensureLoaded() => _loading ??= _load();
 
@@ -52,6 +62,9 @@ class SceneArt {
     _chars['f_calm'] = await _decode('assets/scene/f_calm.webp');
     _chars['f_worried'] = await _decode('assets/scene/f_worried.webp');
     _chars['f_letter'] = await _decode('assets/scene/f_letter.webp');
+    // LAST line, deliberately: every field above must be non-null before a
+    // painter is allowed to believe any of them are.
+    _ready = true;
   }
 
   /// The character frame for this variant and mood, or null for the neutral
