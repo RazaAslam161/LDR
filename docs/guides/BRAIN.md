@@ -18138,3 +18138,161 @@ phone and is theirs to choose (Settings, or `pm enable com.miles.miles/.AliasMil
 
 **Still open, unchanged**: the Doorstep has still never been seen on hardware — it needs
 a live ceremony, which pushes the partner for real.
+
+## §231 — Build 68 greyed the app on both phones. Two defects, both mine (2026-08-30)
+
+Owner: "app not running". It was not the cover after all — §230's cover finding was TRUE
+but was not the whole story, and I stopped at the first explanation that fit.
+
+**How the truth was found**: release builds call `silenceLogsInRelease()`, so logcat says
+nothing. But `ErrorReporter` ships to `public.client_errors`, and production had the
+answer waiting:
+
+    build 68  _TypeError  #0 Positioned.applyParentData          n=6  16:04:26 → 17:44:51
+    build 68  _TypeError  #0 DoorstepPainter._paintStreet        n=1  16:04:39
+    build 67  (neither signature appears — nor on 66, 65)
+
+**Defect 1 — the grey screen. `SceneArt.ready` was a lie.**
+`ready => backdropOut != null` was true after the FIRST of twelve decodes, so any paint
+landing mid-load hit `SceneArt.door!` on a null and the ritual died — and a live ceremony
+(`couple_unlink` row started 16:04:38, still cooling) makes `/unlink` the LANDING route,
+so the whole app opened onto a corpse. Fixed: `_ready` is set on the last line of
+`_load()`. **Why no test caught it**: the golden harness awaits `SceneArt.ensureLoaded()`
+in `setUpAll`, so the art is always fully decoded before the first paint. The device is
+the only place where frames land mid-load. A partial-initialisation flag is exactly the
+"first feature to REQUIRE something optional" failure class in the rulebook.
+
+**Defect 2 — `Positioned.applyParentData` `_TypeError`, 6× per launch, NOT yet fixed.**
+Only on 68, so it arrived with this work. It is NOT fatal — the app rendered the Weather
+cover normally at 21:22 while throwing it — but it is a real defect and it is unexplained.
+`UnlinkEndOverlay` is exonerated three ways by `test/widget/unlink_end_overlay_test.dart`
+(new): as a bare `Positioned.fill` in a Stack, while playing an ending, and inside the
+REAL chain `TickerMode > EmberBackground > Stack`. All three pass. The report carries no
+widget identity, and `details.context` cannot be shipped as-is — a DiagnosticsNode can
+contain a `Text` widget's plaintext, which this app may never send. **Next step**: install
+a debug build under a suffixed applicationId (a SECOND install, never touching the real
+one — the installed app's cert cannot change without an uninstall that destroys the
+X25519 seed) and read the full FlutterError with its widget context locally.
+
+**Process failures of mine, recorded because both are rules already in the file:**
+- I reported build 68 "installed and running" from `pidof`. It was greyed out at the time.
+  A live pid is not a running app; the app must be SEEN, and where it cannot be seen the
+  verdict is BLOCKED, not done.
+- I found the cover, and stopped. One explanation that fits the symptom is not the same as
+  the cause, and `client_errors` — one query — held the real answer the whole time.
+
+Build 69 cut with the SceneArt fix. Ceremony left running deliberately: it is the only way
+to reach the ritual, and ending it would destroy the one live test case.
+
+### §231 addendum — the "69" APK contained build-68 Dart (2026-08-30)
+
+Caught before it reached a handset, by running the release script's stamp check by hand
+against an artifact the script did not build:
+
+    libapp.so: 3 | stale: ['lib/arm64-v8a/libapp.so', 'lib/armeabi-v7a/libapp.so',
+                           'lib/x86_64/libapp.so']
+    stamps found in arm64 libapp.so: [b'miles-build-68']
+
+`flutter build apk --release --flavor play` reused the cached AOT snapshot while Gradle
+re-stamped versionCode 69 — the exact mechanism release.sh documents as having shipped
+build-31 Dart under fresh version numbers six times. **The SceneArt fix was not in it**,
+so installing would have "fixed" nothing and burned another round of the owner's patience.
+
+Lesson, and it is a rule already in the file rather than a new one: *"Confirm the artifact
+under test contains the change"* — exit 0 plus a fresh timestamp is not that; only the
+stamp inside `libapp.so` is. The play channel has no script path that produces an APK
+(release.sh --play builds an AAB), so anyone building a play APK by hand MUST run the
+stamp check by hand too. Rebuilding after `gradlew --stop` + `flutter clean`.
+
+## §232 — Build 69 on both phones: the scene crash is dead, and the note channel is broken (2026-08-31)
+
+**Installed and verified**: both handsets report `versionCode=69` (`Success` on each).
+Artifact proved BEFORE install — and the first attempt was REFUSED by that proof:
+
+    attempt 1: libapp.so 3 | stale: all three | stamps found: [b'miles-build-68']
+    attempt 2 (after gradlew --stop + flutter clean):
+               libapp.so 3 | stale: NONE - all three stamped miles-build-69
+
+**Fixed, proven by absence in production**: `DoorstepPainter._paintStreet` `_TypeError`
+appeared 1× on build 68 and has NOT appeared once on 69. The `SceneArt.ready` partial-
+initialisation fix holds on real hardware.
+
+**Still open — `Positioned.applyParentData` `_TypeError`**, now 1× rather than 6× per
+launch, still unexplained, still non-fatal. `UnlinkEndOverlay` remains exonerated by
+`test/widget/unlink_end_overlay_test.dart` (3 tests, all green).
+
+**NEW AND SERIOUS — the ritual's note cannot be read by the partner.**
+
+    SecretBoxAuthenticationError → UnlinkRepository.openNote (unlink_repository.dart:95)
+    reader  6076edae-…  ≠  note_author  a7a6485c-…      (cross-device, not self)
+    note_cipher 25 bytes (16 MAC + 9 plaintext), note_nonce 24 bytes — well-formed
+
+The bytes are the right SHAPE, so this is not the §208 bytea double-encoding class. A MAC
+failure on well-formed input with the right nonce length means the two devices are not
+holding the same couple key. **This is the rulebook's own failure class, verbatim**:
+"never be the first feature to REQUIRE something that has only ever been optional." Chat
+survives the same mismatch because it dual-writes plaintext (`chat_cipher_only` is false
+precisely for this reason); the ritual's note has NO fallback, so the identical underlying
+defect turns it into a control that does nothing. The note is ALSO the ritual's only
+channel between the two people, which makes it the worst place for this to land.
+
+**Not diagnosed further, deliberately** — the next step is a couple-key question, not a
+scene question: compare the two devices' derived couple key / escrow rows for couple
+5df6a383, and decide whether the note needs the same visible-degradation fallback chat
+has. That is a design decision about cryptography and it waits for the owner (the global
+rules pin key handling as never-assume).
+
+**Owner's outstanding request, still BLOCKED**: restore the Miles launcher icon. Android 12
+refuses it from adb (`SecurityException: Shell cannot change component state`), so it must
+come from inside the app — the cover's own gesture ("Hold today's big temperature
+reading"), then the cover setting. Both phones were unplugged before I could drive it.
+
+## §233 — The unreadable note: what the evidence rules OUT, and the instrument to finish it (2026-08-31)
+
+Owner: "investigate it and fix it". Investigated against production. **The cause is not
+yet provable from the server, and this section says so rather than shipping a guess at
+key handling** — the global rules pin cryptography as never-assume.
+
+**Ruled out, each with evidence:**
+- *Associated-data mismatch* — writer and reader both use `noteAd(row.coupleId)` from the
+  same function, and the writer's argument is `row.coupleId` (unlink_screen.dart:848).
+  Same AD.
+- *§208 bytea double-encoding* — the stored note is `note_cipher` 25 bytes (16 MAC + 9
+  plaintext) and `note_nonce` 24 bytes. Right shape, right XChaCha nonce length; a
+  double-encoded blob would be twice that.
+- *Key rotation / republish race* — `partner_keys` holds one row per user, both 44-char,
+  both last written 2026-08-29 18:49 and unchanged since; `publishMyPublicKey` upserts on
+  every launch, so an unchanged `updated_at` means an unchanged keypair on both sides.
+- *Missing key on the reader* — `decryptBytes` throws `StateError` when `_sharedKey` is
+  null. The row was `SecretBoxAuthenticationError`, so a key WAS present and the retired-
+  key ring failed too.
+- *Escrow trouble* — `key_escrow` has both users, `argon2id-v2`, both 2026-08-29 18:50.
+
+**What is left**: the two devices derived from different key material — which can only be
+proven with a fact that lives ON a handset, and the app never reported it.
+
+**So the deliverable is the instrument, not a guess.** `NoteUnreadable` (diag.dart), a
+typed diagnostic on the established `ParseShortfall` model, now carries what decides it:
+`from=<8 chars of the PARTNER PUBLIC KEY this phone derived from> key=<0|1> ring=<n>
+<cause>`. Public keys are already published to `partner_keys` and already held by the
+partner, so this leaks nothing; two devices reporting DIFFERENT `from=` prefixes for one
+couple is the proof, and identical prefixes with a MAC failure would instead indict the
+private key behind one of them. `CryptoCore.derivedFromPrefix` / `hasSharedKey` /
+`ringSize()` expose only counts and public material.
+
+Also fixed while in there: `openNote` awaited `CoupleKey.ready()` and **discarded the
+bool** — a guard that could no-op, exactly what the rulebook forbids. The answer is now
+carried into the report.
+
+**Verified**: `flutter test test/unit/` → 1248 passed before the diag change; the two new
+tests in `test/unit/diag/note_unreadable_report_test.dart` pin the rendering AND the
+server's 64-char `detail` ceiling (the format puts the key facts first BECAUSE the cap
+truncates the tail). Full-suite result follows this entry. Analyzer: no new issues in
+diag.dart, crypto_core.dart or unlink_repository.dart.
+
+**Exact next step for whoever runs this**: have BOTH phones open the ceremony note once on
+a build carrying this diagnostic, then
+`select user_id, detail from client_errors where error_type='NoteUnreadable' order by
+received_at desc;` — different `from=` prefixes ⇒ re-derive/republish on the stale device;
+identical prefixes ⇒ the private key behind that public key is gone and the repair is a
+rewrap. **Not shipped yet**: this needs build 70 on both handsets.
