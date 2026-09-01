@@ -7,21 +7,30 @@ import 'package:miles/core/data/models.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/presence_character.dart';
+import 'package:miles/core/widgets/presence_figure.dart';
+import 'package:miles/core/widgets/presence_figure_overlay.dart';
 import 'package:miles/features/unlink/scene/scene_state.dart';
 
 /// Presence is the one thing in this app that speaks about a real person while
 /// they are not there to correct it. Showing them somewhere they are not — or
 /// offering to follow them somewhere private — is not a cosmetic bug, so the
-/// states this widget can be in are pinned here.
+/// states this overlay can be in are pinned here.
+///
+/// Ported from partner_here_badge_test.dart when the mark stopped being a
+/// circle in the AppBar and became a whole person standing at the root. The
+/// RULES did not change and neither did these tests; only what "shown" looks
+/// like. Two things did change, deliberately, and are marked below: the figure
+/// unmounts instead of scaling to zero, and a genderless profile now shows
+/// nothing rather than an initial.
 void main() {
-  // The busts are decoded ONCE, here, and never from inside a test body.
-  // `PresenceArt.ensureLoaded` is real bundle I/O: called under testWidgets it
+  // The figures are decoded ONCE, here, never from inside a test body.
+  // `ensureFigureLoaded` is real bundle I/O: called under testWidgets it
   // completes inside the fake-async zone and lands mid-`pump`, which aborts
   // that test AND every one after it with "Guarded function conflict". The
   // Doorstep's SceneArt learned this the same way (BRAIN §228 addendum).
   setUpAll(() async {
-    await PresenceArt.ensureLoaded(PuppetVariant.male);
-    await PresenceArt.ensureLoaded(PuppetVariant.female);
+    await PresenceArt.ensureFigureLoaded(PuppetVariant.male);
+    await PresenceArt.ensureFigureLoaded(PuppetVariant.female);
   });
 
   Profile me() => Profile(
@@ -60,7 +69,8 @@ void main() {
     required String? theirScreen,
     bool fresh = true,
     String at = '/app/care',
-    String? gender,
+    String? gender = 'female',
+    bool animationsOff = false,
   }) async {
     router = GoRouter(
       initialLocation: at,
@@ -68,8 +78,16 @@ void main() {
         for (final path in ['/app', '/app/touch', '/app/care'])
           GoRoute(
             path: path,
-            builder: (_, __) =>
-                const Scaffold(body: Center(child: PartnerHereBadge())),
+            // Mounted the way main.dart mounts it: filling the screen, above
+            // the page, positioning itself.
+            builder: (_, __) => MediaQuery(
+              data: MediaQueryData(disableAnimations: animationsOff),
+              child: const Scaffold(
+                body: Stack(
+                  children: [Positioned.fill(child: PresenceFigureOverlay())],
+                ),
+              ),
+            ),
           ),
       ],
     );
@@ -100,26 +118,29 @@ void main() {
 
   /// Where the router actually is, after everything has been pumped.
   Future<String> settleTo(WidgetTester tester) async {
-    // The avatar breathes forever, so pumpAndSettle would never return.
+    // The figure breathes only while it is on stage now, but the knock is
+    // still running at 300ms, so pumpAndSettle would still not return.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     return router.state.uri.path;
   }
 
-  /// The badge collapses to nothing rather than unmounting, so "not shown"
-  /// means zero scale — which is also what keeps it from shoving a layout
-  /// around as it comes and goes.
-  double scaleOf(WidgetTester tester) =>
-      tester.widget<AnimatedScale>(find.byType(AnimatedScale)).scale;
+  /// Long enough for the whole knock: walk in, hold, walk out.
+  Future<void> pumpPastKnock(WidgetTester tester) =>
+      tester.pump(const Duration(seconds: 5));
 
-  testWidgets('shows when they are on the same screen', (tester) async {
+  /// CHANGED FROM THE BADGE: the figure is not painted at all when nobody is
+  /// there, where the badge scaled to zero and kept its 44dp. It can afford to
+  /// unmount because it sits in an overlay and reserves nobody's layout.
+  bool shown(WidgetTester tester) =>
+      find.byType(PresenceFigure).evaluate().isNotEmpty;
+
+  testWidgets('stands there when they are on the same screen', (tester) async {
     await pump(tester, myScreen: 'Touch', theirScreen: 'Touch');
-    expect(scaleOf(tester), 1.0);
-    expect(find.text('R'), findsOneWidget); // their initial, no name banner
+    expect(shown(tester), isTrue);
   });
 
-  testWidgets('wears the partner face once their bust has decoded',
-      (tester) async {
+  testWidgets('wears the partner face, for either gender', (tester) async {
     // The mark shows the PARTNER, so it reads the partner's gender — not the
     // signed-in user's, which is the profile every other gendered feature in
     // the app happens to read.
@@ -130,42 +151,40 @@ void main() {
         theirScreen: 'Touch',
         gender: gender,
       );
-      expect(find.byType(PresenceCharacter), findsOneWidget,
-          reason: '$gender should wear a face');
-      expect(find.text('R'), findsNothing,
-          reason: '$gender fell back to the letter',);
+      expect(shown(tester), isTrue, reason: '$gender should stand there');
     }
   });
 
-  testWidgets('keeps the initial when the profile has no gender',
-      (tester) async {
+  testWidgets('shows nobody when the profile has no gender', (tester) async {
     // Not a defect state: role-setup has a sign-out escape from a failed save,
-    // so accounts with a null gender exist by design. Asserted with BOTH busts
-    // already decoded (setUpAll), so this proves the neutral branch rather
-    // than proving that an asset had not loaded yet.
-    await pump(tester, myScreen: 'Touch', theirScreen: 'Touch');
-    expect(find.text('R'), findsOneWidget);
+    // so accounts with a null gender exist by design. CHANGED FROM THE BADGE,
+    // which drew their initial instead — a letter inside a circle reads as a
+    // mark, but a letter standing on the carpet reads as a bug. Asserted with
+    // both figures already decoded (setUpAll), so this proves the neutral
+    // branch rather than proving an asset had not loaded yet.
+    await pump(tester, myScreen: 'Touch', theirScreen: 'Touch', gender: null);
+    expect(shown(tester), isFalse);
   });
 
-  testWidgets('still shows when they are somewhere else you can follow',
+  testWidgets('still stands there when they are somewhere you can follow',
       (tester) async {
     await pump(tester, myScreen: 'Chat', theirScreen: 'Touch');
-    expect(scaleOf(tester), 1.0);
+    expect(shown(tester), isTrue);
   });
 
-  testWidgets('hides when they are somewhere private', (tester) async {
+  testWidgets('leaves when they are somewhere private', (tester) async {
     // Following them into the vault would betray the one place in the app that
     // is meant to be theirs alone — so there is nothing to tap and nothing to
     // see.
     await pump(tester, myScreen: 'Chat', theirScreen: 'Vault');
-    expect(scaleOf(tester), 0.0);
+    expect(shown(tester), isFalse);
   });
 
-  testWidgets('hides when their presence has gone stale', (tester) async {
+  testWidgets('leaves when their presence has gone stale', (tester) async {
     // The 45s window has passed: we no longer know where they are, and a
     // confident wrong answer is worse than none.
     await pump(tester, myScreen: 'Touch', theirScreen: 'Touch', fresh: false);
-    expect(scaleOf(tester), 0.0);
+    expect(shown(tester), isFalse);
   });
 
   testWidgets('still points to them before our own screen is published',
@@ -173,13 +192,13 @@ void main() {
     // Where THEY are does not depend on knowing where WE are, and there is a
     // window at launch before the first route has reported.
     await pump(tester, myScreen: null, theirScreen: 'Touch');
-    expect(scaleOf(tester), 1.0);
+    expect(shown(tester), isTrue);
   });
 
-  testWidgets('hides when we know nothing about where they are',
+  testWidgets('leaves when we know nothing about where they are',
       (tester) async {
     await pump(tester, myScreen: 'Chat', theirScreen: null);
-    expect(scaleOf(tester), 0.0);
+    expect(shown(tester), isFalse);
   });
 
   testWidgets('is tappable when together, and when they are joinable',
@@ -188,7 +207,7 @@ void main() {
       await pump(tester, myScreen: mine, theirScreen: theirs);
       final gesture = tester.widget<GestureDetector>(
         find.descendant(
-          of: find.byType(PartnerHereBadge),
+          of: find.byType(PresenceFigureOverlay),
           matching: find.byType(GestureDetector),
         ),
       );
@@ -200,7 +219,7 @@ void main() {
     // A pushed room, not a tab: Touch became a bottom-nav tab, and a tab is
     // joined by selecting it rather than by pushing a route.
     await pump(tester, myScreen: 'Touch', theirScreen: 'Care', at: '/app');
-    await tester.tap(find.byType(PartnerHereBadge));
+    await tester.tap(find.byType(PresenceFigure));
     expect(await settleTo(tester), '/app/care');
   });
 
@@ -209,18 +228,52 @@ void main() {
     // Reachable in the window before our own screen has been published, and a
     // push would stack a second copy of the page on top of itself.
     await pump(tester, myScreen: null, theirScreen: 'Care');
-    await tester.tap(find.byType(PartnerHereBadge));
+    await tester.tap(find.byType(PresenceFigure));
     expect(await settleTo(tester), '/app/care');
-    expect(find.byType(PartnerHereBadge), findsOneWidget); // not stacked twice
+    expect(find.byType(PresenceFigure), findsOneWidget); // not stacked twice
   });
 
   testWidgets('tapping while together navigates nowhere', (tester) async {
     // Together, the tap warms the room. Going somewhere would be the one thing
     // neither of them asked for.
     await pump(tester, myScreen: 'Touch', theirScreen: 'Touch');
-    await tester.tap(find.byType(PartnerHereBadge));
+    await tester.tap(find.byType(PresenceFigure));
     expect(await settleTo(tester), '/app/care');
   });
+
+  group('presence is an event, not a resident', () {
+    // THE WHOLE POINT OF THE REWRITE. The figure used to breathe in the corner
+    // for as long as the partner was online — with ten joinable routes, very
+    // nearly always — and was reported, twice, as annoying and irritating.
+    // Now it arrives, is seen, and leaves; a still dot keeps the fact.
+    testWidgets('they walk out again, and a still dot holds the place',
+        (tester) async {
+      await pump(tester, myScreen: 'Care', theirScreen: 'Care');
+      expect(shown(tester), isTrue, reason: 'the arrival must be seen');
+
+      await pumpPastKnock(tester);
+      expect(shown(tester), isFalse,
+          reason: 'nobody stands in the corner of a screen forever',);
+      expect(find.bySemanticsLabel(RegExp('Rida')), findsOneWidget,
+          reason: 'the fact survives the performance — the dot is still '
+              'there, still tappable, and still says who it is',);
+    });
+
+    testWidgets('reduce-motion is told, never performed at', (tester) async {
+      await pump(
+        tester,
+        myScreen: 'Care',
+        theirScreen: 'Care',
+        animationsOff: true,
+      );
+      expect(shown(tester), isFalse,
+          reason: 'a user who asked their phone to stop animating does not '
+              'get a figure walking across it',);
+      expect(find.bySemanticsLabel(RegExp('Rida')), findsOneWidget,
+          reason: 'they still need to know she is here',);
+    });
+  });
+
 }
 
 class _StubPresence extends PartnerPresenceNotifier {
@@ -230,7 +283,7 @@ class _StubPresence extends PartnerPresenceNotifier {
 }
 
 class _StubScreen extends PartnerScreenNotifier {
-  _StubScreen(super.ref, String? screen) {
-    state = screen;
+  _StubScreen(super.ref, String? value) {
+    state = value;
   }
 }

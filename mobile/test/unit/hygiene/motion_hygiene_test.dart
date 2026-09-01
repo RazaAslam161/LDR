@@ -21,6 +21,10 @@ void main() {
     'lib/core/widgets/gilt_nav_icon.dart',
     'lib/core/widgets/gravity_float.dart',
     'lib/core/widgets/presence_character.dart',
+    // Added 2026-09-01: it was constructing two controllers and never
+    // consulting off(), so it animated for users who had asked their phone
+    // to stop. Its durations are MilesMotion tokens now.
+    'lib/core/widgets/presence_figure_overlay.dart',
     'lib/core/widgets/screen_entrance.dart',
     'lib/core/widgets/tilt_parallax.dart',
     'lib/core/widgets/wordmark.dart',
@@ -30,11 +34,8 @@ void main() {
     // The Doorstep. The scene's DRAWING files are in the set; scene_state
     // (a pure mapper, no widgets) and scene_sync (a realtime subscription)
     // are not motion code and stay outside it.
-    'lib/features/unlink/scene/ritual_scene.dart',
-    'lib/features/unlink/scene/scene_painters.dart',
-    'lib/features/unlink/scene/character_puppet.dart',
-    'lib/features/unlink/scene/bird.dart',
     'lib/features/unlink/scene/unlink_end_overlay.dart',
+    'lib/features/unlink/scene/doorstep_scene.dart',
   ];
 
   String read(String path) {
@@ -74,6 +75,11 @@ void main() {
       'lib/core/widgets/ember_background.dart': (
         1,
         'the 36s ambient loop, expressed from its own _loopSeconds constant',
+      ),
+      'lib/features/unlink/scene/doorstep_scene.dart': (
+        1,
+        'the 1s conversation clock — a timer cadence like countdown_digits, '
+            'not motion; the talk itself is arithmetic on ServerClock',
       ),
     };
     for (final path in motionSet) {

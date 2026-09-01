@@ -5,7 +5,6 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/reasons/reasons_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';
@@ -137,7 +136,7 @@ class _ReasonsScreenState extends ConsumerState<ReasonsScreen> {
       backgroundColor: Colors.transparent,
       drawer: const AppDrawer(),
       appBar: AppBar(
-        actions: const [PartnerHereAction()],
+        
         title: const Text('Reasons I Love You'),
         leading: Builder(
           builder: (ctx) => IconButton(

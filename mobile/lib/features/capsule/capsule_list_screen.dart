@@ -9,7 +9,6 @@ import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/capsule/capsule_repository.dart';
 
@@ -79,7 +78,7 @@ class _CapsuleListScreenState extends ConsumerState<CapsuleListScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        actions: const [PartnerHereAction()],
+        
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),

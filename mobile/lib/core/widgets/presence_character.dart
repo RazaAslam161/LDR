@@ -28,12 +28,16 @@ class PresenceArt {
   static const malePath = 'assets/presence/m_bust.webp';
   static const femalePath = 'assets/presence/f_bust.webp';
   static const maleShutPath = 'assets/presence/m_bust_shut.webp';
+  static const maleFigurePath = 'assets/presence/m_figure.webp';
+  static const femaleFigurePath = 'assets/presence/f_figure.webp';
   static const femaleShutPath = 'assets/presence/f_bust_shut.webp';
 
   static const _decodeWidth = 256;
 
   static final Map<PuppetVariant, ui.Image> _busts = {};
   static final Map<PuppetVariant, ui.Image> _shuts = {};
+  static final Map<PuppetVariant, ui.Image> _figures = {};
+  static final Map<PuppetVariant, Future<void>> _figureLoading = {};
   static final Map<PuppetVariant, Future<void>> _loading = {};
 
   /// The decoded bust, or null while it loads, if it failed, or for a variant
@@ -44,6 +48,35 @@ class PresenceArt {
   /// The same face with its eyes closed. Null means no blink — the figure
   /// simply keeps them open, which is what a missing frame should cost.
   static ui.Image? shutFor(PuppetVariant v) => _shuts[v];
+
+  /// The whole standing person, for the corner of every screen. Separate from
+  /// the bust because they are different crops of a different size with
+  /// different lifetimes — Home's 64dp circle wants a face, the overlay wants
+  /// a person, and neither should pay to decode the other.
+  static ui.Image? figureFor(PuppetVariant v) => _figures[v];
+
+  static String? figurePathFor(PuppetVariant v) => switch (v) {
+        PuppetVariant.male => maleFigurePath,
+        PuppetVariant.female => femaleFigurePath,
+        PuppetVariant.neutral => null,
+      };
+
+  /// Decoded at the size it is actually drawn: 116dp on a 4x handset is 464px
+  /// tall, which at this crop's aspect is ~152px wide. A figure standing in a
+  /// corner has no business holding more.
+  static Future<void> ensureFigureLoaded(PuppetVariant v) =>
+      _figureLoading[v] ??= _loadFigure(v);
+
+  static Future<void> _loadFigure(PuppetVariant v) async {
+    final path = figurePathFor(v);
+    if (path == null) return;
+    try {
+      _figures[v] = await _decode(path, width: 152);
+    } catch (e) {
+      // An empty corner is the designed fallback; the failure still gets named.
+      debugPrint('presence: $path failed to decode, no figure shown: $e');
+    }
+  }
 
   static String? shutPathFor(PuppetVariant v) => switch (v) {
         PuppetVariant.male => maleShutPath,
@@ -92,11 +125,11 @@ class PresenceArt {
     }
   }
 
-  static Future<ui.Image> _decode(String path) async {
+  static Future<ui.Image> _decode(String path, {int? width}) async {
     final bytes = await rootBundle.load(path);
     final codec = await ui.instantiateImageCodec(
       bytes.buffer.asUint8List(),
-      targetWidth: _decodeWidth,
+      targetWidth: width ?? _decodeWidth,
     );
     return (await codec.getNextFrame()).image;
   }
@@ -105,7 +138,9 @@ class PresenceArt {
   static void resetForTest() {
     _busts.clear();
     _shuts.clear();
+    _figures.clear();
     _loading.clear();
+    _figureLoading.clear();
   }
 }
 

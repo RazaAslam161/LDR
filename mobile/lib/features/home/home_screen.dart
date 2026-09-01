@@ -23,7 +23,6 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/presence_character.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
@@ -215,7 +214,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       // Home has no AppBar, but it IS a joinable tab — without
                       // this the one screen a partner is most often on is the
                       // one where they cannot be seen.
-                      const PartnerHereAction(),
                       Builder(
                         builder: (ctx) => IconButton(
                           icon: const Icon(Icons.menu, color: MilesColors.gilt),

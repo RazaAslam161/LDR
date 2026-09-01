@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/timeline/timeline_repository.dart';
 
@@ -80,7 +79,7 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        actions: const [PartnerHereAction()],
+        
         title: const Text('Timeline'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

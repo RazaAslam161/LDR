@@ -32,6 +32,7 @@ import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
+import 'package:miles/core/widgets/presence_figure_overlay.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_controller.dart';
@@ -1081,6 +1082,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // so it reaches the whole screen, above the page and below the
               // lock.
               const Positioned.fill(child: WarmthOverlay()),
+              // The partner, standing in the corner of whatever screen you are
+              // on. Mounted HERE rather than in twenty AppBars: they can arrive
+              // and leave without a single screen reflowing, and a screen added
+              // tomorrow cannot forget to include them.
+              const Positioned.fill(child: PresenceFigureOverlay()),
               // The unlinking ritual's two endings — the light flood and the
               // dusk — played above the router, because both endings navigate
               // and a farewell cut off mid-flight is worse than none.

@@ -11,7 +11,6 @@ import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/cycle/cycle_repository.dart';
@@ -236,7 +235,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
       backgroundColor: Colors.transparent,
       drawer: const AppDrawer(),
       appBar: AppBar(
-        actions: const [PartnerHereAction()],
+        
         title: const Text('Cycle'),
         leading: Builder(
           builder: (ctx) => IconButton(

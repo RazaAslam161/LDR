@@ -7,7 +7,6 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/watch/watch_embed.dart';
 import 'package:miles/features/watch/watch_embed_player.dart';
@@ -704,7 +703,6 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
                       icon: const Icon(Icons.stop_circle_outlined),
                       onPressed: _closeSession,
                     ),
-                  const PartnerHereAction(),
                 ],
                 title: const Text('Watch Together'),
                 leading: Builder(

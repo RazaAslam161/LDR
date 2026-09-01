@@ -667,6 +667,14 @@
             "minted_at",
             "user_id"
         ],
+        "unlink_messages": [
+            "cipher",
+            "couple_id",
+            "created_at",
+            "id",
+            "nonce",
+            "sender"
+        ],
         "vault_items": [
             "ad",
             "ciphertext",
@@ -826,6 +834,7 @@
         "unlink_cancel",
         "unlink_dies_with_couple",
         "unlink_execute",
+        "unlink_send_message",
         "unlink_start",
         "unlink_write_note",
         "unlock_capsule",

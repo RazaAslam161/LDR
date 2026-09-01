@@ -31,7 +31,6 @@ import 'package:miles/core/ui/mood.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/net_image.dart';
-import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
@@ -2077,7 +2076,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           actions: [
             // Presence sits beside their name, where it means something, instead
             // of floating over the middle of the conversation.
-            const PartnerHereAction(),
             if (couple != null)
               IconButton(
                 tooltip: 'Voice call',

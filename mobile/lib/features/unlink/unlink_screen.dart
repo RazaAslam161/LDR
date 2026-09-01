@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/providers.dart';
@@ -8,14 +9,18 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/couple_key.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/services/server_clock.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/countdown_digits.dart';
-import 'package:miles/features/unlink/scene/ritual_scene.dart';
+import 'package:miles/features/unlink/scene/doorstep_clock.dart';
+import 'package:miles/features/unlink/scene/doorstep_scene.dart';
+import 'package:miles/features/unlink/scene/film_library.dart';
 import 'package:miles/features/unlink/scene/scene_state.dart';
 import 'package:miles/features/unlink/scene/scene_sync.dart';
 import 'package:miles/features/unlink/scene/unlink_end_overlay.dart';
 import 'package:miles/features/unlink/unlink_completion.dart';
-import 'package:miles/features/unlink/unlink_quotes.dart';
 import 'package:miles/features/unlink/unlink_repository.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 
@@ -117,6 +122,9 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     final myUid = ref.read(currentProfileProvider)?.id;
     if (coupleId != null && myUid != null) {
       _sync = UnlinkSceneSync.start(coupleId: coupleId, myUid: myUid);
+      // The phone: their knock refetches; so does mounting.
+      UnlinkSceneSync.onMessage = () => unawaited(_fetchMessages());
+      unawaited(_fetchMessages());
     }
     _startTicking();
     unawaited(_loadNote());
@@ -125,6 +133,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   @override
   void dispose() {
     UnlinkState.current.removeListener(_onState);
+    UnlinkSceneSync.onMessage = null;
     _sync?.dispose();
     _tick?.cancel();
     super.dispose();
@@ -143,10 +152,16 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       }
       return;
     }
+    _lastRow = UnlinkState.current.value;
     _noteLoad = _NoteLoad.pending;
     unawaited(_loadNote());
     setState(() {});
   }
+
+  /// The last non-null row seen, kept because the ending needs facts from a
+  /// row whose DELETION is what triggers the ending — by teardown time
+  /// UnlinkState.current is already null on the relink path.
+  UnlinkRow? _lastRow;
 
   /// Whichever way it ended, this phone catches up and leaves.
   ///
@@ -168,6 +183,20 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     // The farewell, above the router: setting a notifier is synchronous, so
     // the pinned teardown gains no await and the overlay plays OVER the
     // navigation. Re-link floods warm; dissolution lets the dusk fall.
+    // The film choice rides the same synchronous write: whoever was OUTSIDE
+    // is the one who walks back in or away, so the initiator's gender picks
+    // the clip — identically on both phones. Null (neutral/unknown) keeps
+    // the light-only ending.
+    final initiator = _lastRow?.initiatedBy;
+    final me = ref.read(currentProfileProvider);
+    final partner = ref.read(partnerProfileProvider);
+    final initiatorGender =
+        initiator == null ? null : (initiator == me?.id ? me?.gender : partner?.gender);
+    UnlinkEndOverlay.initiatorMale.value = switch (initiatorGender) {
+      'male' => true,
+      'female' => false,
+      _ => null,
+    };
     UnlinkEndOverlay.play.value =
         survives ? UnlinkEnding.relink : UnlinkEnding.ended;
     // '/app' either way. If the couple really is gone the funnel's needsCouple
@@ -218,6 +247,8 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
         return;
       }
       if (at % 15 == 0) unawaited(UnlinkState.load());
+      // The floor under the phone's knock, same as the row's.
+      if (at % 15 == 0) unawaited(_fetchMessages());
       if (mounted) setState(() {});
     });
   }
@@ -543,6 +574,617 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
         ],
       );
 
+  /// The words, shared with the calm layout so the story cannot fork.
+  ///
+  /// Grounded in the scene: the initiator IS on the porch in the picture
+  /// behind these words, so "stepped outside" is a description, not a
+  /// verdict. The partner is still never told what happened — they are told
+  /// where their person is.
+  String _headline(bool mine, String partnerName) => mine
+      ? 'You stepped outside.'
+      : '$partnerName stepped out to the porch.';
+
+  /// The clock's two spans: what is left, out of what whole.
+  ///
+  /// THE WINDOW MUST BE THE ONE THE USER IS LIVING IN. This counted the
+  /// 24-hour cooling span from the first second, so through the fifteen
+  /// minutes that actually matter — the conversation, the wait for the gate —
+  /// the hand swept 3.75 degrees and the arc drained 1%. On a real handset
+  /// that is indistinguishable from a stopped clock, and it was reported as
+  /// one. Before the gate the clock counts THE GATE: the same timestamp the
+  /// bird's last line is pinned to, so the dial, the conversation and the
+  /// button all finish together. After it, the day. In last call, its own
+  /// five minutes.
+  DateTime _windowEnd(UnlinkRow row) {
+    if (row.lastCall) return row.endsAt;
+    final gate = _myGate(row);
+    return gate.isAfter(ServerClock.now()) ? gate : row.coolingEndsAt;
+  }
+
+  DateTime _windowStart(UnlinkRow row) {
+    if (row.lastCall) return row.acceptedAt ?? row.startedAt;
+    return row.startedAt;
+  }
+
+  /// Whichever fifteen-minute gate is mine to wait out.
+  DateTime _myGate(UnlinkRow row) =>
+      row.iAmInitiator(ref.read(currentProfileProvider)?.id ?? '')
+          ? row.relinkOpensAt
+          : row.partnerGateOpensAt;
+
+  Duration _remainingWindow(UnlinkRow row) {
+    final left = _windowEnd(row).difference(ServerClock.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  Duration _totalWindow(UnlinkRow row) {
+    final whole = _windowEnd(row).difference(_windowStart(row));
+    return whole.isNegative ? Duration.zero : whole;
+  }
+
+  String _subline(bool mine) =>
+      mine ? "The door isn't locked." : "They're right outside.";
+
+  /// THE STAGE LAYOUT. Design law: the scene is the sentence.
+  ///
+  ///  * NO headline — the film already says it. Words belong to the calm
+  ///    layout, where there is no picture to say them.
+  ///  * NO ticking countdown while waiting. A counter manufactures urgency;
+  ///    this ritual exists to remove it. One quiet ABSOLUTE line, top-right:
+  ///    when this ends. The 15-minute gate is announced by the companion's
+  ///    closing line and the button rising — script, gate and button all
+  ///    read the same timestamp, so they cannot disagree. The ticking clock
+  ///    keeps exactly one honest home: the five-minute last call.
+  ///  * ONE voice on the stage — the companion's. The literary quote stays
+  ///    in the calm layout.
+  ///  * ONE primary action, and only while it exists. No greyed buttons, no
+  ///    waiting rows: absence of a button IS the "not yet".
+  ///  * Exits stay at every stage (law), whisper-quiet at the very bottom.
+  Widget _stageLayout(
+    BuildContext context,
+    UnlinkRow row, {
+    required bool mine,
+    required String partnerName,
+  }) {
+    final h = MediaQuery.sizeOf(context).height;
+    final noteReady =
+        _noteLoad == _NoteLoad.open || _noteLoad == _NoteLoad.sealed;
+    return Scaffold(
+      backgroundColor: MilesColors.night,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: DoorstepScene(
+              row: row,
+              role: mine ? SceneRole.outside : SceneRole.inside,
+              variant: puppetVariantOf(
+                ref.watch(currentProfileProvider)?.gender,
+              ),
+              talkBottomInset: h * 0.20,
+              // The owner's symbols: outside, the key appears when the way
+              // back opens — using it is coming home. Inside, the framed
+              // photo arms when the partner's gate opens — tearing it is
+              // the agreement, behind one plain question.
+              actionTorn: _torn,
+              phoneLine: _latestFromThem,
+              phoneGlow: _phoneGlowing,
+              actionArmed: mine
+                  ? (row.relinkOpen || row.lastCall) && !row.due
+                  : row.partnerGateOpen && !row.lastCall && !row.due,
+              onAction: _busy
+                  ? null
+                  : mine
+                      ? _relink
+                      : () => _confirmTear(context, row),
+            ),
+          ),
+          // Time, as an object in the scene — the owner's call: a small
+          // clock in the corner, not a readout on the chrome. Its hands and
+          // depleting arc are painted from the row's own timestamps; in the
+          // last call it wakes (second hand, ember arc). The caption beneath
+          // carries the absolute end — and for the partner, the one sentence
+          // the app may not omit.
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8, right: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    DoorstepClock(
+                      remaining: _remainingWindow(row),
+                      total: _totalWindow(row),
+                      lastCall: row.lastCall && !row.due,
+                      body: FilmLibrary.still(
+                        mine
+                            ? FilmLibrary.clockPorch
+                            : FilmLibrary.clockRoom,
+                      ),
+                      dial: mine ? DialSpec.porch : DialSpec.room,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      row.due
+                          ? 'This is finishing now.'
+                          : 'Ends ${_deadlineClock(row)}',
+                      style: const TextStyle(
+                        color: MilesColors.taupe,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (!mine && !row.due) ...[
+                      const SizedBox(height: 2),
+                      const Text(
+                        'kept safe for 30 days',
+                        style: TextStyle(
+                          color: MilesColors.faint,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: h * 0.42),
+                  child: SingleChildScrollView(
+                    reverse: true,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // The farewell note, only when there is one to show.
+                        if (mine && noteReady) ...[
+                          _noteCard(partnerName),
+                          const SizedBox(height: 12),
+                        ],
+                        ..._stageActions(row,
+                            mine: mine, partnerName: partnerName,),
+                        const SizedBox(height: 6),
+                        // The exits: present at every stage, whispering.
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          children: [
+                            TextButton(
+                              onPressed: () =>
+                                  context.push('/app/settings/export'),
+                              child: Text(
+                                'Save our memories',
+                                style: TextStyle(
+                                  color: MilesColors.taupe
+                                      .withValues(alpha: 0.75),
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  context.push('/app/settings/account'),
+                              child: Text(
+                                'Account',
+                                style: TextStyle(
+                                  color: MilesColors.faint
+                                      .withValues(alpha: 0.8),
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The stage's actions: at most ONE pill, plus the partner's quiet second
+  /// choice. A closed gate shows NOTHING — the companion's script is the
+  /// "not yet", and an absent button cannot be mistaken for a broken one.
+  List<Widget> _stageActions(
+    UnlinkRow row, {
+    required bool mine,
+    required String partnerName,
+  }) {
+    if (row.due) return const [];
+    if (row.lastCall) {
+      // The one urgent moment keeps its reason ON the stage: the key with
+      // five minutes on the clock and no explanation reads as a trap.
+      return [
+        if (mine)
+          _quiet(
+            '$partnerName is ready to let go. The key by the door is the '
+            'last moment either of you can stop it.',
+          )
+        else
+          _quiet(
+            'You both chose this. $partnerName can still bring you '
+            'back until it closes.',
+          ),
+      ];
+    }
+    // ONE pill for both of them, and it is the PHONE — the live channel the
+    // owner asked for. The farewell letter lives inside the sheet, one quiet
+    // link deep, partner-side only (the note is the voice of the person
+    // being left; the RPC enforces it).
+    return [
+      SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            // scrim over the stage — the pill floats on the film's held
+            // frame, and the 0.55 night fill is what keeps its label legible
+            // over any lighting the clip ends on.
+            backgroundColor:
+                MilesColors.night.withValues(alpha: 0.55),
+            side: BorderSide(
+              color: MilesColors.gilt.withValues(alpha: 0.45),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(26),
+            ),
+          ),
+          onPressed: _busy ? null : () => _openPhone(row),
+          child: const Text(
+            'Write to them',
+            style: TextStyle(
+              color: MilesColors.cream50,
+              fontSize: 15,
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  /// One plain question before the photo tears. The words carry the weight;
+  /// the danger colour goes to the act, not to decoration.
+  Future<void> _confirmTear(BuildContext context, UnlinkRow row) async {
+    final partnerName =
+        ref.read(partnerProfileProvider)?.displayName ?? 'Your partner';
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: MilesColors.surface1,
+        title: const Text(
+          'End it from your side too?',
+          style: TextStyle(color: MilesColors.cream50, fontSize: 18),
+        ),
+        content: const Text(
+          'This starts a five-minute goodbye, and there is no taking it '
+          'back after that.',
+          style: TextStyle(color: MilesColors.taupe, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Not now',
+              style: TextStyle(color: MilesColors.cream100),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'I need space too',
+              style: TextStyle(color: MilesColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (sure ?? false) {
+      // The tear is SEEN: the halves for one settled breath, then the accept
+      // (whose realtime + the parting film carry the rest).
+      if (mounted) setState(() => _torn = true);
+      await Future<void>.delayed(MilesMotion.reveal);
+      await _accept(partnerName);
+    }
+  }
+
+  bool _torn = false;
+
+  UnlinkMessages? _messages;
+
+  /// When the newest message from THEM was written, and when this phone
+  /// first saw it. A text used to arrive by silently swapping the words in a
+  /// bubble — no sound, no buzz, nothing moving. If you were not staring at
+  /// that exact corner of the scene, you never knew they had written.
+  DateTime? _theirLatest;
+  DateTime? _theirLatestSeenAt;
+
+  /// The scene's phone stays lit for a while after a text lands, so it is
+  /// still findable when you look up a few seconds later.
+  bool get _phoneGlowing =>
+      _theirLatestSeenAt != null &&
+      ServerClock.now().difference(_theirLatestSeenAt!).inSeconds < 25;
+
+  Future<void> _fetchMessages() async {
+    final row = UnlinkState.current.value;
+    if (row == null) return;
+    try {
+      final msgs = await UnlinkRepository.fetchMessages(row);
+      if (!mounted) return;
+      final uid = ref.read(currentProfileProvider)?.id;
+      final theirs = [for (final m in msgs.items) if (m.sender != uid) m];
+      final newest = theirs.isEmpty ? null : theirs.last.at;
+      // Compared BEFORE the assignment below, or every 15-second poll would
+      // re-announce the same message for as long as the ceremony lasts.
+      final arrived = newest != null && newest != _theirLatest;
+      // Never on the first load: opening the screen to a chime for something
+      // written an hour ago is a false alarm this ceremony cannot afford.
+      final firstLoad = _messages == null;
+      setState(() {
+        _messages = msgs;
+        if (arrived) {
+          _theirLatest = newest;
+          _theirLatestSeenAt = ServerClock.now();
+        }
+      });
+      if (arrived && !firstLoad) {
+        MilesSound.cue(Cue.receive);
+        unawaited(HapticFeedback.lightImpact());
+      }
+    } catch (e) {
+      debugPrint('unlink messages fetch failed: $e');
+    }
+  }
+
+  /// The other phone's newest words, for the scene bubble.
+  String? get _latestFromThem {
+    final uid = ref.read(currentProfileProvider)?.id;
+    final items = _messages?.items;
+    if (items == null) return null;
+    for (final m in items.reversed) {
+      if (m.sender != uid) {
+        return m.failedToOpen ? "…a message this phone can't open yet." : m.text;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _openPhone(UnlinkRow row) async {
+    final partnerName =
+        ref.read(partnerProfileProvider)?.displayName ?? 'Your partner';
+    final composer = TextEditingController();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: MilesColors.surface1,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(ctx).bottom,
+          ),
+          child: SizedBox(
+            height: MediaQuery.sizeOf(ctx).height * 0.62,
+            child: Column(
+              children: [
+                // THE WAY OUT, VISIBLE. This opened over the scene with no
+                // handle and no close — dismissible only by tapping a scrim
+                // mostly hidden behind the keyboard — and it read as a trap:
+                // "if it opens it stays". The ceremony's own law is that
+                // every exit stays on screen; a sheet is not exempt from it.
+                const SizedBox(height: 8),
+                Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: MilesColors.taupe.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Row(
+                  children: [
+                    const SizedBox(width: 4),
+                    Semantics(
+                      button: true,
+                      label: 'Close',
+                      child: IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close_rounded,
+                            size: 20, color: MilesColors.taupe,),
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            partnerName,
+                            style: MilesType.fraunces(fontSize: 17)
+                                .copyWith(color: MilesColors.cream50),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Only the two of you can read this.',
+                            style: TextStyle(
+                                color: MilesColors.faint, fontSize: 11.5,),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Balances the close button so the name stays centred.
+                    const SizedBox(width: 48),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _messages == null || _messages!.items.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'Nothing yet. Say something small.',
+                            style: TextStyle(
+                              color: MilesColors.taupe,
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : ListView(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 18),
+                          children: [
+                            for (final m in _messages!.items)
+                              Align(
+                                alignment: m.sender ==
+                                        ref
+                                            .read(currentProfileProvider)
+                                            ?.id
+                                    ? Alignment.centerRight
+                                    : Alignment.centerLeft,
+                                child: Container(
+                                  margin:
+                                      const EdgeInsets.only(bottom: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 260,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: MilesColors.surface2,
+                                    borderRadius:
+                                        BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    m.failedToOpen
+                                        ? "…this phone can't open this "
+                                            'one yet.'
+                                        : m.text!,
+                                    style: TextStyle(
+                                      color: m.failedToOpen
+                                          ? MilesColors.faint
+                                          : MilesColors.cream100,
+                                      fontSize: 14,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                ),
+                if (!mineOf(row)) ...[
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _writeNote(row.coupleId);
+                    },
+                    child: const Text(
+                      'Leave them a letter instead',
+                      style: TextStyle(
+                        color: MilesColors.gilt,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ),
+                ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: composer,
+                          maxLength: 500,
+                          maxLines: 3,
+                          minLines: 1,
+                          style: const TextStyle(
+                            color: MilesColors.cream100,
+                            fontSize: 14,
+                          ),
+                          decoration: const InputDecoration(
+                            counterText: '',
+                            hintText: 'Say something…',
+                            hintStyle: TextStyle(color: MilesColors.faint),
+                            filled: true,
+                            fillColor: MilesColors.surface2,
+                            border: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(22)),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () async {
+                          final text = composer.text;
+                          if (text.trim().isEmpty) return;
+                          composer.clear();
+                          // The sound belongs to the gesture, not the ack.
+                          MilesSound.cue(Cue.send);
+                          try {
+                            await UnlinkRepository.sendMessage(
+                              row.coupleId,
+                              text,
+                            );
+                            _sync?.announceMessage();
+                            await _fetchMessages();
+                            setSheet(() {});
+                          } catch (e) {
+                            // A send that fails used to clear the box and say
+                            // nothing: the words were gone and the sender
+                            // believed they had been delivered. Give them
+                            // back, and say so.
+                            debugPrint('unlink send failed: $e');
+                            composer.text = text;
+                            setSheet(() {});
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    "That didn't send. Your words are still "
+                                    'here — try again.',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(
+                          Icons.arrow_upward_rounded,
+                          color: MilesColors.ember,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    composer.dispose();
+  }
+
+  bool mineOf(UnlinkRow row) =>
+      row.iAmInitiator(ref.read(currentProfileProvider)?.id ?? '');
+
   /// The way back. One shape, used by the held state and the last call, so the
   /// button cannot drift between the two moments it matters most.
   Widget _relinkButton() => SizedBox(
@@ -557,7 +1199,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
           ),
           onPressed: _busy ? null : _relink,
           child: const Text(
-            'Re-link',
+            'Open the door',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -658,13 +1300,12 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     }
 
     final mine = row.iAmInitiator(uid);
-    // This ceremony's quote, not this day's: a one-day window started in the
-    // evening would otherwise change its own words at midnight, under both of
-    // them, halfway through.
-    final quote = unlinkQuoteForCeremony(row.startedAt);
     final partnerName =
         ref.watch(partnerProfileProvider)?.displayName ?? 'Your partner';
 
+    if (DoorstepScene.fits(context)) {
+      return _stageLayout(context, row, mine: mine, partnerName: partnerName);
+    }
     return Scaffold(
       backgroundColor: MilesColors.night,
       body: SafeArea(
@@ -700,10 +1341,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                               // protecting the other one's pride is half of
                               // why this window exists. The consequence is
                               // still stated in full, lower down.
-                              mine
-                                  ? 'You closed the door.'
-                                  : '$partnerName needs a little space '
-                                      'right now.',
+                              _headline(mine, partnerName),
                               textAlign: TextAlign.center,
                               style: MilesType.fraunces(
                                 fontSize: 26,
@@ -714,9 +1352,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                           const SizedBox(height: 10),
                           _measure(
                             Text(
-                              mine
-                                  ? "It isn't locked."
-                                  : "They haven't gone anywhere.",
+                              _subline(mine),
                               textAlign: TextAlign.center,
                               style: const TextStyle(
                                 color: MilesColors.taupe,
@@ -726,70 +1362,13 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                             ),
                           ),
                           const SizedBox(height: 24),
-                          // The Doorstep: the street, the door, the lamp, the
-                          // bird who says the quote. When the stage fits, the
-                          // scene IS the quote block; when it does not —
-                          // animations off, or a text scale that needs the
-                          // room — the calm layout below stands alone, same
-                          // words, same rules.
-                          if (RitualScene.fits(context))
-                            RitualScene(
-                              row: row,
-                              role: mine
-                                  ? SceneRole.outside
-                                  : SceneRole.inside,
-                              variant: puppetVariantOf(
-                                ref.watch(currentProfileProvider)?.gender,
-                              ),
-                              quoteText: quote.text,
-                              quoteAuthor: quote.author,
-                              // The doorstep envelope unfolds into the same
-                              // card the calm layout shows — one card, one
-                              // set of note states, two stagings.
-                              letterCard: mine &&
-                                      (_noteLoad == _NoteLoad.open ||
-                                          _noteLoad == _NoteLoad.sealed)
-                                  ? _noteCard(partnerName)
-                                  : null,
-                            )
-                          else ...[
-                            const SizedBox(height: 8),
-                            // One hairline instead of a second heading: ours
-                            // above, somebody else's words below.
-                            Container(
-                              width: 40,
-                              height: 1,
-                              color: MilesColors.hairline,
-                            ),
-                            const SizedBox(height: 32),
-                            // Deliberately SMALLER than the headline, so the
-                            // borrowed quote never outranks the app's own
-                            // sentence.
-                            _measure(
-                              Text(
-                                '“${quote.text}”',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: MilesColors.cream50,
-                                  fontSize: 18,
-                                  height: 1.6,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              quote.author,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: MilesColors.faint,
-                                fontSize: 12,
-                                letterSpacing: 0.6,
-                              ),
-                            ),
-                          ],
-                          if (!RitualScene.fits(context) &&
-                              mine &&
+                          // The calm layout: animations off, or a text scale
+                          // that needs the room. The stage lives in
+                          // _stageLayout; here the words stand alone.
+                          // The borrowed quote is gone by the owner's call:
+                          // the companion is the only voice this ceremony
+                          // needs, in both layouts.
+                          if (mine &&
                               (_noteLoad == _NoteLoad.open ||
                                   _noteLoad == _NoteLoad.sealed)) ...[
                             const SizedBox(height: 32),

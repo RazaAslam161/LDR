@@ -13,6 +13,7 @@ import 'package:miles/core/data/models.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/tilt_parallax.dart';
+import 'package:miles/features/unlink/scene/film_library.dart';
 import 'package:miles/features/unlink/scene/scene_assets.dart';
 import 'package:miles/features/unlink/scene/scene_sync.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
@@ -68,6 +69,14 @@ void main() {
     // The stage swaps the owner's bitmaps in asynchronously; the preview
     // must show the world the phone settles on, not the pre-load frame.
     await SceneArt.ensureLoaded();
+    for (final p in [
+      FilmLibrary.stageOutM,
+      FilmLibrary.stageOutF,
+      FilmLibrary.stageInM,
+      FilmLibrary.stageInF,
+    ]) {
+      await FilmLibrary.ensureStill(p);
+    }
   });
 
   // Cleared only once the tree is gone. Resetting while the screen is still

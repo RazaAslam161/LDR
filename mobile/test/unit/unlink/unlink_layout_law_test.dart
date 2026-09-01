@@ -49,8 +49,50 @@ void main() {
             'and a 56dp button on a 640dp phone',);
   });
 
-  test('the cancel control is laid out OUTSIDE the scrolling region', () {
-    final viewport = screen.indexOf('Expanded(');
+  test('the stage pins its actions to the bottom in a REVERSE viewport', () {
+    // The stage layout has no Expanded viewport; its guarantee is different
+    // and equivalent: the action column rests bottom-pinned in a
+    // `reverse: true` scroll view, so growth (a long farewell note) pushes
+    // words UP into scroll and can never push a button off the screen.
+    final stage = screen.indexOf('Widget _stageLayout(');
+    expect(stage, greaterThan(-1), reason: 'the stage layout has gone');
+    final stageEnd = screen.indexOf('List<Widget> _stageActions(');
+    final body = screen.substring(stage, stageEnd);
+    expect(body.contains('reverse: true'), isTrue,
+        reason: 'without the reverse viewport, growth pushes the actions '
+            'off-screen — the exact audit CRITICAL, restaged',);
+    expect(body.contains('_stageActions(row'), isTrue);
+    expect(body.contains("'Save our memories'"), isTrue,
+        reason: 'the exits must ride the stage too — at every stage, law',);
+  });
+
+  test('time on the stage is the clock OBJECT, and it only wakes for the '
+      'last call', () {
+    // The owner's design: a small clock in the corner — scene-language, not
+    // chrome. Digital digits never appear on the stage; the quiet arc is the
+    // 24 hours, and the second hand exists only when five real minutes do.
+    final stage = screen.indexOf('Widget _stageLayout(');
+    final stageEnd = screen.indexOf('List<Widget> _stageActions(');
+    final body = screen.substring(stage, stageEnd);
+    expect(body.contains('DoorstepClock('), isTrue,
+        reason: 'the stage lost its clock object',);
+    expect(body.contains('_clock('), isFalse,
+        reason: 'digital digits on the stage — time is an object here',);
+    final wake = body.indexOf('lastCall: row.lastCall');
+    expect(wake, greaterThan(-1),
+        reason: "the clock's waking must be gated on the last call, or the "
+            'second hand ticks urgency into the whole 24 hours',);
+    expect(body.contains('_wait('), isFalse,
+        reason: 'the stage shows no waiting counters; absence is the '
+            '"not yet" and the companion script paces the wait',);
+  });
+
+  test('the calm cancel control is laid out OUTSIDE the scrolling region', () {
+    // Anchored on the calm layout's own landmark comment, not the file's
+    // first Expanded — the phone sheet legitimately holds an earlier one.
+    final calm = screen.indexOf('The words scroll; the controls never do');
+    expect(calm, greaterThan(-1), reason: 'the calm viewport landmark moved');
+    final viewport = screen.indexOf('Expanded(', calm);
     expect(viewport, greaterThan(-1), reason: 'nothing absorbs the slack');
     final end = closeOf(screen, viewport);
     expect(screen.substring(viewport, end).contains('SingleChildScrollView'),
@@ -65,22 +107,36 @@ void main() {
     // being safe is exactly the half-fix this law exists to catch.
     final calls = '_relinkButton(),'.allMatches(screen).toList();
     expect(calls, isNotEmpty, reason: 'the only cancel control has gone');
+    // The stage's own call lives inside _stageActions, whose bottom-pinned
+    // reverse viewport is covered by its own law above; every OTHER call must
+    // clear the calm viewport.
+    final actionsAt = screen.indexOf('List<Widget> _stageActions(');
+    final actionsEnd = screen.indexOf('Widget _relinkButton()');
     for (final m in calls) {
+      final inStageActions = m.start > actionsAt && m.start < actionsEnd;
+      if (inStageActions) continue;
       expect(m.start, greaterThan(end),
-          reason: 'inside the viewport, Re-link is one long note away from '
-              'being scrolled off a screen nobody can scroll back',);
+          reason: 'inside the calm viewport, the way back is one long note '
+              'away from being scrolled off a screen nobody can scroll '
+              'back',);
     }
-    // The export link dies with the same overflow, so it lives with it.
-    expect(screen.indexOf("'Save our memories'"), greaterThan(end));
+    // The export link dies with the same overflow, so it lives with it —
+    // lastIndexOf: the calm copy; the stage carries its own, checked above.
+    expect(screen.lastIndexOf("'Save our memories'"), greaterThan(end));
   });
 
   test('everything that can grow is inside the viewport', () {
-    final viewport = screen.indexOf('Expanded(');
+    // Anchored on the calm layout's own landmark comment, not the file's
+    // first Expanded — the phone sheet legitimately holds an earlier one.
+    final calm = screen.indexOf('The words scroll; the controls never do');
+    expect(calm, greaterThan(-1), reason: 'the calm viewport landmark moved');
+    final viewport = screen.indexOf('Expanded(', calm);
     final end = closeOf(screen, viewport);
     final scrolled = screen.substring(viewport, end);
     expect(scrolled.contains('_noteCard(partnerName)'), isTrue,
         reason: 'the partner note is the unbounded child that started this',);
-    expect(scrolled.contains('quote.text'), isTrue);
+    // The borrowed quote is gone by the owner's call — the companion is the
+    // only voice this ceremony needs — so the note is the one growable left.
   });
 
   test('the note editor cannot open over a load still in flight', () {

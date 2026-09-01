@@ -8,6 +8,27 @@ import 'package:miles/core/diag/diag.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 
+/// A decoded phone message, or the honest record of one that would not open.
+class UnlinkMessage {
+  const UnlinkMessage({
+    required this.sender,
+    required this.at,
+    required this.text,
+    required this.failedToOpen,
+  });
+
+  final String? sender;
+  final DateTime at;
+  final String? text;
+  final bool failedToOpen;
+}
+
+class UnlinkMessages {
+  const UnlinkMessages({required this.items, required this.failedToOpen});
+  final List<UnlinkMessage> items;
+  final int failedToOpen;
+}
+
 /// The ceremony's five verbs, and the sealing of the one note.
 ///
 /// Every write goes through a SECURITY DEFINER RPC — the table takes no
@@ -15,6 +36,80 @@ import 'package:miles/features/unlink/unlink_state.dart';
 /// chat: ciphertext and nonce columns, never plaintext at rest.
 class UnlinkRepository {
   UnlinkRepository._();
+
+  /// One decoded phone message.
+  ///
+  /// [sender] tells the UI whose bubble it is; [failedToOpen] marks a row
+  /// whose bytes arrived but would not decrypt — counted and SHOWN as such,
+  /// never silently dropped (parsed N of M is a finding, §208 law).
+  static Future<UnlinkMessages> fetchMessages(UnlinkRow row) async {
+    final rows = await SupabaseService.client
+        .from('unlink_messages')
+        .select()
+        .gte('created_at', row.startedAt.toIso8601String())
+        .order('id', ascending: true)
+        .limit(60);
+    final keyReady = await CoupleKey.ready();
+    var failed = 0;
+    final out = <UnlinkMessage>[];
+    for (final r in rows) {
+      final sender = r['sender'] as String?;
+      final at = DateTime.parse(r['created_at'] as String).toUtc();
+      String? text;
+      if (keyReady) {
+        try {
+          // The note's decode pipeline, verbatim (openNote above): bytea ->
+          // bytes, zero-sentinel refusal, unpack(blob:, nonce:), decrypt with
+          // this channel's own AAD.
+          final blob = byteaToBytes(r['cipher'] as String);
+          final nonce = byteaToBytes(r['nonce'] as String, expect: 24);
+          if (!nonce.every((b) => b == 0) &&
+              !blob.take(16).every((b) => b == 0)) {
+            final payload = unpackMacAndCiphertext(blob: blob, nonce: nonce);
+            text = await CryptoCore.decryptString(
+              payload,
+              associatedData: msgAd(row.coupleId),
+            );
+          }
+        } catch (e) {
+          debugPrint('unlink msg ${r['id']} failed to open: $e');
+        }
+      }
+      if (text == null) failed++;
+      out.add(UnlinkMessage(
+        sender: sender,
+        at: at,
+        text: text,
+        failedToOpen: text == null,
+      ),);
+    }
+    if (failed > 0) {
+      debugPrint('unlink messages: parsed ${out.length - failed} of '
+          '${out.length}');
+    }
+    return UnlinkMessages(items: out, failedToOpen: failed);
+  }
+
+  /// Seal and send one message. Same pipeline as the note: couple-key AEAD,
+  /// packed mac+ciphertext, bytea over the RPC. The all-zero guard is the
+  /// note's guard — a nonce of zeros is a key that never derived.
+  static Future<void> sendMessage(String coupleId, String text) async {
+    if (text.trim().isEmpty) return;
+    await CoupleKey.ready();
+    final sealed = await CryptoCore.encryptString(
+      text.trim(),
+      associatedData: msgAd(coupleId),
+    );
+    final nonce = base64Decode(sealed.nonceB64);
+    final blob = packMacAndCiphertext(sealed);
+    if (nonce.every((b) => b == 0)) {
+      throw StateError('unlink msg: zero nonce — key never derived');
+    }
+    await SupabaseService.client.rpc<void>('unlink_send_message', params: {
+      'p_cipher': bytesToBytea(blob),
+      'p_nonce': bytesToBytea(nonce),
+    },);
+  }
 
   static Future<void> start() =>
       SupabaseService.client.rpc<void>('unlink_start');
@@ -33,6 +128,11 @@ class UnlinkRepository {
   /// outside this couple's ceremony.
   @visibleForTesting
   static String noteAd(String coupleId) => 'unlink_note:$coupleId';
+
+  /// The phones' AAD — a different context string from the note ON PURPOSE:
+  /// a ciphertext sealed as a message can never be replayed as a farewell
+  /// letter, or the reverse.
+  static String msgAd(String coupleId) => 'unlink_msg:$coupleId';
 
   /// Seal and store the partner's note. Empty [text] clears it.
   ///

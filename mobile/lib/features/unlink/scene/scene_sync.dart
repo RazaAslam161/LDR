@@ -107,6 +107,13 @@ class UnlinkSceneSync {
   /// The letter left our hand — give the far phone its head start.
   void announceLetter() => _send('letter');
 
+  /// The phone buzz: tells the far stage a message row exists. A KNOCK only —
+  /// the bytes always arrive via PostgREST (§208).
+  void announceMessage() => _send('msg');
+
+  /// Set by the screen while it is mounted; fired on the partner's knock.
+  static void Function()? onMessage;
+
   /// We agreed — the far phone should see the bolt slide now, not in 15s.
   void announceAgreed() => _send('agreed');
 

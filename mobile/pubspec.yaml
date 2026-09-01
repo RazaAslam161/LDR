@@ -1,7 +1,7 @@
 name: miles
 description: Feel close, even from here. A quiet app for couples apart.
 publish_to: "none"
-version: 0.1.0+70
+version: 0.1.0+71
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
@@ -167,6 +167,11 @@ flutter:
     # MilesSound's loop channel so the user's mute and the server sound-kill
     # still govern it, which a baked-in track would bypass.
     - assets/opening/
+    # The doorstep's eight films and four held stages (the film's own last
+    # frame, extracted at build time — the live stage the 15-minute
+    # conversation plays over). Owner-generated; encoded 480px CRF26, no
+    # audio tracks (sound rides MilesSound so mute and the kill switch hold).
+    - assets/unlink_films/
     # The OFL texts ship because the license requires them to travel with the
     # font software; theme.dart registers both with LicenseRegistry so they
     # surface in the standard licenses page.

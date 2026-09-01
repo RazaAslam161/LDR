@@ -17,6 +17,7 @@ void main() {
     'assets/scene',
     'assets/presence',
     'assets/opening',
+    'assets/unlink_films',
   ]) {
     final d = Directory(dir);
     if (!d.existsSync()) continue;
@@ -100,6 +101,10 @@ void main() {
     // today. The ceiling leaves room for a re-master but not for a second film.
     expect(dirSize('assets/opening'), lessThanOrEqualTo(3 * 1024 * 1024),
         reason: 'assets/opening over its 3MB ceiling');
+    // Eight owner-generated films + four held stages, 5.4MB at intake. The
+    // ceiling leaves room for a retake, not for a second feature's worth.
+    expect(dirSize('assets/unlink_films'), lessThanOrEqualTo(6 * 1024 * 1024),
+        reason: 'assets/unlink_films over its 6MB ceiling');
     expect(
         dirSize('assets/emoji') +
             dirSize('assets/sound') +
@@ -108,14 +113,15 @@ void main() {
             dirSize('assets/scene') +
             dirSize('assets/presence') +
             dirSize('assets/opening') +
+            dirSize('assets/unlink_films') +
             dirSize('assets/motion'),
-        // RAISED 6MB -> 8MB on 2026-08-31, the OWNER's explicit decision, to admit the
-        // Opening film. Recorded here rather than in a doc because this number is the
-        // only thing that actually enforces it. Standing at 4.51MB after the film, so
-        // there is real headroom again — this is a deliberate raise, not a number
-        // moved to make a red test go green.
-        lessThanOrEqualTo(8 * 1024 * 1024),
-        reason: 'assets/ total over its 8MB ceiling',);
+        // RAISED 6MB -> 8MB on 2026-08-31 (the Opening film) and 8MB -> 12MB on
+        // 2026-09-01 (the doorstep's eight films), both the OWNER's explicit
+        // decisions, recorded here because this number is the only thing that
+        // actually enforces them. Standing at ~9.9MB after the films — a
+        // deliberate raise with real headroom, not a number moved to go green.
+        lessThanOrEqualTo(12 * 1024 * 1024),
+        reason: 'assets/ total over its 12MB ceiling',);
   });
 
   test('every top-level asset directory on disk is declared in pubspec', () {

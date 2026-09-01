@@ -10,6 +10,7 @@ import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/countdown_digits.dart';
 import 'package:miles/core/widgets/tilt_parallax.dart';
+import 'package:miles/features/unlink/scene/film_library.dart';
 import 'package:miles/features/unlink/scene/scene_assets.dart';
 import 'package:miles/features/unlink/scene/scene_sync.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
@@ -38,7 +39,17 @@ void main() {
   // Decoded ONCE, before any test — the stage kicks this same load from
   // initState, and a decode that completes mid-file lands its `.then` in a
   // test zone that has already closed.
-  setUpAll(SceneArt.ensureLoaded);
+  setUpAll(() async {
+    await SceneArt.ensureLoaded();
+    for (final p in [
+      FilmLibrary.stageOutM,
+      FilmLibrary.stageOutF,
+      FilmLibrary.stageInM,
+      FilmLibrary.stageInF,
+    ]) {
+      await FilmLibrary.ensureStill(p);
+    }
+  });
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -53,10 +64,16 @@ void main() {
   const meId = 'aaaaaaaa-0000-0000-0000-000000000001';
   const themId = 'bbbbbbbb-0000-0000-0000-000000000002';
 
+  // Real profiles ALWAYS have a gender — the role-setup router gate does not
+  // let anyone past without one. A genderless harness profile is how the §228
+  // bug shipped (every character rendered as the fallback), and now it is how
+  // the stage would render no still and no diegetic objects at all.
   Profile p(String id, String name) => Profile(
         id: id,
         displayName: name,
         timezone: 'UTC',
+        gender: id == meId ? 'male' : 'female',
+        genderSet: true,
         presenceStatus: PresenceStatus.free,
         createdAt: DateTime.utc(2026),
       );
@@ -94,6 +111,7 @@ void main() {
     WidgetTester tester, {
     required Map<String, dynamic> row,
     double textScale = 1.0,
+    bool calm = false,
     Size size = const Size(360, 800),
   }) async {
     UnlinkState.applyRow(row);
@@ -111,7 +129,7 @@ void main() {
           home: MediaQuery(
             data: MediaQueryData(
               size: size,
-              textScaler: TextScaler.linear(textScale),
+              textScaler: TextScaler.linear(calm ? 1.6 : textScale),
             ),
             child: const UnlinkScreen(),
           ),
@@ -127,21 +145,35 @@ void main() {
   });
 
   group('the initiator, before the gate opens', () {
-    testWidgets('waits, and is told what for — never a dead button',
+    testWidgets('the STAGE shows no control at all — absence is the "not yet"',
         (tester) async {
+      // The design law: no headline (the film says it), no ticking countdown
+      // (a counter manufactures urgency this ritual exists to remove), no
+      // dead button. The quiet absolute chip is the only chrome.
       await pump(tester, row: ceremony(initiator: meId));
-      expect(find.text('You closed the door.'), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+      expect(find.byType(CountdownDigits), findsNothing);
+      expect(find.textContaining('Ends '), findsOneWidget,
+          reason: 'when it ends is stated absolutely, without ticking',);
+      expect(find.text('You stepped outside.'), findsNothing,
+          reason: 'the film already says it; a headline would say it twice',);
+    });
+
+    testWidgets('the CALM layout says the words and shows the wait',
+        (tester) async {
+      // Animations off / big text: no film to speak, so the words return —
+      // and with them the visible wait with its end.
+      await pump(tester, row: ceremony(initiator: meId), calm: true);
+      expect(find.text('You stepped outside.'), findsOneWidget);
       expect(find.text('The way back opens in'), findsOneWidget);
       expect(find.byType(CountdownDigits), findsOneWidget,
           reason: 'the wait must show its end, not just assert one',);
-      // The exact failure this screen has already shipped once: a control that
-      // is present and does nothing.
-      expect(find.widgetWithText(FilledButton, 'Re-link'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Open the door'), findsNothing);
     });
   });
 
   group('the initiator, once the gate is open', () {
-    testWidgets('gets Re-link, and it is enabled', (tester) async {
+    testWidgets('gets Open the door, and it is enabled', (tester) async {
       await pump(
         tester,
         row: ceremony(
@@ -150,13 +182,18 @@ void main() {
           gateIn: const Duration(minutes: -1),
         ),
       );
-      final button = tester.widget<FilledButton>(
-          find.widgetWithText(FilledButton, 'Re-link'),);
-      expect(button.onPressed, isNotNull,
+      expect(find.byType(FilledButton), findsNothing,
+          reason: 'no pill returns — the key is the control',);
+      final key = find.bySemanticsLabel('Open the door');
+      expect(key, findsOneWidget);
+      final gd = tester.widget<GestureDetector>(
+        find.descendant(of: key, matching: find.byType(GestureDetector)),
+      );
+      expect(gd.onTap, isNotNull,
           reason: 'the only cancel control in the client must be live',);
     });
 
-    testWidgets('Re-link is REACHABLE at 2.0 text scale on a 360x800 phone',
+    testWidgets('the way back is REACHABLE at 2.0 text scale on a 360x800 phone',
         (tester) async {
       // THE CHECK. A 2.0 accessibility scale used to trigger the overflow with
       // no note at all — everything below the quote was laid out past the
@@ -170,11 +207,11 @@ void main() {
         ),
         textScale: 2,
       );
-      final finder = find.widgetWithText(FilledButton, 'Re-link');
+      final finder = find.widgetWithText(FilledButton, 'Open the door');
       expect(finder, findsOneWidget);
       final box = tester.getRect(finder);
       expect(box.bottom, lessThanOrEqualTo(800),
-          reason: 'Re-link is below the bottom edge — the ceremony is '
+          reason: 'the way back is below the bottom edge — the ceremony is '
               'uncancellable by anyone, which is the audit CRITICAL',);
       expect(box.top, greaterThanOrEqualTo(0));
       // Hit-testable, not merely laid out inside the rectangle.
@@ -185,9 +222,11 @@ void main() {
 
   group('the partner', () {
     testWidgets('is never told what the other one did', (tester) async {
-      await pump(tester, row: ceremony(initiator: themId));
-      expect(find.text('Ayesha needs a little space right now.'),
-          findsOneWidget,);
+      // On the stage the scene itself is the telling — cat, sofa, worry —
+      // and the words return only in the calm layout, softened to WHERE
+      // their person is, never what they did.
+      await pump(tester, row: ceremony(initiator: themId), calm: true);
+      expect(find.text('Ayesha stepped out to the porch.'), findsOneWidget);
       // Softness is the whole point of this side of the screen. If any of
       // these words reach it, the ritual has become a verdict.
       final text = tester
@@ -205,12 +244,22 @@ void main() {
         (tester) async {
       // Soft in tone, honest in substance. Being unlinked with no warning is
       // worse than being told gently.
-      await pump(tester, row: ceremony(initiator: themId));
+      await pump(tester, row: ceremony(initiator: themId), calm: true);
       expect(
         find.textContaining('close your shared space'),
         findsOneWidget,
         reason: 'the one thing this screen must not leave out',
       );
+    });
+
+    testWidgets('the STAGE carries the stakes too, compressed but present',
+        (tester) async {
+      // The full sentence belongs to the calm layout; the stage may compress
+      // it but never drop it — being unlinked with no warning is the app
+      // lying by omission at its highest-stakes moment.
+      await pump(tester, row: ceremony(initiator: themId));
+      expect(find.textContaining('Ends '), findsOneWidget);
+      expect(find.textContaining('kept safe for 30 days'), findsOneWidget);
     });
 
     testWidgets('is offered no chat door — the note is the channel',
@@ -223,16 +272,19 @@ void main() {
           reason: 'the note is the one channel that actually arrives',);
     });
 
-    testWidgets('cannot agree before their own gate opens, and SEES the wait',
-        (tester) async {
-      // The prose alone was the bug: "take a few minutes" with no clock left
-      // the person being left unable to tell two minutes from twenty. The
-      // initiator had a live count for their gate; this side had nothing.
+    testWidgets('cannot agree before their own gate opens', (tester) async {
+      // On the stage, absence is the answer: no danger button until the gate,
+      // no ticking counter — the cat is pacing the wait. The calm layout
+      // keeps the visible clock for the phone that has no cat.
       await pump(tester, row: ceremony(initiator: themId));
+      expect(find.text('I need space too'), findsNothing);
+      expect(find.byType(CountdownDigits), findsNothing);
+
+      await pump(tester, row: ceremony(initiator: themId), calm: true);
       expect(find.text('I need space too'), findsNothing);
       expect(find.text('You can decide in'), findsOneWidget);
       expect(find.byType(CountdownDigits), findsOneWidget,
-          reason: 'the partner must see when their option opens',);
+          reason: 'the calm layout must show when their option opens',);
     });
 
     testWidgets('can agree once it does, quietly', (tester) async {
@@ -244,15 +296,18 @@ void main() {
           gateIn: const Duration(minutes: -1),
         ),
       );
-      final finder = find.text('I need space too');
-      expect(finder, findsOneWidget);
-      // Low emphasis, deliberately: it must never read as the obvious next
-      // step next to a full-width filled button.
-      expect(
-        find.ancestor(of: finder, matching: find.byType(TextButton)),
-        findsOneWidget,
-        reason: 'agreeing to end it must not be a FilledButton',
-      );
+      final photo = find.bySemanticsLabel('I need space too');
+      expect(photo, findsOneWidget,
+          reason: 'the photo arms only once the gate opens',);
+      await tester.tap(photo);
+      await tester.pump();
+      expect(find.text('End it from your side too?'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'I need space too'),
+          findsOneWidget,
+          reason: 'agreeing to end it must never be a FilledButton',);
+      await tester.tap(find.widgetWithText(TextButton, 'Not now'));
+      await tester.pump();
+      expect(find.text('End it from your side too?'), findsNothing);
     });
   });
 
@@ -269,8 +324,12 @@ void main() {
   });
 
   group('last call', () {
-    testWidgets('gives the initiator the button and the reason',
+    testWidgets('keeps the key armed for the initiator, with the reason',
         (tester) async {
+      // The owner's symbol carried into the urgent moment: the key stays by
+      // the door — no pill returns — and the reason stands beside it,
+      // because a key with five minutes on the clock and no explanation
+      // reads as a trap.
       await pump(
         tester,
         row: ceremony(
@@ -281,8 +340,9 @@ void main() {
           gateIn: const Duration(minutes: -1),
         ),
       );
-      expect(find.widgetWithText(FilledButton, 'Re-link'), findsOneWidget);
-      expect(find.textContaining('ready to let go'), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+      expect(find.bySemanticsLabel('Open the door'), findsOneWidget);
+      expect(find.textContaining('key by the door'), findsOneWidget);
     });
 
     testWidgets('leaves the partner no button, because they already chose',
