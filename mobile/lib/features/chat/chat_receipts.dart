@@ -401,8 +401,10 @@ class DeliveryAckPort {
 /// owns the refresh token and refreshes on demand inside its own client
 /// (supabase_client.dart:253). Only when there is demonstrably no UI isolate —
 /// a push that woke a killed process, the case the whole silent push exists for
-/// — does this isolate talk to the server itself, over plain HTTP, as the only
-/// holder of that session.
+/// — does this isolate talk to the server itself, over plain HTTP, and then
+/// READ-ONLY: it uses the stored access token while it is fresh and never
+/// presents the refresh token (see [_accessToken] for the race that rule
+/// closes).
 class BackgroundReceiptAck {
   BackgroundReceiptAck._();
 
@@ -423,8 +425,8 @@ class BackgroundReceiptAck {
     await _ackWithoutTheApp(seq, data['couple_id'] as String?);
   }
 
-  /// Refresh a minute before the JWT actually dies, so a slow request cannot
-  /// land after expiry.
+  /// Treat the JWT as dead a minute early, so a slow request cannot land
+  /// after expiry.
   static const _skew = Duration(seconds: 60);
   static const _budget = Duration(seconds: 15);
 
@@ -504,15 +506,24 @@ class BackgroundReceiptAck {
     return JsonUtils.parseInt(JsonUtils.asMap(rows.first)['seq']);
   }
 
-  /// Reads the session supabase_flutter persisted, and refreshes it in place if
-  /// it has expired.
+  /// Reads the session supabase_flutter persisted. NEVER refreshes it.
   ///
-  /// Refreshing here is safe ONLY because [onMessagePush] has already proven
-  /// there is no UI isolate in this process: rotating a refresh token that a
-  /// second Dart context also holds is what signs people out. The new session
-  /// is written back under the same key, in the same shape gotrue's
-  /// `Session.fromJson` reads (the token endpoint's response body IS that
-  /// shape), so the next launch restores it instead of the burnt one.
+  /// This used to refresh an expired token in place, gated on "no UI isolate
+  /// in this process" — and that gate has a window no port check can close:
+  /// the push that cold-starts this process is often the very reason the user
+  /// opens the app seconds later. This isolate's refresh then races the UI
+  /// isolate's own cold-start refresh with the SAME stored token, and on a
+  /// radio waking from doze either request can take 30-60s (measured 53s on
+  /// the OnePlus 7, BRAIN §248). Two uses of one refresh token landing more
+  /// than the server's 10s reuse-interval apart make gotrue revoke the whole
+  /// token family — which is the "randomly signed out" a couples app can
+  /// least afford, to save one delivery tick.
+  ///
+  /// So: one token holder, ever — the UI isolate. If the stored access token
+  /// is still fresh it is used read-only (no rotation, no race); if it has
+  /// expired, the ack is recorded as owed (the caller already does this on
+  /// null) and the next app open pays the debt through the UI isolate's own
+  /// client.
   static Future<String?> _accessToken(
       http.Client c, String url, String anon,) async {
     final prefs = await SharedPreferences.getInstance();
@@ -528,23 +539,9 @@ class BackgroundReceiptAck {
     if (expiry != null && expiry.isAfter(DateTime.now().add(_skew))) {
       return access;
     }
-    final refresh = stored['refresh_token'] as String?;
-    if (refresh == null) return null;
-
-    final res = await c.post(
-      Uri.parse('$url/auth/v1/token?grant_type=refresh_token'),
-      headers: {'apikey': anon, 'Content-Type': 'application/json'},
-      body: jsonEncode({'refresh_token': refresh}),
-    );
-    if (res.statusCode != 200) {
-      debugPrint('[receipts] bg token refresh HTTP ${res.statusCode}');
-      return null;
-    }
-    final fresh = JsonUtils.asMap(jsonDecode(res.body));
-    final token = fresh['access_token'] as String?;
-    if (token == null) return null;
-    await prefs.setString(key, res.body);
-    return token;
+    debugPrint('[receipts] bg token expired; ack owed, not refreshing '
+        '(one refresh-token holder, ever)');
+    return null;
   }
 
   /// `exp` out of the JWT itself, which is where gotrue reads it from too

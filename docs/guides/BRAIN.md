@@ -20039,3 +20039,81 @@ What this leaves as the story for the owner's failed morning test: unreconstruct
 from here — likely a stale channel on a long-backgrounded app. The MECHANISM is proven
 (addendum 2's timings); if the symptom recurs, instrument the rejoin path
 (realtimeResumed) rather than the presence rail.
+
+### §249 addendum — option 1 built: "knock, then quiet" (2026-09-01)
+
+Owner chose option 1. `presence_figure_overlay.dart` rewritten:
+
+- `_loop.repeat()` for as long as the partner is online is GONE — that was the
+  defect. The breath now runs only while they are on stage.
+- The figure is an EVENT: walks in (`MilesMotion.reveal`), holds
+  `MilesMotion.breath * 0.6` (2.4s), walks out (the same controller reversed),
+  then unmounts. Total ~3.6s and nothing is left running.
+- What remains while they are present is `_PresenceDot`: 11 points, perfectly
+  still, in their mood colour — FILLED when they are on your screen, an open
+  RING when they are elsewhere. That split matters: "they are elsewhere" is a
+  nudge to leave the screen you chose, and it now whispers instead of standing
+  there. Tap target is 44pt and nothing more; the old overlay claimed a
+  figure's worth of corner whether or not anyone was in it.
+- The knock keys on `'here'` / `'away'`, never the screen name, so hopping
+  between two rooms you are not in does not re-knock. At most one knock per
+  state change.
+- **Reduce-motion now honoured.** The overlay built two AnimationControllers
+  and never consulted `MilesMotion.off` — it animated for users who had asked
+  their phone to stop. It now shows the dot and stages nothing.
+- Both durations became MilesMotion tokens (0 raw `Duration(` left), so the
+  file was ADDED to `motion_hygiene_test`'s motionSet. The gate was
+  strengthened, not widened — it had never policed this file at all.
+
+Verified: `flutter analyze lib/` 0 errors / 0 warnings; `flutter test` **1456
+passed** (was 1454). Two new laws pinned in `presence_figure_overlay_test`:
+the figure retires and the dot survives; reduce-motion is told, never performed
+at. A stale comment in that file's helper ("the figure breathes forever") named
+the invariant this change deletes, and was corrected.
+
+Open: NOT built, NOT on a device — the knock's feel (does 2.4s read as too
+short or too long?) is a device judgement. Option 2 ("in the room, not on the
+glass", the character standing inside a Home scene) remains unbuilt and is the
+natural follow-on. Nothing committed.
+
+### §249 — The random sign-out: server never refused, the client raced itself (2026-09-01)
+
+Owner: "fix that random sign out issue." Evidence chain, all pasted in chat:
+
+- Auth logs, 24h: **zero refresh-token refusals except ONE** — Aug 31 19:19:28Z
+  `400 refresh_token_not_found`, followed 13s later by the owner's two failed password
+  attempts (00:19 PKT, the real sign-out moment the owner then hit again at 06:54 when
+  the login finally succeeded). Elsa's Sept-1 13:00:53Z event was a **successful 200
+  rotation** (the `token_revoked` + `login/token` pair is gotrue's normal rotation
+  logging — Steve's "hourly revokes" are the same benign pattern, all 200s).
+- gotrue-dart treats an invalid_grant as terminal: signedOut, storage deleted. So one
+  bad /token answer = the "Welcome back" screen.
+- **The race that produces the bad answer**: a data push cold-starts the process;
+  `BackgroundReceiptAck._accessToken` refreshed the stored token when expired, gated on
+  "no UI isolate" — but the push IS why the user opens the app seconds later. Two
+  refreshes with the SAME token, on a doze-waking radio where one round trip measures
+  53s (§248), land >10s (gotrue reuse-interval) apart → the server revokes the whole
+  family → both isolates die → sign-out. A notification tap is the commonest gesture in
+  a couples app; slow radio + tap = random sign-out.
+- Steve's session has exactly ONE live row — no second device; foreground-task handler
+  is empty (no prefs writes); no android:process components beside an mlkit benchmark.
+
+**Fix (working tree): the background isolate never refreshes — one token holder, ever.**
+`chat_receipts.dart _accessToken`: fresh stored access token → used read-only; expired →
+ack recorded owed (mechanism pre-existing), paid on next app open. Deletes the refresh
+POST + persist. Cost: delivery ticks for pushes-that-woke-a-killed-app defer to next
+open. `flutter analyze` on the file: No issues found. `flutter test test/unit/chat
+test/widget`: 496 passed, All tests passed! Full suite running.
+
+**Open**: the Aug-31 "Not Found" string (vs "Already Used") is not fully explained —
+family revocation edge or server pruning; watch for recurrence. Elsa's 13:00Z sign-in
+screen DESPITE a healthy 200 rotation is still unexplained; a cold-start-with-expired-
+token reproduction is ARMED (both apps force-stopped 13:25:57Z, tokens die ~14:05-14:10Z)
+and runs at ~14:16Z. The installed build 71 still carries the OLD bg-refresh code — the
+fix needs the next build the owner asks for.
+**Next**: reproduction at 14:16Z → if the cold start misroutes, fix that too; full-suite
+verdict; then owner decides on a build.
+
+Full suite after the sign-out fix: **02:36 +1456 ~3: All tests passed!** (1456 passed,
+3 skipped, on the shared tree that includes the concurrent sessions' work). Reproduction
+timer still armed for ~14:16Z.
