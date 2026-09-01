@@ -20245,3 +20245,22 @@ still on build 72.
 
 Play flavor only (both phones carry that signature), `-r`, never uninstall.
 The artifact is already built and proven; it does not need rebuilding.
+
+### §250 addendum 2 — pushed as 3238b5f (2026-09-02)
+
+11 paths staged by explicit path (never `git add -A`), gates re-run at the
+committed tree rather than remembered: analyze 0/0, `flutter test` 1464 passed.
+Secrets grep over the staged diff: clean. No concurrent commits to merge this
+time — the remote was still at 1bd6af6.
+
+**Version reads 71 -> 73 in one commit.** Build 72 was built, proven and
+installed on the OnePlus 8 earlier today and exists in NO commit; the bump was
+still uncommitted when 73 was cut. That is this repo's known "production ahead
+of the repo" hazard happening again, and the commit body records it so the
+missing 72 is not a mystery to whoever reads the ledger later. The lesson is
+narrow and worth keeping: **a version bump belongs in the same turn as the
+build it names**, not left in the working tree until the next one.
+
+Still open, unchanged: nothing is on a device (both phones on 72, `adb devices`
+empty); the stage is a still between films; the door borrows the button-press
+cue; `min_build` untouched.
