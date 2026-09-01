@@ -251,16 +251,28 @@ void main() {
       out = '${r.stdout}';
       err = '${r.stderr}';
       code = r.exitCode;
-      if (RegExp('issues? found', multiLine: true).hasMatch(out)) break;
+      // The summary goes to stdout on Windows and to stderr on Linux.
+      if (RegExp('issues? found').hasMatch('$out$err')) break;
     }
-    final errors =
-        RegExp('^ *error - ', multiLine: true).allMatches(out).length;
-    final warnings =
-        RegExp('^ *warning - ', multiLine: true).allMatches(out).length;
+    // `[-•]`, not ` - `: the Flutter tool separates fields with `-` on
+    // Windows and `•` everywhere else. The first CI run to reach this test
+    // (2026-09-02) captured 37 KB of `   info • ...` lines and matched none
+    // of them, so on Linux all three counts below were structurally zero —
+    // the §58 class again, one platform over.
+    final errorLine = RegExp('^ *error [-•] ', multiLine: true);
+    final warningLine = RegExp('^ *warning [-•] ', multiLine: true);
+    final infoLine = RegExp('^ *info [-•] ', multiLine: true);
+    // The detector has to recognise both shapes, or it is trusted for nothing.
+    expect(errorLine.hasMatch('  error • x • f.dart:1:1 • r'), isTrue);
+    expect(errorLine.hasMatch('  error - x - f.dart:1:1 - r'), isTrue);
+    expect(infoLine.hasMatch('   info • x • f.dart:1:1 • r'), isTrue);
+
+    final errors = errorLine.allMatches(out).length;
+    final warnings = warningLine.allMatches(out).length;
 
     // Proves the output was actually parsed. `info` lines always exist here;
     // zero of them means analyze did not run and the counts above are noise.
-    expect(RegExp('^ *info - ', multiLine: true).hasMatch(out), isTrue,
+    expect(infoLine.hasMatch(out), isTrue,
         reason: 'could not read analyzer output — this check is blind '
             '(exit $code, ${out.length} bytes of stdout, stderr: '
             '${err.trim()}; stdout tail: '

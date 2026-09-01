@@ -168,9 +168,11 @@ fi
 # width 7 — `warning - ` flush left, `  error - `, `   info - ` — so a flush-left
 # anchor silently matches only one of the three. That exact mistake left
 # repo_hygiene_test.dart unable to see an analyzer error for a whole session.
-bad="$(grep -cE '^ *(error|warning) - ' "$alog" || true)"
+# `(-|•)`: the tool's field separator is `-` on Windows and `•` elsewhere, so a
+# ` - ` pattern counts nothing on macOS or Linux (found 2026-09-02 on CI).
+bad="$(grep -cE '^ *(error|warning) (-|•) ' "$alog" || true)"
 if [ "$bad" -ne 0 ]; then
-  grep -E '^ *(error|warning) - ' "$alog" >&2
+  grep -E '^ *(error|warning) (-|•) ' "$alog" >&2
   echo "$bad analyzer error(s)/warning(s) — not building." >&2
   echo "  full analyzer output: $alog" >&2
   exit 1

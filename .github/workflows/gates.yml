@@ -156,9 +156,16 @@ jobs:
             head -40 "$alog"
             exit 1
           fi
-          bad="$(grep -cE '^ *(error|warning) - ' "$alog" || true)"
+          # `(-|•)`, not ` - `: the Flutter tool separates fields with `-` on
+          # Windows and `•` everywhere else. With ` - ` alone this count was
+          # structurally zero on every Linux runner — the first run that ever
+          # executed here (2026-09-02) passed the step with 201 infos while
+          # the same grep could not have seen a single error. Alternation
+          # rather than a bracket class so the three-byte bullet still
+          # matches under LC_ALL=C.
+          bad="$(grep -cE '^ *(error|warning) (-|•) ' "$alog" || true)"
           if [ "$bad" -ne 0 ]; then
-            grep -E '^ *(error|warning) - ' "$alog"
+            grep -E '^ *(error|warning) (-|•) ' "$alog"
             echo "::error title=flutter analyze::$bad error(s)/warning(s)"
             exit 1
           fi
