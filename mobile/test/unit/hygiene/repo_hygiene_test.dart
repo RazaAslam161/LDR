@@ -234,9 +234,25 @@ void main() {
     //
     // Leading whitespace is optional in all three now. A verification that
     // cannot fail is worse than no verification, because it is trusted.
-    final r = Process.runSync('flutter', ['analyze', '--no-pub'],
-        runInShell: true,);
-    final out = '${r.stdout}';
+    // Retried once, for the same reason release.sh and gates.yml retry: a
+    // cold analysis server can answer with nothing at all, and on a fresh CI
+    // runner the first `flutter analyze` is always cold. The first run that
+    // ever reached this test on GitHub (2026-09-02, b5907c0) failed exactly
+    // here with an empty capture while the workflow's own analyze step — which
+    // retries — had passed a minute earlier. Still fails closed on two empty
+    // answers, and the failure now carries what came back rather than the
+    // word "blind".
+    var out = '';
+    var err = '';
+    var code = -1;
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      final r = Process.runSync('flutter', ['analyze', '--no-pub'],
+          runInShell: true,);
+      out = '${r.stdout}';
+      err = '${r.stderr}';
+      code = r.exitCode;
+      if (RegExp('issues? found', multiLine: true).hasMatch(out)) break;
+    }
     final errors =
         RegExp('^ *error - ', multiLine: true).allMatches(out).length;
     final warnings =
@@ -245,7 +261,10 @@ void main() {
     // Proves the output was actually parsed. `info` lines always exist here;
     // zero of them means analyze did not run and the counts above are noise.
     expect(RegExp('^ *info - ', multiLine: true).hasMatch(out), isTrue,
-        reason: 'could not read analyzer output — this check is blind',);
+        reason: 'could not read analyzer output — this check is blind '
+            '(exit $code, ${out.length} bytes of stdout, stderr: '
+            '${err.trim()}; stdout tail: '
+            '${out.length > 600 ? out.substring(out.length - 600) : out})',);
 
     expect(errors, 0, reason: 'analyzer errors:\n$out');
     expect(warnings, 0, reason: 'analyzer warnings:\n$out');
