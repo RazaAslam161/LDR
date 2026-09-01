@@ -92,8 +92,9 @@ this machine.
   all work. The older "no SDK, no adb" note here was stale and made several sessions
   declare device paths unverifiable when they were not.
 - The installed package id is **`com.miles.miles`** — not `com.miles.app`.
-- `mobile/.env` was recreated by hand (gitignored). `mobile/android/maps.properties` is
-  still missing — a build from this tree ships the literal `MISSING_MAPS_API_KEY`.
+- `mobile/.env` was recreated by hand (gitignored). The Google Maps SDK is gone (Mapbox
+  replaced it), so `maps.properties` no longer exists as a concept; its example file and
+  ignore rule were removed 2026-09-02.
 
 ## Open, as of BRAIN §75
 
@@ -108,7 +109,8 @@ this machine.
   the plaintext dual-write is the only fallback, and flipping it early converts any
   decrypt failure into permanent loss. The old "61 reports" figure is dead — production
   was reset, and the surviving evidence is two errors against one message.
-- The Google Maps API key is in git history at commit `5403769`, verbatim in the tracked
-  file `docs/guides/play-readiness-findings.json`, and live/billable. Rotate it. It is
-  **not** in the shipped APK — Mapbox replaced Google Maps — and this repo is private, so
-  the deadline is "before the repo is public or a collaborator is added", not today.
+- The Google Maps API key is in git history at commit `5403769` (and, until it was
+  deleted on 2026-09-02, verbatim in `docs/guides/play-readiness-findings.json`). It is
+  live/billable. Rotate it. It is **not** in the shipped APK — Mapbox replaced Google
+  Maps — and this repo is private, so the deadline is "before the repo is public or a
+  collaborator is added", not today.

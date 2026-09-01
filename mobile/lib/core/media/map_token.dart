@@ -26,7 +26,7 @@ class MapToken {
   /// Null until [ensure] has run, and null afterwards if none is configured.
   static String? get value => _token;
 
-  static bool get configured => (_token?.isNotEmpty ?? false);
+  static bool get configured => _token?.isNotEmpty ?? false;
 
   /// Fetch once per app run — once per SUCCESSFUL fetch. Cheap to call
   /// repeatedly.

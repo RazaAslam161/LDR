@@ -13,8 +13,3 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
-
-# Google Maps browser key. The Maps SDK can only read it from the merged
-# manifest, so it ships in the artifact either way — this keeps the next
-# rotation out of git history, where the first one still is (5403769).
-maps.properties

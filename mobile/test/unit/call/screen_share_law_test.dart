@@ -18,7 +18,7 @@ void main() {
   final screen = File('lib/features/call/call_screen.dart').readAsStringSync();
 
   group('the dedicated connection', () {
-    test('the share never rides the call\'s connection', () {
+    test("the share never rides the call's connection", () {
       expect(controller.contains('addTransceiver'), isFalse,
           reason: 'a pre-negotiated share m-line on the call connection is the '
               'shared-PC design that failed twice — builds 59/60',);
@@ -118,7 +118,7 @@ void main() {
       expect(session.contains('setCodecPreferences'), isTrue);
       expect(controller.contains('setCodecPreferences'), isFalse,
           reason: 'a codec preference on the call connection is the '
-              'H264-promotion regression, and disturbing the call\'s '
+              "H264-promotion regression, and disturbing the call's "
               'negotiation is what the dedicated connection exists to end',);
     });
 
@@ -263,7 +263,7 @@ void main() {
           isTrue,
           reason: 'share telemetry routed through debugPrint is silenced in '
               'release — the §220 blindness',);
-      expect(logging.contains("print('MilesShare \$msg');"), isTrue,
+      expect(logging.contains(r"print('MilesShare $msg');"), isTrue,
           reason: 'print is the one channel silenceLogsInRelease cannot null',);
       expect(session.contains("debugPrint('MilesShare"), isFalse,
           reason: 'the dead channel must not come back',);
@@ -303,7 +303,7 @@ void main() {
               'stays up',);
       expect(controller.contains('shareEndMessage(session.endReason)'), isTrue,
           reason: 'a share that ended itself says why on screen',);
-      expect(controller.contains("shareLog('capture FAILED: \$e')"), isTrue,
+      expect(controller.contains(r"shareLog('capture FAILED: $e')"), isTrue,
           reason: 'the getDisplayMedia catch was catch (_) and cost a field '
               'session the exception text that named the refusal',);
     });
@@ -317,7 +317,7 @@ void main() {
               .hasMatch(fgs),
           isFalse,
           reason: 'a swallowed startForeground failure is a share with no '
-              'mediaProjection type and no trace — §205\'s one unverified '
+              "mediaProjection type and no trace — §205's one unverified "
               'link',);
     });
   });
@@ -412,7 +412,7 @@ void main() {
       expect(session.contains('Future<void> onShareFail()'), isTrue);
     });
 
-    test('a dead sharer re-enables the partner\'s Screen button', () {
+    test("a dead sharer re-enables the partner's Screen button", () {
       expect(controller.contains('remoteSharePendingTimeout'), isTrue);
       expect(controller.contains('_armRemoteSharePendingTimeout'), isTrue,
           reason: 'remoteSharePending with no deadline disabled the button '

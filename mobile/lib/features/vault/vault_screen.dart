@@ -1,22 +1,23 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:miles/core/services/photo_picker_service.dart';
+import 'package:intl/intl.dart';
+import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/media_normalize.dart';
+import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
-import 'package:miles/core/data/media_urls.dart';
-import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
-import 'package:miles/core/data/crypto_core.dart';
-import 'package:miles/main.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_viewer.dart';
+import 'package:miles/main.dart';
 
 /// The unlocked vault — personal notes only the owner can see. Shown by
 /// VaultGateScreen after a successful PIN/biometric unlock.
@@ -257,7 +258,7 @@ class _VaultScreenState extends State<VaultScreen> {
     setState(() => _busy = false);
     if (failed > 0) {
       _toast(failed == picked.length
-          ? "Nothing could be saved — check your connection."
+          ? 'Nothing could be saved — check your connection.'
           : "$failed of ${picked.length} couldn't be saved.");
     }
     await _load();

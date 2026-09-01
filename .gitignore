@@ -80,3 +80,6 @@ scripts/film-shoot/out/
 # mobile/assets/scene/ and ARE tracked; these are the workbench, not the work.
 art_drop/
 mobile/test/widget/preview/
+
+# Editor state (Cursor keeps a per-repo plugin toggle here)
+.cursor/

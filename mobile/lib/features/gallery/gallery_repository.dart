@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/media_urls.dart';
@@ -61,9 +60,6 @@ class GalleryItem {
   /// widget trick.
   final int? width;
   final int? height;
-
-  double get aspect =>
-      (width == null || height == null || height == 0) ? 1 : width! / height!;
 
   /// What the grid paints. Falls back to the original for rows written before
   /// a thumbnail existed, exactly as the chat pipeline does.

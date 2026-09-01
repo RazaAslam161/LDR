@@ -193,7 +193,7 @@ void main() {
       );
       expect(out.single.bodyUndecryptable, isTrue,
           reason: 'the AD binds a blob to its row — a replay must fail closed, '
-              'not render as the partner\'s message');
+              "not render as the partner's message");
     });
 
     test('one flipped ciphertext byte refuses to open', () async {

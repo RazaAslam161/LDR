@@ -38,7 +38,7 @@ class _PartnerCycleCardState extends ConsumerState<PartnerCycleCard> {
     _load();
     if (cid != null) {
       _ch = ManagedSubscription.start(() => SupabaseService.client
-          .channel('home_cycle:$cid', opts: RealtimeChannelConfig(private: true))
+          .channel('home_cycle:$cid', opts: const RealtimeChannelConfig(private: true))
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',

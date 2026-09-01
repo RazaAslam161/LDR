@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -9,8 +10,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:miles/core/services/sound/cue.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -24,9 +23,13 @@ import 'package:miles/core/links/link_scan.dart';
 import 'package:miles/core/links/link_target.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/document_picker_service.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/save_media_service.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/core/ui/mood.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
@@ -39,8 +42,6 @@ import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_media_source.dart';
 import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
-import 'package:miles/core/services/fcm_service.dart';
-import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
@@ -56,8 +57,8 @@ import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';
 import 'package:miles/features/chat/widgets/giphy_picker.dart';
 import 'package:miles/features/chat/widgets/link_card.dart';
-import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/measured_row.dart';
+import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/chat/widgets/mood_selector.dart';
 import 'package:miles/features/chat/widgets/original_message_sheet.dart';
 import 'package:miles/features/chat/widgets/reaction_bar.dart';
@@ -977,7 +978,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         onDelete: _onRemoteDelete,
       );
       _moodChannel = client
-          .channel('mood_burst:$id', opts: RealtimeChannelConfig(private: true))
+          .channel('mood_burst:$id', opts: const RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'mood', callback: _onMoodBurst)
           .onBroadcast(event: 'msg', callback: _onMsgBroadcast)
           .onBroadcast(event: 'typing', callback: _onTypingBroadcast)
@@ -1030,7 +1031,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final partnerId = ref.read(sessionProvider).partner?.id;
       if (partnerId != null) {
         _receiptChannel = client
-            .channel('receipts:$id', opts: RealtimeChannelConfig(private: true))
+            .channel('receipts:$id', opts: const RealtimeChannelConfig(private: true))
             .onPostgresChanges(
               event: PostgresChangeEvent.all,
               schema: 'public',
@@ -3154,7 +3155,7 @@ class _Content extends StatelessWidget {
         // one — the album grid was already on this path and this bubble was not.
         final tile = m.tileUrl;
         final dpr = MediaQuery.devicePixelRatioOf(context);
-        final Widget img = local != null
+        final img = local != null
             ? Image.file(File(local),
                 width: 220,
                 // Layout-only without this: the sender's own phone decoded the

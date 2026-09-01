@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/care/care_repository.dart';
 import 'package:miles/features/shell/app_drawer.dart';

@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,10 +8,10 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/watch/watch_embed.dart';
 import 'package:miles/features/watch/watch_embed_player.dart';
-import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/watch/watch_player.dart';
 import 'package:miles/features/watch/watch_protocol.dart';
 import 'package:miles/features/watch/watch_session.dart';
@@ -163,7 +164,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _channel?.dispose();
     _channel = ManagedSubscription.start(
       () => SupabaseService.client
-          .channel('watch:$couple', opts: RealtimeChannelConfig(private: true))
+          .channel('watch:$couple', opts: const RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'watch', callback: _onMsg)
           .subscribe(),
     );
@@ -509,7 +510,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     final hold = _holdUntil;
     if (hold != null && !DateTime.now().isBefore(hold)) {
       _holdUntil = null;
-      if (_lastPlaying) _applyLocal(() => c.play());
+      if (_lastPlaying) _applyLocal(c.play);
     }
 
     if (_isLeader) {

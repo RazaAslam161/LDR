@@ -196,7 +196,6 @@ class _ConvertCoverState extends State<ConvertCover>
                   onUnitTap: () => _pickUnit(forSource: true),
                   child: TextField(
                     controller: _input,
-                    autofocus: false,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
@@ -337,7 +336,6 @@ class _UnitSheetState extends State<_UnitSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: TextField(
-                autofocus: false,
                 onChanged: (v) => setState(() => _query = v),
                 decoration: const InputDecoration(
                   hintText: 'Search units',

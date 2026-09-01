@@ -3,7 +3,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// What Android actually thinks about this app's notifications.
 ///
-/// Recovered from build 52 (docs/guides/BUILD-52-AUDIT.md). The settings screen
+/// Recovered from build 52 (docs/archive/BUILD-52-AUDIT.md). The settings screen
 /// used to list seven channel rows that each opened a system page, and said
 /// nothing about whether any of them could ring — so a user with notifications
 /// switched off at the app level saw seven confident rows and no working

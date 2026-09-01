@@ -48,7 +48,7 @@ void main() {
 
   group('projection', () {
     test('a paused position does not move', () {
-      final m = WatchMessage(
+      const m = WatchMessage(
         intent: WatchIntent.pause,
         from: 'a',
         seq: 1,
@@ -88,7 +88,7 @@ void main() {
 
   group('wire format', () {
     test('a message survives a round trip', () {
-      final m = WatchMessage(
+      const m = WatchMessage(
         intent: WatchIntent.seek,
         from: 'me',
         seq: 3,
@@ -124,7 +124,7 @@ void main() {
     test('hello carries no position', () {
       // The old build announced pos: 0 on arrival, which dragged the other
       // person back to the start of the film.
-      final m = WatchMessage(
+      const m = WatchMessage(
         intent: WatchIntent.hello,
         from: 'me',
         seq: 1,

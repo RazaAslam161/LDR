@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:miles/core/ui/motion.dart';
+import 'package:miles/core/ui/tab_dissolve.dart' show TabDissolve;
 
 /// DissolveIn — the app-wide route transition (design-system.md §5), adapted
 /// to the motion law: the spec's "outgoing blurs 0→6px" is an animated blur,

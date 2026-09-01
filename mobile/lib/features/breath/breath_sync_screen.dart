@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/services/sound/cue.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/features/breath/widgets/breath_orb.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -52,7 +52,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
   void _attachChannel(String coupleId) {
     if (_channel != null) return;
     _channel = ManagedSubscription.start(() => SupabaseService.client
-        .channel('breath:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('breath:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

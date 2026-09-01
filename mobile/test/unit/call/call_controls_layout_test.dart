@@ -18,12 +18,12 @@ Widget _controls({required int count, required bool wrap}) => Directionality(
               alignment: WrapAlignment.spaceEvenly,
               runSpacing: 16,
               children: List.generate(
-                  count, (_) => Container(width: _btn, height: _btn),),
+                  count, (_) => const SizedBox(width: _btn, height: _btn),),
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: List.generate(
-                  count, (_) => Container(width: _btn, height: _btn),),
+                  count, (_) => const SizedBox(width: _btn, height: _btn),),
             ),
     );
 

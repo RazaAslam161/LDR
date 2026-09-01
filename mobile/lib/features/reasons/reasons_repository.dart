@@ -58,7 +58,7 @@ class ReasonsRepository {
 
   static RealtimeChannel subscribe(String coupleId, void Function() onChange) {
     return _c
-        .channel('love_reasons:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('love_reasons:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

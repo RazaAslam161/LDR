@@ -56,7 +56,7 @@ void main() {
     return false;
   }
 
-  test('every sweep that removes a couple\'s media removes its files', () {
+  test("every sweep that removes a couple's media removes its files", () {
     for (final fn in [
       'delete_message_for_everyone',
       'clear_conversation_everyone',

@@ -53,7 +53,7 @@ PartnerSentence partnerSentence({
   if (active != null && at.difference(active.toUtc()).inMinutes < 5) {
     final t = tz == null ? null : _clock(at, tz);
     return PartnerSentence(
-      t == null ? "$partnerName is here" : "$partnerName is here · it's $t there",
+      t == null ? '$partnerName is here' : "$partnerName is here · it's $t there",
     );
   }
 

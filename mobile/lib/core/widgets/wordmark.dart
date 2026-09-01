@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miles/core/ui/motion.dart' show MilesMotion;
 import 'package:miles/core/ui/theme.dart';
 
 /// FlickerWelcome (design-system.md §5): the wordmark arrives like a wick

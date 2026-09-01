@@ -255,7 +255,7 @@ Future<String?> showReactionPicker(BuildContext context) =>
     );
 
 /// Seventy-two emoji is past the point where scanning beats typing, so the
-/// sheet searches. Recovered from build 52 — see docs/guides/BUILD-52-AUDIT.md.
+/// sheet searches. Recovered from build 52 — see docs/archive/BUILD-52-AUDIT.md.
 class _ReactionPickerSheet extends StatefulWidget {
   const _ReactionPickerSheet();
 
@@ -303,7 +303,6 @@ class _ReactionPickerSheetState extends State<_ReactionPickerSheet> {
               ),
             ),
             TextField(
-              autofocus: false,
               style: const TextStyle(color: MilesColors.cream50),
               decoration: const InputDecoration(
                 hintText: 'Search emoji',

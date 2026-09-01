@@ -49,7 +49,7 @@ void main() {
 
   group('SAF names (behavioral)', () {
     test('separators, the reserved set and control chars become _', () {
-      expect(DataExportService.sanitizeName('a/b\\c'), 'a_b_c');
+      expect(DataExportService.sanitizeName(r'a/b\c'), 'a_b_c');
       expect(DataExportService.sanitizeName('a:b*c?d"e<f>g|h'),
           'a_b_c_d_e_f_g_h',);
       expect(DataExportService.sanitizeName('a\x00b\x1fc'), 'a_b_c');

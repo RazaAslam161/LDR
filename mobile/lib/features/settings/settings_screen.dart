@@ -1,12 +1,10 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/widgets/ember_press.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/config.dart';
 import 'package:miles/core/app/release_gate.dart';
-import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/key_escrow.dart';
 import 'package:miles/core/data/media_urls.dart';
@@ -21,9 +19,11 @@ import 'package:miles/core/services/notification_state.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
@@ -31,16 +31,17 @@ import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
+import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/legal/faq_screen.dart';
 import 'package:miles/features/legal/terms_screen.dart';
 import 'package:miles/features/legal/terms_text.dart';
+import 'package:miles/features/opening/opening_screen.dart';
+import 'package:miles/features/opening/opening_state.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/features/safety/report_service.dart';
 import 'package:miles/features/safety/safety_sheets.dart';
 import 'package:miles/features/safety/severance_sheet.dart';
-import 'package:miles/features/opening/opening_screen.dart';
-import 'package:miles/features/opening/opening_state.dart';
 import 'package:miles/features/settings/security_code_dialog.dart';
 import 'package:miles/features/unlink/unlink_repository.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
@@ -830,7 +831,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// that makes it fit is not the cards — it is putting each setting's CURRENT
   /// VALUE at the end of its own row ("On", "Asia/Karachi", "Backup on"), so a
   /// row explains itself without a header above it. Recovered from build 52;
-  /// see docs/guides/BUILD-52-AUDIT.md.
+  /// see docs/archive/BUILD-52-AUDIT.md.
   List<Widget> _rootGroups(dynamic profile, dynamic partner) => [
         _ProfileCard(
           name: profile?.displayName as String? ?? '',
@@ -1139,7 +1140,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         // Said at the top, because every row below is a lie while this is
         // true: they all open the right pages and none of them can ring.
         if (_notif.appBlocked)
-          _SettingsGroup(children: [
+          const _SettingsGroup(children: [
             _SettingsRow(
               icon: Icons.notifications_off_outlined,
               title: 'Alerts are off for this app, so nothing below can '
@@ -1454,9 +1455,6 @@ class _AboutCard extends StatelessWidget {
     );
   }
 
-  /// The policy is written (docs/legal, web/privacy-policy.html) and not yet
-  /// hosted, so [milesPrivacyPolicyUrl] is empty. Say that, rather than open a
-  /// browser onto a 404 and leave the user wondering what else is missing.
   Future<void> _openPrivacyPolicy(BuildContext context) =>
       _openLegalPage(context, milesPrivacyPolicyUrl);
 

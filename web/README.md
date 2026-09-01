@@ -8,7 +8,7 @@ which a researcher holding a sideloaded APK has no other way to reach.
 Deployed to Vercel as the project **miles-legal**, from this directory. Redeploy
 after any edit:
 
-    cd E:\LDR\web
+    cd D:\Miles\web
     npx vercel --prod
 
 ## Why these files live here and not in a copy
@@ -19,8 +19,9 @@ legal pages that drift apart is precisely the failure a full audit had to fix
 once already, and a privacy policy that disagrees with itself is worse than one
 that is merely out of date.
 
-`docs/legal/*.md` are the markdown sources of the same text and must be kept in
-step by hand when a page changes.
+This directory is the single source for the legal text. The in-app copies
+(`mobile/lib/features/legal/faq_text.dart`, `terms_text.dart`) mirror it by hand
+and must be updated in the same change.
 
 ## Cross-links are relative, so all pages deploy together
 
@@ -71,15 +72,11 @@ dot-directory did not survive the upload, and the fix is a `rewrites` entry to a
 non-dot path — not a second copy of the file, which is the drift this README
 warns about above.
 
-## Outstanding
+## Live status (checked 2026-09-02)
 
-`security.html` AND `/.well-known/security.txt` have never been served — both
-are new in the working tree, both answer 404 today, and the curl above is
-unrun. The app already ships a Settings row pointing at `security.html`, so
-the deploy has to land BEFORE the next APK does. Everything else: the last `[PLACEHOLDER]` in
-`csae.html` was filled 2026-08-17: the
-National Cyber Crime Investigation Agency (NCCIA — absorbed the FIA Cybercrime
-Wing in 2025), complaint portal complaint.nccia.gov.pk, helpline 1799
-(sources: nccia.gov.pk; thenews.pk/print/1402642 — Senate told NCCIA received
-138k+ CSAM reports; nr3c.gov.pk now redirects to NCCIA). The live site serves
-the old text until the next Vercel deploy.
+    curl -sS -o /dev/null -w '%{http_code} %{content_type}' https://miles-legal.vercel.app/.well-known/security.txt
+    200 text/plain; charset=utf-8
+
+`security.html` and `csae.html` also answer 200. The `csae.html` contact block
+names the National Cyber Crime Investigation Agency (NCCIA; complaint portal
+complaint.nccia.gov.pk, helpline 1799), filled 2026-08-17.

@@ -60,8 +60,8 @@ void main() {
             '$orphans');
   });
 
-  test("every asset path lib/ names actually exists", () {
-    final named = RegExp("'(assets/[a-z0-9_/]+\\.[a-z0-9]+)'")
+  test('every asset path lib/ names actually exists', () {
+    final named = RegExp(r"'(assets/[a-z0-9_/]+\.[a-z0-9]+)'")
         .allMatches(lib)
         .map((m) => m.group(1)!)
         .toSet();

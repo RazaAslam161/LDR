@@ -86,7 +86,7 @@ void main() {
 
   testWidgets('a hard tilt never moves the hero further than depth',
       (tester) async {
-    final r = rig(depth: 4);
+    final r = rig();
     await tester.pumpWidget(r.widget);
     // Far past gravity — the clamp is the whole point.
     await restThenHold(tester, r.source, x: 40, y: -40);

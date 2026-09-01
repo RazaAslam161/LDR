@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
+import 'package:miles/features/disguise/cover_gate.dart' show CoverGate;
 
 /// Granular, read-only views over the bundled [sessionProvider]. Features should
 /// watch the narrowest provider they need so they only rebuild when that slice

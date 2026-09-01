@@ -48,8 +48,8 @@ void main() {
 
   /// Strip comments so prose about durations cannot trip the detectors.
   String code(String src) => src
-      .replaceAll(RegExp(r'///.*'), '')
-      .replaceAll(RegExp(r'(?<!:)//.*'), '');
+      .replaceAll(RegExp('///.*'), '')
+      .replaceAll(RegExp('(?<!:)//.*'), '');
 
   test('raw Duration( literals in motion code stay countable', () {
     // Tokens, not numbers: one duration copied everywhere is the anti-pattern
@@ -133,7 +133,7 @@ void main() {
       final hits = RegExp(r'Curves\.').allMatches(code(read(path))).length;
       final allowed = tolerated[path]?.$1 ?? 0;
       expect(hits, lessThanOrEqualTo(allowed),
-          reason: '$path spells ${hits} raw Curves.* — reference MilesMotion '
+          reason: '$path spells $hits raw Curves.* — reference MilesMotion '
               'tokens instead',);
     }
   });

@@ -106,7 +106,7 @@ void main() {
     // be under architecture/, guides/ or archive/.
     const allowedAtDocsRoot = {'docs/REFERENCE.md', 'docs/FIELD-TEST.md'};
     expect(atDocsRoot.toSet().difference(allowedAtDocsRoot), isEmpty,
-        reason: 'file it under docs/architecture, docs/guides or docs/archive: '
+        reason: 'file it under docs/guides or docs/archive: '
             '${atDocsRoot.toSet().difference(allowedAtDocsRoot)}',);
     expect(Directory('../docs/archive').existsSync(), isTrue);
   });
@@ -789,7 +789,7 @@ void main() {
       // Absent and "true" are the same failure and are counted as one.
       final enabled = <String>[];
       for (final tag in aliases) {
-        final name = RegExp(r'android:name="([^"]+)"').firstMatch(tag)?[1];
+        final name = RegExp('android:name="([^"]+)"').firstMatch(tag)?[1];
         expect(name, isNotNull,
             reason: '$channel: an activity-alias with no android:name',);
         if (tag.contains('android:enabled="false"')) continue;

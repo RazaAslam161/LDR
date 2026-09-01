@@ -145,9 +145,7 @@ class CallScreen extends ConsumerWidget {
                                 // that case gets the status panel.
                                 ? call.appScopedShare
                                     ? RTCVideoView(call.screenSelfRenderer,
-                                        key: const ValueKey('call-share-self'),
-                                        objectFit: RTCVideoViewObjectFit
-                                            .RTCVideoViewObjectFitContain,)
+                                        key: const ValueKey('call-share-self'),)
                                     // IgnorePointer is load-bearing: ColoredBox
                                     // hit-tests opaque, and full-screen it
                                     // would sit over the long-press layer and
@@ -585,9 +583,7 @@ List<Widget> _shareTiles(CallController call, String focus) => [
             // view; a whole-display share shows the status card instead.
             child: call.sharingScreen
                 ? call.appScopedShare
-                    ? RTCVideoView(call.screenSelfRenderer,
-                        objectFit:
-                            RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,)
+                    ? RTCVideoView(call.screenSelfRenderer,)
                     : const _SharingCard()
                 : CallVideo(
                     renderer: call.screenRenderer,

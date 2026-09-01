@@ -162,7 +162,7 @@ void main() {
       await pump(tester, row: ceremony(initiator: meId));
       expect(find.byType(FilledButton), findsNothing);
       expect(find.byType(CountdownDigits), findsNothing,
-          reason: 'the gate figures are the stage\'s own, not the chrome '
+          reason: "the gate figures are the stage's own, not the chrome "
               'widget the calm layout uses',);
       expect(find.textContaining('Ends '), findsOneWidget,
           reason: 'the 24-hour end is stated absolutely, never ticked',);

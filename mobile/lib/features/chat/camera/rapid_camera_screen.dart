@@ -558,12 +558,10 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       backgroundColor: MilesColors.night,
       // The camera preview covers the app; pause the root ember field's
       // ticker for as long as this screen exists.
-      body: Stack(children: [const EmberBackgroundHidden(), _denied
-          ? _CameraUnavailable(
+      body: Stack(children: [const EmberBackgroundHidden(), if (_denied) _CameraUnavailable(
               onRetry: _retryBoot,
               onClose: () => Navigator.pop(context),
-            )
-          : !_ready && _state == _CamState.preview
+            ) else !_ready && _state == _CamState.preview
               ? const Center(
                   child: CircularProgressIndicator(color: MilesColors.ember),)
               : (_state == _CamState.preview || _state == _CamState.recording)

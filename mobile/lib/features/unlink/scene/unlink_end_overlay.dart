@@ -157,8 +157,8 @@ class _UnlinkEndOverlayState extends State<UnlinkEndOverlay>
                 fit: BoxFit.cover,
                 clipBehavior: Clip.hardEdge,
                 child: SizedBox(
-                  width: film.value.size.width.toDouble(),
-                  height: film.value.size.height.toDouble(),
+                  width: film.value.size.width,
+                  height: film.value.size.height,
                   child: VideoPlayer(film),
                 ),
               );

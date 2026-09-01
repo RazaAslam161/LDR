@@ -28,7 +28,7 @@ class RealtimeService {
     PostgresChangeEvent event = PostgresChangeEvent.all,
   }) {
     return _c
-        .channel(channelName, opts: RealtimeChannelConfig(private: true))
+        .channel(channelName, opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: event,
           schema: 'public',
@@ -65,37 +65,9 @@ class RealtimeService {
     });
   }
 
-  /// A couple-scoped change stream (for providers / StreamBuilder). The channel
-  /// is created on first listen and torn down when the last listener cancels.
-  static Stream<PostgresChangePayload> coupleStream({
-    required String table,
-    required String coupleId,
-    PostgresChangeEvent event = PostgresChangeEvent.all,
-  }) {
-    RealtimeChannel? channel;
-    late final StreamController<PostgresChangePayload> controller;
-    controller = StreamController<PostgresChangePayload>.broadcast(
-      onListen: () {
-        channel = coupleTable(
-          channelName: 'stream:$table:$coupleId:${event.name}',
-          table: table,
-          coupleId: coupleId,
-          event: event,
-          onChange: controller.add,
-        );
-      },
-      onCancel: () {
-        final c = channel;
-        channel = null;
-        if (c != null) _c.removeChannel(c);
-      },
-    );
-    return controller.stream;
-  }
-
   /// An ephemeral broadcast channel (e.g. proximity pings, typing) — not
   /// persisted to any table.
-  static RealtimeChannel broadcast(String name) => _c.channel(name, opts: RealtimeChannelConfig(private: true));
+  static RealtimeChannel broadcast(String name) => _c.channel(name, opts: const RealtimeChannelConfig(private: true));
 }
 
 /// A self-healing realtime subscription — the canonical Pattern A primitive.

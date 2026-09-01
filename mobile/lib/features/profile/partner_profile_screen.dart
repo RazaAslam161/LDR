@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
@@ -9,6 +8,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/media/media_source.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/widgets/file_bubble.dart';

@@ -147,11 +147,11 @@ void main() {
       await travel(tester, const Duration(minutes: 5));
       final atFive = countdown(tester);
       expect(atFive, isNotNull);
-      expect(atFive!, lessThan(atStart! - 4 * 60),
+      expect(atFive, lessThan(atStart! - 4 * 60),
           reason: 'five minutes must remove about five minutes',);
 
       await travel(tester, const Duration(minutes: 12));
-      expect(countdown(tester)!, lessThan(3 * 60 + 5));
+      expect(countdown(tester), lessThan(3 * 60 + 5));
     });
 
     testWidgets('when the gate opens the figures give way to the invitation',
@@ -197,7 +197,7 @@ void main() {
       // the comment EXPLAINING this bug quotes the very string the law
       // bans, and prose about a defect must never read as the defect.
       final body =
-          src.substring(start, end).replaceAll(RegExp(r'//.*'), '');
+          src.substring(start, end).replaceAll(RegExp('//.*'), '');
 
       final fires = body.indexOf('UnlinkEndOverlay.play.value');
       expect(fires, greaterThan(-1), reason: 'the ending is never fired');

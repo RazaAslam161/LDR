@@ -12,7 +12,7 @@ class FakeSoundEngine implements SoundEngine {
   final played = <Cue>[];
   final loops = <String>[];
   final loopGains = <double>[];
-  var loopStopped = 0;
+  int loopStopped = 0;
 
   @override
   Future<void> preload(List<Cue> cues) async {}
@@ -20,7 +20,7 @@ class FakeSoundEngine implements SoundEngine {
   @override
   Future<void> play(Cue cue, {double gain = 1}) async => played.add(cue);
 
-  var cuesStopped = 0;
+  int cuesStopped = 0;
   @override
   Future<void> stopCues() async => cuesStopped++;
 

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -178,11 +177,16 @@ class EncryptedMediaCache {
   ) {
     final entry = _l2[_key(bucket, path)];
     final memory = MemoryImage(raw);
-    // Explicitly typed: MemoryImage and ResizeImage are ImageProvider over
-    // different key types, so an inferred ternary lands on Object.
-    final ImageProvider provider = decodeWidth == null
-        ? memory
-        : ResizeImage(memory, width: decodeWidth);
+    // Declared, then assigned: MemoryImage and ResizeImage are ImageProvider
+    // over different key types, so a ternary infers Object — and `dart fix`
+    // strips an explicit type off an initialised local, which is how this
+    // once stopped compiling.
+    final ImageProvider provider;
+    if (decodeWidth == null) {
+      provider = memory;
+    } else {
+      provider = ResizeImage(memory, width: decodeWidth);
+    }
     entry?.providers.add(provider);
     return provider;
   }
@@ -255,7 +259,7 @@ class EncryptedMediaCache {
     if (gone == null) return;
     _l2Bytes -= gone.bytes.lengthInBytes;
     for (final p in gone.providers) {
-      PaintingBinding.instance.imageCache.evict(p, includeLive: true);
+      PaintingBinding.instance.imageCache.evict(p);
     }
   }
 
@@ -289,7 +293,7 @@ class EncryptedMediaCache {
   static void clear() {
     for (final e in _l2.values) {
       for (final p in e.providers) {
-        PaintingBinding.instance.imageCache.evict(p, includeLive: true);
+        PaintingBinding.instance.imageCache.evict(p);
       }
     }
     _l2.clear();
@@ -309,12 +313,6 @@ class EncryptedMediaCache {
       debugPrint('[media] L1 empty failed: ${e.runtimeType}');
     }
   }
-
-  @visibleForTesting
-  static int get plaintextBytes => _l2Bytes;
-
-  @visibleForTesting
-  static int get plaintextEntries => _l2.length;
 }
 
 /// One decrypted object, plus every provider built over it, so eviction can

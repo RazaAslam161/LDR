@@ -12,6 +12,7 @@ import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/features/chat/message_preview_port.dart';
+import 'package:miles/features/disguise/cover_gate.dart' show CoverGate;
 import 'package:miles/main.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a

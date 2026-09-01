@@ -88,7 +88,6 @@ void main() {
               role == SceneRole.outside ? birdScript : catScript,
               elapsed: at,
               window: window,
-              tail: 3,
               within: spokenLinger,
             )
           : const <Exchange>[];
@@ -135,7 +134,7 @@ void main() {
                 canvas: tile,
                 variant: variant,
                 phoneLine: at == const Duration(minutes: 5)
-                    ? 'i shouldn\'t have said that'
+                    ? "i shouldn't have said that"
                     : null,
                 phoneGlow: at == const Duration(minutes: 5),
               ),

@@ -42,7 +42,7 @@ class _MoodLampScreenState extends ConsumerState<MoodLampScreen> {
     final coupleId = couple?.id ?? 'none';
 
     _channel = ManagedSubscription.start(
-      () => SupabaseService.client.channel('mood_lamp:$coupleId', opts: RealtimeChannelConfig(private: true)).onBroadcast(
+      () => SupabaseService.client.channel('mood_lamp:$coupleId', opts: const RealtimeChannelConfig(private: true)).onBroadcast(
         event: 'mood',
         callback: (payload) {
           final from = payload['from'] as String?;

@@ -122,7 +122,7 @@ SUPABASE_ANON_KEY=
           # WHY THIS IS GREP-BASED AND NOT `flutter analyze` ALONE.
           #
           # The analyzer exits 1 on `info` as well as on errors, and this tree
-          # carries 532 infos (BRAIN.md §58's last full run). Gating on the exit
+          # still carries infos (200 after the 2026-09-02 sweep). Gating on the exit
           # code would mean every push is red forever, which is how a gate gets
           # deleted rather than obeyed. So: errors and warnings only, filtered
           # exactly the way release.sh filters them. Two gates that disagree

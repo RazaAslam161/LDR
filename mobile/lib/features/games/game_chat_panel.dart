@@ -43,7 +43,7 @@ class _GameChatPanelState extends ConsumerState<GameChatPanel> {
     _myUid = s.profile?.id;
     _myName = s.profile?.displayName ?? 'Me';
     _ch = ManagedSubscription.start(() => SupabaseService.client
-        .channel('gchat:${widget.gameKey}:${widget.coupleId}', opts: RealtimeChannelConfig(private: true))
+        .channel('gchat:${widget.gameKey}:${widget.coupleId}', opts: const RealtimeChannelConfig(private: true))
         .onBroadcast(event: 'msg', callback: _onMsg)
         .subscribe(),);
   }

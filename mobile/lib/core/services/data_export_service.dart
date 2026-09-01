@@ -386,7 +386,7 @@ class DataExportService {
       // false for every message and the entire transcript exports attributed
       // to the partner — a wrong export, not a degraded one. A named row,
       // never a silent mis-attribution.
-      s.failures.add(ExportFailure('Chat', 'NotSignedIn'));
+      s.failures.add(const ExportFailure('Chat', 'NotSignedIn'));
       return;
     }
     final myName = session.profile?.displayName ?? 'Me';
@@ -607,7 +607,7 @@ class DataExportService {
         s.failures.add(ExportFailure('memory ${t.id}', '${e.runtimeType}'));
       }
 
-      List<MemoryPhoto> photos = const [];
+      var photos = const <MemoryPhoto>[];
       try {
         photos = await MemoryPhotoRepository.listFor(t.id);
       } catch (e) {

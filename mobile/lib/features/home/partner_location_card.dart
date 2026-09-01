@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+// `show`, because geolocator's Position collides with Mapbox's geotypes
+// Position — and this file only ever wants the distance helper.
+import 'package:geolocator/geolocator.dart' show Geolocator;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -12,9 +16,6 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/home/partner_sentence.dart';
 import 'package:miles/features/home/world_map_screen.dart';
-// `show`, because geolocator's Position collides with Mapbox's geotypes
-// Position — and this file only ever wants the distance helper.
-import 'package:geolocator/geolocator.dart' show Geolocator;
 
 /// Live partner location on the dashboard: a small dark Mapbox map with the
 /// partner's marker easing to each new fix, "updated Xs ago", and the distance
@@ -92,23 +93,23 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
   static Future<Uint8List> _createAvatarMarker(
       String name, Color color, Color textColor) async {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
-    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(pictureRecorder);
+    final pictureRecorder = ui.PictureRecorder();
+    final canvas = Canvas(pictureRecorder);
 
-    final Paint shadowPaint = Paint()
+    final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.3);
     canvas.drawOval(const Rect.fromLTWH(18, 44, 12, 4), shadowPaint);
 
-    final Paint circlePaint = Paint()..color = color;
+    final circlePaint = Paint()..color = color;
     canvas.drawCircle(const Offset(24, 24), 14, circlePaint);
 
-    final Paint borderPaint = Paint()
+    final borderPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     canvas.drawCircle(const Offset(24, 24), 14, borderPaint);
 
-    final TextPainter textPainter = TextPainter(
+    final textPainter = TextPainter(
       textDirection: ui.TextDirection.ltr,
       text: TextSpan(
         text: initial,
@@ -120,27 +121,27 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
     textPainter.paint(canvas,
         Offset(24 - textPainter.width / 2, 24 - textPainter.height / 2));
 
-    final ui.Image image = await pictureRecorder.endRecording().toImage(48, 48);
-    final ByteData? byteData =
+    final image = await pictureRecorder.endRecording().toImage(48, 48);
+    final byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
   }
 
   static Future<Uint8List> _createMyDotMarker() async {
-    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(pictureRecorder);
+    final pictureRecorder = ui.PictureRecorder();
+    final canvas = Canvas(pictureRecorder);
 
-    final Paint circlePaint = Paint()..color = MilesColors.sage;
+    final circlePaint = Paint()..color = MilesColors.sage;
     canvas.drawCircle(const Offset(13, 13), 10, circlePaint);
 
-    final Paint borderPaint = Paint()
+    final borderPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     canvas.drawCircle(const Offset(13, 13), 10, borderPaint);
 
-    final ui.Image image = await pictureRecorder.endRecording().toImage(26, 26);
-    final ByteData? byteData =
+    final image = await pictureRecorder.endRecording().toImage(26, 26);
+    final byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
   }

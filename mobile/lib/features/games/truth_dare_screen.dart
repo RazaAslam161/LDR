@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/services/sound/cue.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -58,7 +58,7 @@ class _TruthDareScreenState extends ConsumerState<TruthDareScreen> {
     final cid = _coupleId;
     if (cid == null) return;
     _channel = ManagedSubscription.start(() => SupabaseService.client
-        .channel('game_td:$cid', opts: RealtimeChannelConfig(private: true))
+        .channel('game_td:$cid', opts: const RealtimeChannelConfig(private: true))
         .onBroadcast(event: 'state', callback: _onState)
         .onBroadcast(event: 'sync', callback: _onSync)
         .subscribe(),);

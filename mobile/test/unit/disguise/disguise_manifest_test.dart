@@ -173,9 +173,9 @@ void main() {
     // owner turns on afterwards. The picker says the Settings entry stays put.
     for (final m in [manifest, playManifest]) {
       final application =
-          RegExp(r'<application[^>]*>', dotAll: true).firstMatch(m);
+          RegExp('<application[^>]*>', dotAll: true).firstMatch(m);
       expect(application, isNotNull);
-      expect(application!.group(0)!,
+      expect(application!.group(0),
           contains('android:label="${kPlainProfile.label}"'),);
     }
   });
@@ -197,8 +197,8 @@ void main() {
     // is the honest one. An enabled cover here is a launcher identity the user
     // never chose, which is the Deceptive Behavior finding itself.
     final enabled = RegExp(
-      r'<activity-alias(?:(?!</activity-alias>).)*?android:enabled="true"'
-      r'(?:(?!</activity-alias>).)*?</activity-alias>',
+      '<activity-alias(?:(?!</activity-alias>).)*?android:enabled="true"'
+      '(?:(?!</activity-alias>).)*?</activity-alias>',
       dotAll: true,
     ).allMatches(playManifest).toList();
     expect(enabled.length, 1,
@@ -212,7 +212,7 @@ void main() {
     for (final d in kDisguises) {
       final alias = RegExp(
         '<activity-alias(?:(?!</activity-alias>).)*?'
-        'android:name=\"\\.Alias${d.aliasId}\"'
+        'android:name="\\.Alias${d.aliasId}"'
         '(?:(?!</activity-alias>).)*?</activity-alias>',
         dotAll: true,
       ).firstMatch(playManifest);
@@ -229,7 +229,7 @@ void main() {
     // activity: a filter on MainActivity itself would be a tenth identity that
     // the switch cannot disable, so the app could never fully leave a cover.
     final enabledLaunchers = RegExp(
-      r'android:enabled="true"(?:(?!</activity-alias>).)*?'
+      'android:enabled="true"(?:(?!</activity-alias>).)*?'
       r'android\.intent\.category\.LAUNCHER',
       dotAll: true,
     ).allMatches(playManifest).length;

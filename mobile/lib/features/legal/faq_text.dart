@@ -2,7 +2,7 @@
 ///
 /// Same rule as the terms: not a WebView and not a URL. Help has to be
 /// readable offline, and opening Chrome throws the user out of an app whose
-/// launcher identity may be a cover. `docs/legal/faq.md` is the canonical
+/// launcher identity may be a cover. `web/faq.html` is the canonical
 /// wording — edits land there first and are mirrored here, minus what only
 /// makes sense in a browser (download links, the support-contact block).
 library;

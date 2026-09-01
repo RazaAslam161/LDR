@@ -81,7 +81,7 @@ void main() {
           reason: 'withSoundKill must be its own generation at the head of '
               'columnSets');
       final cipherBody = RegExp(
-        r"const withCipher = '([^;]+)';",
+        "const withCipher = '([^;]+)';",
         dotAll: true,
       ).firstMatch(source)![1]!;
       expect(cipherBody, isNot(contains('ui_sound_kill')),

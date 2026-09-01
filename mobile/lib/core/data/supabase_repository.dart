@@ -1,12 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/core/data/key_escrow.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:miles/core/data/key_escrow.dart';
 
 /// Whether a device whose escrow did not restore has actually LOST a key.
 ///
@@ -492,12 +492,6 @@ class SupabaseRepository {
     );
   }
 
-  static Future<void> signInWithGoogle() async {
-    // Native Google sign-in requires the google_sign_in package + config.
-    // For v1 we ship email-only; Google lands in v1.1.
-    throw UnimplementedError('Google sign-in arrives in v1.1');
-  }
-
   static Future<void> signOut() async {
     await _c.auth.signOut();
   }
@@ -562,36 +556,15 @@ class SupabaseRepository {
     });
   }
 
-  static Future<void> updatePresence(PresenceStatus status) async {
-    final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
-    await _c
-        .from('profiles')
-        .update({'presence_status': status.name}).eq('id', uid);
-  }
-
   /// Records THIS user's half of the consent to Closer, and returns where both
-  /// halves now stand.
+  /// halves now stand. [consented] is in the screen's vocabulary: true means
+  /// "I want Closer on".
   ///
-  /// The comment that used to sit here admitted "the schema permits either
-  /// partner to flip it" — one screen away from closer_screen.dart printing
-  /// "It stays off until both of you turn it on in Settings". 20260829160000
-  /// makes the screen true instead of retiring it: `couples.modest_mode` is
-  /// derived from a per-member consent table, and a direct write to the column
-  /// is reinterpreted by a trigger as the writer's own consent, so builds 49-64
-  /// become two-party without being updated.
-  ///
-  /// [enabled] still means modest mode — hide Closer — and [coupleId] is still
-  /// taken, because settings_screen.dart passes both and the RPC no longer
-  /// needs either: it reads the couple off the caller's own profile, which is
+  /// 20260829160000 derives `couples.modest_mode` from a per-member consent
+  /// table, and a direct write to the column is reinterpreted by a trigger as
+  /// the writer's own consent, so builds 49-64 became two-party without being
+  /// updated. The RPC reads the couple off the caller's own profile, which is
   /// the whole least-privilege point of not having a couple_id on the wire.
-  static Future<IntimacyConsent> setModestMode({
-    required String coupleId,
-    required bool enabled,
-  }) =>
-      setIntimacyConsent(!enabled);
-
-  /// [consented] is in the screen's vocabulary: true means "I want Closer on".
   ///
   /// Throws `no_active_couple` for an unpaired account rather than reporting a
   /// consent nobody can pair with — a silent success here is how the toggle
@@ -682,18 +655,6 @@ class SupabaseRepository {
   }
 
   // ─── Couple ──────────────────────────────────────────────────
-
-  static Future<Couple> createCouple({required String timezone}) async {
-    // `create_couple` is a SECURITY DEFINER RPC: it allocates a unique invite
-    // code, inserts the couple, AND links the creator's profile atomically.
-    // The client never reads the couples table under RLS right after insert
-    // (which used to fail), and code generation/uniqueness lives server-side.
-    final res = await _c.rpc<dynamic>(
-      'create_couple',
-      params: {'p_timezone': timezone},
-    );
-    return Couple.fromJson(_singleRow(res));
-  }
 
   /// Permanently deletes the signed-in account and everything keyed to it.
   ///
@@ -1011,42 +972,6 @@ class SupabaseRepository {
     return Map<String, dynamic>.from(res as Map);
   }
 
-  // ─── Visits (countdown) ─────────────────────────────────────
-
-  static Future<Visit?> fetchNextVisit(String coupleId) async {
-    final res = await _c
-        .from('visits')
-        .select()
-        .eq('couple_id', coupleId)
-        .eq('is_upcoming', true)
-        .order('start_date', ascending: true)
-        .limit(1)
-        .maybeSingle();
-
-    if (res == null) return null;
-    return Visit.fromJson(res);
-  }
-
-  static Future<void> setNextVisit({
-    required String coupleId,
-    required DateTime startDate,
-    String? location,
-  }) async {
-    // Mark any prior upcoming visit as past, then insert the new one.
-    await _c
-        .from('visits')
-        .update({'is_upcoming': false})
-        .eq('couple_id', coupleId)
-        .eq('is_upcoming', true);
-
-    await _c.from('visits').insert({
-      'couple_id': coupleId,
-      'start_date': startDate.toUtc().toIso8601String(),
-      'location': location,
-      'is_upcoming': true,
-    });
-  }
-
   /// Realtime subscription: emits when either partner's presence changes.
   static RealtimeChannel subscribeToPresence({
     required String coupleId,
@@ -1055,7 +980,7 @@ class SupabaseRepository {
     // Distinct channel name from the presence-table subscription so the two
     // don't collide on one client (both were 'presence:$coupleId').
     return _c
-        .channel('profile-sync:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('profile-sync:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

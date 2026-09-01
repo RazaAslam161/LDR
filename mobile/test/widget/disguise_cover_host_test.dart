@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/covers/news_cover_screen.dart';
+import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The cover screen is the first thing a user sees on every cold start. If

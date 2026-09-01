@@ -454,7 +454,7 @@ class _ConsentBand extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           const Text(
-            "It stays until you agree. Deleted, the files are erased — it "
+            'It stays until you agree. Deleted, the files are erased — it '
             "can't be undone.",
             style: TextStyle(fontSize: 12, color: Color(0x99F5EFE6)),
           ),
@@ -604,7 +604,6 @@ class _Tile extends StatelessWidget {
                 // nothing and costs sharing: unbounded, every surface painting
                 // this thumbnail shares one decode.
                 thumb: true,
-                fit: BoxFit.cover,
               ),
             if (item.isVideo)
               const Center(

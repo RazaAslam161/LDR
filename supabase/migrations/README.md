@@ -71,6 +71,6 @@ and will drift silently:
   deployed version matches it
 
 `../diagnostics/verify_applied.sql` covers part of this today. The architecture
-plan (`docs/architecture/revised/data.md`) specifies a `conformance_check()` that
+plan (`docs/archive/architecture/revised/data.md`) specifies a `conformance_check()` that
 re-derives all of it every 60 seconds; until that ships, run `verify_applied.sql`
 after any dashboard change.

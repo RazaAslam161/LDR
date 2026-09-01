@@ -3,13 +3,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
+import 'package:miles/core/media/media_decode_queue.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/closer_load_result.dart';
-import 'package:miles/core/data/media_urls.dart';
-import 'package:miles/core/media/encrypted_media_cache.dart';
-import 'package:miles/core/media/media_decode_queue.dart';
 import 'package:miles/features/closer/memory_threads/memory_failure.dart';
 import 'package:miles/features/closer/memory_threads/memory_heal.dart';
 import 'package:miles/features/closer/memory_threads/memory_photo_repository.dart';
@@ -745,7 +745,7 @@ class _MemoryCardState extends State<_MemoryCard> {
   String _friendly(Object e) {
     final raw = e is PostgrestException ? e.message : e.toString();
     if (raw.contains('only your partner can confirm')) {
-      return "You asked for this one — she has to confirm it.";
+      return 'You asked for this one — she has to confirm it.';
     }
     if (raw.contains('not yours to accept')) {
       return 'Only your partner can accept this.';
@@ -780,7 +780,7 @@ class _MemoryCardState extends State<_MemoryCard> {
     // actually happens: the row and its objects are erased by the nightly purge
     // and reap within 30 days.
     final confirmed = await _confirm(
-      "Delete this for both of you? The encrypted files are erased within "
+      'Delete this for both of you? The encrypted files are erased within '
       '30 days.',
     );
     if (!confirmed) return;

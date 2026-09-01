@@ -30,15 +30,15 @@ class BreathOrb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (phase == BreathPhase.idle) {
-      return SizedBox.square(
+      return const SizedBox.square(
         dimension: _box,
         child: Center(
           child: DecoratedBox(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: MilesGradients.halo,
             ),
-            child: const SizedBox.square(
+            child: SizedBox.square(
               dimension: 120,
               child: Icon(Icons.air, color: MilesColors.emberSoft, size: 40),
             ),

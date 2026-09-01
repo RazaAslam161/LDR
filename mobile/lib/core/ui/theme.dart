@@ -14,17 +14,12 @@ class MilesColors {
   // ─── Night / surfaces (warm plum, not cold navy) ───────────────────
   static const night = Color(0xFF120A0C); // scaffold base
   static const nightDeep = Color(0xFF0A0506); // vignette edge / behind hero
-  // Back-compat aliases (existing screens reference these names):
-  static const navy950 = night;
-  static const navy900 = Color(0xFF221017); // surface-1: cards, sheets
-  static const navy800 = Color(0xFF2F1620); // surface-2: raised/input fill
-  static const surface1 = Color(0xFF221017);
-  static const surface2 = Color(0xFF2F1620);
+  static const surface1 = Color(0xFF221017); // cards, sheets
+  static const surface2 = Color(0xFF2F1620); // raised / input fill
 
   // ─── Text (warm) ───────────────────────────────────────────────────
   static const cream50 = Color(0xFFFCEFE6); // primary
   static const cream100 = Color(0xFFF3E3DA); // bright supporting
-  static const cream200 = Color(0xFFEDE4D3);
   static const taupe = Color(0xFFB8909A); // secondary copy
   static const faint = Color(0xFF7A5560); // tertiary / hints / idle icons
 
@@ -42,12 +37,6 @@ class MilesColors {
   /// settings_screen — remove-partner, delete-account and the account row —
   /// which is how a fourth ends up a slightly different crimson.
   static const danger = Color(0xFFB83A57); // passionCrimson
-
-  // Back-compat accent aliases:
-  static const coral400 = emberSoft;
-  static const coral500 = ember;
-  static const coral600 = emberDeep;
-  static const emerald400 = sage;
 
   // ─── Scrim + hairline ────────────────────────────────────────────
   // What is left of the frosted-glass set, renamed for what it actually does.

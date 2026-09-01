@@ -49,7 +49,7 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
     if (couple != null) {
       _channel = ManagedSubscription.start(
         () => SupabaseService.client
-            .channel('desire_temps:${couple.id}', opts: RealtimeChannelConfig(private: true))
+            .channel('desire_temps:${couple.id}', opts: const RealtimeChannelConfig(private: true))
             .onPostgresChanges(
               event: PostgresChangeEvent.all,
               schema: 'public',
@@ -132,7 +132,7 @@ class _WarmthMeterScreenState extends ConsumerState<WarmthMeterScreen> {
           'They put $_partnerScore. Read it aloud together once.';
     }
     if (_submittedToday) {
-      return "Locked in for today.\n"
+      return 'Locked in for today.\n'
           "Change today's any time — everyone sees the change.";
     }
     // Knowing they have answered is safe; their number is not, and the server

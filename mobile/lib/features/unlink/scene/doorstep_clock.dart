@@ -208,7 +208,7 @@ class _ClockPainter extends CustomPainter {
       );
     }
 
-    final dark = const Color(0xFF2E211B);
+    const dark = Color(0xFF2E211B);
     final hoursLeft = remaining.inMinutes / 60.0;
     // Hour hand: a 12-hour dial of what remains.
     hand((hoursLeft % 12) / 12, 0.42, math.max(2, r * 0.09), dark);

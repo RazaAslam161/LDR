@@ -83,7 +83,7 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
           unawaited(_load());
           return SupabaseService.client
               .channel('cycle_events:$cid',
-                  opts: RealtimeChannelConfig(private: true),)
+                  opts: const RealtimeChannelConfig(private: true),)
               .onPostgresChanges(
                 event: PostgresChangeEvent.all,
                 schema: 'public',

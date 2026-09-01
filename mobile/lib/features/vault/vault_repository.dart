@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -133,30 +132,6 @@ class VaultRepository {
     });
   }
 
-  /// Saves a reference to chat/touch media into the personal vault — ZERO bytes
-  /// written to the device. The file stays in Supabase storage.
-  ///
-  /// [publicUrl] (couple_media, never expires) is stored as-is in `content`.
-  /// [storagePath] (couple_intimate, private) is stored as `intimate:<path>`,
-  /// and a fresh signed URL is generated on open. [label] is shown in the vault.
-  static Future<void> saveMediaToVault({
-    required String type, // 'saved_photo' | 'saved_video' | 'saved_voice'
-    required String label,
-    String? publicUrl,
-    String? storagePath,
-  }) async {
-    final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
-    final content = storagePath != null ? 'intimate:$storagePath' : publicUrl;
-    if (content == null) return;
-    await _c.from('personal_vault_items').insert({
-      'owner_id': uid,
-      'type': type,
-      'content': content,
-      'media_url': label, // repurposed as the display label
-    });
-  }
-
   // ─── Media the vault actually owns ───────────────────────────────────────
 
   static const bucket = 'personal_vault';
@@ -174,7 +149,7 @@ class VaultRepository {
   /// after that stopped being true, directly above the line that writes it in
   /// the clear.
   ///
-  /// The old `saveMediaToVault` stored a string — a public URL, or
+  /// The previous design stored a string — a public URL, or
   /// `intimate:<path>` pointing at the couple's shared bucket. That gave the
   /// vault no privacy (the partner's SELECT policy matches the same couple
   /// folder), no durability (so does their DELETE), and no permanence (photos

@@ -108,10 +108,10 @@ void main() {
     });
   });
 
-  group('the loop\'s other exits', () {
+  group("the loop's other exits", () {
     test('the two rewrap subscriptions never share a topic', () {
-      expect(screenSrc.contains("'rewrap:screen:\$coupleId'"), isTrue);
-      expect(shellSrc.contains("'rewrap:\${couple.id}'"), isTrue);
+      expect(screenSrc.contains(r"'rewrap:screen:$coupleId'"), isTrue);
+      expect(shellSrc.contains(r"'rewrap:${couple.id}'"), isTrue);
       // Same topic twice = joined-but-dead (realtime_service.dart's own note).
       expect(shellSrc.contains('rewrap:screen:'), isFalse);
     });

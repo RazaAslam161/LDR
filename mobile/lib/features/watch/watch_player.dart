@@ -105,9 +105,7 @@ class MediaWatchPlayer extends ChangeNotifier implements WatchPlayer {
       if (source.startAt > Duration.zero) await vp.seekTo(source.startAt);
       _chewie = ChewieController(
         videoPlayerController: vp,
-        autoPlay: false,
         showControlsOnInitialize: false,
-        allowFullScreen: true,
         deviceOrientationsAfterFullScreen: const [DeviceOrientation.portraitUp],
         materialProgressColors: ChewieProgressColors(
           playedColor: const Color(0xFFE0785A),

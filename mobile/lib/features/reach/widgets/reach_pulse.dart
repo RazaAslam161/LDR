@@ -48,11 +48,11 @@ class _ReachPulseState extends State<ReachPulse>
 
   /// The lub-dub: two peaks, the second softer, then rest.
   static final Animatable<double> _lubDub = TweenSequence<double>([
-    TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.12), weight: 18),
+    TweenSequenceItem(tween: Tween(begin: 1, end: 1.12), weight: 18),
     TweenSequenceItem(tween: Tween(begin: 1.12, end: 1.02), weight: 16),
     TweenSequenceItem(tween: Tween(begin: 1.02, end: 1.08), weight: 16),
-    TweenSequenceItem(tween: Tween(begin: 1.08, end: 1.0), weight: 25),
-    TweenSequenceItem(tween: ConstantTween(1.0), weight: 25),
+    TweenSequenceItem(tween: Tween(begin: 1.08, end: 1), weight: 25),
+    TweenSequenceItem(tween: ConstantTween(1), weight: 25),
   ]);
 
   bool _running = false;

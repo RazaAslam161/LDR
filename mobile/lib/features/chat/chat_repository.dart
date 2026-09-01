@@ -1066,7 +1066,7 @@ class ChatRepository {
     VoidCallback? onDelete,
   }) {
     return _c
-        .channel('messages:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('messages:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
@@ -1211,7 +1211,7 @@ class ChatRepository {
   }
 
   /// The sentence for each verdict [editMessage] can answer. Copy recovered
-  /// verbatim from build 52 — see docs/guides/BUILD-52-AUDIT.md.
+  /// verbatim from build 52 — see docs/archive/BUILD-52-AUDIT.md.
   static String editMessageError(String verdict) {
     switch (verdict) {
       case 'not_text':

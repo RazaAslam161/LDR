@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:miles/core/media/thumbnails.dart' show Thumbnails;
 import 'package:path_provider/path_provider.dart';
 
 /// Turns whatever the gallery handed back into something this app can actually
@@ -69,13 +70,9 @@ class MediaNormalize {
       final out = await FlutterImageCompress.compressAndGetFile(
         file.absolute.path,
         target,
-        format: CompressFormat.jpeg,
         quality: _quality,
         minWidth: _maxEdge,
         minHeight: _maxEdge,
-        // Without this a photo taken in portrait arrives on its side: the
-        // orientation lives in EXIF, and writing a new JPEG drops the tag.
-        autoCorrectionAngle: true,
       );
       if (out == null) return null;
       return File(out.path);

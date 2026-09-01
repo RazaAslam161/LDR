@@ -46,12 +46,12 @@ void main() {
   testWidgets('survives the REAL root chain: TickerMode > EmberBackground > Stack',
       (tester) async {
     await tester.pumpWidget(
-      MaterialApp(
+      const MaterialApp(
         home: TickerMode(
           enabled: true,
           child: EmberBackground(
             child: Stack(
-              children: const [
+              children: [
                 SizedBox.expand(),
                 Positioned.fill(child: UnlinkEndOverlay()),
               ],

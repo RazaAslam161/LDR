@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miles/core/app/release_gate.dart' show ReleaseGate;
 
 /// The human version has exactly one home.
 ///
@@ -22,7 +23,7 @@ void main() {
     final offenders = <String>[];
     for (final entity in Directory('lib').listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
-      final path = entity.path.replaceAll('\\', '/');
+      final path = entity.path.replaceAll(r'\', '/');
       if (path.endsWith('lib/core/app/release_gate.dart')) continue;
       final lines = entity.readAsLinesSync();
       for (var i = 0; i < lines.length; i++) {

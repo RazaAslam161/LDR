@@ -73,7 +73,7 @@ class CareRepository {
 
   static RealtimeChannel subscribe(String coupleId, void Function() onChange) {
     return _c
-        .channel('care_nudges:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('care_nudges:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',

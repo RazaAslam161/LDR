@@ -109,7 +109,7 @@ class MilesSound {
 
   // ── The one ambient bed (Breath Sync) ──────────────────────────────────
 
-  static double _bedGain = 0.5;
+  static const double _bedGain = 0.5;
   static int _bedHolds = 0;
 
   static Future<void> startBed() async {

@@ -164,9 +164,6 @@ class _WatchViewerState extends State<WatchViewer> {
                   initialSettings: InAppWebViewSettings(
                     mediaPlaybackRequiresUserGesture: false,
                     useShouldOverrideUrlLoading: true,
-                    // Without this the page opens its app-install interstitial
-                    // in a window this viewer never sees and cannot refuse.
-                    javaScriptCanOpenWindowsAutomatically: false,
                   ),
                   shouldOverrideUrlLoading: (_, action) async {
                     if (staysInViewer(action.request.url, origin: _origin)) {

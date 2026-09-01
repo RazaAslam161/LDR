@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miles/features/disguise/cover_gate.dart' show CoverGate;
 import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// The cover screen each identity renders. Read by the tests below, which
@@ -251,11 +252,11 @@ void main() {
         // Punctuation drifts; the words do not.
         final words = d.entry
             .toLowerCase()
-            .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+            .replaceAll(RegExp('[^a-z0-9 ]'), ' ')
             .split(RegExp(r'\s+'))
             .where((w) => w.length > 3)
             .toList();
-        final text = guide.toLowerCase().replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+        final text = guide.toLowerCase().replaceAll(RegExp('[^a-z0-9 ]'), ' ');
         final missing = words.where((w) => !text.contains(w)).toList();
         expect(missing, isEmpty,
             reason: "${d.label}'s gesture is not described in the guide: "

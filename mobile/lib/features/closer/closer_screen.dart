@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/widgets/ember_press.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
-import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/partner_key_pin.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
@@ -612,25 +612,25 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
   @override
   Widget build(BuildContext context) {
     final features = <_FeatureTile>[
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '✏️',
         title: 'Touch Trace',
         blurb: 'Draw together, in real time',
         route: '/app/closer/touch-trace',
       ),
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '🎨',
         title: 'Mood Lamp',
         blurb: 'A color, no words',
         route: '/app/closer/mood-lamp',
       ),
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '🌡️',
         title: 'Closeness',
         blurb: 'How close do you feel today?',
         route: '/app/closer/warmth',
       ),
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '🍯',
         title: 'Wish Jar',
         blurb: 'A quiet nudge when you match',
@@ -643,25 +643,25 @@ class _ModuleEnabledState extends ConsumerState<_ModuleEnabled> {
       // The blurb no longer says "encrypted": gallery objects are stored in the
       // clear so they can be paged and cached like any other picture, and a
       // promise the storage does not keep is worse than no promise.
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '🖼️',
         title: 'Gallery',
         blurb: 'Everything, shared',
         route: '/app/gallery',
       ),
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '✅',
         title: 'Today',
         blurb: 'Your day, side by side',
         route: '/app/routines',
       ),
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '🎬',
         title: 'Watch list',
         blurb: 'Reels you send each other',
         route: '/app/watch-list',
       ),
-      _FeatureTile(
+      const _FeatureTile(
         emoji: '🎲',
         title: 'Pick for us',
         blurb: 'Let the dice decide',
@@ -756,7 +756,6 @@ class _FeatureTile extends StatelessWidget {
                     alignment: Alignment.center,
                     decoration: const BoxDecoration(
                       color: Color(0xFFEF6F58),
-                      shape: BoxShape.rectangle,
                       borderRadius: BorderRadius.all(Radius.circular(10)),
                     ),
                     child: Text(

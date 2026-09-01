@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/features/call/call_controller.dart';
+import 'package:miles/features/call/call_pip.dart' show CallPip;
 
 /// Answers calls from anywhere in the app, not only from inside the shell.
 ///

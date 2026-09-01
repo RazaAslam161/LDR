@@ -144,7 +144,6 @@ class EmbedWatchPlayer extends ChangeNotifier implements WatchPlayer {
             // TikTok's watermark and title are both deep links. Following one
             // ejects the couple to the Play Store mid-video.
             useShouldOverrideUrlLoading: true,
-            javaScriptCanOpenWindowsAutomatically: false,
           ),
           shouldOverrideUrlLoading: (_, action) async {
             final url = action.request.url;

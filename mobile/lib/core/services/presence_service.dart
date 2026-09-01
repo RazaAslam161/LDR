@@ -39,37 +39,6 @@ class Presence {
     this.chatLastRead,
   }) : isOnlineFlag = isOnline;
 
-  /// This row with only its LIVENESS changed — everything else carried over.
-  ///
-  /// Deliberately not a general copyWith. The broadcast hint that calls this
-  /// knows two things and nothing else; a full copyWith would invite a caller
-  /// to blank the screen, mood or location from a payload that never carried
-  /// them, a moment before the database says otherwise.
-  Presence withLiveness({bool? isOnline, DateTime? appLastActiveAt}) => Presence(
-        userId: userId,
-        isOnline: isOnline ?? isOnlineFlag,
-        lastSeen: lastSeen,
-        updatedAt: updatedAt,
-        appLastActiveAt: appLastActiveAt ?? this.appLastActiveAt,
-        isTyping: isTyping,
-        typingInChat: typingInChat,
-        currentMood: currentMood,
-        moodColor: moodColor,
-        locationLabel: locationLabel,
-        locationSharingMode: locationSharingMode,
-        latitude: latitude,
-        longitude: longitude,
-        locationAccuracy: locationAccuracy,
-        locationUpdatedAt: locationUpdatedAt,
-        currentActivity: currentActivity,
-        currentScreen: currentScreen,
-        bodyPhotoPath: bodyPhotoPath,
-        avatarEmoji: avatarEmoji,
-        checkinPhotoUrl: checkinPhotoUrl,
-        checkinPhotoAt: checkinPhotoAt,
-        chatLastRead: chatLastRead,
-      );
-
   factory Presence.fromJson(Map<String, dynamic> j) => Presence(
         userId: JsonUtils.parseString(j['user_id']),
         isOnline: JsonUtils.parseBool(j['is_online']),
@@ -104,6 +73,37 @@ class Presence {
         checkinPhotoAt:
             JsonUtils.parseDateOrNull(j['checkin_photo_at'])?.toLocal(),
         chatLastRead: JsonUtils.parseDateOrNull(j['chat_last_read'])?.toLocal(),
+      );
+
+  /// This row with only its LIVENESS changed — everything else carried over.
+  ///
+  /// Deliberately not a general copyWith. The broadcast hint that calls this
+  /// knows two things and nothing else; a full copyWith would invite a caller
+  /// to blank the screen, mood or location from a payload that never carried
+  /// them, a moment before the database says otherwise.
+  Presence withLiveness({bool? isOnline, DateTime? appLastActiveAt}) => Presence(
+        userId: userId,
+        isOnline: isOnline ?? isOnlineFlag,
+        lastSeen: lastSeen,
+        updatedAt: updatedAt,
+        appLastActiveAt: appLastActiveAt ?? this.appLastActiveAt,
+        isTyping: isTyping,
+        typingInChat: typingInChat,
+        currentMood: currentMood,
+        moodColor: moodColor,
+        locationLabel: locationLabel,
+        locationSharingMode: locationSharingMode,
+        latitude: latitude,
+        longitude: longitude,
+        locationAccuracy: locationAccuracy,
+        locationUpdatedAt: locationUpdatedAt,
+        currentActivity: currentActivity,
+        currentScreen: currentScreen,
+        bodyPhotoPath: bodyPhotoPath,
+        avatarEmoji: avatarEmoji,
+        checkinPhotoUrl: checkinPhotoUrl,
+        checkinPhotoAt: checkinPhotoAt,
+        chatLastRead: chatLastRead,
       );
 
   final String userId;
@@ -199,9 +199,6 @@ class Presence {
   /// GPS-polluted updated_at).
   bool get isOnline => isTrulyOnline;
 
-  /// Back-compat alias for [isTrulyOnline].
-  bool get onlineNow => isTrulyOnline;
-
   /// GETTER 3 — human-readable last-seen string.
   /// Source: app_last_active_at (NEVER updated_at, NEVER location). Returns null
   /// when online (caller shows "Online").
@@ -231,9 +228,6 @@ class Presence {
   bool get isSharingCity =>
       locationSharingMode == 'city' &&
       (locationLabel?.isNotEmpty ?? false);
-
-  /// Sharing anything at all, at any granularity.
-  bool get isSharingAnything => isSharingLive || isSharingCity;
 }
 
 /// Couple-scoped presence read/write. RLS lets you update only your own row and
@@ -503,34 +497,6 @@ class PresenceService {
         // make anyone read as falsely "online" / "active".
         'location_updated_at': DateTime.now().toUtc().toIso8601String(),
       }, op: 'set_location',);
-
-  /// A single live-location tick (precise mode): coords + accuracy + freshness.
-  static Future<void> setLiveLocation(
-    String coupleId, {
-    required double lat,
-    required double lon,
-    double? accuracy,
-    String? label,
-  }) =>
-      _upsert(coupleId, {
-        'location_sharing_mode': 'precise',
-        'latitude': lat,
-        'longitude': lon,
-        'location_accuracy': accuracy,
-        'location_updated_at': DateTime.now().toUtc().toIso8601String(),
-        // Only overwrite the label when we re-geocoded (keeps the dashboard
-        // text in sync with the live map without geocoding every tick).
-        if (label != null) 'location_label': label,
-      }, op: 'set_live_location',);
-
-  /// Clears coords when live sharing stops (so the partner sees "paused", not a
-  /// stale pin presented as live).
-  static Future<void> clearLiveLocation(String coupleId) => _upsert(coupleId, {
-        'location_sharing_mode': 'off',
-        'latitude': null,
-        'longitude': null,
-        'location_accuracy': null,
-      }, op: 'clear_live_location',);
 
   /// App activity (the user actively shared a snap) — stamps app_last_active_at.
   static Future<void> setCheckinPhoto(String coupleId, String url) => _upsert(

@@ -59,7 +59,7 @@ class NetImage extends StatelessWidget {
     // raster thread while scrolling. Only hinted when the caller gave a bound.
     final dpr = MediaQuery.devicePixelRatioOf(context);
     // An explicit width wins; then the thumb rule; then the layout bound.
-    final int? decodePx = decodeWidth ??
+    final decodePx = decodeWidth ??
         (thumb
             ? null
             : (width != null && width!.isFinite)

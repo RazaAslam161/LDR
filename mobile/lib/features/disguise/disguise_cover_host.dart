@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/core/services/unread_tally.dart';
+import 'package:miles/features/covers/news_cover_screen.dart';
 import 'package:miles/features/disguise/covers/calculator_cover.dart';
 import 'package:miles/features/disguise/covers/convert_cover.dart';
 import 'package:miles/features/disguise/covers/device_info_cover.dart';
@@ -11,7 +12,6 @@ import 'package:miles/features/disguise/covers/timer_cover.dart';
 import 'package:miles/features/disguise/covers/weather_cover.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
-import 'package:miles/features/covers/news_cover_screen.dart';
 
 /// Renders the cover that matches the user's chosen launcher identity.
 ///

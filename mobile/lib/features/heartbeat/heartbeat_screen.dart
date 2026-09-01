@@ -5,11 +5,11 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:miles/core/services/sound/cue.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/heartbeat/ppg_detector.dart';
 import 'package:miles/features/shell/app_drawer.dart';
@@ -57,7 +57,7 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
     _myUid = session.profile?.id;
     if (_coupleId != null) {
       _channel = ManagedSubscription.start(() => SupabaseService.client
-          .channel('heartbeat:${_coupleId!}', opts: RealtimeChannelConfig(private: true))
+          .channel('heartbeat:${_coupleId!}', opts: const RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'hb', callback: _onMsg)
           .subscribe(),);
     }

@@ -59,7 +59,7 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
   /// Reads what the platform will give us. A handset that answers nothing still
   /// gets a full screen — the Dart-side facts below are enough on their own.
   Future<void> _read() async {
-    Map<String, Object?> stats = const {};
+    var stats = const <String, Object?>{};
     try {
       final raw = await _channel
           .invokeMapMethod<String, Object?>('read')

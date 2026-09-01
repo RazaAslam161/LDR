@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
@@ -85,8 +84,6 @@ class MemoryPhotoRepository {
   /// the same string the upload sealed with.
   static String coverAdFor(String memoryId, String photoId) =>
       '${memoryId}_${photoId}_cover';
-  static String tileAdFor(String memoryId, String photoId) =>
-      '${memoryId}_${photoId}_tile';
   static String fullAdFor(String memoryId, String photoId) =>
       '${memoryId}_${photoId}_full';
 
@@ -209,17 +206,6 @@ class MemoryPhotoRepository {
         .delete()
         .eq('id', photo.id);
     await _remove([photo.coverPath, photo.tilePath, photo.fullPath]);
-  }
-
-  /// Choose which photograph the timeline shows. A trigger re-denormalises
-  /// `cover_path` onto the parent.
-  static Future<void> setCover({
-    required String memoryId,
-    required String photoId,
-  }) async {
-    await SupabaseService.client
-        .from('memory_threads')
-        .update({'cover_photo_id': photoId}).eq('id', memoryId);
   }
 
   /// `upsert` is NEVER true.

@@ -343,7 +343,7 @@ final List<_IconSpec> _icons = [
   // sits inside a radius of 33 from centre, which is what a circular launcher
   // mask leaves — the rule and strapline were the first casualties when they
   // did not.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_launcher',
     bg: _Bg.linear(_Rgba(0xFF, 0xFF, 0xFF), _Rgba(0xEF, 0xF1, 0xF3), 30),
     shadow: false,
@@ -358,7 +358,7 @@ final List<_IconSpec> _icons = [
       ], color: _ink),
       // e
       _Circle(48, 59, 7, color: _ink),
-      _Circle(48, 59, 4.0, color: _ink, cut: true),
+      _Circle(48, 59, 4, color: _ink, cut: true),
       _RRect(41, 57.8, 14, 2.6, 0, color: _ink),
       _RRect(47.5, 60.4, 9, 2.8, 0, color: _ink, cut: true),
       // w
@@ -388,7 +388,7 @@ final List<_IconSpec> _icons = [
   // device chrome, which is the single most common amateur-icon mistake and
   // turns to mud at 48dp. This is the four operators instead: unmistakable as
   // a category, legible at any size, and nothing to render but strokes.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_calculator',
     bg: _Bg.linear(_Rgba(0x3C, 0x40, 0x43), _Rgba(0x1F, 0x22, 0x24), 15),
     mark: [
@@ -410,7 +410,7 @@ final List<_IconSpec> _icons = [
   // ── Notes ─────────────────────────────────────────────────────────────────
   // A page with a folded corner. The rules are cuts, not grey strokes, so the
   // monochrome layer keeps real holes instead of collapsing to a white slab.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_notes',
     bg: _Bg.linear(_Rgba(0xE6, 0x51, 0x00), _Rgba(0xEF, 0x6C, 0x00), 25),
     mark: [
@@ -425,7 +425,7 @@ final List<_IconSpec> _icons = [
   // ── Weather ───────────────────────────────────────────────────────────────
   // Sun and cloud, deliberately not touching: overlapped they merge into one
   // silhouette the moment Android tints the monochrome layer.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_weather',
     bg: _Bg.linear(_Rgba(0x1E, 0x88, 0xE5), _Rgba(0x0D, 0x47, 0xA1), 20),
     mark: [
@@ -439,7 +439,7 @@ final List<_IconSpec> _icons = [
   // ── Convert ───────────────────────────────────────────────────────────────
   // Two arcs chasing each other, 12° off the vertical so the glyph is not
   // machine-symmetric. Single-hue teal: a converter is a tool, not a brand.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_convert',
     bg: _Bg.linear(_Rgba(0x0F, 0x76, 0x6E), _Rgba(0x11, 0x5E, 0x59), 22),
     mark: [
@@ -454,7 +454,7 @@ final List<_IconSpec> _icons = [
   // A radial highlight instead of a gradient, so this tile and Convert do not
   // read as the same hand. The mic is an outline — the inner cut is what keeps
   // it a mic and not a capsule once it is one flat colour.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_recorder',
     bg: _Bg.radial(_Rgba(0x1C, 0x1B, 0x1F), _Rgba(0x39, 0x36, 0x40)),
     mark: [
@@ -476,7 +476,7 @@ final List<_IconSpec> _icons = [
   // Green rather than the obvious stopwatch vermilion, because News is already
   // red and Notes already orange: nine icons on one home screen have to be
   // told apart by hue before shape, at a glance, in a grid.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_timer',
     bg: _Bg.linear(_Rgba(0x2E, 0x7D, 0x32), _Rgba(0x43, 0xA0, 0x47), 200),
     circularTile: true,
@@ -491,7 +491,7 @@ final List<_IconSpec> _icons = [
   // Flat, no gradient at all — a fourth craft signature. The bubble sits off
   // centre because that is what a spirit level actually looks like, so the
   // asymmetry is earned rather than decorative.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_level',
     bg: _Bg.flat(_Rgba(0xF3, 0xE9, 0xD2)),
     mark: [
@@ -507,7 +507,7 @@ final List<_IconSpec> _icons = [
   // ── Device info ───────────────────────────────────────────────────────────
   // Bars, not a drawing of a phone. The tallest bar is a lighter tint so there
   // is tonal separation inside the mark and not only against the background.
-  _IconSpec(
+  const _IconSpec(
     base: 'ic_disguise_device',
     bg: _Bg.linear(_Rgba(0x31, 0x2E, 0x81), _Rgba(0x37, 0x30, 0xA3), 14),
     mark: [

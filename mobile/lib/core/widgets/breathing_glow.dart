@@ -76,7 +76,7 @@ class _BreathingGlowState extends State<BreathingGlow>
   Widget build(BuildContext context) {
     final glowScale =
         Tween<double>(begin: 0.9, end: 1.25).animate(_curve);
-    final glowFade = Tween<double>(begin: 0.4, end: 1.0).animate(_curve);
+    final glowFade = Tween<double>(begin: 0.4, end: 1).animate(_curve);
     final childScale =
         Tween<double>(begin: widget.minScale, end: widget.maxScale)
             .animate(_curve);

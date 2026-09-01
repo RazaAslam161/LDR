@@ -11,7 +11,7 @@
 # Uploads with curl's built-in SigV4 against R2's S3 API and publishes through
 # PostgREST — no aws CLI, no rclone, no psql. Never put a key in this file;
 # credentials come from the environment. See
-# docs/guides/SIDELOAD-UPDATE-RUNBOOK.md.
+# docs/archive/SIDELOAD-UPDATE-RUNBOOK.md (the updater is retired; --play is the live path).
 set -euo pipefail
 
 bump=false; upload=false; verify=false; publish=false; play=false

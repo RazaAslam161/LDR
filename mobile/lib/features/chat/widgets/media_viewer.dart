@@ -5,14 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/data/media_urls.dart';
+import 'package:miles/core/media/media_decode.dart';
 import 'package:miles/core/media/media_source.dart';
+import 'package:miles/core/media/thumb_backfill.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/chat/widgets/video_surface.dart';
 import 'package:miles/features/closer/secure_screen.dart';
-import 'package:miles/core/media/media_decode.dart';
-import 'package:miles/core/media/thumb_backfill.dart';
 
 /// Full-screen media, paged.
 ///

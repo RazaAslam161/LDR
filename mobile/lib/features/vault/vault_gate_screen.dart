@@ -1,15 +1,15 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
-import 'package:miles/main.dart';
-import 'package:flutter/material.dart';
-import 'package:local_auth/local_auth.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/vault/pin_pad.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_screen.dart';
+import 'package:miles/main.dart';
 
 /// Guards the Private Vault. On first use it sets a 4-digit PIN; thereafter it
 /// asks for the PIN (or biometric) every time. Auto-locks when backgrounded.

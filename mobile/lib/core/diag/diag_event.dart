@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 /// Which mechanism an event belongs to. Kept small on purpose — a trace with
@@ -58,10 +56,6 @@ class DiagEvent {
         if (corr != null) 'corr': corr,
         if (fields.isNotEmpty) 'fields': fields,
       };
-
-  /// One line, appended to disk. NDJSON because the file is read after a crash:
-  /// a truncated last line costs one event, not the whole trace.
-  String toNdjson() => jsonEncode(toJson());
 
   /// Human form, for the in-app viewer and for pasting into a bug report.
   String get line {

@@ -1,73 +1,90 @@
 # Miles
 
-A private long-distance couples app. Flutter client, Supabase backend. One app, two install channels:
-the `play` flavor ships on Google Play; the `sideload` flavor installs directly from an APK.
+A private long-distance couples app. Flutter client, Supabase backend, end-to-end encrypted.
+One app: it ships on Google Play as **Miles** (package `com.miles.miles`). The `play` and
+`sideload` Android flavors are a build mechanism, not two products.
 
-The Android build ships **disguised**: the launcher shows "News" with a matching icon, and the real app
-is behind a cover screen plus a biometric gate. That is deliberate. Do not "fix" it.
+The launcher shows the app under its own name. Nine optional launcher covers exist, all
+disabled by default and opt-in from Settings; see [`docs/guides/disguises.md`](docs/guides/disguises.md).
 
 ## Layout
 
 | Path | What lives there |
 |---|---|
 | `mobile/` | The Flutter app. This is the product. |
-| `mobile/lib/core/` | Cross-feature machinery: session, router, theme, realtime, services, diagnostics. |
+| `mobile/lib/core/` | Cross-feature machinery: session, router, theme, crypto, realtime, services, diagnostics. |
 | `mobile/lib/features/` | One directory per feature. Screens, controllers and repositories stay together. |
-| `mobile/test/` | Unit and widget tests. `flutter test` must be green before anything ships. |
+| `mobile/test/` | Unit and widget tests, including the hygiene suite that asserts the repo's shape. |
+| `mobile/third_party/flutter_webrtc/` | The one vendored dependency, patched in one Java file (`Miles patch` markers). Android only. |
+| `mobile/tool/` | Release script, dependency audit, icon and art generators. |
 | `supabase/migrations/` | The database, in replay order. The **only** place DDL belongs. |
 | `supabase/functions/` | Edge Functions (Deno). |
-| `scripts/` | Operational one-offs. |
+| `supabase/diagnostics/` | Read-only SQL for investigating a live project. Never applied. |
+| `web/` | The hosted legal and safety pages (Vercel project `miles-legal`). Single source for that text. |
+| `scripts/` | Asset pipelines (intro film, doorstep films) and the TURN health check. |
 | `docs/` | See below. |
 
 ## Documentation
 
 - [`docs/REFERENCE.md`](docs/REFERENCE.md) — what every module does. Start here.
+- [`docs/guides/BRAIN.md`](docs/guides/BRAIN.md) — the session handoff log. Read its tail before touching anything.
+- [`docs/guides/PLAY-RELEASE-RUNBOOK.md`](docs/guides/PLAY-RELEASE-RUNBOOK.md) — the ordered path to a Play release.
+- [`docs/guides/THREAT-MODEL.md`](docs/guides/THREAT-MODEL.md) — what the encryption does and does not protect.
+- [`docs/guides/DEVICE-CHECKLIST.md`](docs/guides/DEVICE-CHECKLIST.md) — what only a handset can verify.
+- [`docs/guides/design-system.md`](docs/guides/design-system.md), [`docs/guides/ART-PROMPTS.md`](docs/guides/ART-PROMPTS.md) — look and assets.
 - [`docs/FIELD-TEST.md`](docs/FIELD-TEST.md) — how to run a two-phone test and read the trace.
-- [`docs/architecture/`](docs/architecture/) — the scaling design work: roadmap, contract, per-domain designs.
-- [`docs/guides/`](docs/guides/) — build plan, performance plan, design system.
-- [`docs/archive/`](docs/archive/) — superseded. Kept for history; do not treat as current.
+- [`docs/archive/`](docs/archive/) — superseded audits, plans and specs. Kept for history; do not treat as current.
 
 ## Build
 
 ```bash
 cd mobile
 flutter pub get
+flutter analyze
 flutter test
-flutter build apk --release
+bash tool/release.sh --play      # gates + Play AAB
+bash tool/release.sh --bump      # gates + sideload APK
 ```
 
-`cd mobile` first — running `flutter` from the repo root fails with "No pubspec.yaml".
+`cd mobile` first: running `flutter` from the repo root fails with "No pubspec.yaml". Use
+`tool/release.sh` rather than a bare `flutter build`; a bare release build enters the play
+graph without the play signing config.
 
-The `sideload` APK is debug-signed on purpose (private distribution); the `play` flavor is signed with
-the release upload keystore. If a phone refuses to install, uninstall the old copy first: a different
-signing key will not upgrade in place.
+The `play` flavor is signed with the release upload keystore (`mobile/tool/make-keystore.sh`
+makes it; it is never committed). The `sideload` flavor is debug-signed for private
+distribution. A phone will not upgrade in place across signing keys.
 
 ## Configuration
 
-`mobile/.env` is required and is never committed. See [`mobile/.env.example`](mobile/.env.example) for
-the keys.
+`mobile/.env` is required and never committed. See [`mobile/.env.example`](mobile/.env.example)
+for the keys.
 
-Per-environment server values (the Edge Function base URL, the Cloudflare TURN credentials) live in the
-`app_secrets` table, one row per Supabase project — not in the repo and not in the APK.
+Per-environment server values (the Edge Function base URL, the Cloudflare TURN credentials,
+the Mapbox token) live in the `app_secrets` table, one row per Supabase project, never in the
+repo and never in the APK.
 
 ## Working rules
 
-These are assertions, not good intentions. `flutter test` fails if any of them breaks.
+These are assertions, not intentions. `flutter test` fails if any of them breaks.
 
-`repo_hygiene_test.dart`:
+`test/unit/hygiene/repo_hygiene_test.dart`:
 
-- **No dead code.** Every file under `lib/` is reachable, every dependency is imported, and no private
-  member is unused (`unused_element` is a warning here, and warnings are fatal).
+- **No dead code.** Every file under `lib/` is imported by another, every dependency is
+  imported, and the analyzer reports zero errors and zero warnings (unused private members
+  are warnings here).
 - **No commented-out code.** Git remembers it.
-- **Zero analyzer errors and warnings.** The suite runs the analyzer itself, because a hand-written grep
-  for this was silently matching nothing for an entire session.
 - **Suppressions stay countable.** `// ignore:` is bounded, so keeping a warning stays a decision.
-- **The root stays clean** and the launcher disguise stays intact.
+- **The repository root holds only `README.md` and `.gitignore`.** Docs are filed under
+  `docs/guides/` or `docs/archive/`.
 
-`migrations_hygiene_test.dart`:
+`test/unit/hygiene/migrations_hygiene_test.dart`: DDL only in `supabase/migrations/`, unique
+14-digit ordering prefix, every table the client queries created by a migration.
 
-- **DDL only in `supabase/migrations/`,** with a unique 14-digit ordering prefix, no hardcoded project
-  URL, and every table the client queries created by a migration.
+`test/unit/hygiene/schema_drift_test.dart`: every column the client writes exists in
+`supabase/schema_snapshot.json`, which is regenerated from the live project.
 
-And one rule no test can check: **comments explain why.** A comment restating the next line is noise; a
-comment naming the failure that line prevents is the most valuable thing in the file.
+`test/unit/hygiene/asset_hygiene_test.dart`: every shipped asset is referenced, every
+referenced asset ships, and each asset directory has a size ceiling.
+
+And one rule no test can check: **comments explain why.** A comment restating the next line
+is noise; a comment naming the failure that line prevents is the most valuable thing in the file.

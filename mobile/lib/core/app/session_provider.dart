@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -9,11 +10,11 @@ import 'package:miles/core/app/router.dart';
 import 'package:miles/core/data/couple_key.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
-import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
@@ -54,8 +55,6 @@ class SessionState {
   final String? error;
 
   bool get isAuthenticated => session != null;
-  bool get hasProfile => profile != null;
-  bool get isLinked => couple != null;
 
   /// The last [SessionNotifier.loadProfile] THREW rather than answering.
   ///

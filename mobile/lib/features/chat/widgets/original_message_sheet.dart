@@ -41,9 +41,9 @@ Future<void> showOriginalMessageSheet(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'Original message',
-              style: const TextStyle(
+              style: TextStyle(
                 color: MilesColors.taupe,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -70,10 +70,10 @@ Future<void> showOriginalMessageSheet(
             const SizedBox(height: 14),
             _OriginalBody(message: message, voice: voice, bubble: bubble),
             const SizedBox(height: 16),
-            Text(
+            const Text(
               'This one is older than the conversation loaded on this phone, '
               'so there is nowhere to scroll to.',
-              style: const TextStyle(
+              style: TextStyle(
                 color: MilesColors.faint,
                 fontSize: 12,
                 height: 1.4,

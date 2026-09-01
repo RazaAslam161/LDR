@@ -1,5 +1,3 @@
-I'll synthesize the spec directly. The three directions all share coral-on-deep-night DNA; I'll commit to a clear mood and graft the strongest ideas together.
-
 # Miles — Design System: "Emberlight"
 
 ## 1. Mood

@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:miles/core/services/sound/cue.dart';
-import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/services/sound/cue.dart';
+import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -82,7 +82,7 @@ class _SyncedCardGameScreenState extends ConsumerState<SyncedCardGameScreen> {
     final cid = _coupleId;
     if (cid != null) {
       _sub = ManagedSubscription.start(() => SupabaseService.client
-          .channel('gcard:${widget.deck.key}:$cid', opts: RealtimeChannelConfig(private: true))
+          .channel('gcard:${widget.deck.key}:$cid', opts: const RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'card', callback: _onCard)
           .onBroadcast(event: 'sync', callback: _onSync)
           .subscribe(),);

@@ -3,8 +3,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:typed_data';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // `show`, because geolocator's Position collides with Mapbox's geotypes one.
 import 'package:geolocator/geolocator.dart'
@@ -96,30 +94,30 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
   static Future<Uint8List> _createPartnerMarker(
       String name, bool isLive) async {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '♥';
-    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(pictureRecorder);
+    final pictureRecorder = ui.PictureRecorder();
+    final canvas = Canvas(pictureRecorder);
 
     if (isLive) {
-      final Paint haloPaint = Paint()
+      final haloPaint = Paint()
         ..color = MilesColors.blush.withValues(alpha: 0.3)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2;
       canvas.drawCircle(const Offset(30, 30), 28, haloPaint);
     }
 
-    final Paint circlePaint = Paint()
+    final circlePaint = Paint()
       ..shader = const LinearGradient(
         colors: [MilesColors.emberSoft, MilesColors.ember],
       ).createShader(const Rect.fromLTWH(6, 6, 48, 48));
     canvas.drawCircle(const Offset(30, 30), 24, circlePaint);
 
-    final Paint borderPaint = Paint()
+    final borderPaint = Paint()
       ..color = MilesColors.ember
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     canvas.drawCircle(const Offset(30, 30), 24, borderPaint);
 
-    final TextPainter textPainter = TextPainter(
+    final textPainter = TextPainter(
       textDirection: ui.TextDirection.ltr,
       text: TextSpan(
         text: initial,
@@ -132,13 +130,13 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
         Offset(30 - textPainter.width / 2, 30 - textPainter.height / 2));
 
     if (isLive) {
-      final Paint badgeBg = Paint()
+      final badgeBg = Paint()
         ..color = Colors.black.withValues(alpha: 0.6);
-      final RRect badgeRect = RRect.fromRectAndRadius(
+      final badgeRect = RRect.fromRectAndRadius(
           const Rect.fromLTWH(15, 54, 30, 14), const Radius.circular(4));
       canvas.drawRRect(badgeRect, badgeBg);
 
-      final TextPainter badgeText = TextPainter(
+      final badgeText = TextPainter(
         textDirection: ui.TextDirection.ltr,
         text: const TextSpan(
           text: 'LIVE',
@@ -153,27 +151,27 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
           canvas, Offset(30 - badgeText.width / 2, 61 - badgeText.height / 2));
     }
 
-    final ui.Image image = await pictureRecorder.endRecording().toImage(60, 70);
-    final ByteData? byteData =
+    final image = await pictureRecorder.endRecording().toImage(60, 70);
+    final byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
   }
 
   static Future<Uint8List> _createMyDotMarker() async {
-    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(pictureRecorder);
+    final pictureRecorder = ui.PictureRecorder();
+    final canvas = Canvas(pictureRecorder);
 
-    final Paint circlePaint = Paint()
+    final circlePaint = Paint()
       ..color = MilesColors.sage.withValues(alpha: 0.9);
     canvas.drawCircle(const Offset(16, 16), 16, circlePaint);
 
-    final Paint borderPaint = Paint()
+    final borderPaint = Paint()
       ..color = MilesColors.cream50
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     canvas.drawCircle(const Offset(16, 16), 16, borderPaint);
 
-    final TextPainter textPainter = TextPainter(
+    final textPainter = TextPainter(
       textDirection: ui.TextDirection.ltr,
       text: const TextSpan(
         text: 'YOU',
@@ -186,8 +184,8 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
     textPainter.layout();
     textPainter.paint(canvas, Offset(16 - textPainter.width / 2, 34));
 
-    final ui.Image image = await pictureRecorder.endRecording().toImage(32, 48);
-    final ByteData? byteData =
+    final image = await pictureRecorder.endRecording().toImage(32, 48);
+    final byteData =
         await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
   }
@@ -353,11 +351,11 @@ class _LocationMapScreenState extends ConsumerState<LocationMapScreen>
   Widget build(BuildContext context) {
     final presence = ref.watch(partnerPresenceProvider);
     final partner = presence?.isSharingLive ?? false ? presence : null;
-    final _Geo? partnerPoint =
+    final partnerPoint =
         partner?.latitude != null && partner?.longitude != null
             ? (lat: partner!.latitude!, lon: partner.longitude!)
             : null;
-    final _Geo? myPoint =
+    final myPoint =
         (_myLat != null && _myLon != null) ? (lat: _myLat!, lon: _myLon!) : null;
 
     if (partnerPoint != null && partnerPoint != _followedAt) {

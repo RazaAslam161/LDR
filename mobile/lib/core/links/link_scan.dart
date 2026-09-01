@@ -16,6 +16,8 @@
 /// shelf. They have two jobs.
 library;
 
+import 'package:miles/features/profile/shared_media_repository.dart' show SharedMediaRepository;
+
 /// One linkified run inside a body.
 class LinkSpan {
   const LinkSpan(this.start, this.end, this.url);
@@ -34,7 +36,7 @@ class LinkScan {
 
   /// Display-time detection. Schemed URLs, plus bare `www.`.
   static final _pattern = RegExp(
-    r'(?:https?://|www\.)[^\s<>"' r"'" r']+',
+    r'(?:https?://|www\.)[^\s<>"' "'" ']+',
     caseSensitive: false,
   );
 

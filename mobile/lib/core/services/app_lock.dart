@@ -149,15 +149,6 @@ class AppLock {
   }
 
   // ── Capability ────────────────────────────────────────────────────────────
-  /// Device can do biometric OR device-credential (PIN/pattern/passcode) auth.
-  static Future<bool> canAuthenticate() async {
-    try {
-      return await _auth.isDeviceSupported() || await _auth.canCheckBiometrics;
-    } catch (_) {
-      return false;
-    }
-  }
-
   static Future<List<BiometricType>> availableBiometrics() async {
     try {
       return await _auth.getAvailableBiometrics();

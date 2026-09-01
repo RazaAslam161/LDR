@@ -2,9 +2,9 @@
 
 Ordered. Each phase depends on the one before it.
 
-**Provenance.** Written 2026-08-15 from `docs/guides/PRODUCTION-AUDIT-2026-08-15.md`,
+**Provenance.** Written 2026-08-15 from `docs/archive/PRODUCTION-AUDIT-2026-08-15.md`,
 corrected 2026-08-17 against the tree and against
-`docs/guides/PLAY-READINESS-AUDIT.md` (2026-08-16), which is the current
+`docs/archive/PLAY-READINESS-AUDIT.md` (2026-08-16), which is the current
 readiness source and outranks this file wherever the two disagree on *what is
 still open*. This file is the *order of operations*; the audit is the *state*.
 
@@ -506,7 +506,7 @@ the declaration.
 
 ### 5.4 Data safety form
 
-Answer from the privacy policy — `docs/legal/privacy-policy.md` is the source of
+Answer from the privacy policy — `web/privacy-policy.html` is the source of
 truth and was written from the code, so the two cannot drift if you copy from
 it.
 
@@ -614,8 +614,7 @@ external assets, so any static host works.
 
 **Before publishing, fix these in the sources:**
 
-- delete the "Before publishing" block — `web/privacy-policy.html:95` and
-  `docs/legal/privacy-policy.md:5`;
+- delete the "Before publishing" block — `web/privacy-policy.html:95`;
 - the privacy policy's own deletion link points at `functions/v1/delete-account`,
   which 404s — the real slug is `account-delete`, and it should point at the
   hosted deletion **page** anyway;

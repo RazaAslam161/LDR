@@ -2,26 +2,54 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
-import 'package:miles/features/unlink/scene/film_library.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:video_player/video_player.dart';
 import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/unlink/scene/conversation.dart';
+import 'package:miles/features/unlink/scene/film_library.dart';
 import 'package:miles/features/unlink/scene/scene_assets.dart';
 import 'package:miles/features/unlink/scene/scene_state.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_player/video_player.dart';
 
 /// Where each stage's action object sits — image fractions, read off grids
 /// over the shipped stills. Mapped through the SAME cover math the painter
 /// uses, or the objects drift off their spots as the crop changes with the
 /// screen aspect.
-class _StageGeom {
+enum _StageGeom {
+  outM(
+    actionAt: Offset(0.315, 0.44), photo: false,
+    companionAt: Offset(0.70, 0.21),
+    characterAt: Offset(0.51, 0.49),
+    lampAt: Offset(0.67, 0.26),
+    slamAt: 1.05,
+  ),
+  outF(
+    actionAt: Offset(0.755, 0.50), photo: false,
+    companionAt: Offset(0.365, 0.25),
+    characterAt: Offset(0.645, 0.46),
+    lampAt: Offset(0.365, 0.36),
+    slamAt: 2.10,
+  ),
+  inM(
+    actionAt: Offset(0.145, 0.615), photo: true,
+    companionAt: Offset(0.333, 0.47),
+    characterAt: Offset(0.594, 0.33),
+    lampAt: Offset(0.13, 0.30),
+    slamAt: 0.15,
+  ),
+  inF(
+    actionAt: Offset(0.145, 0.635), photo: true,
+    companionAt: Offset(0.375, 0.45),
+    characterAt: Offset(0.625, 0.32),
+    lampAt: Offset(0.20, 0.24),
+    slamAt: 0.15,
+  );
+
   const _StageGeom({
     required this.actionAt,
     required this.photo,
@@ -52,35 +80,6 @@ class _StageGeom {
 
   /// True: the action object is the framed photo. False: the key.
   final bool photo;
-
-  static const outM = _StageGeom(
-    actionAt: Offset(0.315, 0.44), photo: false,
-    companionAt: Offset(0.70, 0.21),
-    characterAt: Offset(0.51, 0.49),
-    lampAt: Offset(0.67, 0.26),
-    slamAt: 1.05,
-  );
-  static const outF = _StageGeom(
-    actionAt: Offset(0.755, 0.50), photo: false,
-    companionAt: Offset(0.365, 0.25),
-    characterAt: Offset(0.645, 0.46),
-    lampAt: Offset(0.365, 0.36),
-    slamAt: 2.10,
-  );
-  static const inM = _StageGeom(
-    actionAt: Offset(0.145, 0.615), photo: true,
-    companionAt: Offset(0.333, 0.47),
-    characterAt: Offset(0.594, 0.33),
-    lampAt: Offset(0.13, 0.30),
-    slamAt: 0.15,
-  );
-  static const inF = _StageGeom(
-    actionAt: Offset(0.145, 0.635), photo: true,
-    companionAt: Offset(0.375, 0.45),
-    characterAt: Offset(0.625, 0.32),
-    lampAt: Offset(0.20, 0.24),
-    slamAt: 0.15,
-  );
 
   static _StageGeom of(SceneRole role, PuppetVariant v) =>
       switch ((role, v)) {
@@ -336,7 +335,7 @@ class _DoorstepSceneState extends State<DoorstepScene>
     if (elapsed <= window) {
       final said =
           visibleExchanges(script,
-              elapsed: elapsed, window: window, tail: 3, within: spokenLinger,);
+              elapsed: elapsed, window: window, within: spokenLinger,);
       return (
         lines: said,
         late: null,
@@ -557,8 +556,8 @@ class _DoorstepSceneState extends State<DoorstepScene>
                         fit: BoxFit.cover,
                         clipBehavior: Clip.hardEdge,
                         child: SizedBox(
-                          width: film.value.size.width.toDouble(),
-                          height: film.value.size.height.toDouble(),
+                          width: film.value.size.width,
+                          height: film.value.size.height,
                           child: VideoPlayer(film),
                         ),
                       ),

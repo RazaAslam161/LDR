@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/media/encrypted_media_cache.dart' show EncryptedMediaCache;
 
 /// Serves one decrypted video to the platform player over loopback, from RAM.
 ///

@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/watch/watch_source.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// What the couple is watching, as the server holds it.
 ///
@@ -23,8 +23,6 @@ class WatchSession {
   final WatchSource source;
   final String? startedBy;
   final DateTime startedAt;
-
-  bool startedByMe(String? me) => me != null && startedBy == me;
 
   static WatchSession? fromJson(Map<String, dynamic> j) {
     final source = sourceFromKey(

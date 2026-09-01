@@ -21,7 +21,7 @@ void main() {
       Directionality(
         textDirection: TextDirection.ltr,
         child: MediaQuery(
-          data: const MediaQueryData(devicePixelRatio: 1),
+          data: const MediaQueryData(),
           child: RepaintBoundary(
             child: SizedBox(width: size.width, height: size.height, child: child),
           ),
@@ -83,7 +83,7 @@ void main() {
   });
 
   testWidgets('it dithers rather than washes — the average colour is the '
-      'gradient\'s', (tester) async {
+      "gradient's", (tester) async {
     final grained = meanLuma(await shoot(tester, const ChatBackdrop(theme: velvet)));
     final plain = meanLuma(await shoot(tester, plainGradient(velvet)));
     // Symmetric grain over BlendMode.overlay must not move the mean. A

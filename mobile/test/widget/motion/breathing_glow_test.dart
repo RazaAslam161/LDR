@@ -36,11 +36,11 @@ void main() {
   });
 
   testWidgets('animations off = mid-breath, zero tickers', (tester) async {
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
         body: MediaQuery(
-          data: const MediaQueryData(disableAnimations: true),
-          child: const Center(
+          data: MediaQueryData(disableAnimations: true),
+          child: Center(
             child: BreathingGlow(child: SizedBox(width: 100, height: 100)),
           ),
         ),

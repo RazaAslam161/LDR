@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:miles/core/services/app_lock.dart' show AppLock;
 import 'package:miles/main.dart' show MilesApp;
 
 /// PIN + biometric gate for Memory Threads.

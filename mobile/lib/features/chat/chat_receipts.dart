@@ -198,13 +198,6 @@ class ChatReceiptRepository {
   static DateTime? _lastRun;
   static Timer? _debounce;
 
-  @visibleForTesting
-  static void resetBackstopThrottleForTest() {
-    _lastRun = null;
-    _debounce?.cancel();
-    _debounce = null;
-  }
-
   static Future<String?> _couple() async =>
       SessionScope.coupleId ?? await SessionScope.readCouple();
 

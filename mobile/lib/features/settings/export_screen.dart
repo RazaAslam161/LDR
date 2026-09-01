@@ -293,12 +293,12 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        SurfacePanel(
+        const SurfacePanel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                children: const [
+                children: [
                   Icon(Icons.lock_open, color: MilesColors.ember, size: 20),
                   SizedBox(width: 10),
                   Text('Read this first',
@@ -307,8 +307,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                           fontWeight: FontWeight.w600,),),
                 ],
               ),
-              const SizedBox(height: 10),
-              const Text(
+              SizedBox(height: 10),
+              Text(
                 'This creates an unencrypted copy of everything you select, '
                 'in a folder you choose. Anyone with that folder can read '
                 "it. Your phone's gallery app and any cloud backup covering "

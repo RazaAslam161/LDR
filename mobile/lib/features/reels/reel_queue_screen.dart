@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/reels/reel_queue_repository.dart';
-import 'package:miles/core/diag/diag.dart';
 import 'package:miles/features/reels/share_intake.dart';
 import 'package:miles/features/watch/watch_source.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -125,7 +125,7 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Nothing on this phone opens that link.")),
+        const SnackBar(content: Text('Nothing on this phone opens that link.')),
       );
     }
   }
@@ -178,7 +178,7 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
         raw.isNotEmpty &&
         raw.contains('.') &&
         !raw.contains(' ')) {
-      clean = ShareIntake.firstUrl('https://' + raw);
+      clean = ShareIntake.firstUrl('https://$raw');
     }
     if (clean != null) {
       await _addUrl(clean);

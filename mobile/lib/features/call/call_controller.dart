@@ -11,12 +11,12 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_webrtc/src/native/event_channel.dart';
 import 'package:miles/core/app/logging.dart' show shareLog;
 import 'package:miles/core/app/session_provider.dart';
-import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/features/call/call_foreground.dart';
 import 'package:miles/features/call/call_stats.dart';
+import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_session.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/main.dart' show MilesApp;
@@ -256,7 +256,7 @@ class CallController extends ChangeNotifier {
       // 35s timeout looking exactly like a network problem, which is where two
       // months of diagnosis went.
       _chan = SupabaseService.client
-          .channel(topic, opts: RealtimeChannelConfig(private: true))
+          .channel(topic, opts: const RealtimeChannelConfig(private: true))
           .onBroadcast(event: 'signal', callback: _onSignal)
           .subscribe((status, err) {
         // A subscribe callback outlives the channel that owns it: after a
@@ -802,6 +802,8 @@ class CallController extends ChangeNotifier {
   static Future<void> _ensureRelay() async {
     if (_cachedTurn.any(_isRelay)) return;
     final cold = _cachedTurn.isEmpty;
+    // Typed on purpose: turn_relay_test pins `Duration budget` as the law that
+    // this wait is bounded, and `dart fix` strips the annotation otherwise.
     final Duration budget = cold ? _coldRelayBudget : _warmRelayBudget;
     final startedAt = DateTime.now();
     // A person pressing Call outranks the backoff. The backoff exists to stop

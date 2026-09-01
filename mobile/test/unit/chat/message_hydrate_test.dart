@@ -179,7 +179,7 @@ void main() {
     ].map((p) => File(p).readAsStringSync()).join('\n');
     expect(src, contains("'cipher': base64Encode("),
         reason: 'the sender must name the encoder messageFrom decodes with; '
-            'the `\\x` hex of the bytea columns decodes to nothing here',);
+            r'the `\x` hex of the bytea columns decodes to nothing here',);
     expect(src, contains("'nonce': base64Encode("),
         reason: 'the nonce rides the same wire under the same rule',);
   });

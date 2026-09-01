@@ -205,7 +205,7 @@ const birdScript = <Exchange>[
   Exchange(0.9456, Speaker.character, 'My half.'),
   Exchange(0.9578, Speaker.companion, 'Your half is a door handle.'),
   Exchange(0.9711, Speaker.character, 'So what do I do?'),
-  Exchange(1.0, Speaker.companion, "Now it's yours to choose. I'll stay either way."),
+  Exchange(1, Speaker.companion, "Now it's yours to choose. I'll stay either way."),
 ];
 
 /// The room. The partner sits on the sofa; the cat arrives without asking.
@@ -284,7 +284,7 @@ const catScript = <Exchange>[
   Exchange(0.95, Speaker.character, "That's harsh."),
   Exchange(0.9644, Speaker.companion, "That's arithmetic."),
   Exchange(0.9778, Speaker.character, 'What would you do?'),
-  Exchange(1.0, Speaker.companion, "I'd stay close, and let you choose. So: choose."),
+  Exchange(1, Speaker.companion, "I'd stay close, and let you choose. So: choose."),
 ];
 
 /// After the gate: the bird keeps loose company on the lamp.

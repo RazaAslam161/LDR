@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 
-/// Message editing, recovered from build 52 (docs/guides/BUILD-52-AUDIT.md).
+/// Message editing, recovered from build 52 (docs/archive/BUILD-52-AUDIT.md).
 ///
 /// The backend was already live — `edit_message` returns a VERDICT rather than
 /// throwing, and every rule (ownership, the 30-minute window, the 3-second

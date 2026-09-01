@@ -20,7 +20,7 @@ void main() {
   Message photo(int seq) => Message(
         id: 'm$seq',
         senderId: 'them',
-        createdAt: DateTime(2026, 1, 1),
+        createdAt: DateTime(2026),
         kind: 'image',
         imagePath: 'couple/img_$seq.jpg',
         seq: seq,

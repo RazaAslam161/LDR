@@ -82,7 +82,7 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
     _coupleId = couple.id;
     final topic = 'screen_presence:${couple.id}';
     _channelTopic = topic;
-    final ch = SupabaseService.client.channel(topic, opts: RealtimeChannelConfig(private: true));
+    final ch = SupabaseService.client.channel(topic, opts: const RealtimeChannelConfig(private: true));
     ch
         .onBroadcast(
           event: 'screen',

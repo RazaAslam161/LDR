@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:miles/core/data/key_escrow.dart' show KeyEscrow;
 import 'package:miles/core/services/server_clock.dart';
 
 /// Couple-shared authenticated encryption for the Closer module.
@@ -505,9 +506,6 @@ class CryptoCore {
     if (from == null) return 'none';
     return from.length <= 8 ? from : from.substring(0, 8);
   }
-
-  /// Whether a shared key is loaded right now, without exposing it.
-  static bool get hasSharedKey => _sharedKey != null;
 
   /// How many RETIRED keys the ring holds. A count, never the keys — it says
   /// whether a rewrap has happened on this device, which decides whether an

@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
-import 'package:miles/core/realtime/screen_presence.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
 
@@ -314,8 +313,8 @@ const Map<String, String> kJoinableRoutes = {
 };
 
 /// Tab screens live inside the shell, so joining one means selecting its tab
-/// rather than pushing a route. Index matches [kTabScreens].
-/// Nav index per tab, given which optional tabs this build is showing.
+/// rather than pushing a route: the nav index per tab, given which optional
+/// tabs this build is showing.
 ///
 /// NOT a const map. Touch sits in the middle of the bar and is hidden while
 /// modest mode is on, which slides Closer down one — a fixed 'Closer': 4 was

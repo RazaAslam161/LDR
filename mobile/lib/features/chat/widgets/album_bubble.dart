@@ -129,7 +129,7 @@ class _AlbumTile extends StatelessWidget {
     // bound and NetImage shares one decode across every surface showing it.
     final dpr = MediaQuery.devicePixelRatioOf(context);
     const tileEdge = 160.0;
-    final Widget image = local != null
+    final image = local != null
         ? Image.file(File(local),
             fit: BoxFit.cover,
             cacheWidth: (tileEdge * dpr).round(),

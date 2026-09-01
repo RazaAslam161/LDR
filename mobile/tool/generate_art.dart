@@ -219,7 +219,7 @@ img.Image chest(int s) {
       x2: cx + w - 4, y2: seam + (s * 0.004).round(),
       color: ember, thickness: s * 0.012,);
   img.gaussianBlur(glow, radius: (s * 0.028).round());
-  addLayer(art, glow, gain: 1.0);
+  addLayer(art, glow);
   img.drawLine(art,
       x1: cx - w + 6, y1: seam + (s * 0.004).round(),
       x2: cx + w - 6, y2: seam + (s * 0.004).round(),
@@ -258,7 +258,7 @@ img.Image frame(int s) {
         color: emberSoft, antialias: true,);
   }
   img.gaussianBlur(glow, radius: (s * 0.022).round());
-  addLayer(art, glow, gain: 1.0);
+  addLayer(art, glow);
   for (final p in [
     [cx - (s * 0.045).round(), cy - (s * 0.055).round(), s * 0.005],
     [cx + (s * 0.055).round(), cy + (s * 0.070).round(), s * 0.0035],

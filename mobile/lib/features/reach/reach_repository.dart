@@ -65,7 +65,7 @@ class ReachRepository {
     void Function(ReachEvent) onReach,
   ) {
     return _c
-        .channel('reach_events:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('reach_events:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

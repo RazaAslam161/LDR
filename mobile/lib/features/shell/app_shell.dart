@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,26 +9,25 @@ import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
-import 'package:miles/features/reels/share_intake.dart';
 import 'package:miles/core/data/partner_rewrap.dart';
-import 'package:miles/core/ui/tab_dissolve.dart';
-import 'package:miles/core/widgets/gilt_nav_icon.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/update_service.dart';
+import 'package:miles/core/ui/tab_dissolve.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
+import 'package:miles/core/widgets/gilt_nav_icon.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/call/pip_mode.dart';
-import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_screen.dart';
@@ -42,11 +41,13 @@ import 'package:miles/features/opening/opening_screen.dart';
 import 'package:miles/features/opening/opening_state.dart';
 import 'package:miles/features/reach/reach_overlay_screen.dart';
 import 'package:miles/features/reach/reach_repository.dart';
+import 'package:miles/features/reels/share_intake.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/unlink/unlink_completion.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 
@@ -651,7 +652,7 @@ class _AppShellState extends ConsumerState<AppShell>
   /// app that is already usable, and every exit path pops it.
   ///
   /// The couple is checked through `partner`, not `couple`, because
-  /// SessionState.isLinked is already true for a couple of ONE — firing on that
+  /// SessionState.couple is already set for a couple of ONE — firing on that
   /// would ambush the person who created the invite while they are still
   /// waiting for their partner to accept it.
   Future<void> _maybePlayOpening() async {

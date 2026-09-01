@@ -43,25 +43,6 @@ class TouchMapRepository {
 
   static SupabaseClient get _c => SupabaseService.client;
 
-  static Future<void> sendTouch({
-    required String coupleId,
-    required String zone,
-    required String type,
-    double? posX,
-    double? posY,
-  }) async {
-    final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
-    await _c.from('body_touches').insert({
-      'couple_id': coupleId,
-      'from_user': uid,
-      'body_zone': zone,
-      'touch_type': type,
-      if (posX != null) 'pos_x': posX,
-      if (posY != null) 'pos_y': posY,
-    });
-  }
-
   /// Sets/refreshes the user's body photo (private bucket) and returns a signed
   /// URL to view a body photo at [path] (couple_intimate bucket, 1h).
   static Future<String?> signedBodyUrl(String? path) async {
@@ -112,7 +93,7 @@ class TouchMapRepository {
     void Function(BodyTouch) onTouch,
   ) {
     return _c
-        .channel('body_touches:$coupleId', opts: RealtimeChannelConfig(private: true))
+        .channel('body_touches:$coupleId', opts: const RealtimeChannelConfig(private: true))
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

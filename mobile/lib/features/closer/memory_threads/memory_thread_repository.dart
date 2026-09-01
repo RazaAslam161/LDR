@@ -135,8 +135,6 @@ class MemoryThread {
 
   final String? visitId;
 
-  bool get hasPhotos => photoCount > 0 || coverPath != null;
-
   EncryptedPayload titlePayload() => _unpack(titleCipher, titleNonce);
   EncryptedPayload? photoPayload() => photoCipher == null || photoNonce == null
       ? null
@@ -471,17 +469,6 @@ class MemoryThreadRepository {
     });
   }
 
-  /// Writing your side of it after the fact.
-  static Future<void> setPartnerNote(String threadId, String note) async {
-    final sealed = await _sealText(note, '${threadId}_pnote');
-    if (sealed == null) return;
-    await _c.rpc<void>('memory_set_partner_note', params: {
-      'p_id': threadId,
-      'p_note_cipher': bytesToBytea(sealed.blob),
-      'p_note_nonce': bytesToBytea(sealed.nonce),
-    });
-  }
-
   /// Either partner archives (non-destructive). Recoverable.
   static Future<void> archive(String threadId) =>
       _c.rpc<void>('memory_set_state',
@@ -515,11 +502,6 @@ class MemoryThreadRepository {
   /// guarantee, and it cannot live in the client.
   static Future<void> confirmDeletion(String threadId) =>
       _c.rpc<void>('memory_confirm_delete', params: {'p_id': threadId});
-
-  /// The requester's escape hatch, 14 days on the SERVER's clock. It exists
-  /// because a sole surviving partner otherwise has no exit at all.
-  static Future<void> forceDeletion(String threadId) =>
-      _c.rpc<void>('memory_force_delete', params: {'p_id': threadId});
 
   /// Encrypts [text] and returns the packed blob plus its nonce, or null when
   /// there is nothing to write.

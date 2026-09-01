@@ -35,11 +35,11 @@ void main() {
   group('timestamps', () {
     const id = 'dQw4w9WgXcQ';
     final cases = <String, Duration>{
-      't=90': Duration(seconds: 90),
-      't=90s': Duration(seconds: 90),
-      't=1m30s': Duration(seconds: 90),
-      't=1h2m3s': Duration(hours: 1, minutes: 2, seconds: 3),
-      'start=45': Duration(seconds: 45),
+      't=90': const Duration(seconds: 90),
+      't=90s': const Duration(seconds: 90),
+      't=1m30s': const Duration(seconds: 90),
+      't=1h2m3s': const Duration(hours: 1, minutes: 2, seconds: 3),
+      'start=45': const Duration(seconds: 45),
     };
     cases.forEach((q, want) {
       test(q, () {

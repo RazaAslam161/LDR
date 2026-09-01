@@ -1,10 +1,10 @@
 import 'dart:async';
 
+import 'package:cryptography/cryptography.dart'
+    show SecretBoxAuthenticationError;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cryptography/cryptography.dart'
-    show SecretBoxAuthenticationError;
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/crypto_core.dart';
@@ -19,8 +19,8 @@ import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/auth/widgets/alert_banner.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
-import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/closer/memory_threads/memory_failure.dart';
+import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/safety/severance_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -748,7 +748,7 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
-              "Yes — neither of us can read them",
+              'Yes — neither of us can read them',
               style: TextStyle(color: MilesColors.danger),
             ),
           ),

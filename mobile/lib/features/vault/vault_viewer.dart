@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
-import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/core/ui/theme.dart';
-import 'package:miles/core/data/crypto_core.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_video_server.dart';
 import 'package:video_player/video_player.dart';
@@ -109,7 +109,6 @@ class _PageState extends State<_Page> {
           _chewie = ChewieController(
             videoPlayerController: vp,
             autoPlay: true,
-            allowFullScreen: true,
             deviceOrientationsAfterFullScreen: const [
               DeviceOrientation.portraitUp,
             ],
@@ -159,7 +158,6 @@ class _PageState extends State<_Page> {
         _chewie = ChewieController(
           videoPlayerController: vp,
           autoPlay: true,
-          allowFullScreen: true,
           deviceOrientationsAfterFullScreen: const [
             DeviceOrientation.portraitUp,
           ],
@@ -201,8 +199,6 @@ class _PageState extends State<_Page> {
         _chewie = ChewieController(
           videoPlayerController: vp,
           autoPlay: true,
-          looping: false,
-          allowFullScreen: true,
           deviceOrientationsAfterFullScreen: const [
             DeviceOrientation.portraitUp,
           ],
