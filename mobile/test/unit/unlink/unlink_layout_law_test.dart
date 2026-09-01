@@ -66,25 +66,29 @@ void main() {
         reason: 'the exits must ride the stage too — at every stage, law',);
   });
 
-  test('time on the stage is the clock OBJECT, and it only wakes for the '
-      'last call', () {
-    // The owner's design: a small clock in the corner — scene-language, not
-    // chrome. Digital digits never appear on the stage; the quiet arc is the
-    // 24 hours, and the second hand exists only when five real minutes do.
+  test('the stage carries the clock object AND the gate it is waiting on',
+      () {
+    // AMENDED 2026-09-02. This used to assert that digits never appear on the
+    // stage — "absence is the not-yet, and the companion script paces the
+    // wait". On a handset that produced a scene with no readable time at all:
+    // an analog dial whose minute hand crossed a quarter turn in fifteen
+    // minutes, over a caption naming the 24-HOUR deadline. Reported three
+    // times as "there is no timer".
+    //
+    // The object stays — it is the owner's design and it is good. What is
+    // added is the readout beside it, and the law now pins BOTH.
     final stage = screen.indexOf('Widget _stageLayout(');
     final stageEnd = screen.indexOf('List<Widget> _stageActions(');
     final body = screen.substring(stage, stageEnd);
     expect(body.contains('DoorstepClock('), isTrue,
         reason: 'the stage lost its clock object',);
-    expect(body.contains('_clock('), isFalse,
-        reason: 'digital digits on the stage — time is an object here',);
     final wake = body.indexOf('lastCall: row.lastCall');
     expect(wake, greaterThan(-1),
         reason: "the clock's waking must be gated on the last call, or the "
             'second hand ticks urgency into the whole 24 hours',);
-    expect(body.contains('_wait('), isFalse,
-        reason: 'the stage shows no waiting counters; absence is the '
-            '"not yet" and the companion script paces the wait',);
+    expect(body.contains('_gateReadout(row'), isTrue,
+        reason: 'the stage must say how long until the choice exists, and '
+            'what the choice is — the two things reported missing',);
   });
 
   test('the calm cancel control is laid out OUTSIDE the scrolling region', () {

@@ -147,14 +147,27 @@ void main() {
   group('the initiator, before the gate opens', () {
     testWidgets('the STAGE shows no control at all — absence is the "not yet"',
         (tester) async {
-      // The design law: no headline (the film says it), no ticking countdown
-      // (a counter manufactures urgency this ritual exists to remove), no
-      // dead button. The quiet absolute chip is the only chrome.
+      // The design law, AMENDED 2026-09-02. It used to read "no ticking
+      // countdown — a counter manufactures urgency this ritual exists to
+      // remove". The owner reported "there is no timer of 15 minutes" three
+      // times from the handset, and they are right: with no figures anywhere,
+      // nobody could tell that a choice was coming or when. That half of the
+      // law is repealed.
+      //
+      // What survives, and is pinned here: no headline (the film says it),
+      // no dead button before the gate, and the day's end still stated
+      // absolutely rather than ticked. The one counter on screen counts the
+      // fifteen minutes and stops existing when they are up —
+      // doorstep_runtime_test walks that across real time.
       await pump(tester, row: ceremony(initiator: meId));
       expect(find.byType(FilledButton), findsNothing);
-      expect(find.byType(CountdownDigits), findsNothing);
+      expect(find.byType(CountdownDigits), findsNothing,
+          reason: 'the gate figures are the stage\'s own, not the chrome '
+              'widget the calm layout uses',);
       expect(find.textContaining('Ends '), findsOneWidget,
-          reason: 'when it ends is stated absolutely, without ticking',);
+          reason: 'the 24-hour end is stated absolutely, never ticked',);
+      expect(find.text('until you can open the door'), findsOneWidget,
+          reason: 'the figures must say what they are counting towards',);
       expect(find.text('You stepped outside.'), findsNothing,
           reason: 'the film already says it; a headline would say it twice',);
     });

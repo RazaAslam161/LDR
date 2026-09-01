@@ -169,16 +169,37 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   /// phone's Re-link over realtime, the deadline, and the cron job. Running the
   /// teardown twice is survivable; navigating twice is not.
   Future<void> _released() async {
-    final old = ref.read(currentCoupleProvider)?.id;
-    final session = ref.read(sessionProvider.notifier);
+    // THE ENDING MUST OUTLIVE THIS SCREEN.
+    //
+    // The row's deletion is what triggers this, and it is ALSO what makes the
+    // router's gate stop allowing '/unlink' — so this widget is unmounted
+    // somewhere inside the `loadProfile()` below. There used to be an
+    // `if (!mounted) return;` immediately after that await, which meant the
+    // relink path reached it, returned, and never set the notifiers: the
+    // reunion film did not play, and neither did the light. Reported from the
+    // handset as "even after re-link, reunion video doesn't even play".
+    //
+    // Everything this needs is now read through the CONTAINER, which outlives
+    // the widget, and every fact the film choice depends on is captured
+    // BEFORE the await. Only the navigation is still guarded by `mounted`,
+    // because only the navigation actually needs a live element.
+    final container = ProviderScope.containerOf(context, listen: false);
+    final old = container.read(currentCoupleProvider)?.id;
+    final session = container.read(sessionProvider.notifier);
+    final initiator = _lastRow?.initiatedBy;
+    final me = container.read(currentProfileProvider);
+    final partner = container.read(partnerProfileProvider);
+    final initiatorGender = initiator == null
+        ? null
+        : (initiator == me?.id ? me?.gender : partner?.gender);
+
     await session.loadProfile();
-    if (!mounted) return;
     // A re-link leaves the couple standing; an execution does not, and this
     // phone may only be learning that now. Mirror of AppShell's
     // _onUnlinkChanged, which cannot run while the gate holds this screen up.
-    final survives = ref.read(currentCoupleProvider) != null;
+    final survives = container.read(currentCoupleProvider) != null;
     if (!survives && old != null) {
-      await ref.read(sessionProvider.notifier).endCouple(old);
+      await container.read(sessionProvider.notifier).endCouple(old);
     }
     // The farewell, above the router: setting a notifier is synchronous, so
     // the pinned teardown gains no await and the overlay plays OVER the
@@ -187,11 +208,6 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     // is the one who walks back in or away, so the initiator's gender picks
     // the clip — identically on both phones. Null (neutral/unknown) keeps
     // the light-only ending.
-    final initiator = _lastRow?.initiatedBy;
-    final me = ref.read(currentProfileProvider);
-    final partner = ref.read(partnerProfileProvider);
-    final initiatorGender =
-        initiator == null ? null : (initiator == me?.id ? me?.gender : partner?.gender);
     UnlinkEndOverlay.initiatorMale.value = switch (initiatorGender) {
       'male' => true,
       'female' => false,
@@ -584,6 +600,89 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       ? 'You stepped outside.'
       : '$partnerName stepped out to the porch.';
 
+  /// How long until MY gate opens. Zero once it has.
+  Duration _gateLeft(UnlinkRow row) {
+    final left = _myGate(row).difference(ServerClock.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  static String _mmss(Duration d) =>
+      '${d.inMinutes.toString().padLeft(2, '0')}:'
+      '${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+
+  /// THE FIFTEEN MINUTES, IN FIGURES, AND WHAT THEY BUY.
+  ///
+  /// This corner used to carry an analog dial and the sentence "Ends 08:47" —
+  /// the TWENTY-FOUR HOUR deadline. So the one number on screen answered a
+  /// question nobody was asking, the dial's minute hand crept a quarter turn
+  /// across the whole wait, and nothing anywhere said that a choice was
+  /// coming at all. Reported three separate times as "there is no timer", and
+  /// once as "how would user know that there is still a chance to re-link".
+  ///
+  /// I had a design law that a countdown "manufactures urgency". The owner
+  /// has overruled it three times; the law loses. What survives of it is the
+  /// part that was actually right: the figures count the GATE, not the day,
+  /// and they are gone the moment the gate opens — replaced by what you can
+  /// now do. A number that keeps running after it means anything is nagging.
+  List<Widget> _gateReadout(UnlinkRow row, {required bool mine}) {
+    if (row.due) {
+      return const [
+        Text(
+          'This is finishing now.',
+          style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+        ),
+      ];
+    }
+    final left = _gateLeft(row);
+    final open = left == Duration.zero;
+    return [
+      if (!open) ...[
+        Text(
+          _mmss(left),
+          style: MilesType.inter(
+            fontSize: 21,
+            color: MilesColors.gilt,
+            decoration: TextDecoration.none,
+          ).copyWith(
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            height: 1.05,
+          ),
+        ),
+        SizedBox(
+          width: 118,
+          child: Text(
+            mine
+                ? 'until you can open the door'
+                : 'until you can answer this',
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: MilesColors.taupe, fontSize: 11.5),
+          ),
+        ),
+      ] else
+        SizedBox(
+          width: 118,
+          child: Text(
+            mine ? 'The key is on the door.' : 'You can answer this now.',
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: MilesColors.gilt, fontSize: 12.5),
+          ),
+        ),
+      const SizedBox(height: 3),
+      Text(
+        'Ends ${_deadlineClock(row)}',
+        style: const TextStyle(color: MilesColors.faint, fontSize: 11),
+      ),
+      if (!mine) ...[
+        const SizedBox(height: 1),
+        const Text(
+          'kept safe for 30 days',
+          style: TextStyle(color: MilesColors.faint, fontSize: 11),
+        ),
+      ],
+    ];
+  }
+
   /// The clock's two spans: what is left, out of what whole.
   ///
   /// THE WINDOW MUST BE THE ONE THE USER IS LIVING IN. This counted the
@@ -691,8 +790,24 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
             child: SafeArea(
               child: Padding(
                 padding: const EdgeInsets.only(top: 8, right: 14),
-                child: Column(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    // scrim over the stage — bare figures sat straight on the
+                    // porch lamp and the lit window behind it, and neither the
+                    // count nor the sentence could be read at all. Time has to
+                    // survive whatever art is under it.
+                    // 0.72 is the same floor the speech bubbles use; 0.55 was
+                    // readable over the night sky and not over the lit doorway.
+                    color: MilesColors.nightDeep.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                  child: SizedBox(
+                  width: 138,
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     DoorstepClock(
                       remaining: _remainingWindow(row),
@@ -705,27 +820,12 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                       ),
                       dial: mine ? DialSpec.porch : DialSpec.room,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      row.due
-                          ? 'This is finishing now.'
-                          : 'Ends ${_deadlineClock(row)}',
-                      style: const TextStyle(
-                        color: MilesColors.taupe,
-                        fontSize: 12,
-                      ),
-                    ),
-                    if (!mine && !row.due) ...[
-                      const SizedBox(height: 2),
-                      const Text(
-                        'kept safe for 30 days',
-                        style: TextStyle(
-                          color: MilesColors.faint,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
+                    const SizedBox(height: 6),
+                    ..._gateReadout(row, mine: mine),
                   ],
+                  ),
+                  ),
+                  ),
                 ),
               ),
             ),

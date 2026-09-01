@@ -20153,3 +20153,95 @@ from those two, so nothing of theirs was reverted. Pushed as a fast-forward.
 Still open and unchanged by this commit: nothing is on a device; the four
 idle-loop films and real slam/chirp/purr audio are unbuilt; `min_build`
 untouched.
+
+## §250 — four defects off the handset, and the harness that should have caught them (2026-09-02)
+
+Owner ran build 72 and reported four things. Three of them I had already
+claimed fixed. The reason they were not is one habit: **every previous fix to
+this screen was checked with a STILL PREVIEW at one instant**, and a picture of
+one moment cannot show whether anything moves — which was the only thing ever
+wrong with it.
+
+### Root causes
+
+1. **The reunion film never played.** `_released()` awaited `loadProfile()` and
+   then hit `if (!mounted) return;`. The row's deletion is what triggers the
+   ending AND what makes the router stop allowing `/unlink`, so on the relink
+   path this screen is torn down *inside that await* — the guard fired and threw
+   the ending away every time. Fixed by reading through
+   `ProviderScope.containerOf` (which outlives the widget), capturing the film's
+   facts BEFORE the await, and guarding only the navigation with `mounted`.
+2. **"There is no timer of 15 minutes" (third report).** The corner held an
+   analog dial with no digits, whose minute hand crosses a quarter turn in
+   fifteen minutes, above a caption naming the **24-hour** deadline. So the one
+   number on screen answered a question nobody asked. My own design law — "no
+   countdown, a counter manufactures urgency" — is what kept the figures off.
+   **The law loses; the owner has overruled it three times.** What survives of
+   it: the figures count the GATE, not the day, and they stop existing the
+   moment the gate opens.
+3. **No way to know a choice was coming.** Nothing said a re-link existed, or
+   that the partner could also agree. Now: `until you can open the door` /
+   `until you can answer this`, becoming `The key is on the door.` /
+   `You can answer this now.`
+4. **"Too slow, doesn't look like a conversation."** It wasn't one. 21 lines
+   across 15 minutes is one utterance every 45 seconds. Rewritten to **73 bird
+   lines and 72 cat lines, median gap 9-10s**, in clusters with real lulls; and
+   `visibleExchanges` gained `within: spokenLinger` (40s) so a line LEAVES —
+   previously the last line of a cluster hung there through the whole lull, so
+   two sentences from different minutes sat on the stage like labels.
+
+### The harness (the actual fix to the habit)
+
+`test/widget/doorstep_runtime_test.dart`. `ServerClock.now()` is
+`DateTime.now() + offset` and `observe()` sets that offset — so a test can put
+the app fifteen minutes into its own future and pump the REAL screen. It now
+asserts: the countdown exists, is >14 min at the start, drops ~5 min when the
+app travels 5 min, disappears at the gate, and is replaced by the invitation —
+for both roles. Plus a source law pinning that the ending fires before any
+mounted-guard (a widget test cannot reach that path; it needs a live Supabase).
+
+`conversation_test` gained a **liveness** group that walks all 900 seconds a
+second at a time and asserts the stage changes >=65 times and never holds the
+same thing for more than 90s. That is the test that would have caught "too
+slow" on day one.
+
+### Verified
+
+- `flutter analyze lib/` 0 errors, 0 warnings. `flutter test` **1464 passed**.
+- Rendered and LOOKED AT twice: the first render of the new readout was
+  illegible bare text over the lit doorway, which is why it now sits on a 0.72
+  scrim plate. The scene previews were re-pointed at real cluster moments
+  (100s/340s/555s) and show turn-taking at every one.
+- Two of my own law-tests said "no ticking countdown" while the screen now has
+  one; both were rewritten rather than left lying.
+
+### Open
+
+- Build 73 building at time of writing; nothing installed yet in this section.
+- The stage is still a still between films (idle-loop videos unbuilt), and the
+  door still borrows the button-press cue for its slam.
+- `min_build` untouched. Version bump to 73 is uncommitted in the tree.
+
+### §250 addendum — build 73 proven, install BLOCKED on a cable (2026-09-02)
+
+Built after `taskkill java.exe` + `gradlew --stop` + clean (the pinned-daemon
+lesson from §247 holds; it produced a correct stamp again).
+
+    stamps: ['miles-build-73']
+    until you can open the door    True
+    until you can answer this      True
+    You can answer this now.       True
+    Oh. Someone's on my step.      True
+    The key is on the door.        True
+
+Proof pasted BEFORE any install, per §247's rule. Then `adb devices` returned
+an EMPTY list — neither handset is attached, and an adb server restart plus a
+60-second wait did not bring either back. Nothing was installed; the phones are
+still on build 72.
+
+**Exact next step**: plug in either phone and run
+
+    adb -s <serial> install -r mobile/build/app/outputs/flutter-apk/app-play-release.apk
+
+Play flavor only (both phones carry that signature), `-r`, never uninstall.
+The artifact is already built and proven; it does not need rebuilding.

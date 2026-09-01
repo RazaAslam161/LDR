@@ -335,7 +335,8 @@ class _DoorstepSceneState extends State<DoorstepScene>
     final script = outside ? birdScript : catScript;
     if (elapsed <= window) {
       final said =
-          visibleExchanges(script, elapsed: elapsed, window: window, tail: 3);
+          visibleExchanges(script,
+              elapsed: elapsed, window: window, tail: 3, within: spokenLinger,);
       return (
         lines: said,
         late: null,

@@ -75,9 +75,9 @@ void main() {
     // and the conversation DIRECTLY at chosen moments — same law as the
     // Distance preview: goldens cannot move ServerClock.
     const moments = [
-      Duration(minutes: 1),
-      Duration(minutes: 5),
-      Duration(minutes: 15),
+      Duration(seconds: 100),
+      Duration(seconds: 340),
+      Duration(seconds: 555),
       Duration(minutes: 40),
     ];
     const window = Duration(minutes: 15);
@@ -88,7 +88,8 @@ void main() {
               role == SceneRole.outside ? birdScript : catScript,
               elapsed: at,
               window: window,
-              tail: 2,
+              tail: 3,
+              within: spokenLinger,
             )
           : const <Exchange>[];
       final leaning = at <= window

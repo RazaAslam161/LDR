@@ -17,7 +17,7 @@ void main() {
     });
 
     test('the first hello lands early, not at once', () {
-      // 0.02 of 15min = 18s. At 10s: nothing. At 20s: the bird has spoken.
+      // The bird lands at 15s. At 10s the step is still quiet.
       expect(
         visibleExchanges(birdScript,
             elapsed: const Duration(seconds: 10), window: window,),
@@ -26,7 +26,7 @@ void main() {
       final at20 = visibleExchanges(birdScript,
           elapsed: const Duration(seconds: 20), window: window,);
       expect(at20, hasLength(1));
-      expect(at20.single.line, 'Hi.');
+      expect(at20.single.line, "Oh. Someone's on my step.");
       expect(at20.single.speaker, Speaker.companion);
     });
 
@@ -37,8 +37,11 @@ void main() {
       final lines = visibleExchanges(birdScript,
           elapsed: const Duration(minutes: 12), window: window,);
       expect(lines, hasLength(3));
-      expect(lines.last.at, 0.713);
-      expect(lines.last.line, "That's not nothing. Leaving looks different.");
+      // 0.80 * 900s = 720s, inside the cluster that runs 640-762s: the
+      // newest thing said is the character's, at 714s.
+      expect(lines.last.at, 0.7933);
+      expect(lines.last.line, 'Like what?');
+      expect(lines.last.speaker, Speaker.character);
       // And the identical call returns the identical answer — resume IS
       // recompute.
       expect(
@@ -136,34 +139,88 @@ void main() {
     });
   });
 
-  group('pacing', () {
-    // THE LAW THE FIRST BUILD BROKE. Twenty-one lines spread evenly over
-    // fifteen minutes put forty-five seconds of nothing between every pair,
-    // and forty-five seconds of nothing between "I'm fine" and "Didn't ask"
-    // does not read as two people talking — it reads as a frozen screen,
-    // which is exactly how it was reported off the handset. Every gap must
-    // be either conversational (people answering each other) or a real
-    // silence (people sitting with it). The dead middle is banned.
+  group('liveness', () {
+    // THE COMPLAINT THIS FILE EXISTS FOR: "conversation is too slow, it
+    // doesn't even look like that conversation is going on between them."
+    // It was true. Twenty-one lines across fifteen minutes is one utterance
+    // every forty-five seconds, which is not a conversation at any speed.
+    //
+    // So this walks the ENTIRE window a second at a time and asks the only
+    // question that matters: how often does what is on the stage change, and
+    // what is the longest anyone stares at something that does not?
+    const window = Duration(minutes: 15);
+
     for (final (name, script) in [
       ('bird', birdScript),
       ('cat', catScript),
     ]) {
-      test('$name talks in beats, never on a metronome', () {
-        const window = Duration(minutes: 15);
+      test('$name keeps the stage moving for the whole fifteen minutes', () {
+        expect(script.length, greaterThanOrEqualTo(60),
+            reason: '$name has ${script.length} lines; a fifteen-minute '
+                'conversation cannot be carried by fewer',);
+
+        String? shown;
+        var changes = 0;
+        var still = 0;
+        var worstStill = 0;
+        for (var sec = 0; sec <= 900; sec++) {
+          final now = visibleExchanges(
+            script,
+            elapsed: Duration(seconds: sec),
+            window: window,
+            within: spokenLinger,
+          );
+          final newest = now.isEmpty ? null : now.last.line;
+          if (newest != shown) {
+            shown = newest;
+            changes++;
+            still = 0;
+          } else {
+            still++;
+            if (still > worstStill) worstStill = still;
+          }
+        }
+
+        expect(changes, greaterThanOrEqualTo(65),
+            reason: '$name changed the stage only $changes times in fifteen '
+                'minutes',);
+        expect(worstStill, lessThanOrEqualTo(90),
+            reason: '$name leaves the same thing on screen for $worstStill '
+                'seconds — that stretch is what reads as a frozen app',);
+      });
+
+      test('$name never leaves a stale line standing', () {
+        // A line used to hang on the stage through the whole lull after it,
+        // so two sentences from different minutes sat there like labels. A
+        // said thing is visible for `spokenLinger` and then the quiet has it.
+        for (var sec = 0; sec <= 900; sec += 5) {
+          final now = visibleExchanges(
+            script,
+            elapsed: Duration(seconds: sec),
+            window: window,
+            within: spokenLinger,
+          );
+          for (final e in now) {
+            final saidAt = e.at * 900;
+            expect(sec - saidAt, lessThanOrEqualTo(spokenLinger.inSeconds),
+                reason: '$name still showing "${e.line}" at ${sec}s, said at '
+                    '${saidAt.round()}s',);
+          }
+        }
+      });
+
+      test('$name talks in clusters, not on a metronome', () {
         var quick = 0;
         for (var i = 1; i < script.length; i++) {
-          final gap =
-              (script[i].at - script[i - 1].at) * window.inSeconds;
-          expect(gap > 0, isTrue,
+          final gap = (script[i].at - script[i - 1].at) * 900;
+          expect(gap, greaterThan(0),
               reason: '$name line $i runs backwards in time',);
-          expect(gap <= 15 || gap >= 45, isTrue,
-              reason: '$name gap $i is ${gap.toStringAsFixed(1)}s — too slow '
-                  'to be an answer, too quick to be a silence',);
           if (gap <= 15) quick++;
         }
-        expect(quick / (script.length - 1), greaterThan(0.6),
-            reason: '$name is mostly silence; a companion who speaks six '
-                'times in fifteen minutes is scenery, not company',);
+        expect(quick / (script.length - 1), greaterThan(0.75),
+            reason: '$name is mostly waiting; people answer each other',);
+        expect(script.last.at, 1.0,
+            reason: 'the handover must land ON the gate',);
       });
     }
   });
@@ -172,10 +229,10 @@ void main() {
     const window = Duration(minutes: 15);
 
     test('leans forward just before a line, and not otherwise', () {
-      // 0.022 * 900s = 19.8s. Four seconds ahead of it, the bird is coming.
+      // The bird's first line lands at 15s; two seconds out, it is coming.
       expect(
         pendingSpeaker(birdScript,
-            elapsed: const Duration(seconds: 17), window: window,),
+            elapsed: const Duration(seconds: 13), window: window,),
         Speaker.companion,
       );
       // Deep in a silence, nobody is about to say anything — the stillness
