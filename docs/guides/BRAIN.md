@@ -20493,3 +20493,46 @@ CI (`.github/workflows/gates.yml`) runs analyze + test + the OSV audit on that
 push; its verdict is the next thing to read. This addendum is committed and
 pushed as its own docs commit so the tree is left clean, the same shape as
 bd1ee39.
+
+### §252 addendum 3 — CI had never run; the workflow file was unparseable (2026-09-02)
+
+After the push, `gh run list` showed EVERY run on fix-sprint — including the
+concurrent session's 3238b5f and bd1ee39 — as `failure` in 0s with no jobs:
+"This run likely failed because of a workflow file issue." Reproduced
+locally with PyYAML: `gates.yml line 113, column 1 — could not find expected
+':'`. The placeholder-.env step's `printf` argument carried literal newlines
+starting at column 0, which ends the `run: |` block scalar. So the CI gates
+described in §43/§58 had never executed once. Fixed as `b5907c0` (one-line
+printf with `\n` escapes; the same PyYAML parse now succeeds), pushed, and the
+run for b5907c0 is the first that can actually run analyze + test + the OSV
+audit on a fresh runner. Its result goes in the next addendum. Note for the
+rulebook: a green-looking gate that never ran is the §58 class again, one
+layer up — the file, not the grep.
+
+### §252 addendum 4 — the analyzer greps only knew Windows (2026-09-02)
+
+The first CI run to execute jobs (b5907c0) failed one test: repo_hygiene's
+in-test analyzer check said "blind". 30a7f80 made that test print what it
+saw; the second run (33565549570) showed 37 KB of `   info • ... • rule`
+lines with the summary on stderr. The Flutter tool separates fields with
+`-` on Windows and `•` everywhere else. Every gate grep here — gates.yml,
+release.sh, the test — matched ` - ` only, so on the Linux runner the
+error and warning counts were structurally zero: the workflow's analyze step
+had "passed" a minute earlier while unable to see an error. §58's class
+(a matcher that cannot match), one platform over.
+
+Fixed as e96fff2: `(-|•)` in both shell greps (alternation, proven to match
+the three-byte bullet under LC_ALL=C with a sample file), `[-•]` in the
+test, summary read from stdout+stderr, and the test asserts its own regex
+against a Linux-shaped and a Windows-shaped line. Local: gates.yml parses,
+`bash -n release.sh` clean, analyze 0/0 (201 infos), the test passes.
+CI verdict for e96fff2: SUCCESS (run 33566322104) — the first green run in the
+repository's history. On the ubuntu runner: `201 issues found`, 0 errors,
+0 warnings under the corrected grep; `1464 tests passed, 3 skipped`; OSV
+dependency audit step success.
+
+Commits this session on fix-sprint, all pushed: 4fbe38b (sweep), 01bce79 and
+80bd203 (BRAIN), b5907c0 (workflow YAML), 30a7f80 (test diagnostics),
+e96fff2 (cross-platform greps). The play AAB for build 73 in §252 predates
+b5907c0..e96fff2, which touch only CI, a script and a test — no app code —
+so it is still the artifact for this tree.
