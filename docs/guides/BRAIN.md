@@ -20117,3 +20117,39 @@ verdict; then owner decides on a build.
 Full suite after the sign-out fix: **02:36 +1456 ~3: All tests passed!** (1456 passed,
 3 skipped, on the shared tree that includes the concurrent sessions' work). Reproduction
 timer still armed for ~14:16Z.
+
+### §249 addendum 2 — committed and pushed as 531c02a (2026-09-01)
+
+The doorstep rework (§248) and the presence rewrite (§249) landed together in
+one commit: they share `motion_hygiene_test`'s motionSet and tolerance table,
+so splitting them would have left each half redding the other's gate.
+
+- 72 paths, 6.7MB, staged BY EXPLICIT PATH — never `git add -A`. Every path was
+  checked against `git diff --name-only 86fb671..HEAD` first.
+- Gates re-run at the committed tree state, not remembered: analyze 0/0,
+  `flutter test` 1456 passed.
+- Staged diff grepped for `api_key|secret|password|bearer|service_role|eyJ...`
+  before commit — nothing.
+
+**Concurrency finding worth keeping.** A second session was live in this repo
+the whole time and had pushed three commits since my 86fb671. Two things came
+out of checking rather than assuming:
+
+1. Its commit `c91aeae`, titled "§248 — presence proven on hardware", actually
+   carried 878 BRAIN insertions — it swept up MY uncommitted §248/§249 sections
+   along with its own. So this repo now has a BRAIN commit whose message does
+   not describe most of its content, and §248 means two different things
+   depending on whether you read the title or the body. Read the file, never
+   the commit title.
+2. `chat/chat_receipts.dart` showed as modified in my tree but had a ZERO
+   content diff — a line-ending/stat-cache artifact over their committed
+   version. Staging it blind would have been noise at best; `git diff
+   --numstat` is what told the difference between "I changed this" and "git
+   touched this".
+
+The intersection of their committed files and my changed files was empty apart
+from those two, so nothing of theirs was reverted. Pushed as a fast-forward.
+
+Still open and unchanged by this commit: nothing is on a device; the four
+idle-loop films and real slam/chirp/purr audio are unbuilt; `min_build`
+untouched.
