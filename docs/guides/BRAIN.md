@@ -20264,3 +20264,223 @@ build it names**, not left in the working tree until the next one.
 Still open, unchanged: nothing is on a device (both phones on 72, `adb devices`
 empty); the stage is a still between films; the door borrows the button-press
 cue; `min_build` untouched.
+
+## §251 — pre-Play sweep: dead code out, docs filed, vendored fork trimmed to Android (2026-09-02)
+
+Owner asked for the final audit and cleanup before the Play production push.
+Everything below is in the working tree, uncommitted, staged only where `git
+mv`/`git rm` required it. The concurrent session committed its §250 work
+(`3238b5f`, `bd1ee39`) while this ran; its hunks survived (checked:
+`spokenLinger` present, `buildNumber = 73`, `doorstep_runtime_test.dart` now
+tracked) and the lint pass landed on top of them.
+
+### What changed
+
+- **Dead Dart removed (verified unreferenced in lib/ AND test/ by a tokenizing
+  scan, then re-scanned for cascades):** `signInWithGoogle`, `updatePresence`,
+  `setModestMode`, `createCouple`, `fetchNextVisit`, `setNextVisit`
+  (supabase_repository); `onlineNow`, `isSharingAnything`, `setLiveLocation`,
+  `clearLiveLocation` (presence_service); `canAuthenticate` (app_lock);
+  `coupleStream` (realtime_service); `hasProfile`, `isLinked`
+  (session_provider); `hasSharedKey` (crypto_core); `plaintextBytes`,
+  `plaintextEntries` (encrypted_media_cache); `toNdjson` (diag_event);
+  `aspect` (gallery_repository); `startedByMe` (watch_session);
+  `resetBackstopThrottleForTest` (chat_receipts); `hasPhotos`,
+  `setPartnerNote`, `forceDeletion` (memory_thread_repository); `tileAdFor`,
+  `setCover` (memory_photo_repository); `saveMediaToVault` (vault_repository);
+  `sendTouch` (touch_map_repository); eight unused palette aliases in
+  theme.dart; and the whole of `core/realtime/screen_presence.dart`
+  (`kTabScreens` + `visibleTabScreens`, both orphaned — the observer maps tab
+  ids by switch). Note for later: `memory_force_delete` RPC exists server-side
+  and is now wired to nothing on the client; it never was.
+- **`dart fix --apply`: 249 fixes in 117 files.** Analyzer infos 599 -> 201.
+  Two regressions from it, both from `omit_local_variable_types`, both fixed
+  and both left with a comment naming the trap: `encrypted_media_cache._provider`
+  (ternary over MemoryImage/ResizeImage infers Object without the annotation —
+  2 compile errors) and `call_controller._ensureRelay` (turn_relay_test pins
+  the literal `Duration budget` — red test). **Run the full suite after any
+  future `dart fix`; the analyzer alone missed the second one.**
+- **Vendored flutter_webrtc trimmed to Android:** ios/, macos/, linux/,
+  windows/, common/ (desktop C++), third_party/, Documentation/, assets/,
+  test/, renovate.json, format.sh, code-workspace, CONTRIBUTING.md removed
+  (340 -> 105 tracked files); pubspec `platforms:` block is android-only.
+  `android/` untouched byte-for-byte; the three Miles-patch files are all there.
+- **Docs filed.** `docs/architecture/` -> `docs/archive/architecture/`; fifteen
+  superseded guides (audits, plans, specs, the sideload-update runbook) ->
+  `docs/archive/`. Deleted: `docs/guides/instructions.md` (stale copy of
+  ~/.claude/CLAUDE.md), `play-readiness-findings.json` (carried the burned
+  Maps key verbatim) and `market-readiness-findings.json`, `docs/legal/*.md`
+  (drifted copies of web/; web/ is the single source now). `docs/guides/` is
+  now: BRAIN, PLAY-RELEASE-RUNBOOK, THREAT-MODEL, DEVICE-CHECKLIST, disguises,
+  design-system (LLM preamble line stripped), ART-PROMPTS.
+- **`docs/REFERENCE.md` rewritten from the tree** (was E:\LDR, 145 files,
+  google_fonts/workmanager/ads, "not on any store"). Root `README.md`
+  rewritten (the "ships disguised as News" paragraph was false; build commands
+  now name the flavors); `mobile/README.md`, `web/README.md` (E:\ path, docs/legal
+  reference, stale "Outstanding" replaced by the live curl: security.txt 200
+  text/plain). Every dangling `docs/...` path in lib/test/tool comments,
+  the runbook and migrations/README repointed.
+- **Dead config:** `android/maps.properties.example`, the `maps.properties`
+  ignore rule and `GOOGLE_MAPS_3D_KEY` in `.env.example` (no code reads any of
+  them since Mapbox). `.cursor/settings.json` untracked + `.cursor/` ignored.
+  `.claude/launch.json` down to the one config that exists (`site`).
+  `.claude/CLAUDE.md` notes updated for the deleted findings file and the
+  Maps leftovers.
+
+### Verified (this tree, after the last edit)
+
+    flutter analyze --no-pub      -> 201 issues found, 0 errors, 0 warnings
+    flutter test                  -> 1464 passed, 0 failed (03:29)
+    flutter pub get               -> flutter_webrtc resolves for android only
+    ./gradlew :flutter_webrtc:compileDebugJavaWithJavac -> BUILD SUCCESSFUL in 2m 10s
+    secrets grep over added lines -> names only, no values
+    git diff --stat HEAD          -> 444 files changed, 721 insertions(+), 44162 deletions(-)
+
+Not an APK build (rule: not unless asked). The plugin's Java compiled through
+Gradle, which is the closest proof of the prune short of a build.
+
+### Still open
+
+- Leftover analyzer infos (201): 79 cascade_invocations, 33 comment_references,
+  29 avoid_dynamic_calls, 23 deprecated_member_use (Color.red/green/blue,
+  Matrix4.scale/translate, screen_brightness rename, TickerMode.of,
+  createSignedUrls, anonKey, mapbox cameraOptions, test-side
+  setMockMethodCallHandler). Deprecated, not broken, on the pinned SDK.
+- 5 `unawaited_futures`, 2 `avoid_catching_errors` (rewrap_screen) unreviewed;
+  the 2 `use_build_context_synchronously` in disguise_picker_screen ARE
+  mounted-guarded (`if (confirmed != true || !mounted) return;`).
+- The Maps key still needs rotating (git history; the tracked copy is gone).
+- Untracked weight left for the owner: `Miles.apk` 103M at the root,
+  `archive/` 94M (build-52 APK), `art_drop/` 509M, `mobile/build` 2.2G,
+  `scripts/film-render/out` 2.6G, `scripts/film-shoot/{out,work}` 827M.
+  Nothing deleted — none of it is mine.
+- The `.claude/CLAUDE.md` "two rules contradicted" note about arm64-only
+  packaging is stale in one respect: `build.gradle.kts:247-251` now strips
+  every non-arm64 `.so` from the sideload APK, so the §193 broken-32-bit case
+  cannot recur. Owner's file; not edited beyond the two facts above.
+
+**Exact next step:** review `git status`, then stage by explicit path
+(the docs renames are already staged from `git mv`). A real build of this
+tree — `bash tool/release.sh --play` — is the only remaining proof the prune
+did not touch the release graph; it was not run here by rule.
+
+## §252 — Play AAB for build 73 cut from the swept tree, and verified from five sides (2026-09-02)
+
+Owner: "run the play build now." Built on the §251 tree (uncommitted sweep on
+top of `bd1ee39`).
+
+### Pre-flight (the §247 daemon lesson, applied by hand because `--play` alone
+does not run the bump-path clean)
+
+    ./gradlew --stop                 -> No Gradle daemons are running.
+    flutter clean (retried, asserted) -> build/ is gone
+    flutter pub get                  -> ok
+    mobile/.env                      -> points at sopictusdonlvuezmfep (release.sh's own guard also checked)
+
+The other session's build-73 play APK (`build/app/outputs/flutter-apk/app-play-release.apk`,
+233,257,984 bytes, 00:57) was copied to the session scratchpad before the
+clean deleted it; nothing of theirs was overwritten in the tree.
+
+One local edit to the gitignored `mobile/.env`: the `GOOGLE_MAPS_3D_KEY=` line
+(EMPTY value, no reader in lib/ since Mapbox) was removed so the shipped `.env`
+asset carries only the two Supabase keys. The pre-sweep APK's `.env` asset had
+carried the empty key name. Backup of the original `.env` is in the scratchpad.
+
+### The build
+
+    bash tool/release.sh --play   (detached, log in the scratchpad)
+    gate: flutter pub get / flutter analyze / flutter test
+    02:44 +1464 ~3: All tests passed!
+    building play release AAB...
+    Running Gradle task 'bundlePlayRelease'...   659.6s
+    √ Built build\app\outputs\bundle\playRelease\app-play-release.aab (169.9MB)
+    sha256 802e19b20e923671529e67f7c70de251f205d46a2e22851037c73842c11e6486
+    size   169 MB
+    checked 3 libapp.so, all stamped miles-build-73
+    play AAB is build 73: build/app/outputs/bundle/playRelease/app-play-release.aab
+    exit=0
+
+Artifact: `mobile/build/app/outputs/bundle/playRelease/app-play-release.aab`,
+178,152,182 bytes, 02:14. It lives under build/ and the next `flutter clean`
+deletes it — upload it, or copy it somewhere that is not build/.
+
+Toolchain warnings printed by the build (not errors, no action today):
+Flutter will soon drop Gradle < 8.14 (tree is 8.13) and Kotlin < 2.2.20 (tree
+is 2.2.0); several plugins still apply KGP (device_info_plus, file_picker,
+flutter_foreground_task, flutter_image_compress_common, flutter_webrtc, ...).
+
+### Verification (workflow: five lenses, three skeptics per non-pass finding, a critic)
+
+33 agents, 53 checks, 0 blockers. Every fail/warn was re-derived from the
+bundle by three independent skeptics; none was refuted.
+
+PASS, from the artifact itself:
+- manifest: package com.miles.miles, versionCode 73, versionName 0.1.0,
+  minSdk 24, targetSdk 36 / compileSdk 36 (Play's floor since 2026-08-31 is
+  API 36), label Miles, allowBackup=false, no debuggable, no cleartext.
+- launcher: 10 aliases, exactly one enabled (.AliasMiles "Miles"); the nine
+  covers all enabled=false; MainActivity has no MAIN/LAUNCHER filter.
+- play-flavor invariants: no REQUEST_INSTALL_PACKAGES, no updater FileProvider.
+- contents: base/lib/{arm64-v8a,armeabi-v7a,x86_64} each carry the identical
+  11 .so set incl. libapp.so + libflutter.so; 16 KB page alignment on every
+  64-bit lib; R8 mapping at BUNDLE-METADATA/.../proguard.map (71 MB); three dex.
+- Dart: miles-build-73 in all three libapp.so, no 72/71; the bundle postdates
+  the last source edit; NO staging ref (zqltaobarpcuantrqxha) anywhere in the
+  1013 entries; production ref appears only in the .env asset.
+- .env asset: exactly NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  the JWT is role=anon; a negative curl with only that key returned nothing
+  it should not.
+- signing: jarsigner "jar verified"; signer CN=Miles, 4096-bit RSA,
+  SHA-256 A3:7C:59:A5:… IDENTICAL to the cert in miles-upload.jks; valid to
+  2054; bundletool validate clean; download-size estimate under Play's caps.
+- deep links: only tethered://join and tethered://auth-callback, no
+  autoVerify, so no assetlinks.json needed.
+
+Standing, non-blocking (plugins' manifests, not ours):
+- WRITE_EXTERNAL_STORAGE maxSdk=28 (camera_android_camerax), ACCESS_WIFI_STATE
+  (mapbox), USE_FINGERPRINT (androidx.biometric), c2dm RECEIVE (FCM). No
+  Play form is triggered by any of them.
+- The Firebase Android client key (AIzaSyBH…, same as google-services.json)
+  is compiled into libapp.so via firebase_options.dart — public by design.
+- found, not fixed: geolocator's GeolocatorLocationService declares
+  foregroundServiceType=location while FOREGROUND_SERVICE_LOCATION is not
+  declared. Dormant — lib/ never passes ForegroundNotificationConfig, so the
+  service never starts. Would be a SecurityException on API 34+ if it did.
+- Native debug symbols ship for only 4 of 11 libs per ABI (app, flutter,
+  dartjni, xeno); the Console will warn "no debug symbols" for the rest.
+- `version-control-info.textproto` says NO_SUPPORTED_VCS_FOUND and the tree
+  is uncommitted: this exact bundle cannot be traced to a commit until the
+  sweep is committed.
+
+Console work the artifact implies (owner):
+- Foreground service declaration form: TYPE_MICROPHONE and
+  TYPE_MEDIA_PROJECTION (flutter_foreground_task), each with a demo video.
+- Full-screen-intent declaration (call ring), POST_NOTIFICATIONS is present.
+- Data safety: precise+approximate location, camera, mic, photos, biometrics,
+  health (cycle tracker) declaration; App access notes with two paired demo
+  accounts and the cover-unlock gesture.
+- First upload: this cert becomes the Play App Signing upload key (no AAB has
+  ever been uploaded; versionCode 73 is Play's first).
+- Personal developer account: 12 testers × 14 days closed test before
+  production access.
+
+### Still open
+
+- Nothing installed; the AAB is for the Console. Both handsets remain on 72.
+- `min_build` untouched.
+- Gradle/Kotlin floor bumps before Flutter drops support (warnings above).
+
+**Exact next step:** upload the AAB to the Play Console (internal testing
+track first), answer the forms the policy lens listed, and record the
+Console's own versionCode acceptance here.
+
+### §252 addendum — the swept tree is committed as 4fbe38b (2026-09-02)
+
+Owner: "commit the swept tree." 444 paths staged by explicit path (BRAIN.md
+held back for this commit), never `git add -A`. Checked first: HEAD still
+bd1ee39, every pending hunk mine (the unlink-area files carried only
+`dart fix` changes on top of 3238b5f), BRAIN diff insert-only, value-shaped
+secrets grep over the staged diff clean, `flutter analyze` 0/0 (201 infos)
+re-run on the tree as committed. The play AAB built in §252 came from this
+exact source, so it now traces to a commit. NOT pushed — the owner said
+commit, not push.
