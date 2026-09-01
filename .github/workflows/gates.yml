@@ -109,9 +109,11 @@ jobs:
           if [ -f .env ]; then
             echo ".env already present, leaving it alone"
           else
-            printf 'SUPABASE_URL=
-SUPABASE_ANON_KEY=
-' > .env
+            # One line on purpose: a literal newline here starts at column 0,
+            # ends the `run: |` block, and GitHub refuses the whole workflow
+            # ("workflow file issue") — which is why no run on this branch
+            # had ever executed a job before 2026-09-02.
+            printf 'SUPABASE_URL=\nSUPABASE_ANON_KEY=\n' > .env
             echo "wrote placeholder .env"
           fi
           test -f .env
