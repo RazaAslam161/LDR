@@ -19161,3 +19161,881 @@ missing from it. Regenerate with `supabase/scripts/dump_schema_snapshot.sql` aga
 one path that matters (pair -> film plays -> kill mid-play -> reopen -> does NOT replay) can
 only be proven on two handsets. No music bed. Build number NOT bumped for this work. The
 build-69-vs-70 CPU A/B is still blocked on both phones being awake.
+
+### §238 — Presence leaves the circle: a whole person, in the corner of every screen (2026-08-31)
+
+Owner: "3d avatar not in a circle, popping up on every screen." Chose full body, bottom
+corner, and the AppBar badge removed with the figure taking its taps.
+
+**Mounted ONCE, at the root** — `main.dart`, `Positioned.fill(child: PresenceFigureOverlay())`,
+beside `WarmthOverlay`. That is the whole design: they arrive and leave without a single
+screen reflowing, and a screen added tomorrow cannot forget to include them. Nothing was
+added to `router.dart` and no screen knows the figure exists.
+
+**New**: `presence_figure.dart` (the painter) + `presence_figure_overlay.dart` (state, tap,
+position). `PresenceArt` gained figure loading, decoded at 152px because 116dp on a 4x
+handset is all that is ever drawn. Assets `{m,f}_figure.webp` cut from
+`art_drop/cut/*_calm.png` — no generation, ~18KB each.
+
+**The motion is body motion, and that is a measured decision.** At 116dp the figure is
+113x360 real pixels and each eye is ~8px — rendered and looked at before deciding. A blink
+is invisible there, so the figure breathes (scaleY, about the FEET) and shifts its weight
+(rotate ±0.008 rad) and does nothing with its face. The blink work is not lost; it is in
+git history on the busts.
+
+**A real defect the preview caught.** `ColorFilter.mode(tint, BlendMode.overlay)` paints
+across the whole destination rect INCLUDING its transparent pixels, so every "here" figure
+stood inside a visible tinted RECTANGLE. Invisible while the character was clipped to a
+circle; obvious the moment the circle came off. Now `BlendMode.srcATop`, which keeps the
+destination's alpha. The same latent bug is still in `presence_character.dart` — harmless
+only because that draw is circle-clipped.
+
+**MY OWN VERIFICATION WAS BROKEN ALL SESSION, and the gate caught it.** Every
+"0 errors, 0 warnings" reported before this section used `grep -E '^\s+(error|warning)'`,
+which REQUIRES leading whitespace — and `flutter analyze` right-aligns severity to width 7,
+so `warning - ` has ZERO leading spaces and could never match. The repo's own
+`repo_hygiene_test` carries a comment about exactly this trap, having been burned by it
+twice before. 17 unused-import warnings were sitting behind a green-looking check.
+**Use `grep -cE '^ *warning - '` — leading whitespace OPTIONAL — or the count is a lie.**
+
+    flutter analyze --no-pub -> errors: 0   warnings: 0   (counted correctly)
+    flutter test            -> 1433 passed, 0 failed, 4 skipped
+
+**NOT FINISHED, deliberately.** `PartnerHereAction` is gone from all 17 screens and their
+imports, but `PartnerHereBadge`, `PartnerHereAction`, `_PresenceAvatar` and `_AuraPainter`
+still EXIST in `partner_here_badge.dart`, unused by the app and kept alive only by
+`partner_here_badge_test.dart`. Those 11 tests cover the presence visibility rules
+(same-screen / elsewhere / stale / private / joinable / tap) — real coverage that the new
+overlay now duplicates in code but not in tests. Deleting the widgets means PORTING those
+tests to `PresenceFigureOverlay` first, not dropping them.
+
+**Open**: that port + deletion; the bust assets and `PresenceCharacter` go with it. The
+figure has NEVER been seen on a handset — the corner placement, whether it covers anything
+that matters, and its cost while looping are all unproven. Build number not bumped. The
+build-69-vs-70 CPU A/B is still blocked.
+
+### §239 — Badge deleted, its tests ported to the figure (2026-09-01)
+
+`PartnerHereBadge`, `PartnerHereAction`, `_PresenceAvatar` and `_AuraPainter` are gone —
+`partner_here_badge.dart` is 759 -> 341 lines and now holds only what it always really was:
+the presence PROVIDERS, `PartnerScreenNotifier` (the `screen_presence:<coupleId>` channel),
+and `joinPartner`. Not one line of sync was touched.
+
+**All 11 visibility tests ported, none dropped**, to
+`test/widget/presence_figure_overlay_test.dart` — same stubs, same rules (same-screen,
+elsewhere-you-can-follow, private, stale, our-screen-unpublished, unknown, tappable,
+tap-navigates, tap-does-not-stack, tap-together-goes-nowhere). Two assertions changed
+BEHAVIOUR and say so in place: the figure unmounts where the badge scaled to zero (it
+reserves nobody's layout, so it can), and a genderless profile now shows nothing where the
+badge drew an initial — a letter in a circle reads as a mark, a letter on the carpet reads
+as a bug.
+
+**The port earned itself immediately: it caught a crash the whole design would have hit.**
+`late final AnimationController` is LAZY, so for an offline partner — the commonest state —
+the controllers were never created, and `dispose()` calling `_loop.dispose()` RAN the
+initialiser, constructing an AnimationController on an already-deactivated element and
+throwing out of the widget tree's teardown. Only the three HIDE cases reach it. Controllers
+are now built in `initState`.
+
+**Over-deleted once, and caught it**: `presence_character.dart` also holds `PresenceArt`,
+and **Home's 64dp check-in-photo fallback still legitimately uses the bust** — the owner
+asked for the AppBar badge to go, not Home's card. Restored from git, and the figure
+additions re-applied on top (the restore reverted them). `presence_character_preview_test`
+was deleted for real: it rendered `PartnerHereBadge`.
+
+    flutter analyze --no-pub -> errors: 0   warnings: 0
+    flutter test             -> 1433 passed, 0 failed, 3 skipped
+
+**Open**: NEVER SEEN ON A HANDSET. Whether a person standing bottom-left covers anything
+that matters, how the entrance feels, and what the loop costs while visible are all
+unproven — and the build-69-vs-70 CPU A/B, still blocked on both phones being awake, is now
+also stale because the thing it was measuring has been replaced. Build number not bumped.
+Bust assets stay shipped and referenced (Home). Nothing committed.
+
+### §240 — Why the Doorstep does not work, and what should replace it (2026-09-01)
+
+Owner: "analyze that whole system i created but I didn't like it." Audit only — no code
+changed. The mechanism, read from the migrations and `scene_state.dart`:
+24h cooling, a 15-minute gate before either may act, and if BOTH agree it collapses to a
+5-minute last look. Acts `settled`/`lastCall`; beats `slam`, `speak`, `letter`, `bolt`;
+roles `outside` (initiator) / `inside` (partner).
+
+**Six defects, all structural rather than cosmetic:**
+
+1. **It assigns blame.** The initiator is cast OUTSIDE, at night, alone on a doorstep;
+   the partner is INSIDE the warm house. "You closed the door." / "They haven't gone
+   anywhere." One of them is the leaver and one is the left — and the person who starts an
+   unlink is very often the one who was hurt.
+2. **They can never see each other.** `SceneRole` casts each phone with its OWN user only,
+   so at the exact moment the question is "are we still an us", the app draws two solitary
+   people in two separate films. The one image that could change a mind is the one image
+   the architecture cannot produce.
+3. **24 hours inside a horror film.** Night, a slammed door, a bolt, a flickering lamp —
+   and the router forces `/unlink`, so this is not a moment, it is the only room in the app
+   for a day.
+4. **The letter cannot be answered.** `unlink_write_note` writes ONE note with no reply. It
+   offers "say something" and forbids "talk", which is backwards for the one flow whose
+   best outcome is a conversation.
+5. **Three of the four beats are closing gestures** (slam, letter, bolt). There is no beat
+   for reaching, and none for the two of them.
+6. **The craft is spent on the ending.** The slam, the bolt and the dusk are the animated
+   set-pieces; relinking is a cue and a light flood. The app is at its most beautiful when
+   a relationship is dying, which is an incentive pointed the wrong way.
+
+**Proposed replacement — "The Distance".** An unlink stops being a departure and becomes a
+widening space. BOTH figures on screen the whole time, in the warm room, the floor
+lengthening between them as the 24 hours pass — the countdown becomes something you can SEE
+rather than a number. Reaching is the animated payoff: the figure WALKS the distance back
+and the other watches it happen live on the existing `scene_sync` rail. Letting go is quiet
+— the far figure steps out of the light. No slam, no bolt.
+
+**It reuses the Opening's cast almost entirely** — `art_drop/opening/` already holds the
+8-frame walk, the hands, and the 8-frame embrace. Missing: both figures apart facing each
+other, the drift (turning away), and a front-facing approach.
+
+**Open**: nothing built, nothing decided. The current Doorstep still ships.
+
+### §240 addendum — the Distance frame spec is SINGLE figures (2026-09-01)
+
+Correcting the sketch in §240: all 14 frames are ONE PERSON per image, never a pair.
+A frame with both people baked in fixes the gap between them, and the entire design turns on
+that gap being a continuous variable the 24h clock drives. Separate cut-outs make distance
+a number in code and cost nothing extra to generate.
+
+Consequence the prompts must enforce: identical camera distance, lens and character SCALE
+across all 14, because figures from different frames now stand on screen TOGETHER. That
+constraint is stricter here than it was for the Opening, where each shot was self-contained.
+
+The 14, per person (m/f): wait, drift (turned away), walk A, walk B, reach, away A, away B.
+The reunion needs no new art — `art_drop/opening/` already holds the hands and the 8-frame
+embrace. Frames land in `art_drop/distance/`.
+
+**Open**: nothing built; the current Doorstep still ships and the owner has not approved
+the replacement. These prompts are issued for generation only.
+
+### §240 addendum 2 — Distance frames: 11 of 14, all opaque, matted (2026-09-01)
+
+Owner generated the Distance set into `art_drop/distance/`. Intake:
+
+**11 of 14 poses arrived.** Missing: `dist_m_reach`, `dist_m_away_b`, `dist_f_walk_b`.
+`dist_f_away_b` came twice (.jpg and .png) and `dist_f_reach` has a double-dot filename.
+
+**All delivered as JPEG — a format with NO alpha channel at all**, so the transparency
+question did not even arise this time. Matted locally with rembg into
+`art_drop/distance_cut/` (11 files, 409s). Nothing was regenerated and no credits spent.
+
+**Checks run, with results:**
+- edge-touch on every frame -> ALL CLEAR, so nothing is cropped at head or feet.
+- figure heights vary 1414..2664px, but only because source canvases differ
+  (2048x2048, 2754x1536, 1440x2560, 1440x2896). Normalising to a common height removes it,
+  the way `Cast` does for the Opening.
+- **Relative height between the two people must NOT be normalised away** — he should stay
+  taller. The anchor is measurable from the Opening frames where they appear together:
+  s2_01 gave m=1380, f=1310, so she is ~0.949 of his height.
+
+**Two pose defects, both fixable locally without regenerating:**
+1. `dist_f_wait` faces RIGHT; the design needs her facing LEFT across the room at him.
+   Mirror it — the cost is her hair parting and necklace flipping, which is invisible at
+   the size she is drawn.
+2. `dist_m_away_a` is a side profile walking away, not the REAR view the beat asks for.
+   Usable, but it is not the shot.
+
+**Open**: the 3 missing poses; and The Distance is STILL NOT APPROVED as a replacement —
+the current Doorstep ships, and swapping it touches a live production state machine, so
+nothing will be built on it without the owner saying so.
+
+### §241 — The Doorstep is gone; the Distance ships (2026-09-01)
+
+Owner approved the replacement and told me to work around the 3 missing frames.
+
+**THE MECHANISM WAS NOT TOUCHED.** Same 24h cooling, same 15-minute gate, same 5-minute
+last look, same RPCs, same `scene_sync` rail, same `scene_state.dart` mapper. The complaint
+was about what the flow FEELS like, not what it does, so only the scene changed.
+`DistanceScene` reuses `SceneModel.dawn` — the 0->1 progress through the cooling window that
+used to drive the sunrise — as the distance driver. No new state, no new timings.
+
+**New**: `lib/features/unlink/scene/distance_scene.dart` + `assets/distance/` (11 figures,
+233KB). Both people are on screen the whole time in the same room; the only thing that
+changes is the gap between them. Nobody is outside, nobody is blamed.
+
+**The 3 missing frames, worked around and documented in the file**: his reach holds
+`m_walk_b` (already a forward-leaning stride), and both walk-away cycles run on a single
+frame — they read as walking because they TRAVEL, and a second pose would only add a bob at
+this size. None was load-bearing.
+
+**Assets carry the 0.949 height ratio** measured off the Opening frames where the two stand
+together, so the painter applies one height to both and he stays taller without knowing why.
+
+**DELETED**: `ritual_scene.dart`, `scene_painters.dart`, `character_puppet.dart`,
+`bird.dart`, `scene_assets.dart`, `unlink_scene_preview_test.dart`, and the 11 orphaned
+Doorstep assets (`assets/scene` 416KB -> 53KB; only `backdrop_in.webp` survives, now the
+Distance's room). All recoverable from git history. `scene_state`, `scene_sync` and
+`unlink_end_overlay` all survive untouched.
+
+**Three defects found by looking or by a gate, not by review:**
+1. The first preview laid five full-width scenes in a Row and each painted outside its box
+   into its neighbour — which read as the woman having gone translucent. The scene was fine;
+   the SHEET was lying. Reshaped to clipped portrait tiles at the real phone aspect.
+2. At `_height` 0.46 and a 0.20..0.74 gap the two filled the room and the space had nowhere
+   to grow — the change across twenty hours was too small to notice, and noticing is the
+   whole feature. Now 0.40 and 0.13..0.70; the last look pulled 0.86 -> 0.74 because both
+   were half out of frame, which reads as clipping rather than as leaving.
+3. `unlink_screen_test`'s prose-measure law caught the quote at 312dp against a 300.5 cap.
+   The Doorstep dodged that law by putting the quote INSIDE the picture, spoken by a bird;
+   as ordinary prose it is subject to it. Constrained to 300.
+
+    flutter analyze --no-pub -> errors: 0   warnings: 0
+    flutter test             -> 1433 passed, 0 failed, 3 skipped
+
+**Open**: NEVER SEEN ON A HANDSET — the gap reading over real hours, and the room dimming,
+are only proven in a golden. The COPY still says "You closed the door." and the rest of the
+doorstep vocabulary; the scene changed but the words did not, and they now describe a
+picture that no longer exists. Build number not bumped. Nothing committed.
+
+### §242 — Doorstep Act II begins: the owner's story returns, with logic (2026-09-01)
+
+Owner REJECTED the Distance (§240-241) and reaffirmed the original doorstep vision,
+elaborated: slam -> initiator sits on the porch steps -> a bird lands on the lamp and holds
+a REAL 15-minute conversation (paced to the relink gate); partner inside on the sofa with
+the cat, same conversation shape; in-scene phone messaging between them (new E2EE
+`unlink_messages`, knock->refetch per §208 law); reunion/parting FILMS in the end-overlay
+slot; full-screen staging replacing the small-card layout. My §240 blame critique is
+OVERRULED — recorded, not relitigated. Canonical art reference: the owner's glimpse video
+(`Downloads/Stylized_D_character_render_.mp4`, frames inspected — porch, lamp-bird, sofa,
+cat, phone bubbles). Plan: `~/.claude/plans/we-do-things-later-deep-puddle.md` (approved).
+
+Execution order (green tree at every checkpoint): (1) restore `assets/scene` webps +
+`scene_assets.dart` from HEAD — atomic, orphan/dead-code gates require restorer and
+referencer together; (2) conversation engine — line on screen is a pure function of
+`ServerClock.now() - started_at` against the row's own gate timestamps, resumable by
+construction; (3) `doorstep_scene.dart` replaces `distance_scene.dart` in the SAME screen
+slot (full layout rebuild + layout-law test rewrite is its own later step); (4) generation
+prompts to the owner up front (~20 frames: sitting/sofa/cat/bird/phone poses + film
+keyframes) so art lands in parallel; sitting poses placeholder to standing-worried until
+intake. Films, messaging migration, copy rewrite: subsequent steps.
+
+**Open at write time**: everything — this entry marks the start.
+
+### §242 addendum — checkpoint 1 green: the porch talks (2026-09-01)
+
+Slice landed, tree green:
+- **Restored atomically from HEAD**: 11 `assets/scene` webps + `scene_assets.dart`
+  (SceneArt names them; orphan + dead-code gates satisfied together).
+- **`conversation.dart`** — engine (`visibleExchanges`, `companionshipLine`) + BOTH full
+  scripts (bird 21 exchanges, cat 19) + companionship pools. Timing is FRACTIONS of the
+  gate window, last line pinned at 1.0, so the talk compresses with any window and the
+  handover lands exactly when the button rises. 11 unit tests green, including resume
+  (recompute == resume), gate alignment across three window sizes, no-banned-words, and
+  slot determinism.
+- **`doorstep_scene.dart`** replaces `distance_scene.dart` in the same screen slot (same
+  fits/quote/letterCard contract, `variant` re-threaded from the screen). Stage: cover
+  backdrop per role, restored standing-worried figure, bird sprite on the lamp (mirrored to
+  face the porch), drawn-silhouette CAT placeholder (real cat arrives with the batch),
+  dawn dimming, conversation stack (300dp measure, companion gilt-left / character
+  cream-right, older lines fading). 1s tick is a declared TIMER in the motion law
+  (tolerated entry, reason on file); truth stays in ServerClock arithmetic.
+- Distance fully removed (lib file, preview, `assets/distance/`, pubspec + both hygiene
+  entries). unlink screen tests repointed `DistanceArt` -> `SceneArt`.
+- **Two glimpse videos are canon now** — the second (`now_switch_the_character_fem.mp4`,
+  frames inspected) shows the FEMALE initiating: same porch, same bird. Role and variant
+  are independent parameters already, so the code covers it with no change.
+- **Two defects found by looking / by gates**: (1) the outside figure stood IN the dark
+  doorway — read as never having left; moved beside it (doorway span x .362-.612, figure at
+  .27). (2) The glassmorphism gate flagged the bubble scrim; it is the sanctioned
+  over-imagery case and now carries the `// scrim over` declaration.
+
+    analyze -> 0 errors, 0 warnings (counted '^ *warning - ')
+    flutter test -> 1444 passed, 0 failed, 3 skipped
+    assets 4.55 MB of 8 MB
+
+**Open**: full-bleed layout rebuild + layout-law rewrite; copy rewrite; `unlink_messages`
+migration + in-scene phone; films + end-overlay wiring; the ~20-frame generation batch
+(prompts issued to owner this turn — sitting/sofa/cat/bird/phone poses swap the placeholders
+out at intake); device pass on two handsets. Nothing committed.
+
+### §242 addendum 2 — pivot: video clips for the cinematic beats (2026-09-01)
+
+Owner proposed and I confirmed: the doorstep's cinematic beats become VIDEO CLIPS from the
+owner's tool (storm-out/slam/sit/bird lands; cat arrives; reunion; parting), while code
+keeps what only code can do (the 15-minute resumable conversation — already built and
+tested — the E2EE phone messages, timer, buttons). The 18-frame generation batch from
+§242 addendum 1 is CANCELLED — poses, cat, bird, sofa stills are all baked into the clips.
+
+Five rules govern the wiring: (1) intro clip plays ONCE per ceremony per device
+(SharedPreferences latch keyed on started_at — the slam-latch precedent), never again on
+reopen; (2) skippable from frame one, reduce-motion skips entirely; (3) HELD-FRAME
+HANDOFF — the clip's true last frame is extracted at build time and shipped as a still;
+clip end crossfades to the identical still and the controller is RELEASED (no paused
+decoder running for 24h); (4) therefore every intro clip must END ON A ~1s STABLE HOLD
+(mechanically checked at intake: last-second frame variance); (5) messages render as UI
+bubbles anchored beside the baked character — no pose swaps exist.
+
+Budget: 8 clips (out_m/f, in_m/f, reunion_m/f_enters, parting_out_m/f) at thrifty portrait
+encode = 3.6-4.8MB on top of 4.55 → 8.1-9.3MB vs the 8MB ceiling. Flagged to the owner:
+likely ceiling raise 8→10MB, THEIR sign-off at intake, or drop to mirrored endings.
+
+Full standalone prompts for all 8 issued this turn; intake lands in `art_drop/doorstep2/`.
+**Open**: layout rebuild + copy rewrite (next slice, unchanged); messages migration; clip
+wiring + intake gate; device pass. Nothing committed.
+
+### §242 addendum 3 — first clip intake: out_f ACCEPTED (2026-09-01)
+
+`Downloads/Woman_slams_door_and_sits_202609010338.mp4` -> intake per the stated contract:
+1080x1920 9:16, 24fps, 8.000s, 4.75MB source, AAC audio present (will be stripped — the
+score rides MilesSound). Beats sampled at 0.3/1.5/3/4.5/6/7.9s and LOOKED at: she storms
+out -> at the door -> sinks onto the steps -> BLUE bird lands on the porch lamp -> settled.
+Identity, wardrobe (cream knit, rose skirt) and the glimpse staging all match; watermark:
+none found in sampled frames. **END-HOLD MEASURED, not eyeballed**: max frame-to-frame
+luma diff over the final 1.0s = 1.775 (threshold 3.0) -> a genuine stable hold; the last
+frame can be extracted as the live stage still.
+
+One deviation, accepted: she hugs her knees on the steps rather than elbows-on-knees, and
+the bird lands on a lamp POST at the porch rail rather than a wall lamp — both better than
+the prompt, both consistent with a stage the conversation stack can anchor to (bird upper
+right, character lower left — bubble anchors clear).
+
+Next intake steps when siblings arrive: same probe + hold check; then extract last frames
+(`ffmpeg -sseof -0.04 -update 1 frame.png`), thrifty re-encode (~540px, CRF ~23, -an,
+faststart) into `assets/unlink_films/`, ceilings decision at the full set.
+**Filename law for the owner**: rename on save to `out_f.mp4` etc. — the tool's long names
+carry timestamps that would drift the intake tooling.
+
+### §242 addendum 4 — batch intake: 6 of 8 accepted, ceiling 8→12 by owner (2026-09-01)
+
+All 8 clips arrived in `art_drop/doorstep2/` (owner renamed correctly; doubled `.mp4.mp4`
+normalized). Batch intake, every number measured:
+
+    all 8: 1080x1920 9:16, 24fps, 8s (reunion_m 10s), h264+AAC
+    end-hold (intros, max luma diff in final 1.0s, threshold 3.0):
+      out_f 1.77 OK · in_m 2.93 OK · in_f 1.97 OK · out_m 3.08 FAIL
+
+**ACCEPTED (6)**: out_f, in_m, in_f, reunion_m_enters, parting_out_m, parting_out_f —
+beats verified frame-sampled at 4 points each: flinch/sit/cat-settles, embraces, partings
+all present; identity and blue bird consistent; no watermarks found.
+
+**BOUNCED (2), specific fixes, not full redos:**
+1. `out_m` — end-hold fail was NOT marginal despite 3.08 vs 3.0: the frame-diff shows his
+   WHOLE BODY moving — he lifts his head and ends alert, staring at camera, instead of
+   settled head-down. Fix appended to the prompt: "in the final two seconds he stays
+   head-down, elbows on knees, completely still; nobody looks at the camera."
+2. `reunion_f_enters` — the man appears CHILD-SIZED seated on the sofa in the opening
+   seconds (classic consistency failure), snapping to adult when he stands. Fix: "the man
+   is adult height throughout, seated normally on the sofa when she enters."
+
+**Encoding curve measured**: CRF23/540px = 7.12MB for six; CRF26/480px = 4.00MB, and an
+A/B at phone size is visually indistinguishable on this smooth art style. Full set incl.
+the two returning bounces + webp stage stills ≈ 10MB vs the 8MB ceiling. **Owner chose:
+raise 8→12MB** (third deliberate raise: 6→8 Opening, 8→12 doorstep films; APK is ~171MB,
+the ceiling is discipline not panic). Applied when the films enter `assets/` — clips stay
+STAGED in `art_drop/doorstep2/encoded26/` until the player code references them, or the
+orphan gate fires.
+
+Stage stills extracted from the three accepted intros (`stage_out_f/in_m/in_f.png`,
+1080x1920) — ship as webp when wired. **Open**: two regenerations (owner); player wiring +
+once-latch + skip; full-bleed layout + copy; messages migration; device pass.
+
+### §242 addendum 5 — the set is COMPLETE: 8 of 8 accepted (2026-09-01)
+
+Both retakes in:
+- `reunion_f_enters` retake ACCEPTED clean — the child-sized man is fixed: adult
+  proportions seated, rising, and through the embrace (frames 0.5/1.5/3/7.5 inspected).
+- `out.m.mp4` retake FAILED the hold AGAIN (3.38, worse than the bounced 3.08) — but the
+  stability profile showed a genuine settle at 5.5-7.0s (max diff 2.20) with every beat
+  complete by 6.9s (he stays head-down; bird settled on the lamp from 5.5s). **Repaired in
+  the edit instead of a third generation: trimmed to 7.0s.** Re-measured on the trimmed
+  file: 7.02s, END-HOLD max diff 2.17 → PASS. The dot-typo source (`out.m.mp4`) replaced
+  the bounced `out_m.mp4` and was removed.
+
+**All 8 encoded at CRF26/480px: 5.11MB total.** Projected assets: 4.55 + 5.11 + ~0.2
+(four webp stage stills) ≈ 9.9MB against the owner-approved 12MB ceiling — comfortable.
+Everything remains STAGED in `art_drop/doorstep2/encoded26/` + `encoded/stage_*.png`;
+enters `assets/unlink_films/` only with the player code, or the orphan gate fires.
+
+**The full film library, final**: out_m 7.0s · out_f 8.0s · in_m 8.0s · in_f 8.0s ·
+reunion_m_enters 10.0s · reunion_f_enters 8.0s · parting_out_m 8.0s · parting_out_f 8.0s.
+Four intro stage stills extracted. **Open**: player wiring (once-latch, skip, crossfade
+to still), full-bleed layout + copy rewrite, `unlink_messages` migration + phone UI,
+ceiling 8→12 applied with the wiring, device pass. Nothing committed.
+
+### §242 addendum 6 — checkpoint 2 green: films wired, the held frame IS the stage (2026-09-01)
+
+- **Shipped**: `assets/unlink_films/` — 8 films (CRF26/480px) + 4 stage stills (webp,
+  extracted true last frames), 5.38MB. Total assets 9.92MB; **ceiling 8→12 applied** with
+  the owner's decision recorded AT the assertion (third deliberate raise).
+- **`film_library.dart`** — story-fact addressing: `intro(role, me)` / `stage(role, me)` /
+  `reunion(initiatorMale)` / `parting(initiatorMale)`. Both phones derive the shared
+  endings from the same row, so they always watch the same film. Neutral gender → null →
+  painted fallback stage (a designed state).
+- **`doorstep_scene.dart` v2** — intro film with the Opening's hardened lifecycle
+  (latch-BEFORE-play keyed on started_at+role; skip from frame one; reduce-motion never
+  plays; failure falls to the stage; controller RELEASED at end so no decoder idles under
+  a 24h ceremony). Held still becomes the painter's primary; the SceneArt composite
+  survives as fallback. Conversation waits for `_filmDone` — bubbles over a slamming door
+  would be two scenes fighting one stage.
+- **`unlink_end_overlay.dart`** — reunion/parting films on the SAME IgnorePointer surface
+  as the light flood (an ending must never eat a tap; the film releases itself at its
+  final frame). `initiatorMale` rides a second ValueNotifier set in the same synchronous
+  teardown write; null keeps the pre-film light-only ending. **`_lastRow` captured in
+  `_onRow`** because the row's DELETION is what triggers the relink ending — by teardown
+  `UnlinkState.current` is already null.
+- **Preview re-rendered against the REAL film stages and LOOKED at**: porch = him seated
+  head-down, blue bird on the lamp; room = her with the calico beside her; talk pacing
+  min 1/5/15/40 over both. It matches the owner's glimpse videos.
+
+    analyze -> 0 errors, 0 warnings ('^ *warning - ')
+    flutter test -> 1444 passed, 0 failed, 3 skipped
+    assets 9.92MB of 12MB
+
+**Open**: full-bleed layout + layout-law rewrite + copy rewrite (next slice);
+`unlink_messages` migration + phone UI; intro-film widget tests (latch/skip/failure —
+engine and screen tests cover the rest today); device pass on two handsets. Nothing
+committed.
+
+### §243 — The stage gets designed: the scene is the sentence (2026-09-01)
+
+Owner interrupted mid-build seeing the BEFORE previews: "again the full screen full of
+timer, sentences and buttons?" — the drafted stage layout was the same clutter floated over
+the film. Binned, redesigned with stated laws (each now PINNED in tests):
+
+1. NO headline on the stage — the film already says it; words live in the calm layout.
+2. NO ticking countdown while waiting — a counter manufactures the urgency this ritual
+   exists to remove. One quiet ABSOLUTE chip top-right ("Ends 4:58am tomorrow"; partner's
+   adds "kept safe for 30 days" — the may-not-omit warning, compressed but present). The
+   15-min gate is announced by the companion's closing line + the pill rising (same
+   timestamp, cannot disagree). The one honest countdown: the 5-minute last call, centred.
+3. ONE voice on the stage. **The borrowed literary quote is DELETED APP-WIDE by owner's
+   call** — `unlink_quotes.dart` + its pool test removed, calm layout carries no quote.
+4. ONE primary action, only while it exists: "Open the door" (was "Re-link" — label now
+   matches the film the tap plays). Partner: "Write to them" pill + quiet danger text
+   after their gate. Absence of a button IS the "not yet".
+5. Exits at every stage, whisper-quiet (alpha-dimmed, 11.5px).
+
+Structure: `_stageLayout` (full-bleed `DoorstepScene` + chip + bottom reverse-viewport
+action column) / calm layout unchanged for animations-off & big text. DoorstepScene became
+always-full-bleed (card/AspectRatio/quote/letter params deleted); talk gets
+`talkBottomInset` so bubbles clear the controls. Last-call reasons kept ON stage (a
+5-minute button with no explanation reads as a trap).
+
+Tests: screen tests re-pinned as STAGE laws + CALM laws (pump gained `calm:` = 1.6 scale);
+layout-law rewritten: reverse-viewport law, no-tick-outside-last-call law, calm viewport
+law scoped around `_stageActions`. Glassmorphism gate caught the pill fill over the film —
+declared as the sanctioned scrim case.
+
+    analyze -> 0 errors, 0 warnings · flutter test -> 1444 passed, 0 failed
+    AFTER previews rendered + LOOKED at: film-frame stage edge to edge, chip, single pill.
+
+**Found, not fixed (next slice):** (1) partner panel's stage still renders inset with
+side bars where the other three cover-fill — suspect the in_m still's decode width vs the
+cover math, diagnose before touching; (2) last-call reason text sits tight against the
+exits row at preview size — needs breathing room.
+**Open**: those two; `unlink_messages` migration + phone UI; intro-film widget tests;
+device pass. Nothing committed.
+
+### §244 — Everything is scene now: the key, the photo, the clocks (2026-09-01)
+
+Owner's final symbols, built: RE-LINK IS A KEY (appears by the door when the way back
+opens — using the key is coming home) and UN-LINK IS TEARING THE PHOTO of the two of them
+(on the partner's side table, armed only at their gate, behind one plain confirm — nobody
+tears a photo by accident, which is the weight the act must carry). The stage pills are
+GONE for both actions; 'Write to them' remains as the partner's one pill.
+
+- Both clock bodies shipped + wired (`clock_porch/room.webp`, FilmLibrary stills,
+  `DialSpec` per body). The porch render arrived slightly three-quarter AGAIN — carried in
+  code via `DialSpec.squashX` (hands/arc drawn in a squashed space so they foreshorten
+  WITH the dial) instead of a third bounce. The room clock's matte kept the LAMP — fixed by
+  re-cropping below y=.50 and re-trimming.
+- Hotspot geometry per stage still, image-fraction coords mapped through the SAME
+  cover-fit math the painter uses (or objects drift with screen aspect). Drawn key and
+  drawn framed-photo placeholders until the owner's 3D objects arrive; the photo's glow is
+  deliberately HALF the key's — inviting vs precious.
+- Confirm dialog for the tear ('End it from your side too?' / 'Not now' / danger
+  'I need space too'); tap-through exercised in tests without touching Supabase.
+- **The §228 gender-less-harness bug returned in its third costume**: the screen tests'
+  Profile stub had no gender → neutral variant → no stage still → NO diegetic objects →
+  three tests red with "0 widgets with semantics label". Real profiles always have a
+  gender (role-setup gate). Harness now sets them, with a comment naming the bug class.
+- A patch script half-applied earlier (assert threw before write on one file, after
+  in-memory replaces on none — files stay atomic because every section writes at its end);
+  reconstructed as patch3 with the tail matcher read from disk.
+
+    analyze -> 0 errors, 0 warnings · flutter test -> 1444 passed, 0 failed
+    previews: key + glow on the porch, photo on the table, clock bodies with live
+    hands, ember arc + woken clock in last call — LOOKED at.
+
+**Found, not fixed**: partner stage's photo placement sits half behind the sofa arm
+(nudge .105->.13 x after the real asset lands); the partner chip's two caption lines can
+collide at some widths; last-call reason text still tight against the exits.
+**Open**: owner's 3D key + photo assets (prompts issued); messages migration + phone;
+intro-film widget tests; device pass. Nothing committed.
+
+### §245 — The owner's objects land: key, photo, torn photo (2026-09-01)
+
+Choices made and wired, with reasons argued and accepted:
+- **Key 1** (solid bow, heart cut-out) over Key 2 — legible at ~50dp where the thin
+  heart-outline dissolves; flat-lit mattes clean and takes the scene grade.
+- **Intact photo B** (the embrace) over camera-facing A — it is the SAME POSE the reunion
+  film ends on: one image says what tearing destroys and what the key restores.
+- **Torn photo B** (two loose halves) over torn-in-frame A — unmistakable at size, and the
+  separated halves make the tear VISIBLE: on confirm the screen flashes the torn state for
+  one `MilesMotion.reveal` breath before `_accept` (`_torn` -> `actionTorn` -> painter).
+
+**Inventory comedy with a real lesson**: my earlier thumbnail montage truncated two Gemini
+filenames to the same 9-char prefix, the second overwrote the first, and I told the owner
+Key 1 wasn't on disk while shipping it as `photo_frame.webp`. Everything WAS on disk.
+Unique names in scratch montages from now on. Also found: a third porch-clock render
+(`hf_000920`, looks more face-on) — worth a circularity check later; squashX carries today.
+
+**A defect found by preview, fixed the general way**: the scene only ever `ensureStill`ed
+the STAGE frame, so key/photo/clock assets existed solely as drawn stand-ins forever. All
+object stills now decode in initState alongside the stage. Photo nudged out from behind
+the sofa arm (.105 -> .145 x).
+
+    analyze -> 0 errors, 0 warnings · flutter test -> 1444 passed, 0 failed
+    unlink_films 5.49MB of its 6MB ceiling; previews LOOKED at: real key on the door,
+    real photo by the cat, clock bodies live.
+
+**Found, not fixed**: partner chip's two caption lines still collide; room-clock caption
+tight under its body. **Open**: messages migration + phone UI; intro-film widget tests;
+device pass on two handsets; nothing committed.
+
+### §246 — The phones work: unlink_messages live on prod, wired end to end (2026-09-01)
+
+**Migration** `20260901120000_they_can_still_text_each_other.sql` — rollback in header
+BEFORE applying; staging -> verified -> prod -> verified. E2EE like chat (cipher+nonce
+bytea, 8KB cap, nonce 12..48), insert-only `unlink_send_message(bytea,bytea)` deriving the
+couple from auth.uid() and REQUIRING a live ceremony; `revoke all` + `grant select` +
+member RLS. **Deliberately NOT in the realtime publication** — the knock is a broadcast
+'msg' event on the existing scene channel + the screen's 15s poll; bytes only ever arrive
+via PostgREST (§208).
+
+**Proofs pasted at the console**: rls_on=true, auth=SELECT only, anon=0,
+in_realtime_pub=0 (both projects); the no-ceremony guard REFUSES a send (do-block caught
+it); a stranger reads 0 rows of a seeded message; seed cleaned (0 after). The
+read-as-owner positive check got swallowed by the cleanup statement's last-result — the
+policy is byte-identical to couple_intro_seen's proven shape; noted, not re-run.
+
+**Client**: `UnlinkRepository.msgAd` (DIFFERENT AAD from the note, so a message ciphertext
+can never replay as a farewell letter); `sendMessage` = the note's seal pipeline verbatim;
+`fetchMessages` = openNote's decode pipeline verbatim (bytea->bytes, zero-sentinel refusal,
+`unpackMacAndCiphertext(blob:, nonce:)`, per-channel AAD), filtered to created_at >= this
+ceremony's started_at, **parsed-N-of-M surfaced** and unopenable rows SHOWN as such.
+I first WROTE THE CRYPTO CALLS FROM IMAGINATION and got 10 analyzer errors — the
+round-trip rule exists for exactly this; the fix was reading openNote and mirroring it.
+
+**UI**: ONE pill for both roles ('Write to them') -> bottom sheet: thread (mine right,
+theirs left, unopenable rows labelled honestly), composer (500 cap), send -> RPC ->
+`announceMessage()` knock -> refetch. The farewell letter lives INSIDE the sheet as a
+quiet link, partner-side only (the RPC enforces authorship anyway). The other phone's
+newest message renders IN THE SCENE as the newest bubble in the talk stack — pinned by
+test to stand BELOW the script lines (a real person's words are never buried under
+script). Partner chip caption collision fixed (spacing block).
+
+**A law's anchor broke honestly**: both viewport laws anchored on the file's FIRST
+`Expanded(` and the sheet added an earlier one. Re-anchored on the calm layout's landmark
+comment instead of a structural token.
+
+    analyze -> 0 errors, 0 warnings · flutter test -> 1446 passed, 0 failed
+    snapshot: unlink_messages + unlink_send_message added (drift gate green)
+
+**Open**: intro-film widget tests (latch/skip/failure); the room-clock caption spacing;
+the third porch-clock render (hf_000920) unmeasured; **DEVICE PASS on two handsets — the
+whole feature has never run on hardware**; build number not bumped; nothing committed.
+
+### §247 — Build 71: proven fresh, and a signature trap surfaced (2026-09-01)
+
+Intro-film laws pinned first (3 new tests): a FAILED film still latches (latch-before-play
+proven by reading the pref back), a latched ceremony never replays, and reduce-motion
+neither plays NOR spends the film (different from failure on purpose — that user's one
+showing is still theirs). Suite 1449 green, analyze 0/0, lockstep 70→71 both files.
+
+`tool/release.sh` verdict pasted: **`checked 1 libapp.so: stamped miles-build-71`** —
+102.6MB sideload APK, sha256 0ac2b6fd…7188. APK contents verified by unzip: all 17
+unlink_films assets (8 films, 4 stages, 2 clocks, key, photo, torn photo), the Opening,
+6 presence assets. The app_release publish step SKIPPED — self-updater retired 2026-08-28.
+
+**INSTALL_FAILED_UPDATE_INCOMPATIBLE on the OnePlus 8.** Root cause in one sentence: the
+fleet-of-two is running the PLAY-flavor signature, because the build-70 restore installed
+`app-play-release.apk`, and the sideload flavor signs with a different key. NOT
+uninstalled — that deletes app data and the E2EE seed. Fix in flight: build 71 as the
+PLAY flavor and `install -r` over the matching signature.
+
+**Standing hazard for future sessions, recorded**: until the phones are deliberately
+migrated back (an uninstall+reinstall the OWNER schedules, with pairing re-setup), every
+device install must be the PLAY flavor. release.sh's sideload APK cannot land on them.
+
+OnePlus 7 off USB at install time — owner asked to replug. `min_build` untouched.
+
+### §247 addendum — I installed a stale snapshot on both phones (2026-09-01)
+
+The play-flavor rebuild REUSED BUILD-70 DART under a versionCode-71 label — the artifact
+carried all 17 new assets and none of the new code (`libapp.so` stamp: miles-build-70).
+**And both phones got it**, because my check and my install ran in the same command batch
+instead of the install being GATED on the check. The stamp law exists because six releases
+once shipped this exact lie; today I re-proved why, on my own fleet.
+
+Root cause: release.sh runs `flutter clean` + daemon stop before building precisely for
+this; my bare `flutter build apk --flavor play` right after the sideload build reused the
+play flavor's cached snapshot from yesterday's build-70.
+
+State right now: both handsets report versionCode=71 but run build-70 Dart — no doorstep.
+Fix in flight: `flutter clean` + rebuild; the NEXT install happens only after a pasted
+`miles-build-71` stamp from the play APK, as a separate gated step. Sequencing rule for
+every future session: **stamp first, paste it, THEN install. Never in one batch.**
+
+### §247 addendum 2 — build 71 is REAL and on both phones (2026-09-01)
+
+The clean-rebuild STILL stamped 70, which killed the stale-cache theory — the true ghost
+was a PINNED GRADLE/JAVA DAEMON serving stale sources across `flutter clean` (the repo's
+own recorded precedent; release.sh stops daemons for exactly this, and my bare builds did
+not). After `taskkill java.exe` + `gradlew --stop` + clean: **stamps ['miles-build-71']**
+and all four build-71 sentinels present in libapp.so (`doorstep_intro_`, a bird line,
+`unlink_send_message`, `Open the door`) — the sentinel scan is now the better proof than
+the stamp alone and should be the standard: STAMP + SENTINELS, PASTED, THEN INSTALL.
+
+Installed as a separate gated step: OnePlus 8 versionCode=71 launched; OnePlus 7 dropped
+off USB mid-batch (third time this session), recovered with adb server restart + wait,
+then versionCode=71 launched. Both phones now run PROVEN build-71 play-flavor.
+
+`min_build` untouched. Play-flavor signature hazard from §247 stands. Nothing committed.
+**Next**: the owner's two-phone walkthrough — slam film -> bird's 15 minutes -> porch-to-
+sofa text -> the key / the tear -> the films. Starting a real ceremony on their couple is
+the OWNER's act.
+
+### §248 — "Zero progress" on presence: the OnePlus 7 is the prime suspect, and it was never re-proven (2026-09-01)
+
+Owner: still the same lag, wants it instant. Diagnosis so far, evidence pasted in chat:
+
+- The §237 kill-path fix IS in build 71 and IS running on the OnePlus 8 — pulled the
+  INSTALLED base.apk and grepped: `'track failed': 2, 'miles-build-71': 1` in all three
+  libapp.so. The on-disk `app-play-release.apk` is byte-identical
+  (sha256 ae6db9e4…2418c both), so the artifact §247add2 proved is the artifact installed.
+- `presence_figure_overlay.dart:128-131` gates on `partnerPresenceProvider` /
+  `isTrulyOnline`, so the live-hint rail does move the figure. Sync unbroken by §238/§239.
+- **The hole: §247 addendum 1 installed a STALE versionCode-71 (build-70 Dart, NO presence
+  fix) on BOTH phones. Addendum 2 re-proved and reinstalled the OnePlus 8 — but the
+  OnePlus 7's recovery was only ever verified by `versionCode=71`, which is the exact
+  number the stale APK also carries.** If the OnePlus 7 still runs stale 71, the fleet is
+  mixed and presence join/leave shows zero progress BY DEFINITION: the old side never
+  tracks (nothing to see) and ignores presence events (nothing to show). The symptom does
+  not distinguish this from a broken mechanism.
+- OnePlus 7 is OFF USB — asked the owner to plug it in. The moment it appears:
+  (1) pull its base.apk, grep `'track failed'` + stamp; (2) if stale, `install -r` the
+  proven byte-identical APK; (3) run the kill-timing test on both phones over adb and
+  paste the timings. Realtime server logs carry no presence records at this level
+  (only REST-broadcast 202s), so the two-phone test is the only decisive instrument.
+
+**Open**: OnePlus 7 unproven; the timing test unrun. **Next**: exactly the three steps above.
+
+## §248 — the doorstep was hollow: five defects the owner found on the handset (2026-09-01)
+
+Build 71 went onto both phones and the owner opened the ceremony. Everything I
+had "verified" was verified by gates, and the gates could not see any of this:
+
+1. **No sound anywhere.** One `MilesSound.cue` existed in the entire unlink
+   feature, at the very end. The films ship with no audio track BY DESIGN (so
+   mute and the sound-kill work) — which means every sound must be a cue, and I
+   wrote none. The plan (§240) even listed the stand-ins to use. Not done.
+2. **The presence avatar stood in the corner of the ceremony.** The overlay is
+   mounted at the app root with no notion of a screen that owns its frame.
+3. **The 15-minute clock never moved.** Root cause: `_remainingWindow` counted
+   `coolingEndsAt` — the 24-HOUR span — from the first second. Across the
+   fifteen minutes that matter the hand swept 3.75 degrees and the arc drained
+   1%. Mechanically indistinguishable from a stopped clock, and reported as one.
+4. **"Silent conversation, too slow, chat on a stuck screen."** Three separate
+   causes, all mine: (a) lines spread EVENLY across the window sat 27–63s apart;
+   (b) the talk rendered as a bottom-pinned chat log, companion-left /
+   character-right, attached to nobody; (c) the stage after the intro film is a
+   decoded still and NOTHING on it moved — no ambient, no entrance, no motion.
+   The app already had `flicker`, `sceneLoop`, `spokenWord` and `birdFlight`
+   tokens defined for exactly this scene. I used none of them.
+5. **The letter/phone sheet had no visible way out**, and an arriving message
+   did nothing at all — no sound, no haptic, no glow; it silently swapped the
+   text inside a bubble. Also found while in there: a FAILED send cleared the
+   composer and said nothing, so the words were gone and the sender believed
+   they had been delivered.
+
+### What changed
+
+- **Sound**: `MilesSound.startBed()` for the whole scene (night air) with
+  `stopBed` on dispose; companion line -> `chime`, character line -> `tap`,
+  message in -> `receive` + light haptic, message out -> `send`, gate opening ->
+  `unlock`, the door -> `seal`. The slam fires off the FILM'S OWN PLAYHEAD at a
+  frame-measured offset (out_m 1.05s, out_f 2.10s, inside 0.15s — measured by
+  extracting frames and LOOKING, pasted in-session), never a timer, so it cannot
+  drift from the picture on a stuttering phone. Lines only speak when fresh
+  (<=8s old), so reopening at minute twelve replays history in silence.
+- **Clock**: counts the gate it is actually waiting on (`relink_opens_at` /
+  `partner_gate_opens_at`), then the day, then last call. The dial, the bird's
+  final line and the button now all finish on the same timestamp.
+- **Conversation re-timed into BEATS**: clusters of 4–5 exchanges 7–11s apart
+  separated by 70–190s silences, plus `pendingSpeaker()` — three dots at the
+  next speaker's head a few seconds before they talk, so a silence reads as
+  inhabited rather than stalled. Pinned by a new test: every gap must be <=15s
+  or >=45s (the dead middle is banned) and >60% must be conversational.
+- **The talk moved onto the people having it.** `_TalkLayer` hangs one bubble
+  off each speaker's measured head — anchors read off all four shipped stages
+  by eye at 480x853 — with a tail pointing home, through the SAME cover-fit map
+  the key and the photo use (now one shared `_mapPoint`). One line per person:
+  stacking history under a head rebuilt the chat log a bubble at a time. Each
+  speaker's words go on the side of their head FACING AWAY from the other, which
+  is what stops the two columns colliding on the inside stages where the heads
+  are ~100pt apart.
+- **The stage breathes**: a ~1% camera drift over 8s, a lamp glow that flickers
+  on each stage's measured warm source, both dead under the film and under
+  reduce-motion. Not a loop video — see OPEN.
+- **The gate is now an event**: the object grows in behind an overshooting
+  glint, `unlock` sounds, and a 30-second diegetic hint says what it is ("The
+  door still opens." / "Tear it, and you agree.").
+- **Exits and feedback**: drag handle + explicit close on the phone sheet; a
+  failed send restores the text and says so; an arriving message chimes, buzzes,
+  and its bubble breathes for 25s.
+- **Presence figure** is suppressed for the whole ceremony (and its breath
+  ticker stopped, or it would have spun for 24 hours behind a hidden widget).
+
+### Verified
+
+- `flutter analyze lib/` — 0 errors, 0 warnings (counted with `^ *(error|warning) - `).
+- `flutter test` — **1454 passed** (was 1449). Tests updated to the NEW laws, none
+  deleted: the phone test's "newest is lowest" chronology law became a "words sit
+  at their speaker" spatial law; the conversation resume test moved to the beat
+  timing; three new laws added (pacing, pendingSpeaker, dots).
+- The preview golden was regenerated at a TRUE phone aspect (260x578 ~ 0.45)
+  after the first pass at 280x500 hid nothing and the previous 0.56 tile was not
+  device-shaped. Looked at, twice: the first render showed bubbles overlapping
+  each other, which is what produced the push-apart rule.
+
+### Open / not done
+
+- **NOT VERIFIED ON A DEVICE. Nothing here has been built or installed** — the
+  owner has not asked for a build. Sound actually sounding, the slam landing on
+  the door, and the clock visibly sweeping are all device-only proofs.
+- **The stage is still a still.** The drift and the flicker stop it reading as a
+  photograph, but "fully 3D animated" wants a 4–6s seamless idle loop per stage
+  (bird shifting, character breathing, lamp alive). Four short loop videos would
+  slot straight into the existing player. Prompts on request.
+- **No door-slam, chirp or purr audio exists.** `seal` (a button press) is a
+  stand-in for the door. Real sounds need new assets — which means downloading,
+  which needs the owner's go-ahead and the same Pixabay provenance discipline
+  as the existing fifteen.
+- found, not fixed: `/unlink` publishes itself as a presence room, so the
+  partner's badge can read "Unlink" as a place being visited.
+- Nothing committed. `min_build` untouched.
+
+### §248 addendum — OnePlus 7 is PROVEN current; the new suspect is auth churn killing the channel (2026-09-01)
+
+- OnePlus 7 plugged in; pulled its installed base.apk: **sha256 ae6db9e4…2418c — byte-identical
+  to the OnePlus 8 and the proven artifact; sentinels present ('track failed': 2,
+  'miles-build-71': 1).** Mixed-fleet theory DEAD. Both phones run the §237 fix.
+- Put the OnePlus 7 on wifi-adb (192.168.100.3:5555, `adb tcpip 5555`) so one cable can
+  serve both phones. Woke it to test — **it is SIGNED OUT, sitting on "Welcome back"**.
+- Auth logs (UTC): Elsa password login 01:54:28 (owner's morning test session); at
+  13:00:53 — the moment this session am-started the app — a token login immediately
+  followed by **token_revoked** for Elsa → signed out (her goodbye presence write landed
+  13:01:31). **Steve's account emits token_revoked EVERY HOUR** (02:45→12:01, ten in a
+  row) — the refresh-token-reuse signature. chat_receipts.dart:373-548 already documents
+  the two-holder danger and its bg-ack path is properly gated + persists rotated tokens,
+  so the second holder is NOT that path; unidentified (candidates: a second device or
+  process holding Steve's session; NOT a second in-app Supabase.initialize — only one
+  exists).
+- Realtime logs during the owner's failing 01:55-02:30Z test: continuous REST /broadcast
+  202s. REST fallback fires only when a channel is NOT joined over the socket. Presence
+  join/leave has NO REST fallback → an unjoined channel = zero presence, working chat.
+  Fits "everything else fine, presence dead" exactly. Not yet proven — needs the live
+  pair test.
+
+**Open**: Elsa must be signed back in BY THE OWNER (credentials are never an agent's to
+enter); OnePlus 8 needs USB or owner-operated moves; then the timed kill test. The hourly
+token_revoked on Steve is a live defect regardless of presence — it randomly signs people
+out (it got Elsa today) and deserves its own hunt: what else holds his refresh token.
+**Next**: owner signs in on the OnePlus 7 → pair test with timestamps → fix what it names.
+
+## §249 — why the presence figure irritates, and what should replace it (2026-09-01)
+
+Owner: "the presence avatar is annoying and irritating" — twice, unprompted,
+across two separate turns. Diagnosed before proposing. It is not a polish
+problem; three structural facts make it irritating by construction:
+
+- `presence_figure_overlay.dart:94` — `_loop.repeat()`. A 5.2-second breath
+  cycle that never ends. Perpetual motion in peripheral vision is the single
+  most reliable way to make an interface element hostile: the eye is drawn to
+  motion involuntarily, so the figure re-interrupts forever without ever
+  carrying new information.
+- `figureHeight = 116.0`, bottom-left, mounted at the app root. Roughly a
+  seventh of a phone's height, permanently, on every screen in the app.
+- Visibility is `isHere || canJoin`, and `canJoin` covers **10 joinable routes
+  plus the tab screens** — so it is on screen essentially the whole time the
+  partner has the app open. It is a RESIDENT, not an event.
+
+Also conflated: one control does two unrelated jobs — "warm the room" (they are
+here with you) and "go to them" (they are elsewhere). The second is an
+unsolicited nudge to leave the screen you chose, and it is the one that lives
+there permanently.
+
+### Proposed (owner to choose; nothing built)
+
+1. **Knock, then quiet** — RECOMMENDED. The figure becomes a moment: walks in
+   on arrival, holds ~2.5s, walks out. What remains is a STILL dot in the
+   AppBar in their mood colour. Tap = peek + the warm/join action. No animation
+   ever runs longer than ~4s; nothing permanently occupies the canvas. Motion
+   becomes information again.
+2. **In the room, not on the glass** — the character exists only where the app
+   has a scene to stand in (Home), at art scale, part of the picture, the way
+   the doorstep already works. Everywhere else: the dot. Needs Home to become a
+   place; more art.
+3. **Warmth only** — delete the figure; presence is a still soft edge-glow in
+   their mood colour plus the dot. Calmest, cheapest, least characterful.
+4. **Minimum de-annoyance** if the figure stays: freeze the loop (animate on
+   arrival only), ~64pt, auto-retire to the dot after 8s.
+
+Next step: owner picks. 1 and 2 compose (1 everywhere, 2 on Home).
+Nothing built this turn. The ceremony-suppression from §248 stands regardless.
+
+### §248 addendum 2 — MEASURED: presence flips in ~2.4s on a hard kill, ~1s after boot on return (2026-09-01)
+
+Owner signed Elsa in on the OnePlus 7 and put the OnePlus 8 on USB. Clean baseline: both
+apps force-stopped, relaunched, both showed partner Online with the corner figure. Then
+the exact class the owner reported — an INSTANT kill (`am force-stop`, harsher than any
+swipe) — with timestamped screenshots of the partner's phone:
+
+    T_KILL 18:08:08.278 (force-stop Elsa's app)
+    +1.4s  still Online, figure standing
+    +2.1s  still Online, figure standing
+    +2.7s  figure GONE, "Last seen 6:07 PM"     -> leave latency ~2.4s
+    T_START 18:08:51.667 (cold start, OnePlus 7)
+    +2.6s  still Last seen (app still booting)
+    +4.7s  Online, figure back                   -> ~1s after the app was up
+
+**The §237 mechanism works on hardware, both directions, on the kill class client code
+can never cover.** The server-observed socket death does the goodbye; track-on-join does
+the arrival. No DB wait visible.
+
+**Why the owner measured "zero progress" this morning, best-supported story:** the fleet's
+AUTH CHURN. Steve's account logged hourly `token_revoked` all night (refresh-token reuse);
+Elsa's session was killed by the same mechanism at 13:00Z mid-launch. A phone inside one
+of those dead-token windows has no authorized realtime channel — presence (socket-only)
+goes dark while chat (PostgREST, retried after refresh) keeps working. This morning's
+01:55-02:30Z test ran with Steve's phone 8+ hours into that churn.
+
+**Open, and it is the next work item: find the second holder of Steve's refresh token.**
+Hourly cadence = access-token TTL; the in-app bg-ack path is properly gated
+(chat_receipts.dart:507-548) and only one Supabase.initialize exists, so the second
+holder is likely OUTSIDE this app install (another device/emulator/PC holding his
+session). Until it is found, random sign-outs and dark presence windows continue.
+`min_build` untouched. Nothing committed this turn beyond BRAIN.
+**Next**: enumerate Steve's active auth sessions server-side; kill the stale one; then
+watch whether hourly token_revoked stops.
+
+### §248 addendum 3 — auth-churn theory CORRECTED by the session inventory (2026-09-01)
+
+`auth.sessions`: Steve has exactly ONE live session (53b39085, created 08-30, still
+refreshing at 13:03 today) — there is NO second device/holder. A session that survives
+"hourly token_revoked" means those audit rows are most likely gotrue logging the OLD
+token's revocation during ROUTINE rotation — benign, not a reuse attack. The §248add
+"reuse signature" claim is therefore WITHDRAWN as unproven; what remains real: Elsa's
+session b085f9a3 died at 13:00:53 mid-refresh (sign-in screen photographed) — one
+occurrence, cause unestablished, watch for recurrence rather than theorize.
+
+What this leaves as the story for the owner's failed morning test: unreconstructable
+from here — likely a stale channel on a long-backgrounded app. The MECHANISM is proven
+(addendum 2's timings); if the symptom recurs, instrument the rejoin path
+(realtimeResumed) rather than the presence rail.
