@@ -20484,3 +20484,12 @@ secrets grep over the staged diff clean, `flutter analyze` 0/0 (201 infos)
 re-run on the tree as committed. The play AAB built in §252 came from this
 exact source, so it now traces to a commit. NOT pushed — the owner said
 commit, not push.
+
+### §252 addendum 2 — pushed as 01bce79 (2026-09-02)
+
+Owner: "push it." `git fetch` first: origin/fix-sprint was still bd1ee39, so
+the push was a plain fast-forward, `bd1ee39..01bce79 fix-sprint -> fix-sprint`.
+CI (`.github/workflows/gates.yml`) runs analyze + test + the OSV audit on that
+push; its verdict is the next thing to read. This addendum is committed and
+pushed as its own docs commit so the tree is left clean, the same shape as
+bd1ee39.
