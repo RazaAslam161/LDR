@@ -20536,3 +20536,46 @@ Commits this session on fix-sprint, all pushed: 4fbe38b (sweep), 01bce79 and
 e96fff2 (cross-platform greps). The play AAB for build 73 in §252 predates
 b5907c0..e96fff2, which touch only CI, a script and a test — no app code —
 so it is still the artifact for this tree.
+
+### §250 — The resurrection: the leave hint was a one-shot, and every later row undid it (2026-09-02)
+
+Owner: "goes offline after 2 seconds but comes back online after 2 seconds — the partner
+is already gone." Both phones on USB; reproduced on the OnePlus 8 in Chat with the
+OnePlus 7 force-stopped, 18 timestamped screenshots classified by the header dot and the
+corner figure (kill = +0):
+
+    +4s … +19s   OFFLINE (grey dot)            <- §237 leave hint worked
+    +22.5s       ONLINE again, figure pops in  <- resurrection
+    +26s … +34s  online, figure gone
+    +38s         online, figure pops again
+    +41s … +63s  offline for good (45s freshness decay)
+
+**Root cause in one sentence:** the live hint was applied ONCE as an overlay on the current
+state, and every later row `PartnerPresenceNotifier._apply` published — the dead partner's
+own `is_online:true` row with a seconds-old stamp, refetched by the 800ms debounce that ANY
+event on the couple's presence channel schedules (the reader's own 30s heartbeat included)
+— replaced it wholesale until the 45s window decayed. My §248 test only watched 4.6s and
+missed it; "riskiest path exercised" was not true for the sustained window.
+
+**Fix:** `PresenceService.reconcile(row, hint)` — one rule, run on EVERY row inside
+`_apply`: a row wins only by carrying `app_last_active_at` NEWER than the hint (the
+partner really wrote after the socket said they left = they are back); otherwise the
+hint's liveness is laid over the row. `_onLiveHint` now just re-applies the current state
+through the same path. Both stamps are server time (trigger vs ServerClock), so no
+device-clock reconciliation. New `test/unit/presence/presence_resurrection_test.dart`
+(4 tests: stale row after a leave stays offline; newer activity wins; arrival hint
+overlays an older row; null passthrough).
+
+**Verified**: `flutter analyze` on both files — No issues found. `flutter test
+test/unit/presence` — 45 passed, All tests passed. Full suite on the final tree running
+at write time; verdict appended below.
+**BLOCKED for device proof**: both phones run build 71, which predates this fix AND the
+§249 sign-out fix; the 60s kill window on hardware can only be re-measured after the owner
+asks for a build. The figure's on/off flicker WHILE resurrected (+22 vs +26) is a
+consequence of the same stale rows and goes with them.
+**Next**: full-suite verdict → owner asks for build 72 → install both → repeat the 18-shot
+kill window (expect: grey from +4s through +63s, no green in between).
+
+Full suite on the final tree (after the last edit): see the line pasted in chat —
+appended here verbatim by the next command.
+    flutter test  ->  02:23 +1468 ~3: All tests passed!   (1468 passed, 3 skipped)

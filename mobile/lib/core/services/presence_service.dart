@@ -380,6 +380,41 @@ class PresenceService {
     liveHint.value = null;
   }
 
+  /// The row the database (or a realtime payload) just handed us, corrected
+  /// by whatever the socket has said SINCE that row was written.
+  ///
+  /// The hint used to be applied once, as an overlay on the current state, and
+  /// the next row to arrive replaced it wholesale. On a force-kill that next
+  /// row is the dead partner's own — `is_online:true`, a stamp seconds old —
+  /// and it arrives every time ANY event touches the couple's presence channel
+  /// (the reader's own 30s heartbeat schedules a refetch), so the avatar went
+  /// dark at ~2s, came BACK at the next heartbeat, and only left for good when
+  /// the 45s window decayed. Measured on the OnePlus 8 (BRAIN §250): offline
+  /// at +4s, online again at +22s and +38s, gone at +41s.
+  ///
+  /// The rule is one comparison: a row wins only by carrying activity NEWER
+  /// than the hint — the partner really did write something after the socket
+  /// said they had gone, so they are back. Otherwise the hint is the newest
+  /// fact about liveness and it is laid over the row, exactly as the broadcast
+  /// handler lays it over the current state. Both stamps are server time
+  /// (`app_last_active_at` by the trigger, the hint by [ServerClock]), so they
+  /// are comparable without reconciling two device clocks.
+  static Presence? reconcile(
+    Presence? row,
+    ({bool online, DateTime at})? hint,
+  ) {
+    if (row == null || hint == null) return row;
+    final activeAt = row.appLastActiveAt;
+    if (activeAt != null && activeAt.isAfter(hint.at)) return row;
+    return row.withLiveness(
+      isOnline: hint.online,
+      // isTrulyOnline reads app_last_active_at against the 45s window, so an
+      // arrival has to move that clock or the avatar stays dark until the
+      // database catches up — which is the latency the hint exists to remove.
+      appLastActiveAt: hint.online ? hint.at : null,
+    );
+  }
+
   static Future<void> setOnline(String coupleId, {required bool online}) {
     // Claiming presence requires a person. Going OFFLINE is always allowed —
     // it is the honest direction, and a goodbye written as the app dies must
@@ -618,19 +653,13 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
   ///
   /// Only the liveness fields move — a hint carries no screen, mood or
   /// location, and inventing those from it would blank real values a moment
-  /// before the database confirms them. The postgres_changes event that follows
-  /// ~500ms later carries the whole row and reconciles.
+  /// before the database confirms them. The overlay itself lives in
+  /// [PresenceService.reconcile], which [_apply] runs on EVERY row, so the
+  /// postgres_changes event that follows cannot undo what the socket said.
   void _onLiveHint() {
-    final hint = PresenceService.liveHint.value;
     final cur = state;
-    if (hint == null || cur == null) return;
-    _apply(cur.withLiveness(
-      isOnline: hint.online,
-      // isTrulyOnline reads app_last_active_at against the 45s window, so an
-      // arrival has to move that clock or the avatar stays dark until the
-      // database catches up — which is the latency this exists to remove.
-      appLastActiveAt: hint.online ? hint.at : null,
-    ),);
+    if (cur == null) return;
+    _apply(cur);
   }
 
   final Ref ref;
@@ -670,8 +699,10 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     },);
   }
 
-  /// Publish [p] and re-arm the liveness timer for it.
-  void _apply(Presence? p) {
+  /// Publish [row] — corrected by the newest socket hint — and re-arm the
+  /// liveness timer for it.
+  void _apply(Presence? row) {
+    final p = PresenceService.reconcile(row, PresenceService.liveHint.value);
     state = p;
     _expiry?.cancel();
     final ts = p?.appLastActiveAt;
