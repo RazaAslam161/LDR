@@ -21988,3 +21988,48 @@ Found, not fixed (outside this change):
 
 Install build 76 over 75 with `adb install -r`, expect `Success` and
 `versionCode=76`, then exercise the R8 paths and the backup hold.
+
+### §263 addendum — committed and pushed (2026-09-03)
+
+`58e82b9` on `fix-sprint`, pushed to `origin` and confirmed there
+(`git rev-list --left-right --count origin/fix-sprint...HEAD` → `0 0`). Seven
+files, staged by explicit path, nothing else in the tree:
+
+    .claude/CLAUDE.md
+    docs/guides/BRAIN.md
+    docs/guides/PLAY-RELEASE-RUNBOOK.md
+    mobile/android/app/build.gradle.kts
+    mobile/lib/core/app/release_gate.dart
+    mobile/pubspec.yaml
+    mobile/tool/release.sh
+
+Gates immediately before the commit, run from `mobile/`:
+
+    flutter analyze  → 177 info, 0 error, 0 warning
+    flutter test     → 03:17 +1572 ~3: All tests passed!
+
+That severity tally is a real measurement rather than a structural zero: the
+matcher was first fed one synthetic error, one warning and one info line and
+returned one of each.
+
+Also amended this turn, outside the repo: the global rulebook's "a gate that
+COUNTS proves it can match" bullet, sharpened in place to require that a test
+harness reproduce the real ENVIRONMENT (shell options, interpreter flags,
+working directory) and run code lifted out of the file rather than retyped. A
+harness missing the script's own `set -e` is what let defect 6 above be
+reported as verified when the script could not run at all.
+
+**Two mechanical traps on this machine, both of which cost real time here and
+will cost it again.** Neither is a code defect; both make a command lie:
+
+- **The working directory drifts back to the repo root between commands.** Four
+  separate runs this session executed from `D:\Miles` instead of
+  `D:\Miles\mobile`. Two of them looked like a script that exited 1 with an
+  empty log, and one produced `Test directory "test" not found` after a
+  clean-looking analyze. Put the directory change in the SAME command as the
+  thing being run, every time, and never trust a previous command's `cd`.
+- **Backticks inside a double-quoted `python -c "..."` are expanded by bash
+  before python ever sees them.** That is what mangled the first version of
+  this addendum: the commit hash, the branch name and every file path silently
+  vanished, and bash executed `tool/release.sh` as a command in passing. Write
+  scripts to a file and run the file. Heredocs also fail on this shell.
