@@ -30,7 +30,6 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart' show partnerScreenProvider;
-import 'package:miles/core/widgets/presence_figure_overlay.dart';
 import 'package:miles/core/widgets/stealth_overlay.dart';
 import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
@@ -1073,20 +1072,15 @@ class _MilesAppState extends ConsumerState<MilesApp>
               // screen is sending the partner a black rectangle, and neither of
               // them could previously tell that from a broken share.
               const ScreenShareBanner(),
-              // Presence used to float here, top-centre over every screen. It
-              // covered titles and buttons, interrupted whatever was being
-              // read, and looked like a system alert instead of a person. It
-              // now lives in each screen's own AppBar next to their name —
-              // see PartnerHereAction.
+              // Presence does not float here. It floated top-centre once, then
+              // stood full-length in the bottom corner, and both were rejected
+              // on the handset as an intrusion. It lives in each screen's own
+              // AppBar beside the partner's name, as a face that wears their
+              // mood — see PartnerHereAction in partner_bust.dart.
               // The shared bloom when one of them warms the room. Root-level
               // so it reaches the whole screen, above the page and below the
               // lock.
               const Positioned.fill(child: WarmthOverlay()),
-              // The partner, standing in the corner of whatever screen you are
-              // on. Mounted HERE rather than in twenty AppBars: they can arrive
-              // and leave without a single screen reflowing, and a screen added
-              // tomorrow cannot forget to include them.
-              const Positioned.fill(child: PresenceFigureOverlay()),
               // The unlinking ritual's two endings — the light flood and the
               // dusk — played above the router, because both endings navigate
               // and a farewell cut off mid-flight is worse than none.

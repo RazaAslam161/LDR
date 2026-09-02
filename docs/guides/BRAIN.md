@@ -20846,3 +20846,174 @@ Fast-forward push (30d990e..f3b035b). CI run 33579936687 on the fix commit:
 analyze + test success, dependency advisories success — the second green run
 in the repository's history, and the first on an app-code change. Both
 phones still run build 73 with the defect until build 74 is cut.
+
+## §256 — the partner's face in the AppBar, on an instant rail (2026-09-02)
+
+Third presence design in a week, the owner's own: "3D avatar on the top beside
+the call icon where it was already — just shoulder and face, real expressions,
+changes its mood according to the partner, instantly synchronized, without any
+second delay." The standing figure (§249) and its knock are DELETED. Plan
+approved and executed; Phase A (mechanism, provable against the two neutral
+busts that ship today) is done; Phase B (the 80-frame expression cast the owner
+is generating from the prompts delivered this session) slots in behind it.
+
+### The rail
+
+Mood travelled by the presence row alone: one upsert, one postgres_changes hop,
+~750ms–1.2s. Now `_setMyMood` does **two writes, one instant**: it broadcasts
+`mood` on `screen_presence:<coupleId>` (the ~100ms rail that already carries
+`screen`/`live`/`warm`) FIRST and un-awaited, then upserts the row with the
+SAME `mood_updated_at`. `mood_updated_at` is client-stamped (the server trigger
+touches only `updated_at`/`app_last_active_at`), so `mergeMood(row, hint)` is
+one comparison on one clock: the row wins only if STRICTLY newer (a broadcast
+was missed; the refetch caught up), else the hint. `Presence.moodUpdatedAt` is
+parsed and carried through `withLiveness`, or the reconcile would strip it and
+the row could never win. `moodHint` mirrors `liveHint` exactly, including
+`resetMoodHint()` at the identity switch. `partnerMoodProvider` merges both
+rails; only the 44pt host watches it. No migration — the topic already passes
+the couple-id authz policy. The "instant" law is pinned without a socket:
+`onMoodBroadcast(...)` then `read(partnerMoodProvider)` with no await, plus
+source laws (nothing deferred on the path; broadcast indexed before the awaited
+upsert; no `ServerClock` in the merge).
+
+### The face
+
+`PresenceCharacter` now takes `mood` (art name), `size`, `disc`. `PresenceArt`
+is a literal manifest (`m_neutral`, `m_neutral_shut`, `f_…`) — literal because
+the orphan gate reads it as text — with `exprFor()` falling back to neutral for
+any mood without a shipped frame, and an LRU of four pairs whose references are
+dropped, never disposed (a painter mid-fade may hold one). A mood change is a
+cross-fade THROUGH the same mesh: positions computed once, the old face drawn,
+the new one composited through a `saveLayer` carrying the fade's alpha (a layer,
+not paint alpha under an ImageShader — that is backend-defined), one blink
+decision for both. A small reactive beat (scale + chin-lift, `sin(pi*swap)`)
+rides the existing transform. `disc: false` stands the matted bust free — no
+clip, `srcATop` tint (overlay paints the transparent rectangle; presence_figure
+found that), a lighter shoulder pool, and a `dstIn` gradient over the layer's
+bottom 20% so the square crop's hard chest edge fades instead of ending like a
+sticker. `_blinkEvery` retuned 4.3 → 2.8 for the 4s `MilesMotion.breath` loop.
+
+`partner_bust.dart` is the host: `PartnerHereAction` (the 44pt drop-in) over a
+`_BustHost` with `_loop` (breath, runs only while `fresh`) and `_arrive`
+(rings on the isHere rising edge). Owner's rules, as decided: the face is
+ALWAYS painted once we know who they are; offline = colour drains, expression
+stays; tap warms when together, joins when joinable, inert otherwise; the
+semantics label names the mood. Mounted on the 17 AppBars the badge lived in
+(15 by reverse-applying 531c02a's own hunks, chat and Home by hand) — chat's
+first action, above the voice-call button, where the owner asked. Home's 64pt
+card face wears the mood too.
+
+### Three defects the tests found before a handset could
+
+1. **Lazy `late final` controllers die in dispose** — the overlay's bug class,
+   again: a face with no art never builds, so `_swap`'s initialiser ran for the
+   first time INSIDE dispose() on a deactivated element. Both files now build
+   their controllers in initState, with the comment naming why.
+2. **A `.then` on an already-complete decode never fires inside a test's zone**
+   (the future completed in setUpAll's zone), and in production it was a
+   needless microtask hop. The fade now starts synchronously when the frame is
+   decoded — which, with the LRU, is the common case — and only awaits a decode
+   when it must.
+3. **`isDone` is `t > duration`, strictly** — at exactly 420ms the controller
+   is at 1.0 and still `forward`; the phone's next frame completes it. The test
+   pumps one frame past.
+
+### Verified
+
+- `flutter analyze lib/ test/` 0 errors / 0 warnings.
+- `partner_bust_test` 12, `mood_rail_test` 19, identity twin: green.
+- Rendered and LOOKED at: `preview/presence_moods.png` (2 characters × 20 moods
+  at 34pt and 80pt, every cell neutral until the cast lands; tints, the
+  free-standing edge, the shoulder fade and the drained state all read) and
+  `preview/presence_fade.png` (mid-fade, clean composite).
+- Full suite: running at time of writing — result in the addendum.
+
+### Open
+
+- **NOT ON A DEVICE.** Only the OnePlus 8 is attached; the latency proof needs
+  both (A sets, B's face changes). Instrumentation is in the code behind
+  `kDebugMode || kProfileMode`: `[mood] send …` on A, `[mood] recv … rail=bcast
+  one_way_ms=…` on B. Run B as a profile build, `adb logcat -s flutter | grep
+  '\[mood\]'`, target < 300ms one-way.
+- **Phase B**: `tool/presence_cut.py` (matte → register → crop → alpha ramp →
+  256px WebP q80 → measure pupils/neck → print the 80 manifest lines), the
+  ceiling raise 150KB → 1MB, and a LOOK at all 40 cells at 4x.
+- Nothing committed.
+
+### §256 addendum — full suite green; the expression cast has arrived (2026-09-02)
+
+`flutter test` → **1485 passed** (was 1464: +new rail/bust/preview laws, −the
+figure's). `flutter analyze lib/ test/` 0/0. Secrets grep over the diff: clean.
+Owner dropped the generated expressions in `C:\Users\RAZA\Downloads\Presence\`
+— Phase B starts: inventory, matte, register, crop, ramp, encode, measure,
+manifest. Nothing committed.
+
+## §257 — Phase B: the forty expressions, cut and shipped (2026-09-02)
+
+The owner delivered `C:\Users\RAZA\Downloads\Presence\`: 40 frames, all 2048²
+with the background BAKED IN (grey; one black; two peach), no blink pass yet.
+Two names hand-typed (`m-joyful`, `f_kissy`), and `f_neutral.png` was a
+1440×2560 portrait render while the stray `Gemini_Generated_Image_…jpg` was her
+actual square neutral — used as such.
+
+`tool/presence_cut.py`: matte (rembg bria-rmbg) → register every frame to its
+character's neutral (silhouette + luminance over the head, 9 scales × 169
+offsets at 128px) → one square per character → alpha ramp over the bottom 12%
+→ 256px WebP q80 → measure → manifest. **40 frames, 406KB** (~10KB each; dir
+ceiling raised 150KB → 1MB with the reason in the gate).
+
+### What the pipeline got wrong before it got it right — all caught by LOOKING
+
+1. bria on CPU: 2048² ran past ten minutes, 1024² past twenty. Now 640² (2.5×
+   the output) and CACHED per frame in `%TEMP%\presence_cut\mattes\`, so a
+   re-run is seconds.
+2. The crop square added the bbox's `left` to columns that were already
+   absolute — every male frame 174px right, his face off the left edge. Hers
+   survived only because her hair reaches x=0.
+3. The square was sized off HEAD WIDTH: her hair is twice his head, so he got
+   a tight face-only crop with no shoulders. Now sized off silhouette height,
+   the one measure both share (both deliveries reach the frame's bottom).
+4. The automatic pupil finder measured the VOID (transparent = black =
+   darkest) and, once masked, the HAIR. The numbers that ship were read off
+   the 5% grid by eye — male axis 0.50 / collar 0.76, female 0.443 / 0.66 —
+   which is what the grid overlay was for.
+
+Male set: all 20 registered at identity (pixel-consistent delivery). Female:
+17 consistent; `f_excited`, `f_loving`, `f_missing_you` are true outliers
+(different zoom/offset at generation) — shipped, usable, but they shift on a
+cross-fade. **Ask the owner to regenerate those three with the neutral
+attached as the reference.** No `_shut` frames exist yet, so the old-framing
+neutral blinks were removed; nobody blinks until the blink pass lands.
+
+### Verified
+
+- Preview goldens regenerated with the real cast and LOOKED AT: all 40 at 34pt
+  and 80pt, tints, drained state, free-standing edge, shoulder fade; and the
+  neutral → angry mid-fade. Expressions read at 34pt.
+- `flutter analyze lib/ test/` 0/0. Full suite: running — addendum follows.
+- `PresenceArt.keep` is settable for the preview (holds 40); the test resets
+  it to 4.
+
+### Open
+- Device pass: still one phone attached (§254's session has the other).
+- Three female retakes; the blink pass; `min_build` untouched; nothing
+  committed.
+
+### §257 addendum — full suite green with the cast (2026-09-02)
+`flutter test` → **1485 passed**; `flutter analyze lib/ test/` 0/0; asset
+gates green at 406KB / 1MB for presence and ~10.8MB / 12MB aggregate. Nothing
+committed. Next: owner regenerates `f_excited`, `f_loving`, `f_missing_you`
+(and the 40 blinks); with both phones attached, the profile-build latency
+proof from §256.
+
+### §257 addendum 2 — 088fc22 is HALF a commit; the other half follows it (2026-09-02)
+
+The explicit `git add` list carried two pathspecs for files already removed
+with `git rm`. `git add` aborts on the first bad pathspec, stages NOTHING from
+that call, and the commit that followed took what was already in the index —
+the 8 deletions and 2 renames — and pushed it. So `088fc22` on its own does
+not compile (main.dart there still imports the deleted overlay). Fix-forward,
+not a rewrite: this branch is shared with a session in the same tree, and a
+force-push under it is worse than two commits that only make sense together.
+Rule for next time: `git add` and `git commit` in SEPARATE steps, with the
+staged count checked between them — the count was printed and ignored.

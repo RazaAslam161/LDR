@@ -72,6 +72,27 @@ void main() {
             'one the previous couple left behind',);
   });
 
+  test('a stale mood hint does not swallow the first mood of the next couple',
+      () {
+    // The liveHint case, for the other thing the socket carries by the
+    // sender's clock.
+    PresenceService.resetMoodHint();
+    PresenceService.applyMoodHint(
+      mood: 'angry',
+      at: DateTime.utc(2026, 8, 29, 12),
+    );
+    PresenceService.resetMoodHint();
+    PresenceService.applyMoodHint(
+      mood: 'calm',
+      at: DateTime.utc(2026, 8, 29, 11),
+    );
+    addTearDown(PresenceService.resetMoodHint);
+
+    expect(PresenceService.moodHint.value?.mood, 'calm',
+        reason: "the next partner's first mood was dropped as older than the "
+            'one the previous couple left behind',);
+  });
+
   test('a session the SERVER ends unbinds the handset too', () {
     // signOut() unbinds the device before it leaves, but a revoked or expired
     // refresh token never passes through signOut() — it arrives as an event

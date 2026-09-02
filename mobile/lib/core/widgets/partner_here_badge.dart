@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode, kProfileMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +31,49 @@ final partnerScreenProvider =
 /// devices render at the same moment. It is a counter rather than a bool so a
 /// second warmth while the first is still fading re-triggers the animation.
 final roomWarmthProvider = StateProvider<int>((ref) => 0);
+
+/// The PARTNER's mood key, merged from two rails: the `mood` broadcast (the
+/// instant one) and the presence row (the durable one). The face in every
+/// AppBar watches this and nothing wider, so a mood landing rebuilds a 44pt
+/// box and not the shell.
+final partnerMoodProvider =
+    StateNotifierProvider.autoDispose<PartnerMoodNotifier, String?>(
+  PartnerMoodNotifier.new,
+);
+
+class PartnerMoodNotifier extends StateNotifier<String?> {
+  PartnerMoodNotifier(this.ref)
+      : super(
+          PresenceService.mergeMood(
+            ref.read(partnerPresenceProvider),
+            PresenceService.moodHint.value,
+          ),
+        ) {
+    // The database rail: the bind fetch, postgres_changes, the refetch on
+    // resume, the 45s expiry — every row that arrives is re-merged.
+    ref.listen(partnerPresenceProvider, (_, __) => _recompute());
+    // The broadcast rail.
+    PresenceService.moodHint.addListener(_recompute);
+  }
+
+  final Ref ref;
+
+  void _recompute() {
+    if (!mounted) return;
+    state = PresenceService.mergeMood(
+      ref.read(partnerPresenceProvider),
+      PresenceService.moodHint.value,
+    );
+  }
+
+  @override
+  void dispose() {
+    // moodHint is static and outlives this; a listener left on it is the
+    // liveHint leak all over again.
+    PresenceService.moodHint.removeListener(_recompute);
+    super.dispose();
+  }
+}
 
 class PartnerScreenNotifier extends StateNotifier<String?> {
   PartnerScreenNotifier(this.ref) : super(null) {
@@ -133,6 +177,10 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
             PresenceService.applyLiveHint(online: online, at: stamped);
           },
         )
+        // Their mood, the instant they choose it. The database write still
+        // happens beside the broadcast and still decides; this only stops the
+        // partner's face waiting ~1s on a postgres_changes hop to change.
+        .onBroadcast(event: 'mood', callback: onMoodBroadcast)
         // The rails above all need the OTHER phone to still be running Dart.
         // An instant swipe-kill runs none — the only thing that outlives it is
         // the socket, which the OS closes as the process dies. Presence rides
@@ -246,6 +294,59 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
     } catch (e) {
       debugPrint('[presence] live broadcast failed (online=$online): $e');
     }
+  }
+
+  /// Tell the partner what mood was just chosen, immediately.
+  ///
+  /// Sent BESIDE the database write with the SAME [at], never instead of it:
+  /// if the socket is down this does nothing and the postgres_changes path
+  /// carries the change, a little slower. `sent` is server time and exists
+  /// only so the receiving phone can measure the hop.
+  void announceMood(String mood, {required DateTime at}) {
+    final myUid = ref.read(currentProfileProvider)?.id;
+    final ch = _channel;
+    if (ch == null || myUid == null) return;
+    try {
+      ch.sendBroadcastMessage(
+        event: 'mood',
+        payload: {
+          'from': myUid,
+          'mood': mood,
+          'at': at.toUtc().toIso8601String(),
+          'sent': ServerClock.now().toIso8601String(),
+        },
+      );
+    } catch (e) {
+      debugPrint('[presence] mood broadcast failed ($mood): $e');
+    }
+  }
+
+  /// The 'mood' event, applied SYNCHRONOUSLY — no timer, no debounce, no
+  /// refetch in the way. Named and visible so the "instant" law can be
+  /// exercised without a socket: call it, read the provider, no await.
+  @visibleForTesting
+  void onMoodBroadcast(Map<String, dynamic> payload) {
+    final myUid = ref.read(currentProfileProvider)?.id;
+    Diag.record(DiagArea.presence, 'presence_mood_recv', fields: {
+      'has_from_key': payload.containsKey('from'),
+      'from_is_self': payload['from'] == myUid,
+      'has_mood': payload['mood'] is String,
+      'has_at': payload['at'] is String,
+    },);
+    if (payload['from'] == myUid) return; // our own echo
+    final mood = payload['mood'];
+    final atRaw = payload['at'];
+    if (mood is! String || mood.isEmpty || atRaw is! String) return;
+    final at = DateTime.tryParse(atRaw)?.toUtc();
+    if (at == null) return;
+    if (kDebugMode || kProfileMode) {
+      final sent = DateTime.tryParse(payload['sent'] as String? ?? '');
+      final hop = sent == null
+          ? null
+          : ServerClock.now().difference(sent).inMilliseconds;
+      debugPrint('[mood] recv $mood rail=bcast one_way_ms=$hop');
+    }
+    PresenceService.applyMoodHint(mood: mood, at: at);
   }
 
   /// Warm the room: a bloom that lands on BOTH screens at once.

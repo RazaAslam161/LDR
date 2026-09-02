@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_repository.dart';
 
@@ -115,7 +116,7 @@ class _DailyPromptScreenState extends ConsumerState<DailyPromptScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        
+        actions: const [PartnerHereAction()],
         title: const Text('Daily Question'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

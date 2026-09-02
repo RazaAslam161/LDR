@@ -11,6 +11,7 @@ import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_press.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
 import 'package:miles/features/closer/memory_threads/memory_thread_repository.dart';
@@ -223,7 +224,7 @@ class _CloserScreenState extends ConsumerState<CloserScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        
+        actions: const [PartnerHereAction()],
         title: const Text('Closer'),
         leading: Builder(
           builder: (ctx) => IconButton(

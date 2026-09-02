@@ -8,6 +8,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/shell/app_drawer.dart';
 import 'package:miles/features/watch/watch_embed.dart';
@@ -695,6 +696,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
             ? null
             : AppBar(
                 actions: [
+                  const PartnerHereAction(),
                   // The ONLY way a session ends. Leaving the screen used to do it,
                   // which meant one of them glancing at a message closed the video for
                   // both — so ending it is now a deliberate act with a button.

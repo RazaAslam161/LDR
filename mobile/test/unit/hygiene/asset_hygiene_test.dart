@@ -91,11 +91,14 @@ void main() {
         reason: 'assets/fonts over its 600KB ceiling');
     expect(dirSize('assets/scene'), lessThanOrEqualTo(600 * 1024),
         reason: 'assets/scene over its 600KB ceiling');
-    // Two busts, ~54KB. The ceiling is deliberately close to the contents:
-    // this directory exists so a badge on twenty screens decodes ONE small
-    // face, and the day it grows a cast is the day that stops being true.
-    expect(dirSize('assets/presence'), lessThanOrEqualTo(150 * 1024),
-        reason: 'assets/presence over its 150KB ceiling');
+    // RAISED 150KB -> 1MB on 2026-09-02, the owner's decision: the day the
+    // badge grew a cast. Forty expression frames (2 characters x 20 moods,
+    // open-eyed) at 256px, ~10KB each; the blink pass doubles the count.
+    // Still decoded one pair at a time (PresenceArt's LRU), so a face on
+    // twenty screens costs one small decode, not forty. Room for the blinks
+    // and a retake, not a third character.
+    expect(dirSize('assets/presence'), lessThanOrEqualTo(1024 * 1024),
+        reason: 'assets/presence over its 1MB ceiling');
     // The Opening: one 14s H.264 film, 406x720 portrait, no audio track (the score
     // plays through MilesSound so mute and the sound-kill still govern it). 1.93MB
     // today. The ceiling leaves room for a re-master but not for a second film.

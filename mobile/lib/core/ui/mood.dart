@@ -29,7 +29,12 @@ class MoodData {
   /// every mood the other phone has ever set. The FILENAME has no such
   /// constraint, and it is the half that ships in the clear: `unzip -l` on the
   /// APK lists every asset path without any tooling at all.
-  String get lottieAsset => 'assets/emoji/${_asset ?? key}.json';
+  String get lottieAsset => 'assets/emoji/$artName.json';
+
+  /// The stem every mood-keyed asset is named by — the Lottie emoji and the
+  /// partner's expression frames alike. Overridable where the key must not
+  /// ship in the clear (see [_asset]); the wire key itself never changes.
+  String get artName => _asset ?? key;
 }
 
 const List<MoodData> kMoods = [

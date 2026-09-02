@@ -157,10 +157,10 @@ flutter:
     # features/unlink/scene/ — the sprites are stills, all motion is code.
     - assets/scene/
     # The presence cast: the same two owner-rendered people as assets/scene,
-    # re-cut from the full-resolution originals to a head-and-shoulders
-    # portrait so they read inside a 30dp mark. Their own directory rather
-    # than assets/scene because the Doorstep loads that one whole, and a badge
-    # on twenty screens must not decode a street to draw a face.
+    # cut to a head-and-shoulders portrait, one open + one blink frame per
+    # mood (neutral today; twenty each when the expression cast lands). Their
+    # own directory rather than assets/scene because the Doorstep loads that
+    # one whole, and a face on twenty screens must not decode a street.
     - assets/presence/
     # The Opening: the 14s film a couple sees once, after they pair. Portrait
     # 406x720 H.264, NO audio track on purpose — the score plays through

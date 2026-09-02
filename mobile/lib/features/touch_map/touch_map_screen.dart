@@ -18,6 +18,7 @@ import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/services/touch_haptics.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
 import 'package:miles/features/chat/camera/rapid_camera_screen.dart' show RapidCameraScreen;
@@ -968,6 +969,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
           ),
         ),
         actions: [
+          const PartnerHereAction(),
           GestureDetector(
             onTap: () => setState(() {
               _reactionModeActive = !_reactionModeActive;

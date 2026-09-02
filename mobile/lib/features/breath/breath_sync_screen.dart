@@ -9,6 +9,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
 import 'package:miles/features/breath/widgets/breath_orb.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -160,7 +161,7 @@ class _BreathSyncScreenState extends ConsumerState<BreathSyncScreen>
 
     return Scaffold(
       appBar: AppBar(
-        
+        actions: const [PartnerHereAction()],
         title: const Text('Breath Sync'),
         leading: Builder(
           builder: (ctx) => IconButton(

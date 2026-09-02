@@ -26,6 +26,7 @@ import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
+import 'package:miles/core/services/server_clock.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
@@ -34,6 +35,8 @@ import 'package:miles/core/ui/mood.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/animated_mood.dart';
 import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
@@ -1354,7 +1357,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       intimateAllowed: couple != null && !couple.modestMode,
     );
     if (m == null) return;
-    await PresenceService.setMood(id, m.key, m.hex);
+    // Two writes, one instant. The broadcast goes FIRST and is never awaited
+    // — the partner's face must not wait on this phone's REST round trip —
+    // and the row carries the same stamp so the two can be ordered without a
+    // second clock. The upsert remains the durable record.
+    final at = DateTime.now().toUtc();
+    ref.read(partnerScreenProvider.notifier).announceMood(m.key, at: at);
+    if (kDebugMode || kProfileMode) {
+      debugPrint('[mood] send ${m.key} sent=${ServerClock.now().toIso8601String()}');
+    }
+    await PresenceService.setMood(id, m.key, m.hex, at: at);
   }
 
   Future<void> _reload() async {
@@ -2075,8 +2087,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             ),
           ),
           actions: [
-            // Presence sits beside their name, where it means something, instead
-            // of floating over the middle of the conversation.
+            // The partner's face, beside the call icon — where the owner asked
+            // for it, wearing whatever mood they last chose.
+            const PartnerHereAction(),
             if (couple != null)
               IconButton(
                 tooltip: 'Voice call',
@@ -2421,7 +2434,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       // `isActivelyInChat` (chat_last_read within 20s) rather than
                       // the live screen, so it kept claiming they were in the chat
                       // for up to 20 seconds after they had walked away. One
-                      // signal, one source — see PartnerHereBadge.
+                      // signal, one source — see PartnerHereAction
+                      // (partner_bust.dart).
                       ChatInputBar(
                         coupleId: couple.id,
                         onChanged: _onTyping,

@@ -582,6 +582,8 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // silently swallows the first arrivals of the next one until that person's
     // clock passes it.
     PresenceService.resetLiveHint();
+    // Same rule, same clock problem, for the last mood the socket carried.
+    PresenceService.resetMoodHint();
     // Both are process-scoped and outlive the couple: a map of live signed
     // URLs to this couple's storage objects, and uploads accepted for it.
     // Neither belongs to whoever this account pairs with next.

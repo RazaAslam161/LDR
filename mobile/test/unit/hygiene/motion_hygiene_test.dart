@@ -21,10 +21,10 @@ void main() {
     'lib/core/widgets/gilt_nav_icon.dart',
     'lib/core/widgets/gravity_float.dart',
     'lib/core/widgets/presence_character.dart',
-    // Added 2026-09-01: it was constructing two controllers and never
-    // consulting off(), so it animated for users who had asked their phone
-    // to stop. Its durations are MilesMotion tokens now.
-    'lib/core/widgets/presence_figure_overlay.dart',
+    // 2026-09-02: the AppBar bust replaced the standing figure. Its own file,
+    // because the notifier file it sits beside keeps a raw 900ms throttle in
+    // warm() and a widget with controllers must be policed at zero.
+    'lib/core/widgets/partner_bust.dart',
     'lib/core/widgets/screen_entrance.dart',
     'lib/core/widgets/tilt_parallax.dart',
     'lib/core/widgets/wordmark.dart',

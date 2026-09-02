@@ -24,6 +24,8 @@ import 'package:miles/core/widgets/breathing_glow.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/widgets/gravity_float.dart';
+import 'package:miles/core/widgets/partner_bust.dart';
+import 'package:miles/core/widgets/partner_here_badge.dart';
 import 'package:miles/core/widgets/presence_character.dart';
 import 'package:miles/core/widgets/screen_entrance.dart';
 import 'package:miles/core/widgets/signed_image.dart';
@@ -214,6 +216,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       // Home has no AppBar, but it IS a joinable tab — without
                       // this the one screen a partner is most often on is the
                       // one where they cannot be seen.
+                      const PartnerHereAction(),
                       Builder(
                         builder: (ctx) => IconButton(
                           icon: const Icon(Icons.menu, color: MilesColors.gilt),
@@ -234,6 +237,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 _PartnerStatusCard(
                   partner: partner,
                   presence: presence,
+                  moodArt: moodByKey(ref.watch(partnerMoodProvider))?.artName,
                   uploading: _uploading,
                   onShareSnap: _shareSnap,
                 ),
@@ -339,12 +343,17 @@ class _PartnerStatusCard extends StatelessWidget {
   const _PartnerStatusCard({
     required this.partner,
     required this.presence,
+    required this.moodArt,
     required this.uploading,
     required this.onShareSnap,
   });
 
   final Profile partner;
   final Presence? presence;
+
+  /// Their mood's art name — the card's face wears it, same as the AppBar's.
+  /// (`mood` is already the MoodData the card's own chip reads.)
+  final String? moodArt;
   final bool uploading;
   final VoidCallback onShareSnap;
 
@@ -380,6 +389,7 @@ class _PartnerStatusCard extends StatelessWidget {
                     photoUrl: presence?.checkinPhotoUrl,
                     name: partner.displayName,
                     variant: puppetVariantOf(partner.gender),
+                    mood: moodArt,
                     online: online,),
               ),
               const SizedBox(width: 16),
@@ -472,11 +482,15 @@ class _Avatar extends StatelessWidget {
   const _Avatar({
     required this.name,
     required this.variant,
+    this.mood,
     this.photoUrl,
     this.online = false,
   });
   final String name;
   final String? photoUrl;
+
+  /// Their mood's art name, or null for the neutral face.
+  final String? mood;
 
   /// Which bust stands in when there is no check-in photo.
   final PuppetVariant variant;
@@ -499,7 +513,8 @@ class _Avatar extends StatelessWidget {
     // breath, and a second one inside it would beat against the first.
     final face = PresenceCharacter(
       variant: variant,
-      diameter: 64,
+      size: 64,
+      mood: mood,
       here: online,
       fallback: Center(
         child: Text(initial,

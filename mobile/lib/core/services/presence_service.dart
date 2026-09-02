@@ -24,6 +24,7 @@ class Presence {
     this.typingInChat = false,
     this.currentMood,
     this.moodColor,
+    this.moodUpdatedAt,
     this.locationLabel,
     this.locationSharingMode = 'off',
     this.latitude,
@@ -52,6 +53,12 @@ class Presence {
         typingInChat: JsonUtils.parseBool(j['typing_in_chat']),
         currentMood: JsonUtils.parseStringOrNull(j['current_mood']),
         moodColor: JsonUtils.parseStringOrNull(j['mood_color']),
+        // Client-stamped by setMood — the server trigger rewrites only
+        // updated_at and app_last_active_at — so it is the SENDER's clock,
+        // the same one the mood broadcast carries. Parsed UTC because the
+        // merge compares it to that broadcast's stamp and nothing else.
+        moodUpdatedAt:
+            JsonUtils.parseDateOrNull(j['mood_updated_at'])?.toUtc(),
         locationLabel: JsonUtils.parseStringOrNull(j['location_label']),
         locationSharingMode:
             JsonUtils.parseString(j['location_sharing_mode'], fallback: 'off'),
@@ -91,6 +98,9 @@ class Presence {
         typingInChat: typingInChat,
         currentMood: currentMood,
         moodColor: moodColor,
+        // Carried, or every liveness reconcile would drop the stamp and the
+        // database row could never win a mood back from a stale broadcast.
+        moodUpdatedAt: moodUpdatedAt,
         locationLabel: locationLabel,
         locationSharingMode: locationSharingMode,
         latitude: latitude,
@@ -124,6 +134,11 @@ class Presence {
   final bool typingInChat;
   final String? currentMood;
   final String? moodColor;
+
+  /// When [currentMood] was set, by the SENDER's clock. Orders the row
+  /// against the mood broadcast ([PresenceService.mergeMood]); nothing else
+  /// reads it.
+  final DateTime? moodUpdatedAt;
   final String? locationLabel;
   final String locationSharingMode; // 'off' | 'city' | 'precise'
   final double? latitude;
@@ -380,6 +395,32 @@ class PresenceService {
     liveHint.value = null;
   }
 
+  /// The last mood the socket said the partner set, beside the row that the
+  /// database will say it in ~750ms–1.2s.
+  ///
+  /// Mood used to arrive by that database hop alone, and on a handset that is
+  /// "a second of delay" between one phone choosing a face and the other
+  /// wearing it. This rides `screen_presence:<coupleId>` with the other
+  /// presence facts in ~100ms; the upsert is untouched and remains the durable
+  /// record. Ordered by the SENDER's clock, exactly as [liveHint] is, so a
+  /// reordered broadcast cannot win — and the sender stamps the row with the
+  /// same instant, so the two are comparable without any clock reconciling.
+  static final ValueNotifier<({String mood, DateTime at})?> moodHint =
+      ValueNotifier(null);
+
+  /// Applied from the broadcast handler. Older-or-equal hints are dropped.
+  static void applyMoodHint({required String mood, required DateTime at}) {
+    final prev = moodHint.value;
+    if (prev != null && !at.isAfter(prev.at)) return;
+    moodHint.value = (mood: mood, at: at);
+  }
+
+  /// The [resetLiveHint] twin: a hint ordered by the previous partner's clock
+  /// would silently swallow the next partner's first moods.
+  static void resetMoodHint() {
+    moodHint.value = null;
+  }
+
   /// The row the database (or a realtime payload) just handed us, corrected
   /// by whatever the socket has said SINCE that row was written.
   ///
@@ -413,6 +454,24 @@ class PresenceService {
       // database catches up — which is the latency the hint exists to remove.
       appLastActiveAt: hint.online ? hint.at : null,
     );
+  }
+
+  /// The partner's mood: the broadcast's, unless the row is STRICTLY newer.
+  ///
+  /// Both stamps are the sender's own device clock — and for a mood set on
+  /// this build they are the same instant — so no [ServerClock] is consulted
+  /// here. A row that beats the hint means a broadcast was missed (socket down)
+  /// and the refetch caught up; an equal or older row is the same mood, or the
+  /// database still catching up to what the socket already said.
+  static String? mergeMood(
+    Presence? row,
+    ({String mood, DateTime at})? hint,
+  ) {
+    if (hint == null) return row?.currentMood;
+    if (row == null) return hint.mood;
+    final rowAt = row.moodUpdatedAt;
+    if (rowAt != null && rowAt.isAfter(hint.at)) return row.currentMood;
+    return hint.mood;
   }
 
   static Future<void> setOnline(String coupleId, {required bool online}) {
@@ -482,13 +541,21 @@ class PresenceService {
         op: 'clear_chat_presence',
       );
 
-  static Future<void> setMood(String coupleId, String mood, String color) =>
+  /// [at] is the instant the caller also broadcast, so the row and the socket
+  /// carry ONE stamp and [mergeMood] can order them without a second clock.
+  static Future<void> setMood(
+    String coupleId,
+    String mood,
+    String color, {
+    DateTime? at,
+  }) =>
       _upsert(
         coupleId,
         {
           'current_mood': mood,
           'mood_color': color,
-          'mood_updated_at': DateTime.now().toUtc().toIso8601String(),
+          'mood_updated_at':
+              (at ?? DateTime.now().toUtc()).toUtc().toIso8601String(),
         },
         op: 'set_mood',
         isAppActivity: true,
