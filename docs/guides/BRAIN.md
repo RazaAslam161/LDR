@@ -22330,3 +22330,55 @@ symbol that file cannot see) and a `prefer_const_declarations` in the new test.
   it opens first try.
 - Nothing here is committed.
 - §264's doc fixes and §265's diagnosis remain uncommitted too.
+
+### §266 addendum — committed and pushed, CI green (2026-09-03)
+
+`f9028fd` on `fix-sprint`, pushed and confirmed on the remote
+(`git rev-list --left-right --count origin/fix-sprint...HEAD` → `0 0`).
+CI run `33693105970`: **success**, 5m20s.
+
+Sixteen files, staged by explicit path, nothing else in the tree:
+
+    .claude/CLAUDE.md
+    docs/guides/BRAIN.md
+    docs/guides/DEVICE-CHECKLIST.md
+    docs/guides/PLAY-RELEASE-RUNBOOK.md
+    docs/guides/THREAT-MODEL.md
+    docs/guides/disguises.md
+    mobile/android/gradle.properties
+    mobile/lib/features/disguise/cover_gate.dart
+    mobile/lib/features/disguise/disguise_picker_screen.dart
+    mobile/lib/features/disguise/entry/cover_entry_recorder_screen.dart
+    mobile/lib/features/disguise/entry/entry_trigger_layer.dart
+    mobile/lib/features/legal/faq_text.dart
+    mobile/lib/features/shell/app_shell.dart
+    mobile/test/unit/disguise/disguise_test.dart
+    mobile/test/widget/cover_entry_layer_test.dart
+    web/faq.html
+
+Gates re-run immediately before staging rather than reported from the earlier
+run, because edits had landed after it and mtimes cannot prove ordering:
+
+    flutter analyze → 177 info, 0 error, 0 warning
+    flutter test    → 02:47 +1574 ~3: All tests passed!
+
+**§264, §265 and §266 went in as ONE commit, deliberately.** They are three
+logical changes, but `BRAIN.md` and `PLAY-RELEASE-RUNBOOK.md` are each touched
+by more than one of them, and partial staging needs an interactive mode this
+environment does not have. Splitting by file would have cut a logical change in
+half, which is worse than a wide commit that says so. Before staging, both
+shared files were diffed and every hunk confirmed to be this session's: BRAIN's
+only two deletions are the live-index line at §4 that §264 corrected (the dead
+`maps.properties` reference), not any session's append-only section.
+
+`web/privacy-policy.html` and `web/security.html` are deliberately NOT in this
+commit and remain untouched — the owner stopped that work before it began. They
+still disclose "Google — Maps SDK" as a current third party, which is false and
+is the most consequential stale line still standing in the repo.
+
+### Next step
+
+Build, install over the existing app **without uninstalling** (the play flavour
+carries the upload key, which is what makes that possible), and hold two
+fingers still for ten seconds on a cover. If it does not open first try,
+`kBackupSlop` is the one number to raise and everything else follows from it.
