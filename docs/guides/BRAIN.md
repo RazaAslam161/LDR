@@ -21258,3 +21258,44 @@ Gates after the fixes:
 
 The Kotlin change compiles; it runs on no handset yet. Build 74 on both
 phones has the pre-reorder placement and the unbounded trace read.
+
+### §258 addendum 2 — committed as 0a2b1c5, gated as committed, pushed, CI green (2026-09-02)
+
+Owner: "commit and push your work". One commit for the batch, 52 files
+(+1045 / -1187), staged by explicit path. Four dirty files were another
+session's live work and stayed out: doorstep_clock.dart,
+doorstep_scene.dart, unlink_screen.dart and unlink_phone_test.dart (the
+clock plate resize, §259 below; the fourth appeared between two status
+reads, so that session was typing while this one staged). Every test file
+this commit touches was diffed hunk by hunk first — all mine — because a
+test carrying their assertions against lib code left uncommitted would have
+gone red on CI.
+
+The committed tree is the working tree minus those four files, and the
+1485-test run had been made WITH them present, so the commit was re-gated
+as itself: a detached `git worktree` at 0a2b1c5, `.env` copied in, pub get,
+analyze, full suite:
+
+    === pub get ===
+    === analyze ===
+    176 issues found. (ran in 79.1s)
+    === test ===
+    04:49 +1484 ~3: test/widget/voice_wave_scrub_test.dart: a note whose length nobody knows cannot be scrubbed
+    04:49 +1485 ~3: All tests passed!
+    test exit=0
+
+Push and CI:
+
+    gh run watch 33600341363 --exit-status: exit=0
+    gates run 33600341363: completed success
+      job dependency advisories: success
+      job analyze + test: success
+
+Secrets grep over the diff before the commit: hits were the env-var name
+`MILES_SUPABASE_SERVICE_KEY` (placeholder dots in the docs), the
+`publishableKey:` rename, the prefs key names and the two-phone tool's
+`key` parameter read from the environment — no value.
+
+This addendum is committed on its own, with §259 (theirs, uncommitted at
+the time) left in the working tree: the index got HEAD's file plus this
+text, never the whole working copy.
