@@ -20782,3 +20782,60 @@ back to dual-write; rows 4638/4639 stay cipher-only and decryptable.
 **Exact next step:** nothing for this switch. Next candidates from the
 rating: the `joinPartner` `_TypeError` (§254 found-not-fixed), then cold
 start and size.
+
+## §255 — joinPartner threw on every tap of the standing figure (2026-09-02)
+
+Owner: "fix the joinPartner _TypeError." The §254 found-not-fixed.
+
+### Reproduction, before any edit
+
+The overlay test mounted `PresenceFigureOverlay` INSIDE a GoRoute builder —
+its comment even said "mounted the way main.dart mounts it" — while main.dart
+mounts it in `MaterialApp.router`'s `builder`, as a Stack sibling ABOVE the
+Router. Moving the harness to the real shape (overlay in `builder:`, routes
+as bare Scaffolds) turned the existing tap tests into the reproduction:
+
+    flutter test test/widget/presence_figure_overlay_test.dart
+    The following assertion was thrown while handling a gesture:
+    No GoRouter found in context
+    'package:go_router/src/router.dart': Failed assertion: line 521 pos 12: 'inherited != null'
+    #2 GoRouter.of (package:go_router/src/router.dart:521:12)
+    #3 joinPartner (package:miles/core/widgets/partner_here_badge.dart:316:27)
+    00:01 +9 -1: tapping goes to the room they are in [E]
+    00:01 +9 -2: tapping does nothing when we are already in that room [E]
+
+Same frames as the production row (client_errors 2026-09-01 22:45:26Z,
+build 73, `_TypeError` — the release build strips the assert and the `!`
+null-check throws instead).
+
+### Root cause, one sentence
+
+`joinPartner` resolved the router from its widget context, but the figure
+lives in `MaterialApp.router`'s `builder` Stack, above the Router where
+`InheritedGoRouter` is inserted, so `GoRouter.of(context)` had nothing to
+find and every tap on the figure threw instead of navigating.
+
+### Fix (one cause, one change)
+
+`partner_here_badge.dart`: `joinPartner` takes the router from
+`ref.read(routerProvider)` — the same `GoRouter` instance main.dart passes as
+`routerConfig` — and calls `router.state.uri.path`, `router.go`,
+`router.push`. The now-unused `BuildContext` parameter and the `go_router`
+import are gone; the one call site (`presence_figure_overlay.dart:200`)
+updated. Test harness: overlay mounted in `builder:` as in main, plus
+`routerProvider.overrideWithValue(router)`.
+
+### Verified
+
+    flutter test test/widget/presence_figure_overlay_test.dart -> 00:01 +14: All tests passed!
+    flutter analyze --no-pub -> 201 issues found. (ran in 7.9s) errors+warnings=0
+    flutter test -> 03:56 +1468 ~3: All tests passed!
+
+### Still open
+
+- The fix is in the tree, uncommitted; build 73 on both phones still carries
+  the defect (a tap on the figure does nothing). It ships with the next build.
+- The doc comment above `joinPartner` still says the AppBar badge shares the
+  trip; grep shows the figure is its only caller today. Left as is.
+
+**Exact next step:** commit when asked; include in the next build (74).
