@@ -20579,3 +20579,107 @@ kill window (expect: grey from +4s through +63s, no green in between).
 Full suite on the final tree (after the last edit): see the line pasted in chat —
 appended here verbatim by the next command.
     flutter test  ->  02:23 +1468 ~3: All tests passed!   (1468 passed, 3 skipped)
+
+## §253 — build 73 play APK for the handset: the AAB's Dart, byte for byte (2026-09-02)
+
+Owner: "install to the connected device but make sure it is the latest one
+with all the latest updates and fixes."
+
+### What "latest" means here
+
+HEAD `e63063e`. App code last changed in `4fbe38b` (the sweep):
+`git diff --stat 4fbe38b HEAD -- mobile/lib mobile/pubspec.yaml mobile/android
+mobile/assets mobile/third_party` is EMPTY. The four commits after it touch
+CI, a script, a test and BRAIN. So the §252 AAB and this APK carry the
+latest app code there is; no bump — the AAB for Play and the APK on the
+phone are the same build 73.
+
+### The APK
+
+    flutter build apk --release --flavor play   (no clean: same intermediates as the AAB)
+    Running Gradle task 'assemblePlayRelease'...  56.9s
+    √ Built build\app\outputs\flutter-apk\app-play-release.apk (222.5MB)
+    sha256 abbc09adbcba927e872453359a91f54b4cc7619e75f083d77d774d6b2f6bafdc
+
+Identity proof against the preserved AAB (`scratchpad/app-play-release-73.aab`),
+per ABI, sha256 of libapp.so:
+
+    arm64-v8a    apk=291be20dd555014e aab=291be20dd555014e identical=True stamp73=True
+    armeabi-v7a  apk=e11a31994f3a7d0e aab=e11a31994f3a7d0e identical=True stamp73=True
+    x86_64       apk=4ef3893b81f703cb aab=4ef3893b81f703cb identical=True stamp73=True
+    3 ABIs x 11 libs each, libapp + libflutter in all; .env = the two Supabase
+    keys; no staging ref; apksigner signer SHA-256 a37c59a5… (= the upload
+    keystore, = the AAB); badging versionCode 73, versionName 0.1.0,
+    targetSdk 36, label Miles.
+
+So what goes on the phone IS what goes to Play, not a sibling build.
+
+### The device
+
+OnePlus 8 (IN2015, Android 13, arm64) on 1896b4b3 — it took a re-seat of
+the cable; Windows was not enumerating it at all at first. Before:
+versionCode=72, lastUpdateTime 2026-09-01 19:01:10, signer a37c59a5… (pulled
+base.apk, apksigner) — the same certificate as the new APK, so `-r` upgrades
+in place. No uninstall.
+
+    adb -s 1896b4b3 install -r app-play-release.apk   -> Performing Streamed Install / Success
+    dumpsys package com.miles.miles  -> versionCode=73 minSdk=24 targetSdk=36
+                                        versionName=0.1.0
+                                        lastUpdateTime=2026-09-02 03:39:59
+    am start -W -n com.miles.miles/.AliasMiles -> Status: ok, TotalTime: 3516
+    pidof after 8s: 9634; logcat: no FATAL EXCEPTION, no AndroidRuntime crash,
+    no 'has died', no force-finish.
+
+Post-install verification (workflow: four read-only lenses on the device,
+three skeptics per non-pass finding, a critic):
+
+Both phones, same APK, same checks. Server first: production
+`app_release` reads min_build=42, latest_build=46 (the retired updater's
+stale row, expected) — 73 clears the gate, nothing server-side blocks either
+handset.
+
+OnePlus 8 (1896b4b3): 4 lenses, 38 checks, 0 fail. Pulled base.apk sha256 ==
+the installed APK (abbc09ad…, also hashed ON the device with toybox
+sha256sum); libapp.so identical to the AAB on all three ABIs, build-73 tag
+present, 72 absent; classes.dex ×3 and all 194 code/asset entries identical
+to the bundle; all 33 .so stored uncompressed and 16 KB-aligned with
+extractNativeLibs=false; signer a37c59a5… v2+v3; .env = the two Supabase
+keys byte-identical to the bundle's. Launcher: User 0 resolves exactly
+com.miles.miles/.AliasMiles; the nine covers sit in disabledComponents.
+firstInstallTime 2026-08-30 preserved (in-place upgrade, data kept);
+run-as refused (release); flags carry no DEBUGGABLE, no ALLOW_BACKUP;
+5 runtime grants survived (notifications, fine+coarse location, camera,
+mic). Runtime: alive and resumed, TOTAL PSS ~324 MB, no crash, no
+kill-switch, no dlopen failure. Seen in logcat: the app lock fired on launch
+and the owner's fingerprint authenticated at 03:40:10 — the owner was at the
+phone. Two infos worth knowing: OxygenOS also installs the package into the
+'system_clone' user (User 10, never launched — parallel-apps container), and
+`installerPackageName=pc` is the ROM's tag for adb installs. One skeptic and
+the critic died on the session limit; the finding they were on (resources
+"equivalent, not hash-provable") was refuted by the other two: bundletool's
+own universal APK from the same AAB decodes to the same resources.
+
+OnePlus 7 (a959ee2b, GM1900, Android 12): was on 71 (lastUpdateTime
+2026-09-01 07:16:26), signer a37c59a5… — same certificate, so:
+
+    adb -s a959ee2b install -r app-play-release.apk -> Success
+    versionCode=73, versionName=0.1.0, firstInstallTime=2026-09-01 06:54:03 (kept)
+    lastUpdateTime=2026-09-02 03:44:45
+    am start -W .AliasMiles -> Status: ok, TotalTime: 2331; pid 7114 alive; no crash lines
+
+4 lenses, 36 checks, 0 fail, 0 standing findings. Pulled base.apk sha256 ==
+abbc09ad…; libapp.so identical to the AAB on all three ABIs with the 73 tag;
+signer verified v2+v3; .env two keys, prod host; exactly one launcher entry
+(.AliasMiles), no per-user component overrides; release flags; TOTAL PSS
+~235 MB. Only 2 runtime grants on this phone (fine+coarse location) — camera
+and mic were never granted here, not a regression. An earlier post-install
+process was ended by 'remove task' (a swipe), not a crash. The critic died on
+the session limit; one 'meminfo timed out' warn was refuted 3-0 (answered in
+under a second on ten re-runs).
+
+### Still open
+
+- Phones: BOTH on build 73 now (OnePlus 8 1896b4b3, OnePlus 7 a959ee2b). Nothing is on any other device.
+- `min_build` untouched.
+
+**Exact next step:** upload `mobile/build/app/outputs/bundle/playRelease/app-play-release.aab` (copy also at the session scratchpad) to the Play Console internal track — it is the exact Dart both phones are running — and answer the forms §252 listed. Copy the AAB out of build/ first; the next `flutter clean` deletes it.
