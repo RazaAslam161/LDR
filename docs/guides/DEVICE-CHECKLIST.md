@@ -114,4 +114,8 @@ the whole reason these are yours and not mine.
 Also still open, unrelated to feel:
 - `ui_sound_kill` is applied to STAGING only. Apply to production after a
   build with the sound layer actually ships.
-- The Google Maps API key in git history at `5403769` still wants rotating.
+- The leaked Google Maps key `AIzaSyBa6XGz…` (git history at `5403769`, `b591d90`
+  and `75a4459`) wants **deleting, not rotating** — nothing consumes a Maps key
+  since Mapbox replaced Google Maps. Match the prefix first: the other `AIzaSy…`
+  keys in that project are Firebase's and FCM dies without them.
+  See `PLAY-RELEASE-RUNBOOK.md` §2.3.

@@ -578,9 +578,9 @@ class _AppShellState extends ConsumerState<AppShell>
           content: Text(
             'This phone wears the ${profile.label} cover, and the app ships '
             'no move to open it — only one you record.\n\n'
-            'You are not locked out: holding two fingers still in the middle '
-            'of the cover for five seconds always reaches your PIN. Record '
-            'your own way in now, or take the cover off.',
+            'Record your own way in now, or take the cover off. Nothing else '
+            'opens a cover, so do one of the two before you put the phone '
+            'down.',
           ),
           actions: [
             TextButton(

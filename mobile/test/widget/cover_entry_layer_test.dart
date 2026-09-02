@@ -260,7 +260,7 @@ void main() {
   });
 
   group('the backup hold', () {
-    testWidgets('two still fingers for five seconds open it', (tester) async {
+    testWidgets('two still fingers for the full hold open it', (tester) async {
       await pumpLayer(tester);
       final a = await tester.startGesture(px(0.3, 0.5), pointer: 11);
       final b = await tester.startGesture(px(0.7, 0.5), pointer: 12);
@@ -291,11 +291,36 @@ void main() {
       final c = await tester.startGesture(px(0.3, 0.5), pointer: 11);
       final d = await tester.startGesture(px(0.7, 0.5), pointer: 12);
       await tester.pump(const Duration(seconds: 1));
-      await d.moveBy(const Offset(40, 0));
+      // Derived, never a literal: this was `Offset(40, 0)`, comfortably past
+      // the old 24px slop and exactly ON the new one, where `>` is false. A
+      // hardcoded distance silently stops testing cancellation the moment the
+      // tolerance moves.
+      await d.moveBy(const Offset(kBackupSlop + 10, 0));
       await tester.pump(kCoverRecoveryHold);
       await c.up();
       await d.up();
-      expect(opened, isEmpty, reason: 'a drift');
+      expect(opened, isEmpty, reason: 'a drift past the tolerance');
+    });
+
+    testWidgets('a tremor inside the tolerance still opens it', (tester) async {
+      // The point of deriving kBackupSlop from the duration. A resting hand
+      // wanders, and over a ten-second hold it wanders further than over five;
+      // if this fails the gesture is unusable in the hand even though every
+      // other test passes on a machine that never shakes.
+      await pumpLayer(tester);
+      final a = await tester.startGesture(px(0.3, 0.5), pointer: 21);
+      final b = await tester.startGesture(px(0.7, 0.5), pointer: 22);
+      const wobble = kBackupSlop / 2;
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(kCoverRecoveryHold ~/ 6);
+        await a.moveBy(Offset(i.isEven ? wobble : -wobble, 0));
+        await b.moveBy(Offset(0, i.isEven ? -wobble : wobble));
+      }
+      await tester.pump(kCoverRecoveryHold);
+      expect(opened, [EntrySource.backup],
+          reason: 'a hand that wanders within the tolerance must still get in',);
+      await a.up();
+      await b.up();
     });
 
     testWidgets('a third finger cancels it', (tester) async {

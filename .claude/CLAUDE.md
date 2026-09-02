@@ -160,8 +160,18 @@ install to a device unprompted.
   confirmed. Rollback is one statement: `update public.app_release set chat_cipher_only
   = false;` — it restores dual-write for NEW rows only. Rows 4636/4637 (pre-flip test
   messages) still hold plaintext.
-- The Google Maps API key is in git history at commit `5403769` (and, until it was
-  deleted on 2026-09-02, verbatim in `docs/guides/play-readiness-findings.json`). It is
-  live/billable. Rotate it. It is **not** in the shipped APK — Mapbox replaced Google
-  Maps — and this repo is private, so the deadline is "before the repo is public or a
-  collaborator is added", not today.
+- The leaked Google Maps key is **`AIzaSyBa6XGz…`**, in git history at commits
+  `5403769`, `b591d90` and `75a4459` (all three re-confirmed 2026-09-03 with
+  `git log --all -S'AIzaSy'`) and, until it was deleted on 2026-09-02, verbatim in
+  `docs/guides/play-readiness-findings.json`. **Delete it, do not rotate it**: nothing
+  in the app consumes a Maps key any more, so a replacement would have no consumer
+  (runbook §2.3). It is **not** in the shipped APK — Mapbox replaced Google Maps. Its
+  last recorded probe returned `REQUEST_DENIED` for billing being disabled, so the
+  exposure is unauthorised use, not an accruing bill; the deadline is "before the repo
+  is public or a collaborator is added", not today.
+  **Three `AIzaSy…` strings, only one to delete.** `AIzaSyBHUOM-…` is the Firebase
+  **Android** client key (`google-services.json`, `firebase_options.dart:63`) and ships
+  in the APK by design — removing it breaks FCM. `AIzaSyC93dDX…` is the Firebase
+  **web** key (`firebase_options.dart:53`), tree-shaken out and not in the APK. Neither
+  is protected by Firebase Security Rules; this app runs no Firestore, RTDB, Firebase
+  Storage or Firebase Auth — only `firebase_core` + `firebase_messaging`.

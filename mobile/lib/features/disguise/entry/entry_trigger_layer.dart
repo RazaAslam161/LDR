@@ -11,7 +11,13 @@ import 'package:miles/features/disguise/entry/cover_entry_trigger.dart';
 const kEntrySlop = 18.0;
 
 /// Two fingers may drift this far and still be holding still.
-const kBackupSlop = 24.0;
+/// Derived from [kCoverRecoveryHoldSeconds], never a standalone number: a
+/// resting finger drifts further the longer it rests, so a tolerance tuned for
+/// one duration quietly becomes an impossible gesture at a longer one. Four
+/// logical pixels per second of hold — 24 at the original five seconds, 40 at
+/// ten — holds the difficulty roughly constant while staying far below any
+/// deliberate movement, which travels hundreds.
+const kBackupSlop = 4.0 * kCoverRecoveryHoldSeconds;
 
 /// Touches that begin inside this band along the safe box's edges are not
 /// counted: thumbs rest there, and Android's own edge gestures cancel there.

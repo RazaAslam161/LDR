@@ -31,7 +31,16 @@ import 'package:miles/main.dart';
 /// signal they were close.
 
 /// How long two still fingers stay down before the backup door opens.
-const kCoverRecoveryHold = Duration(seconds: 5);
+/// Seconds, as a number, because [Duration.inSeconds] is a getter and cannot
+/// be used in a const expression — and `kBackupSlop` (in the entry layer) has
+/// to be derived from this rather than restated beside it.
+const kCoverRecoveryHoldSeconds = 10;
+
+/// Raised from 5s to 10s on 2026-09-03 (owner). Longer because the gesture is
+/// no longer disclosed to users: nothing in the app, the FAQ or the public site
+/// teaches it any more, so the only cost of length is paid by someone who
+/// already knows it exists, while an accidental discovery gets harder.
+const kCoverRecoveryHold = Duration(seconds: kCoverRecoveryHoldSeconds);
 
 /// Who is asking the gate to open.
 enum EntrySource {

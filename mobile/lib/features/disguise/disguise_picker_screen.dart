@@ -72,8 +72,8 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
           title: const Text('Apply without App Lock?'),
           content: Text(
             'With App Lock off, your move opens Miles directly — anyone who '
-            'watches you do it is in. The backup hold always asks to unlock. '
-            'With App Lock on, your move lands on your lock instead.'
+            'watches you do it is in. With App Lock on, your move lands on '
+            'your lock instead.'
             '${widget.isOnboarding ? ' You can turn it on any time after '
                 'setup.' : ''}',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
@@ -142,10 +142,9 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
             'Your launcher icon and name become "${choice.label}". Miles will '
             'not be findable by its own name until you change this back.\n\n'
             'Way back in — ${keptExisting ? 'the move already recorded for '
-                'this cover' : 'the move you just recorded'}.\n\n'
-            "Forgotten it? Hold two fingers still in the middle of the cover's "
-            'opening screen for five seconds, then unlock with your '
-            'fingerprint or PIN.',
+                'this cover' : 'the move you just recorded'}. Nothing else '
+            'opens the cover, so practise it once before you put the phone '
+            'down.',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [

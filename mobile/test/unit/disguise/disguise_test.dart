@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/entry/entry_trigger_layer.dart';
 
 /// The cover screen each identity renders. Read by the tests below, which
 /// assert on the source because the thing being protected — "this cover
@@ -199,12 +200,51 @@ void main() {
       }
     });
 
+    test('no user-facing surface teaches the backup gesture', () {
+      // Owner's ruling 2026-09-03: the hold stays, and users are not told
+      // about it. It reached four dialogs, both FAQs and the public site the
+      // first time round, so the rule is pinned rather than remembered.
+      //
+      // Matched on the shapes a hint actually takes, not on "hold" alone —
+      // "hold to confirm" buttons are unrelated and must stay legal.
+      final hint = RegExp(
+        r'(two|2)[\s-]*fingers?|fingers?[\s\S]{0,40}(five|ten|5|10)[\s-]*seconds',
+        caseSensitive: false,
+      );
+      // Dart comments explain the gesture to maintainers and that is allowed,
+      // so only shipped strings are searched. HTML is read raw: _code() would
+      // treat "https://" as a line comment and blank the rest of the line,
+      // which could hide the sentence being looked for.
+      final surfaces = <String>[
+        'lib/features/legal/faq_text.dart',
+        'lib/features/disguise/disguise_picker_screen.dart',
+        'lib/features/disguise/entry/cover_entry_recorder_screen.dart',
+        'lib/features/shell/app_shell.dart',
+        'lib/features/settings/settings_screen.dart',
+        '../web/faq.html',
+        '../web/privacy-policy.html',
+        '../web/security.html',
+      ];
+      for (final path in surfaces) {
+        final f = File(path);
+        if (!f.existsSync()) {
+          fail('$path is missing; the surface list needs updating');
+        }
+        final raw = f.readAsStringSync();
+        final text = path.endsWith('.dart') ? _code(raw) : raw;
+        expect(hint.hasMatch(text), isFalse,
+            reason: '$path teaches the backup gesture. It is undisclosed: the '
+                'app, the FAQ and the public site must not name it. Play '
+                "Console's App access notes are the only place it belongs.",);
+      }
+    });
+
     test('the guide documents the backup hold and every cover', () {
-      // The owner needs the one public way in somewhere they can read without
-      // opening the app they are locked out of.
+      // A maintainer has to be able to find it; a user must not. The guide is
+      // repo-only, so it is where the gesture is allowed to be written down.
       final guide = File('../docs/guides/disguises.md').readAsStringSync();
       expect(guide.contains('two fingers'), isTrue);
-      expect(guide.contains('five seconds'), isTrue);
+      expect(guide.contains('ten seconds'), isTrue);
       for (final d in kDisguises) {
         expect(guide.contains(d.label), isTrue,
             reason: '${d.label} is missing from docs/guides/disguises.md',);
@@ -242,9 +282,13 @@ void main() {
       expect(layer.contains('kCoverRecoveryHold'), isTrue,
           reason: 'the layer must time the backup hold by the shared '
               'constant, not by a number of its own',);
-      expect(kCoverRecoveryHold, const Duration(seconds: 5),
-          reason: 'every sentence in the app, the FAQ, the guide and the Play '
-              'Console notes quotes five seconds',);
+      expect(kCoverRecoveryHold, const Duration(seconds: 10),
+          reason: 'raised from 5s on 2026-09-03 when the gesture stopped being '
+              'disclosed; the guide and the Play Console notes quote ten',);
+      expect(kBackupSlop, 4.0 * kCoverRecoveryHoldSeconds,
+          reason: 'the drift tolerance is derived from the duration, never a '
+              'standalone number: a finger drifts further the longer it '
+              'rests, so a slop tuned for 5s makes a 10s hold impossible',);
       expect(gate.contains('nameless: forced'), isTrue,
           reason: 'the backup door lands on a lock screen that names no app',);
     });

@@ -6,10 +6,12 @@ screen. Behind every cover is the real app — and **the app ships no way throug
 a cover of its own**. The way in is a move the owner records on that cover, and
 the one thing the app defines is the backup way in, which lands on the PIN.
 
-**If you remember nothing else: hold two fingers still in the middle of the
-cover's opening screen for five seconds, then unlock with your fingerprint or
-app PIN.** That is the backup way in, it works on every cover, and it is the
-only way in the app itself knows. Not at the edges: a finger that lands in the
+**Maintainers only, and deliberately not printed anywhere a user can read it:
+hold two fingers still in the middle of the cover's opening screen for ten
+seconds, then unlock with your fingerprint or app PIN.** That is the backup way
+in, it works on every cover, and it is the only way in the app itself knows.
+Since 2026-09-03 (owner's ruling) the app, the in-app FAQ and the public web FAQ
+teach it nowhere; `disguise_test.dart` fails if any of them starts to. Not at the edges: a finger that lands in the
 24 dp edge band is not counted, and the other one alone is not the hold.
 
 ## The threat model these are built against
@@ -119,10 +121,12 @@ the opening screen.
 
 ### The backup way in
 
-Two still fingers in the middle of the cover's opening screen for five seconds
-(`kCoverRecoveryHold` in `cover_gate.dart`, the one number every sentence about
-it quotes). It is public by design — it is the sentence Play Console gets and
-the sentence the FAQ prints — so with a move recorded it may never open the app
+Two still fingers in the middle of the cover's opening screen for ten seconds
+(`kCoverRecoveryHoldSeconds` in `cover_gate.dart`; `kBackupSlop` is derived from
+it, because a resting finger drifts further the longer it rests and a tolerance
+tuned for five seconds makes a ten-second hold impossible). It is **not**
+disclosed to users any more — only Play Console's App access notes carry it —
+so with a move recorded it may never open the app
 on its own: it lands on a **nameless** lock screen (a lock icon, "Locked", and
 the biometric prompt first where one is enrolled, the PIN pad otherwise or on
 cancel), and back returns to the cover silently.
@@ -176,7 +180,8 @@ from Settings.
 Nothing from the APK: no cover file names a door, and `disguise_test.dart` pins
 that (no cover reaches the gate, the lock or the store; no cover wires a
 long-press handler). Nothing from the cover: no About sheet, no printed gesture,
-no reaction to a miss. From the listing: that a two-finger hold reaches a lock.
+no reaction to a miss. Nothing from the listing or the FAQ either, since
+2026-09-03 — the hold is told only to Play Console.
 From watching the owner: the move — a watched unlock still leaks it, as it always
 did the fixed one.
 

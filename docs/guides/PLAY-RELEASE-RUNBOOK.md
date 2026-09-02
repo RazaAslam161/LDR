@@ -60,7 +60,7 @@ Console form:**
 |---|---|---|---|
 | 1 | No unprompted cover offer on first run | `app_shell.dart` | **done** — `_offerCoverAtFirstOpen()` removed; grep for it returns nothing |
 | 2 | Confirmation naming the consequence *and* the way back, before any cover applies | `disguise_picker_screen.dart` | **done** — a PIN is set, the owner records their own move on the cover, then the dialog names the new label, says Miles will not be findable by name, and states the backup hold |
-| 3 | A way back the owner can find on every cover screen | `cover_gate.dart`, `entry_trigger_layer.dart` | **done** — the backup hold: two still fingers on the opening screen for five seconds, landing on the PIN. No About sheet any more — the app ships no door it could describe. **Not a policy requirement** — items 4-5 carry the disclosure. See `disguises.md`. |
+| 3 | A way back the owner can find on every cover screen | `cover_gate.dart`, `entry_trigger_layer.dart` | **done** — the backup hold: two still fingers on the opening screen for ten seconds, landing on the PIN. Undisclosed to users since 2026-09-03; the Console App access note is the only place it is written. No About sheet any more — the app ships no door it could describe. **Not a policy requirement** — items 4-5 carry the disclosure. See `disguises.md`. |
 | 4 | The listing describes the feature, with the picker in ≥1 screenshot | store listing | **OPEN — phase 7** |
 | 5 | The unlock gesture + a working test account in Console → App access | Console | **OPEN — phase 5.6** |
 
@@ -71,10 +71,18 @@ enforcement, not a resubmit. If you are not going to do 4 and 5, the decision to
 reverse is 0.1 itself, before the build — not the declaration.
 
 The exact way back, the same on every cover and in every state — **press and
-hold two fingers still in the middle of the cover's opening screen for five
+hold two fingers still in the middle of the cover's opening screen for ten
 seconds, then unlock with the app PIN (a fingerprint prompt may appear first;
 cancel it to type the PIN)**. That sentence goes in the Console App access
-notes verbatim. The owner's own recorded move is per phone and is not something the
+notes verbatim.
+
+**Ten, not five, and the Console notes are now the ONLY place this gesture is
+written for anyone outside the repo.** The owner ruled on 2026-09-03 that users
+are not told it exists: it is gone from the app's dialogs, the in-app FAQ and
+the public web FAQ, and `disguise_test.dart` fails the build if it reappears
+there. Google still needs it — a reviewer who cannot get back in rejects the
+app — so it belongs here and nowhere else. If the duration changes again, this
+sentence and `kCoverRecoveryHoldSeconds` move together. The owner's own recorded move is per phone and is not something the
 notes can state.
 
 ### 0.2 One app, one channel that reaches people
@@ -293,33 +301,55 @@ cd /d/Miles/mobile/android && ./gradlew :app:signingReport
 and it resolves correctly. If you write `key.properties` by hand instead, use an
 absolute path.
 
-### 2.3 `mobile/android/maps.properties` — the Google Maps key
+### 2.3 The leaked Google Maps key — delete it, don't replace it
 
-The committed manifest no longer carries the key. It is substituted from an
-untracked properties file via `manifestPlaceholders["mapsApiKey"]`
-(`build.gradle.kts:24-36`, `src/main/AndroidManifest.xml:78`), and a build
-without it logs a banner and substitutes `MISSING_MAPS_API_KEY` so the failure is
-loud.
+**There is no `maps.properties` step any more, and no Maps key to install.**
+Mapbox replaced Google Maps on 2026-09-02 and the whole plumbing went with it.
+Verified in the tree on 2026-09-03: no `mapsApiKey` or `manifestPlaceholders`
+in `mobile/android/app/build.gradle.kts`, no `com.google.android.geo.API_KEY`
+in `src/main/AndroidManifest.xml`, no `maps.properties` or `.example` on disk,
+no `.gitignore` entry for one, and `pubspec.yaml` ships
+`mapbox_maps_flutter: ^2.28.1`. This section used to tell you to create that
+file and cited line numbers that no longer hold anything — following it would
+have produced a file nothing reads.
 
-```properties
-# mobile/android/maps.properties
-mapsApiKey=<the NEW key>
-```
+**The old key is still burned, and that part is not stale.** The Maps key
+`AIzaSyBa6XGz…` is in git history at commits `5403769`, `b591d90` and `75a4459`
+(`git log --all -S'AIzaSy'` — all three re-confirmed present 2026-09-03) and
+cannot be un-published. Because nothing in the app uses it any more, the action
+is simpler than it used to be:
 
-**The old key is burned.** An `AIzaSy…` key is in git history at commits
-`5403769`, `b591d90` and `75a4459` (`git log --all -S'AIzaSy'`) and cannot be
-un-published. In Google Cloud Console:
+1. In Google Cloud Console (project `ldrc-120a2`), **delete the Android key
+   beginning `AIzaSyBa6XGz`** outright. Do not rotate it, do not restrict it —
+   nothing needs a Maps key now, so there is no replacement to create.
 
-1. Create a **new** Android key.
-2. Restrict it to package `com.miles.miles` **plus the SHA-1 of the Play App
-   Signing certificate** (phase 2.4 — not your upload key, or Maps fails for
-   every Play install).
-3. Enable **only** "Maps SDK for Android" on it.
-4. **Delete** the old key. Restricting it is not enough; it is public.
+**Match the prefix before you click.** That project holds more than one
+`AIzaSy…` Android key and the console lists them by name and value, not by
+repo path. Deleting the wrong one breaks FCM on both handsets.
 
-The Maps SDK reads the key from the merged manifest and nowhere else, so it
-ships inside the artifact regardless. Restrictions are the only protection it
-has.
+| prefix | what it is | do |
+|---|---|---|
+| `AIzaSyBa6XGz…` | the leaked Maps key, no consumer left | **delete** |
+| `AIzaSyBHUOM-…` | Firebase **Android** client key (`google-services.json:18`, `firebase_options.dart:63`) | keep — FCM dies without it |
+| `AIzaSyC93dDX…` | Firebase **web** client key (`firebase_options.dart:53`) | keep; it is tree-shaken out and is not in the APK |
+
+How urgent: the key is enabled, but the last probe against it (recorded in
+`75a4459`'s findings) came back `REQUEST_DENIED` — *"You must enable Billing on
+the Google Cloud Project"* — so billing was **off** and nothing is accruing.
+The exposure is unauthorised use and quota, not a running bill. This repo is
+private, so the deadline is "before the repo goes public or a collaborator is
+added", not today. Confirm the billing state in the console rather than
+trusting this paragraph; it is one probe old.
+
+**About the two Firebase keys.** They ship on purpose — every Firebase client
+embeds one, and `AIzaSyBHUOM-…` is present in `Miles.apk` by design. The
+Android one is restricted by package name plus signing-certificate fingerprint;
+the **web** one cannot be (that restriction type is Android-only), so it is
+protected only by being unused and unshipped. Neither is guarded by Firebase
+Security Rules — this app runs no Firestore, Realtime Database, Firebase
+Storage or Firebase Auth (`pubspec.yaml` carries only `firebase_core` and
+`firebase_messaging`); user data lives in Supabase under RLS. Do not cite
+Security Rules as the mitigation for these keys.
 
 ### 2.4 Enrol in Play App Signing
 
@@ -328,12 +358,12 @@ signing**. Let Google generate and hold the app signing key; the key from 2.1
 stays an *upload* key, which is what makes it recoverable if you lose it.
 
 Once enrolled, copy the **app signing certificate SHA-1 and SHA-256** from that
-page. You need them for:
+page. You need them for one thing now — Firebase: add both fingerprints to the
+`com.miles.miles` Android app, or **FCM stops delivering to Play installs**.
+Re-download `google-services.json` afterwards.
 
-- the Maps key restriction (2.3),
-- Firebase — add both fingerprints to the `com.miles.miles` Android app, or
-  **FCM stops delivering to Play installs**. Re-download `google-services.json`
-  afterwards.
+(They used to be needed for the Maps key restriction as well. There is no Maps
+key any more — see 2.3.)
 
 ---
 
@@ -596,7 +626,7 @@ is a policy violation with worse consequences than the rating itself.
     itself. If you turn a cover on (Settings → How this app looks) the app asks
     you to set a 4-digit PIN and record your own gesture before anything
     changes. To get back in from any cover: press and hold two fingers still in
-    the middle of the cover's opening screen for five seconds, then unlock with
+    the middle of the cover's opening screen for ten seconds, then unlock with
     that PIN (a fingerprint prompt may appear first; cancel it to type the
     PIN)." A
     reviewer who enables a cover and cannot get back writes the rejection you
@@ -689,8 +719,12 @@ shape, adjusted to your voice:
 > Settings → How this app looks lets you pick a different launcher name and
 > icon (for example Notes, Weather or Calculator). You choose it; nothing
 > changes until you have set a PIN, recorded your own way back in on that
-> screen, and confirmed — and holding two fingers still on the cover for five
-> seconds always brings up your lock.
+> screen, and confirmed. Only the move you record opens the cover, so choose
+> one you will not forget.
+
+(The backup gesture used to be named here. The store listing is public, so it
+is not — see the App access note above: Google gets that sentence, users do
+not.)
 
 Three properties matter more than the wording: the feature is **named**, it is
 **user-initiated**, and the **way back is stated**. Do not bury it in the last

@@ -162,9 +162,10 @@ take a screenshot, scroll a chat, look at the recent-apps thumbnails.
   word committed by a control the cover already has — and a pointer layer in
   the host matches it (`features/disguise/entry/`). The recorder refuses,
   out loud, any move a curious person performs by ordinary use.
-- **One backup way in, public by design, landing on the PIN.** Two still
-  fingers on the cover's opening screen for five seconds. It is the sentence
-  Play Console and the FAQ get, so with a move recorded it never opens the app:
+- **One backup way in, undisclosed, landing on the PIN.** Two still fingers on
+  the cover's opening screen for ten seconds. Told only to Play Console's App
+  access notes — since 2026-09-03 no user-facing surface names it — so with a
+  move recorded it never opens the app:
   it lands on a nameless lock screen. A PIN must exist before a move can be
   recorded; App Lock's own switch stays the owner's choice (with it off, the
   owner's move opens directly; the backup still asks for the PIN).

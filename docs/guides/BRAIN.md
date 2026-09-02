@@ -115,8 +115,8 @@ was built. `git status` before assuming a file is yours; six tracks touched this
 tree in one day.
 
 **The ordered release procedure is now written: `docs/guides/PLAY-RELEASE-RUNBOOK.md`.**
-It carries the real commands (keystore, `key.properties`, `maps.properties`, the
-AAB build for the new `play` flavor), every Play Console declaration, the
+It carries the real commands (keystore, `key.properties`, the AAB build for the
+`play` flavour), every Play Console declaration, the
 Supabase upgrade, the NOTIFY_SHARED_SECRET seeding, and the sideload→Play
 migration sequence. Do not reconstruct any of that from this file.
 
@@ -22045,3 +22045,288 @@ moment the addendum push queued behind it: *"Canceling since a higher priority
 waiting request for gates-refs/heads/fix-sprint exists"*. The superseding run
 covers the same code plus one doc file. Two pushes a minute apart will always
 look like this; read the annotation before treating a red run as a defect.
+
+## §264 — the two stale doc lines, and the four the fix for them created (2026-09-03)
+
+Owner: *"fix those two stale doc lines too"* — the `found, not fixed` pair at the
+end of §263.
+
+### The two, and what was actually true
+
+- **`mobile/android/gradle.properties`** justified `kotlin.incremental=false`
+  with "the project lives on the E: drive". The repo left E: on 2026-08-23.
+  The *reason* survived the move — the pub cache is still on C: (`PUB_CACHE`
+  unset, `C:\Users\RAZA\AppData\Local\Pub\Cache` present) and the repo is on
+  D:, so it is still cross-drive — only the letter was wrong. The flag was not
+  touched; `gradlew properties` still reports `kotlin.incremental: false`.
+- **`PLAY-RELEASE-RUNBOOK.md` §2.3** told you to create
+  `mobile/android/maps.properties` and cited `build.gradle.kts:24-36` and
+  `AndroidManifest.xml:78`. All dead, verified: no `mapsApiKey` or
+  `manifestPlaceholders` in `build.gradle.kts`, no `com.google.android.geo.API_KEY`
+  in the manifest, no `maps.properties` or `.example` on disk, no `.gitignore`
+  entry, and `pubspec.yaml` ships `mapbox_maps_flutter: ^2.28.1`. Following that
+  section produced a file nothing reads.
+
+`docs/archive/**` also carries dozens of `E:\LDR` paths and was deliberately
+left alone: it is a record of what was true when written, not live guidance.
+Same for every `maps.properties` and "rotate" hit inside BRAIN's numbered
+append-only sections (§11 onward, line 988+).
+
+### Delete, do not rotate — and this was the load-bearing claim
+
+The leaked Maps key had no consumer left, so the old advice (mint a replacement
+and restrict it) would have created a key nothing uses. Confirmed by sweeping
+for any remaining consumer: `geocoding: ^4.0.0` resolves to `geocoding_android`,
+which calls the **platform** `android.location.Geocoder` and declares no
+meta-data key; Mapbox takes a runtime token from `app_secrets` via the
+`map-token` edge function; no Maps, Places, Static Maps, Directions or Google
+geocoding call anywhere in `mobile/lib`, `supabase/functions` or `web/`.
+
+### The four defects the fix itself introduced, found by the pass over it
+
+1. **"Delete the old Android key" named no key.** That GCP project holds three
+   `AIzaSy…` strings and the console lists them by value, not by repo path — so
+   the instruction's most likely outcome was deleting Firebase's and killing
+   FCM on both handsets, which is what the section's own last line warns
+   against. Now a prefix table: `AIzaSyBa6XGz…` delete (the Maps key),
+   `AIzaSyBHUOM-…` keep (Firebase **Android** client, ships in the APK by
+   design), `AIzaSyC93dDX…` keep (Firebase **web**, tree-shaken out).
+   Prefixes only — writing the full leaked value back into a tracked file would
+   undo the 2026-09-02 cleanup.
+2. **"Guarded by Security Rules" is false.** This app runs no Firestore, RTDB,
+   Firebase Storage or Firebase Auth — `pubspec.yaml` carries only
+   `firebase_core` and `firebase_messaging`, and user data is in Supabase under
+   RLS. Anyone auditing the exposed key would have been pointed at a control
+   nobody configured.
+3. **`firebase_options.dart` holds two keys, not one** (`:53` web, `:63`
+   android), and the text claimed both were restricted by package name plus
+   signing fingerprint — a restriction type that cannot apply to a browser key.
+4. **"Live and billable" was contradicted by the repo's own evidence.**
+   `git show 75a4459` records the probe against that key returning
+   `REQUEST_DENIED` / *"You must enable Billing on the Google Cloud Project"* —
+   billing was OFF. Restating an inherited claim as fact inside a rewrite whose
+   whole purpose was removing stale claims is the same defect one level up.
+
+Two more live sites were still contradicting the new text and were corrected:
+`DEVICE-CHECKLIST.md` (owner to-do, still said "wants rotating") and
+`BRAIN.md:118`, which is live index text in `## 4. Open, with diagnosis` — it
+sits before §11 at line 988, so it is not part of the append-only region — and
+still advertised the `maps.properties` step.
+
+The `gradle.properties` rewrite was also trimmed: its first version asserted the
+cross-drive causal mechanism more confidently than the line it replaced, and
+that mechanism is evidenced nowhere in this repo (`grep -iE "kotlin.incremental|
+cross-drive"` over BRAIN returns nothing). It now says the condition holds and
+the cause is inherited and unmeasured, and it names no drive letter — the first
+version hardcoded `D:\Miles`, re-seeding the exact staleness it was fixing.
+
+### Verified
+
+    flutter analyze  → 177 info, 0 error, 0 warning
+    flutter test     → 02:47 +1572 ~3: All tests passed!
+    gradlew properties → kotlin.incremental: false   (flag intact, exit 0)
+    git grep -E "AIzaSy[A-Za-z0-9_-]{33}" → only the 3 pre-existing Firebase
+      keys; the diff adds 0 full keys and the leaked Maps value is absent
+
+No test reads any file changed here (`repo_hygiene_test.dart`'s dynamic list is
+six Next.js config names), so the suite is unaffected by construction as well as
+by result.
+
+### Open
+
+- **Uncommitted.** This work sits in the working tree; §263's commit
+  authorisation was spent on that work and no new one has been given.
+- **`web/privacy-policy.html:276-281` still discloses "Google — Maps SDK" as a
+  current third party, and `web/security.html:203` lists Google Maps too.**
+  Google Maps is gone. That is a false statement in a *published legal
+  document*, and it feeds the Play Data Safety form the runbook drives at §5.4.
+  Not fixed here — out of the scope the owner set — but it is the most
+  consequential stale line found today, more so than either of the two asked
+  about. The adjacent "Google — Android geocoder" row is still correct.
+- Runbook §2.3 is now the only subsection of "Phase 2 — signing" that has
+  nothing to do with signing; it lived there because the Maps key restriction
+  needed the Play App Signing SHA-1. Worth moving to its own phase.
+- Everything still open from §263: build 76 never installed or launched, the
+  first R8 build anyone will run, and the two-finger backup hold never
+  performed on hardware.
+
+## §265 — "the calculator code stopped working": an uninstall, not a defect (2026-09-03)
+
+Owner reported build 76 installed, the calculator cover showing, and neither the
+recorded code `120222` nor the App Lock PIN accepted. Reported as a major issue.
+**There is no code defect. The previous install was removed, which destroyed
+every device-local secret.**
+
+### The evidence that settled it
+
+    adb shell dumpsys package com.miles.miles
+      versionCode=76
+      firstInstallTime=2026-09-03 02:58:37     <- User 0
+      lastUpdateTime =2026-09-03 02:58:37
+      firstInstallTime=2026-08-30 07:41:46     <- User 10, the untouched profile
+
+`firstInstallTime == lastUpdateTime` is the tell: an update preserves the
+original `firstInstallTime`. Equal values mean a fresh install. Owner confirmed:
+uninstalled first, then installed. So `flutter_secure_storage` went with it, and
+with it the App Lock PIN hash (`app_lock_pin_v2`), the cover move
+(`miles_cover_entry_calculator_v1`) and the X25519 seed. No hash can match a
+secret that no longer exists.
+
+**I asserted the opposite earlier in the session** — "both flavours use
+`com.miles.miles`, so it updated in place and the keystore was not wiped." Same
+`applicationId` makes an in-place update *possible*, not *what happened*. The
+package id was checked and the install timeline was not, which is the whole
+error: an inference about an artifact was reported as a fact about a device.
+
+### What the symptoms actually were
+
+- **PIN rejected.** The account had been signed into again, so a *new* PIN
+  record existed; the old one did not.
+- **`=` did nothing.** With no stored record, the cover resolves to a mode with
+  no trigger, `feedText` returns false, and the calculator computes as normal.
+  Silent by design.
+- **Two-finger hold worked.** It is pure gesture handling and touches no
+  storage — which is exactly why it was the only thing still working.
+- **"A little about you" on screen.** Not the cover at all: the owner had
+  already signed in and started a new account.
+
+### The genuinely good finding: escrow restore ran for real, and passed
+
+The runbook's phase 3 says the key-recovery ceremony **has never been run**. It
+ran tonight, by accident, on a device whose seed had just been destroyed:
+
+    account              pubkey updated       escrow updated       gap
+    razaaslam5096        2026-09-02 06:54:09  2026-09-02 22:04:18  -15h 10m
+    milesapp.officials   2026-09-02 22:09:36  2026-09-02 22:11:08  -1m 32s
+    zunairaaleem1202     2026-09-02 22:17:12  2026-09-02 22:17:47  -35s
+
+The two brand-new accounts published a public key and escrowed a seed seconds
+apart — the signature of generating a fresh key. The owner's account re-wrapped
+its escrow at sign-in while its **public key stayed 15 hours old**. A new seed
+forces a new public key; no new public key means no new seed. Corroborated by
+`select count(*) from partner_rewrap_requests` → **0**: no rotation, so no
+partner re-wrap was ever needed.
+
+**Conclusion: the seed was restored from escrow with the account password, not
+regenerated.** That is the first field evidence that the escrow path works, and
+it materially changes a design premise — "a forgotten move means uninstall means
+total loss" is now false for anyone who has an escrow row and remembers their
+password. All four accounts have one (`key_escrow`: 48-byte wrapped seed,
+16-byte salt, 24-byte nonce, `argon2id-v2` m=19456 t=2 p=1).
+
+Little was at risk regardless: that couple (`29b68a18-…`) holds **0 message
+rows**; the account is a day old.
+
+### Why the uninstall happened at all, and the real lesson
+
+The install that preceded build 76 was signed differently, so Android refused
+the update and the only way forward was removal. That is precisely the
+certificate hazard §263 documented — and it bit within hours of being written
+down, on the author's own handset. The runbook's phase-3 ceremony exists for
+this and had never been rehearsed; had the owner not had an escrow row, the
+seed would simply be gone.
+
+### Open
+
+- **The owner has instructed — twice — that the two-finger backup hold must not
+  exist.** "app has no entry points." It is still in the code. It was built for
+  the never-lockout law and for Play's App access section; tonight's escrow
+  result weakens the first of those two justifications. Not yet removed, and
+  what replaces it for a Play reviewer is undecided.
+- The recorder's rehearse step was removed at the owner's request ("2
+  verifications, not 3"), so nothing ever proves a recorded move actually
+  matches before the user depends on it. Tonight that was not the cause, but it
+  remains the reason a genuine record/match asymmetry would stay invisible.
+- The phone is now on a NEW account (`milesapp.officials`), paired with
+  `zunairaaleem1202`. The owner's own account is intact and can be signed back
+  into; its seed restores from escrow.
+- Nothing in this section changed any file. §264's doc fixes remain uncommitted.
+
+## §266 — the backup hold: kept, doubled to 10s, and no longer told to users (2026-09-03)
+
+Owner's ruling, after objecting twice that the app must ship no door of its own:
+*"ok we can keep it but we can't tell user's about it and also increase the time
+for that like atleast 10 seconds of holding."* So the door stays and the
+instructions go.
+
+### What changed
+
+- `kCoverRecoveryHoldSeconds = 10` (new const) and
+  `kCoverRecoveryHold = Duration(seconds: kCoverRecoveryHoldSeconds)`, up from a
+  flat 5s.
+- **`kBackupSlop` is now derived: `4.0 * kCoverRecoveryHoldSeconds`** — 40, up
+  from a standalone 24. This is the part that makes the owner's change usable
+  rather than decorative. The hold cancels when either finger's cumulative drift
+  passes the slop; a resting hand wanders further the longer it rests, so
+  doubling the duration while leaving a tolerance tuned for five seconds ships a
+  gesture that mostly fails in the hand and passes every test on a machine that
+  never shakes. Duration and tolerance now move together by construction.
+- Every user-facing sentence teaching the gesture is gone: the apply-confirmation
+  dialog and the App-Lock-off dialog (`disguise_picker_screen.dart`), the
+  recorder's closing card, the shell's blocking setup dialog
+  (`app_shell.dart` — its reassurance *was* the gesture, so it now points at the
+  two choices in the dialog itself), the in-app FAQ (`faq_text.dart`) and the
+  public `web/faq.html`.
+- **Play Console keeps the sentence, updated to ten.** A reviewer who cannot get
+  back in writes a rejection, and the runbook's App access note is now the only
+  place the gesture is written for anyone outside this repo. The runbook's
+  *store listing* paragraph is public, so the gesture came out of it entirely
+  rather than being updated — three stale "five seconds" in that file were also
+  corrected, including one in the readiness table that would have sent a
+  reviewer to hold for five.
+
+### The new law, and proof it can fail
+
+`disguise_test.dart` gains **"no user-facing surface teaches the backup
+gesture"**, scanning eight files (five Dart, three published HTML) for
+`two fingers` / `fingers … N seconds`. Dart is scanned with comments stripped —
+explaining the gesture to a maintainer stays legal — while HTML is scanned raw,
+because the comment stripper reads `https://` as a line comment and would blank
+the rest of the line, hiding the sentence being searched for.
+
+The gate was proven to FAIL before being trusted: a hint was pasted into
+`web/faq.html` and the run gave
+
+    ../web/faq.html teaches the backup gesture. It is undisclosed: ...
+    Some tests failed.
+
+then the file was restored (`grep -c "two fingers" web/faq.html` → 0). Two
+escaped `\$path` interpolations were also fixed — they would have printed the
+literal text instead of the offending filename.
+
+### Tests moved with the change rather than around it
+
+- `expect(kCoverRecoveryHold, Duration(seconds: 5))` → 10, plus a new assertion
+  that `kBackupSlop == 4.0 * kCoverRecoveryHoldSeconds`, so the derivation
+  cannot be quietly unpicked.
+- The drift test moved a finger exactly `Offset(40, 0)`: comfortably past the
+  old 24px slop and **exactly on** the new 40px boundary, where `>` is false. It
+  now uses `kBackupSlop + 10`. A literal distance stops testing cancellation the
+  moment the tolerance moves.
+- New: **"a tremor inside the tolerance still opens it"** — both fingers wander
+  by `kBackupSlop / 2` five times across a full ten-second hold and it must
+  still open. Nothing previously proved a long hold is completable by a hand
+  that shakes.
+- The guide test now requires "ten seconds" and its reason no longer calls the
+  hold public.
+
+### Verified
+
+    flutter test test/widget/cover_entry_layer_test.dart \
+                 test/unit/disguise/disguise_test.dart \
+                 test/widget/disguise_cover_host_test.dart
+      00:05 +52: All tests passed!
+
+Two analyzer infos introduced by this change were fixed rather than left: a
+`comment_references` in `cover_gate.dart` (a doc `[kBackupSlop]` pointing at a
+symbol that file cannot see) and a `prefer_const_declarations` in the new test.
+
+### Open
+
+- **Not built, not installed.** The 10s hold has never been performed on
+  hardware, and the drift tolerance is reasoned from how hands behave, not
+  measured on a phone. The tremor test proves the logic, not the ergonomics.
+  Next build: hold two fingers for ten seconds on a real cover and see whether
+  it opens first try.
+- Nothing here is committed.
+- §264's doc fixes and §265's diagnosis remain uncommitted too.

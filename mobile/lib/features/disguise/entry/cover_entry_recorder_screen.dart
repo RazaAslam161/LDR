@@ -578,9 +578,8 @@ class _CoverEntryRecorderScreenState extends State<CoverEntryRecorderScreen>
         _title("That's it — ${_derived!.summary}."),
         const SizedBox(height: 6),
         _line(
-          'If you ever forget it: hold two fingers still in the middle of the '
-          "cover's opening screen for five seconds, then unlock with your "
-          'fingerprint or PIN.',
+          'This move is the only way in from the cover. Practise it now, '
+          'while you can still change it.',
         ),
         const SizedBox(height: 12),
         // Stacked, never a Row: at a large text scale two buttons side by

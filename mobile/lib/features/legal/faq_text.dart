@@ -91,9 +91,9 @@ List<FaqSection> milesFaq() => [
               'launcher and opens on a convincing stand-in screen until you '
               'enter through a move you record yourself — on that screen, '
               'when you put the cover on. The app ships no gesture of its '
-              'own. Forgotten it? Hold two fingers still in the middle of the '
-              'cover for five seconds, then unlock with your fingerprint or '
-              'app PIN.\n\nMiles installs '
+              'own, and nothing but your move opens the cover — so choose one '
+              'you will not forget. With App Lock on it lands on your '
+              'fingerprint or app PIN.\n\nMiles installs '
               'under its own name and icon; a cover is something you choose '
               'to put on, and you can take it off any time.',
         ),
