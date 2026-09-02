@@ -22033,3 +22033,15 @@ will cost it again.** Neither is a code defect; both make a command lie:
   this addendum: the commit hash, the branch name and every file path silently
   vanished, and bash executed `tool/release.sh` as a command in passing. Write
   scripts to a file and run the file. Heredocs also fail on this shell.
+
+### §263 addendum 2 — CI green (2026-09-03)
+
+Run `33683474470` on `8d810bd`, both jobs: **analyze + test** green in 5m36s,
+**dependency advisories** green in 58s.
+
+The run on `58e82b9` before it (`33683320007`) shows as failed and was NOT a
+test failure — GitHub cancelled it under the workflow's concurrency group the
+moment the addendum push queued behind it: *"Canceling since a higher priority
+waiting request for gates-refs/heads/fix-sprint exists"*. The superseding run
+covers the same code plus one doc file. Two pushes a minute apart will always
+look like this; read the annotation before treating a red run as a defect.
