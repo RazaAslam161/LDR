@@ -20683,3 +20683,102 @@ under a second on ten re-runs).
 - `min_build` untouched.
 
 **Exact next step:** upload `mobile/build/app/outputs/bundle/playRelease/app-play-release.aab` (copy also at the session scratchpad) to the Play Console internal track — it is the exact Dart both phones are running — and answer the forms §252 listed. Copy the AAB out of build/ first; the next `flutter clean` deletes it.
+
+## §254 — two-phone realtime decrypt check, then flip chat_cipher_only (2026-09-02, IN PROGRESS)
+
+Owner: "run the two-phone chat decrypt check and flip chat_cipher_only."
+
+### What the switch is (read, not remembered)
+
+- `public.app_release.chat_cipher_only boolean not null default false`
+  (20260818110500). Read by `ReleaseGate.check()` at cold start and by the
+  throttled `recheck()` on resume (release_gate.dart:287). The client rule is
+  `omitPlaintext = cipherOnly && sealed` (chat_repository.dart:582): a body
+  that did not seal is written in the clear REGARDLESS of the flag, so the
+  flag can never produce a textless row. Flip: `update public.app_release set
+  chat_cipher_only = true;` Rollback: the same with `false`. Second run of
+  either: no-op. Accepted consequence per the migration: the server-side
+  Links shelf stops indexing (media_class 'link' arm reads body); prod has 0
+  such rows.
+- Preconditions from the migration, checked today: a dual-write build is on
+  both handsets (73 ≥ 46, §253); min_build for sideload is moot (updater
+  retired, both phones hand-installed); Play has no users yet; the
+  `msg_insert_result sealed:true` diag is a release no-op, so the DB rows of
+  the test messages are the oracle instead.
+
+### Baseline on production (sopictusdonlvuezmfep), before any message
+
+    app_release: chat_cipher_only=false, min_build=42, latest_build=46
+    messages: 0 rows (production was reset; the first rows will be the test)
+    profiles=2, couples=1, couple_members=2
+    client_errors, last 30d: kind 'chat-decrypt' / ParseShortfall on builds 66
+      and 69 only (the §208 double-hex class); NONE on 70-73.
+
+### found, not fixed (build 73, live)
+
+client_errors 2026-09-01 22:45:26Z, build 73, `_TypeError` at
+`GoRouter.of (router.dart:522)` <- `joinPartner (partner_here_badge.dart:316)`
+<- `_PresenceFigureOverlayState._stand.act`. `PresenceFigureOverlay` is
+inserted at main.dart:1089 OUTSIDE the router, so `GoRouter.of(context)`
+has no router above it: tapping the standing partner figure to join them
+throws and does nothing. Separate fix, own change.
+
+### The check, and why it needs a person
+
+The couple key exists only on the phones, so the only way to produce a real
+ciphered message is the app's own send path. The app lock is biometric, and
+the chat screen is not FLAG_SECURE (only the media viewer is), so `adb
+screencap` can read the result but adb cannot get past the lock. Needed from
+the owner: OnePlus 7 back on the cable (it dropped off after §253), both
+phones unlocked with Miles open on the chat. From there: one message each
+way, screenshot the receiving phone, verify the rows have body_cipher AND a
+plaintext body (pre-flip), verify client_errors gains no chat-decrypt row;
+flip; one more message each way; verify rows have body_cipher and NO body,
+and both screens render the text.
+
+### §254 addendum — flipped (2026-09-02 01:20 UTC)
+
+Pre-flip evidence: seq 4636 (op8->op7) and 4637 (op7->op8), both rendered on
+the receiving phone over the realtime path within 6 s (screenshots in the
+session scratchpad), both rows body_cipher 39 bytes + body_nonce 24 bytes
+WITH plaintext body, chat_receipts d4637/r4637 for both users, client_errors
+in the last 30 min: 0 (so both phones hydrated the ciphered rows and filed
+no chat-decrypt). Rollback written first: `update public.app_release set
+chat_cipher_only = false;`. Then:
+
+    update public.app_release set chat_cipher_only = true where chat_cipher_only = false
+    -> [{"id":true,"chat_cipher_only":true,"min_build":42,"latest_build":46}]
+
+Both apps force-stopped and cold-started so ReleaseGate.check() reads the
+flag (recheck on resume is throttled to 15 min). Post-flip check follows.
+
+### §254 addendum 2 — post-flip proof: cipher-only rows render on both phones (2026-09-02 01:20 UTC)
+
+Both apps cold-started after the flip (am start: 761 ms / 660 ms, no lock
+prompt, landed on Home; Chat tab tapped via adb). Then one message each way
+through the real input:
+
+    seq 4638  op8 -> op7  "cipher-only-3-from-op8"  body NULL  cipher 38 B  nonce 24 B
+    seq 4639  op7 -> op8  "cipher-only-4-from-op7"  body NULL  cipher 38 B  nonce 24 B
+    receipts: 6076edae d4638/r4638, a7a6485c d4639/r4639
+    client_errors last 30 min: 0        app_release.chat_cipher_only: true
+
+Each receiving phone rendered the text within 6 s over the realtime path
+(screenshots op7_recv3.png / op8_recv4.png in the session scratchpad). With
+`body` NULL the only source of that text is decryptBytes over body_cipher,
+so this is the two-handset realtime decrypt confirmation §208 asked for,
+on build 73, in both directions. The §208 class (double-hex bytea) would
+have filed kind 'chat-decrypt'; none was filed.
+
+State now: chat text is written cipher-only by both installed clients. Rows
+4636 and 4637 (the two pre-flip test messages) still carry plaintext in the
+DB — the switch never touches existing rows; they can be deleted from the
+app (delete for everyone) if the owner wants the table plaintext-free.
+Accepted consequence per the migration: the server-side Links shelf stops
+indexing new links (0 rows ever). Rollback if anything regresses:
+`update public.app_release set chat_cipher_only = false;` — new rows go
+back to dual-write; rows 4638/4639 stay cipher-only and decryptable.
+
+**Exact next step:** nothing for this switch. Next candidates from the
+rating: the `joinPartner` `_TypeError` (§254 found-not-fixed), then cold
+start and size.

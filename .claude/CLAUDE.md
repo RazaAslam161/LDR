@@ -100,15 +100,14 @@ this machine.
 
 - **Production may be ahead of this repo.** Builds have shipped to handsets that exist in
   no commit. Read the tree's build number rather than assuming a baseline.
-- **Chat decryption fails on the REALTIME path** (audited 2026-08-30, BRAIN §208). Root
-  cause: `postgres_changes` double-hex-encodes `bytea` and keeps the `\x` prefix, so a
-  decoder returns twice the stored bytes and a 24-byte nonce arrives as 48 — an
-  `ArgumentError` that reads like a missing key. Chat now refetches ciphered rows through
-  PostgREST instead of parsing the realtime payload, and `byteaToBytes` takes an `expect`
-  length. **`chat_cipher_only` must stay false** until that is confirmed on two handsets:
-  the plaintext dual-write is the only fallback, and flipping it early converts any
-  decrypt failure into permanent loss. The old "61 reports" figure is dead — production
-  was reset, and the surviving evidence is two errors against one message.
+- **Chat is cipher-only since 2026-09-02** (BRAIN §254). `app_release.chat_cipher_only` is
+  true on production; both installed clients (build 73) write `body_cipher` + `body_nonce`
+  and no plaintext `body`. Proven the same day: one message each way over the realtime
+  path on both handsets rendered from ciphertext alone (rows 4638/4639, body NULL, zero
+  `chat-decrypt` client_errors). The §208 realtime double-hex defect is fixed and
+  confirmed. Rollback is one statement: `update public.app_release set chat_cipher_only
+  = false;` — it restores dual-write for NEW rows only. Rows 4636/4637 (pre-flip test
+  messages) still hold plaintext.
 - The Google Maps API key is in git history at commit `5403769` (and, until it was
   deleted on 2026-09-02, verbatim in `docs/guides/play-readiness-findings.json`). It is
   live/billable. Rotate it. It is **not** in the shipped APK — Mapbox replaced Google
