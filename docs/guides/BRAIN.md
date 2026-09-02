@@ -20839,3 +20839,10 @@ updated. Test harness: overlay mounted in `builder:` as in main, plus
   trip; grep shows the figure is its only caller today. Left as is.
 
 **Exact next step:** commit when asked; include in the next build (74).
+
+### §255 addendum — pushed as 328979a + f3b035b, CI green (2026-09-02)
+
+Fast-forward push (30d990e..f3b035b). CI run 33579936687 on the fix commit:
+analyze + test success, dependency advisories success — the second green run
+in the repository's history, and the first on an app-code change. Both
+phones still run build 73 with the defect until build 74 is cut.
