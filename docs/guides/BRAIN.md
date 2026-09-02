@@ -21753,3 +21753,24 @@ reaching disk.
   and five seconds. It is the one door the app itself defines.
 - The sideload signing key decision above.
 - The phone wears a Calculator cover whose move this session cannot name.
+
+### §262 addendum 3 — pushed as 9d1082b, CI green (2026-09-02)
+
+48 paths, staged by explicit path (the concurrent session's unlink work was
+already in 42bdc6e, so nothing of theirs was swept in). Secrets grep over the
+diff and the new `entry/` files: clean. CI run 33624288567 on 9d1082b:
+**success**.
+
+Unchanged by the push, and still the two things that matter:
+
+1. **BLOCKED: the two-finger backup hold has never been performed on
+   hardware.** It is the one door the app itself defines, and the only one a
+   locked-out owner has. `sendevent` is denied to the adb shell by SELinux, so
+   it cannot be driven; it needs a person and five seconds.
+2. **The sideload signing key is still a defect, not a decision.** Build 75
+   installed only because the artifact was re-signed by hand with
+   `miles-upload.jks`. Until `build.gradle.kts` is settled, every sideload
+   build fails on these handsets with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+
+The OnePlus 8 is on the Calculator cover with a move this session cannot name.
+The way in is the backup hold, then the PIN.
