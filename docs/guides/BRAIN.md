@@ -21017,3 +21017,13 @@ not a rewrite: this branch is shared with a session in the same tree, and a
 force-push under it is worse than two commits that only make sense together.
 Rule for next time: `git add` and `git commit` in SEPARATE steps, with the
 staged count checked between them — the count was printed and ignored.
+
+### §257 addendum 3 — fcf62fd pushed; HEAD coherent (2026-09-02)
+- `088fc22` (deletions + renames) and `fcf62fd` (everything else) are both on
+  origin; the tree is exactly HEAD and `flutter analyze lib/ test/` at HEAD is
+  0/0. CI cancelled 088fc22's run when fcf62fd's push superseded it, so the
+  intermediate state never went red on the badge — by luck of concurrency,
+  not by design. fcf62fd's run: result below.
+- Nothing left uncommitted except this note.
+- CI on fcf62fd: **analyze + test: success; dependency advisories: success**
+  (run 33588934986). The branch is whole again.
