@@ -96,6 +96,17 @@ this machine.
   replaced it), so `maps.properties` no longer exists as a concept; its example file and
   ignore rule were removed 2026-09-02.
 
+## Tests — two gotchas that each cost a fix (2026-09-02)
+
+- `local_auth`'s channel never answers under `flutter test`; anything that
+  awaits `AppLock.availableBiometrics()` hangs. It is a swappable static: set
+  `AppLock.availableBiometrics = () async => const [];` in `setUp`, restore
+  `AppLock.availableBiometricsLive` in `tearDown`.
+- `tester.startGesture` without `pointer:` draws ids from a counter shared
+  across every test in the file. Two-finger tests must pass explicit, distinct
+  ids for BOTH fingers or the second down asserts "unexpectedly has a
+  HitTestResult".
+
 ## Open, as of BRAIN §75
 
 - **Production may be ahead of this repo.** Builds have shipped to handsets that exist in

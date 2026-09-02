@@ -1,9 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
-import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/entry/cover_entry_scope.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A notepad that really keeps notes.
@@ -14,19 +12,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// innocuous key and are deliberately NOT part of the couple's encrypted data —
 /// they are set dressing, and treating them as private data would be the tell.
 ///
-/// The way in is a **long-press on the empty-state illustration** — reachable
-/// only when there are no notes on screen, so it cannot be hit by someone
-/// actually using the pad.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen. The one thing this file does is
+/// hand whatever Save commits to [CoverEntryScope], blind to what it means —
+/// and never write down a title it offered.
 class NotesCover extends StatefulWidget {
-  const NotesCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const NotesCover({super.key});
 
   @override
   State<NotesCover> createState() => _NotesCoverState();
 }
 
-class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
+class _NotesCoverState extends State<NotesCover> {
   static const _storeKey = 'notes_cover_items';
 
   List<_Note> _notes = [];
@@ -37,9 +34,6 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
     super.initState();
     _load();
   }
-
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -57,9 +51,27 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
   }
 
   Future<void> _edit([_Note? existing]) async {
+    // Read here, not in the editor: the editor is a route above the host,
+    // outside the scope's subtree.
+    final scope = CoverEntryScope.maybeOf(context);
+    // A title that was offered to the scope is never written down, matched
+    // or not: a near-miss would otherwise pile the owner's half-remembered
+    // secret into a plain-prefs list on the cover itself.
+    var offered = false;
     final result = await Navigator.of(context).push<_Note>(
-      MaterialPageRoute(builder: (_) => _NoteEditor(note: existing)),
+      MaterialPageRoute(
+        builder: (_) => _NoteEditor(
+          note: existing,
+          onCommitTitle: scope == null
+              ? null
+              : (t) {
+                  offered = true;
+                  return scope.feedText(t, commit: true);
+                },
+        ),
+      ),
     );
+    if (offered) return;
     if (result == null || !mounted) return;
     setState(() {
       if (existing == null) {
@@ -84,21 +96,12 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
         backgroundColor: const Color(0xFFFDFBF7),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: CoverAboutTap(
-          onTap: () => showCoverAbout(context,
-              cover: DisguiseCover.notes,
-              onOpen: runEntryGate,
-              theme: coverTheme(
-                primary: const Color(0xFFF4B400),
-                surface: const Color(0xFFFDFBF7),
-              ),),
-          child: const Text(
-            'Notes',
-            style: TextStyle(
-              color: Color(0xFF202124),
-              fontWeight: FontWeight.w500,
-              fontSize: 20,
-            ),
+        title: const Text(
+          'Notes',
+          style: TextStyle(
+            color: Color(0xFF202124),
+            fontWeight: FontWeight.w500,
+            fontSize: 20,
           ),
         ),
       ),
@@ -111,7 +114,7 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
       body: !_loaded
           ? const SizedBox.shrink()
           : _notes.isEmpty
-              ? _EmptyState(onSecretHold: runEntryGate)
+              ? const _EmptyState()
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
                   itemCount: _notes.length,
@@ -137,30 +140,22 @@ class _NotesCoverState extends State<NotesCover> with CoverGate<NotesCover> {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onSecretHold});
-
-  final VoidCallback onSecretHold;
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: GestureDetector(
-        // The door. Only present when the pad is empty, so nobody using the
-        // notepad normally can land on it.
-        onLongPress: onSecretHold,
-        behavior: HitTestBehavior.opaque,
-        child: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.sticky_note_2_outlined,
-                size: 72, color: Color(0xFFDADCE0),),
-            SizedBox(height: 16),
-            Text(
-              'Notes you add appear here',
-              style: TextStyle(color: Color(0xFF80868B), fontSize: 14),
-            ),
-          ],
-        ),
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.sticky_note_2_outlined,
+              size: 72, color: Color(0xFFDADCE0),),
+          SizedBox(height: 16),
+          Text(
+            'Notes you add appear here',
+            style: TextStyle(color: Color(0xFF80868B), fontSize: 14),
+          ),
+        ],
       ),
     );
   }
@@ -207,9 +202,13 @@ class _NoteCard extends StatelessWidget {
 }
 
 class _NoteEditor extends StatefulWidget {
-  const _NoteEditor({this.note});
+  const _NoteEditor({this.note, this.onCommitTitle});
 
   final _Note? note;
+
+  /// Save is the notepad's commit. A title it consumes was the owner's move
+  /// on this cover, and no note is written — nothing to find later.
+  final bool Function(String title)? onCommitTitle;
 
   @override
   State<_NoteEditor> createState() => _NoteEditorState();
@@ -227,6 +226,10 @@ class _NoteEditorState extends State<_NoteEditor> {
   }
 
   void _save() {
+    if (widget.onCommitTitle?.call(_title.text.trim()) ?? false) {
+      Navigator.pop(context);
+      return;
+    }
     if (_title.text.trim().isEmpty && _body.text.trim().isEmpty) {
       Navigator.pop(context);
       return;

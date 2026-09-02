@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/models.dart';
-import 'package:miles/features/disguise/cover_gate.dart' show CoverGate;
+import 'package:miles/features/disguise/disguise_cover_host.dart'
+    show DisguiseCoverHost;
 
 /// Granular, read-only views over the bundled [sessionProvider]. Features should
 /// watch the narrowest provider they need so they only rebuild when that slice
@@ -48,5 +49,5 @@ final passwordRecovery = ValueNotifier<bool>(false);
 /// drops it to the cover. The link then wakes it behind that cover, where the
 /// router does not exist: supabase_flutter redeems the token, the session goes
 /// valid, and the user is looking at a calculator with nothing to say it
-/// worked. Watched by [CoverGate], same as an incoming call.
+/// worked. Watched by [DisguiseCoverHost], same as an incoming call.
 final pendingAuthLink = ValueNotifier<bool>(false);

@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/entry/cover_entry_store.dart';
+import 'package:miles/features/disguise/entry/cover_entry_trigger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Switches what the app looks like in the launcher.
@@ -127,12 +129,28 @@ class DisguiseService {
   static Future<void> markChosen() async =>
       (await SharedPreferences.getInstance()).setBool(_chosenKey, true);
 
-  /// Switches the launcher identity to [profile].
+  /// Switches the launcher identity to [profile], recording [entry] as the
+  /// way into it first.
   ///
-  /// Returns true when the platform confirmed the swap. On failure the previous
-  /// identity is left intact and nothing is persisted, so a half-applied state
-  /// is not possible.
-  static Future<bool> apply(DisguiseProfile profile) async {
+  /// Returns true when the platform confirmed the swap. On failure the
+  /// launcher preference is put back, so the stored identity always matches
+  /// the alias Android has enabled.
+  ///
+  /// The move is written before anything else: the alias switch below is what
+  /// can force-stop the process, and every write that precedes it is one the
+  /// next launch reads. A switch that fails takes the move just written with
+  /// it, so the cover still worn keeps its own — records are per cover, and
+  /// the worn cover's is never touched here.
+  static Future<bool> apply(
+    DisguiseProfile profile, {
+    CoverEntryTrigger? entry,
+  }) async {
+    assert(
+      entry == null || entry.cover == profile.cover,
+      'a move is recorded for the cover it opens',
+    );
+    if (entry != null && !await CoverEntryStore.save(entry)) return false;
+
     final prefs = await SharedPreferences.getInstance();
     final previous = prefs.getString(_prefsKey);
 
@@ -158,6 +176,13 @@ class DisguiseService {
 
     // The switch did not happen — put the stored identity back so it keeps
     // matching the alias that is actually enabled.
+    //
+    // The move just written STAYS. The native side enables the target alias
+    // before disabling the others (MainActivity.setAlias), so a throw in that
+    // loop returns failure with the new alias already live: deleting its
+    // record here would leave the cover Android is actually wearing with no
+    // way in but the public hold. A record for a cover nobody wears costs
+    // nothing and is replaced the next time that cover is chosen.
     if (previous == null) {
       await prefs.remove(_prefsKey);
     } else {

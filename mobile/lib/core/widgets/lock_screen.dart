@@ -7,9 +7,14 @@ import 'package:miles/features/vault/pin_pad.dart';
 
 /// Full-screen lock shown over the app while [AppLock.locked] is true. Always
 /// offers a way in: it auto-prompts biometrics, lets you retry that prompt, and
-/// falls back to the 4-digit app-lock PIN. Cannot be dismissed without auth.
+/// falls back to the 4-digit app-lock PIN. Cannot be dismissed without auth —
+/// except the [nameless] form, which the cover's backup door pushes: it prints
+/// no app name and back returns to the cover silently, so a stranger who found
+/// the public hold sees a lock and learns nothing else.
 class LockScreen extends StatefulWidget {
-  const LockScreen({super.key});
+  const LockScreen({this.nameless = false, super.key});
+
+  final bool nameless;
 
   @override
   State<LockScreen> createState() => _LockScreenState();
@@ -86,7 +91,7 @@ class _LockScreenState extends State<LockScreen> {
     // build 68 was reporting. A widget that fills whatever it is given works
     // in both places; a Positioned only works in one.
     return PopScope(
-        canPop: false,
+        canPop: widget.nameless,
         child: Material(
           color: MilesColors.night,
           child: SafeArea(
@@ -100,8 +105,8 @@ class _LockScreenState extends State<LockScreen> {
                     const Icon(Icons.lock_rounded,
                         color: MilesColors.ember, size: 52,),
                     const SizedBox(height: 14),
-                    const Text('Miles is locked',
-                        style: TextStyle(
+                    Text(widget.nameless ? 'Locked' : 'Miles is locked',
+                        style: const TextStyle(
                             color: MilesColors.cream50,
                             fontSize: 19,
                             fontWeight: FontWeight.w600,),),

@@ -16,7 +16,7 @@ import 'package:miles/features/call/call_pip.dart' show CallPip;
 /// only widget that could act on it had been unmounted.
 ///
 /// Mounted in the root builder beside [CallPip], so it covers every route the
-/// shell does and the ones it does not. This is the same hole CoverGate closes
+/// shell does and the ones it does not. This is the same hole the cover host closes
 /// for a raised cover, reached from the other side: there, no router exists at
 /// all; here, the router exists and the shell does not.
 class CallRouteBridge extends ConsumerStatefulWidget {

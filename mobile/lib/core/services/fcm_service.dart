@@ -12,7 +12,8 @@ import 'package:miles/core/services/session_scope.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/features/chat/message_preview_port.dart';
-import 'package:miles/features/disguise/cover_gate.dart' show CoverGate;
+import 'package:miles/features/disguise/disguise_cover_host.dart'
+    show DisguiseCoverHost;
 import 'package:miles/main.dart';
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
@@ -42,7 +43,7 @@ class CallTap {
   /// — which fires with the app already running, having posted no notification
   /// at all, so nothing was shown and nothing was tapped.
   ///
-  /// [CoverGate] refuses to open on a ring that was not tapped. Without that,
+  /// [DisguiseCoverHost] refuses to open on a ring that was not tapped. Without that,
   /// a partner pressing Call replaces the cover the user is looking at with the
   /// call screen — their avatar and real name — within a frame, unprompted;
   /// and with an app lock enrolled it raises a biometric prompt the user did
@@ -274,7 +275,7 @@ class FcmService {
     if (type == 'call') {
       // fromTap: false — onMessage fires with the app already running and posts
       // no notification, so nothing was shown and nothing was tapped. The shell
-      // still rings when the real app is visible; CoverGate refuses to open on
+      // still rings when the real app is visible; the cover host refuses to open on
       // this, so a partner cannot replace the cover the user is looking at.
       pendingCall.value = CallTap(
         (m.data['call_id'] as String?) ?? '',

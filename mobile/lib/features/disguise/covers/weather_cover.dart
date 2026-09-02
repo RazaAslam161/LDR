@@ -1,9 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
-import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A local forecast panel.
 ///
@@ -14,23 +11,17 @@ import 'package:miles/features/disguise/disguise_profile.dart';
 /// stable: seeded from the day, so it does not reshuffle every time it opens,
 /// which is what a fake would do.
 ///
-/// The way in is a **long-press on the temperature**. Large, obvious to reach
-/// deliberately, and inert to a tap.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen; nothing here knows it exists.
 class WeatherCover extends StatefulWidget {
-  const WeatherCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const WeatherCover({super.key});
 
   @override
   State<WeatherCover> createState() => _WeatherCoverState();
 }
 
-class _WeatherCoverState extends State<WeatherCover>
-    with CoverGate<WeatherCover> {
+class _WeatherCoverState extends State<WeatherCover> {
   late final _Forecast _forecast = _Forecast.forToday();
-
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
 
   @override
   Widget build(BuildContext context) {
@@ -56,55 +47,31 @@ class _WeatherCoverState extends State<WeatherCover>
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 4),
-              // The way back. NOT the location line above it: on a real
-              // weather app that line opens location selection, so a door
-              // behind it is a door behind ordinary use — the mistake the News
-              // search box already made once. The date is the inert reading.
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => showCoverAbout(context,
-                    cover: DisguiseCover.weather,
-                    onOpen: runEntryGate,
-                    theme: coverTheme(
-                      primary: const Color(0xFF4285F4),
-                      surface: Colors.white,
-                    ),),
-                child: Text(
-                  _dayLabel(now),
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                ),
+              Text(
+                _dayLabel(now),
+                style: const TextStyle(color: Colors.white, fontSize: 13),
               ),
               const SizedBox(height: 24),
-              // The door.
-              GestureDetector(
-                onLongPress: runEntryGate,
-                behavior: HitTestBehavior.opaque,
-                child: Column(
-                  children: [
-                    Icon(_forecast.today.icon,
-                        size: 84, color: Colors.white.withValues(alpha: 0.95),),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${_forecast.today.high}°',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 76,
-                        fontWeight: FontWeight.w200,
-                        height: 1,
-                      ),
-                    ),
-                    Text(
-                      _forecast.today.label,
-                      style: const TextStyle(color: Colors.white, fontSize: 17),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'H:${_forecast.today.high}°  L:${_forecast.today.low}°',
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
-                  ],
+              Icon(_forecast.today.icon,
+                  size: 84, color: Colors.white.withValues(alpha: 0.95),),
+              const SizedBox(height: 8),
+              Text(
+                '${_forecast.today.high}°',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 76,
+                  fontWeight: FontWeight.w200,
+                  height: 1,
                 ),
+              ),
+              Text(
+                _forecast.today.label,
+                style: const TextStyle(color: Colors.white, fontSize: 17),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'H:${_forecast.today.high}°  L:${_forecast.today.low}°',
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 28),
               Expanded(

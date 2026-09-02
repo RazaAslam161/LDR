@@ -4,9 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -26,21 +24,16 @@ import 'package:record/record.dart';
 /// indicator on this handset, so the indicator appearing during a real voice
 /// note is no longer the anomaly it would otherwise be.
 ///
-/// **The way in: hold the 00:00 readout before recording anything.** Normal use
-/// is tapping the record button — the readout is a passive number with no
-/// ripple, no tap handler and no affordance, and the gate only opens while it
-/// literally reads zero, so it cannot be reached mid-recording.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen; nothing here knows it exists.
 class RecorderCover extends StatefulWidget {
-  const RecorderCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const RecorderCover({super.key});
 
   @override
   State<RecorderCover> createState() => _RecorderCoverState();
 }
 
-class _RecorderCoverState extends State<RecorderCover>
-    with CoverGate<RecorderCover> {
+class _RecorderCoverState extends State<RecorderCover> {
   /// Both caps exist so the cover cannot quietly become a pile of someone's
   /// audio. Five minutes is longer than any voice memo anybody actually makes.
   static const _maxFiles = 20;
@@ -81,9 +74,6 @@ class _RecorderCoverState extends State<RecorderCover>
     unawaited(_player.dispose());
     super.dispose();
   }
-
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
 
   // ── Library ────────────────────────────────────────────────────────────────
 
@@ -254,11 +244,6 @@ class _RecorderCoverState extends State<RecorderCover>
     }
   }
 
-  /// The door — see the class doc for why this state and not another.
-  void _onReadoutHold() {
-    if (!_recording && _elapsed == Duration.zero) runEntryGate();
-  }
-
   // ── Rendering ──────────────────────────────────────────────────────────────
 
   @override
@@ -272,33 +257,22 @@ class _RecorderCoverState extends State<RecorderCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: CoverAboutTap(
-            onTap: () => showCoverAbout(context,
-                cover: DisguiseCover.recorder,
-                onOpen: runEntryGate,
-                theme: theme,),
-            child: const Text('Recorder'),
-          ),
+          title: const Text('Recorder'),
         ),
         body: SafeArea(
           child: Column(
             children: [
               const SizedBox(height: 8),
-              // The door. Passive: no ink, no handler, nothing to press.
-              GestureDetector(
-                onLongPress: _onReadoutHold,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 32, vertical: 12,),
-                  child: Text(
-                    _clock(_elapsed),
-                    style: TextStyle(
-                      fontSize: 52,
-                      fontWeight: FontWeight.w200,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                      color: theme.colorScheme.onSurface,
-                    ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 32, vertical: 12,),
+                child: Text(
+                  _clock(_elapsed),
+                  style: TextStyle(
+                    fontSize: 52,
+                    fontWeight: FontWeight.w200,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               ),

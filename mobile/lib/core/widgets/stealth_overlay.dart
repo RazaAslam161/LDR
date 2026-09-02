@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 /// Controls the quick-cover stealth scrim from anywhere.
 final ValueNotifier<bool> stealthActive = ValueNotifier<bool>(false);
 
+/// True while a screen owns the whole touchscreen for itself — the move
+/// recorder, whose owner may hold the top-right corner on purpose. The
+/// long-press zone below and the panic detector both stand down for it.
+final ValueNotifier<bool> stealthSuppressed = ValueNotifier<bool>(false);
+
 /// App-wide stealth layer: an invisible 48×48 LONG-PRESS zone in the top-right
 /// corner that raises an innocent "Syncing news" scrim over the ENTIRE app.
 /// Dismiss by tapping the scrim (or volume-down).
@@ -25,14 +30,19 @@ class StealthLayer extends StatelessWidget {
         // Invisible, always-present long-press zone — top-right corner, 48×48.
         // No visual indicator of any kind. Translucent so single taps fall
         // through to any real button underneath.
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 4,
-          right: 4,
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onLongPress: () => stealthActive.value = true,
-            child: const SizedBox(width: 48, height: 48),
-          ),
+        ValueListenableBuilder<bool>(
+          valueListenable: stealthSuppressed,
+          builder: (_, suppressed, __) => suppressed
+              ? const SizedBox.shrink()
+              : Positioned(
+                  top: MediaQuery.of(context).padding.top + 4,
+                  right: 4,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onLongPress: () => stealthActive.value = true,
+                    child: const SizedBox(width: 48, height: 48),
+                  ),
+                ),
         ),
         // The cover scrim — instant (no fade), tap anywhere to dismiss.
         ValueListenableBuilder<bool>(

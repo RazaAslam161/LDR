@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
+import 'package:miles/core/widgets/lock_screen.dart';
+import 'package:miles/features/disguise/covers/calculator_cover.dart';
 import 'package:miles/features/disguise/covers/convert_cover.dart';
 import 'package:miles/features/disguise/covers/device_info_cover.dart';
 import 'package:miles/features/disguise/covers/level_cover.dart';
+import 'package:miles/features/disguise/covers/notes_cover.dart';
 import 'package:miles/features/disguise/covers/recorder_cover.dart';
 import 'package:miles/features/disguise/covers/timer_cover.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/covers/weather_cover.dart';
+import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A cover that throws while building is not a bug with a stack trace — it is a
@@ -21,9 +24,22 @@ void main() {
     await tester.pump();
   }
 
+  /// Nothing a cover does on its own may reach the gate: no lock screen, no
+  /// splash, no app name. The covers are pumped without a host, so a door that
+  /// somehow survived in one of them would have nowhere to go but here.
+  void expectNoDoor(WidgetTester tester, String cover) {
+    tester.takeException();
+    expect(find.byType(LockScreen), findsNothing,
+        reason: '$cover reached the lock on its own',);
+    expect(find.byType(IntroSplashScreen), findsNothing,
+        reason: '$cover ran the reveal on its own',);
+    expect(find.text('Miles'), findsNothing,
+        reason: '$cover printed the real name',);
+  }
+
   testWidgets('Convert renders its own identity, not the app theme',
       (tester) async {
-    await pumpCover(tester, ConvertCover(onAuthenticated: () {}));
+    await pumpCover(tester, const ConvertCover());
     expect(find.text('Convert'), findsOneWidget);
     expect(find.text('Length'), findsOneWidget);
     // Metres to feet, computed live as you type.
@@ -32,21 +48,8 @@ void main() {
     expect(find.text('3.2808'), findsOneWidget);
   });
 
-  testWidgets('holding swap on two different units does nothing',
-      (tester) async {
-    // The negative half of the door, and the one that matters: the gate must
-    // stay shut for anyone using the converter normally. If this ever opens it
-    // reaches the app lock, and the test fails on the missing plugin rather
-    // than passing quietly.
-    var opened = false;
-    await pumpCover(tester, ConvertCover(onAuthenticated: () => opened = true));
-    await tester.longPress(find.byIcon(Icons.swap_vert_rounded));
-    await tester.pump();
-    expect(opened, isFalse);
-  });
-
   testWidgets('Timer runs a real stopwatch', (tester) async {
-    await pumpCover(tester, TimerCover(onAuthenticated: () {}));
+    await pumpCover(tester, const TimerCover());
     expect(find.text('05:00'), findsOneWidget); // the default countdown
 
     await tester.tap(find.text('Stopwatch'));
@@ -66,28 +69,11 @@ void main() {
     expect(find.text('Reset'), findsOneWidget);
   });
 
-  testWidgets('holding Lap on a running stopwatch does nothing',
-      (tester) async {
-    var opened = false;
-    await pumpCover(tester, TimerCover(onAuthenticated: () => opened = true));
-    await tester.tap(find.text('Stopwatch'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Start'));
-    await tester.pump(const Duration(milliseconds: 300));
-
-    await tester.longPress(find.text('Lap'));
-    await tester.pump();
-    expect(opened, isFalse);
-
-    await tester.tap(find.text('Stop'));
-    await tester.pump();
-  });
-
   testWidgets('Level builds without a sensor ever reporting', (tester) async {
     // Emulators and a handful of cheap handsets have no magnetometer, and the
     // accelerometer stream simply never fires in a test. The cover must still
     // be a working screen rather than a blank one.
-    await pumpCover(tester, LevelCover(onAuthenticated: () {}));
+    await pumpCover(tester, const LevelCover());
     expect(find.text('Level'), findsWidgets);
     expect(find.text('0.0°  ·  0.0°'), findsOneWidget);
   });
@@ -97,7 +83,7 @@ void main() {
     // directory, none of which exists on a test host. An empty list is the
     // correct outcome; a thrown exception is a black screen on a real phone
     // whose cache directory is unavailable.
-    await pumpCover(tester, RecorderCover(onAuthenticated: () {}));
+    await pumpCover(tester, const RecorderCover());
     await tester.pump();
     expect(find.text('Recorder'), findsOneWidget);
     expect(find.text('00:00'), findsOneWidget);
@@ -108,7 +94,7 @@ void main() {
       (tester) async {
     // Everything on that screen comes from Android. On a host with none of it,
     // the Dart-side facts still have to render a full screen.
-    await pumpCover(tester, DeviceInfoCover(onAuthenticated: () {}));
+    await pumpCover(tester, const DeviceInfoCover());
     await tester.pump();
     expect(find.text('Device Info'), findsOneWidget);
     expect(find.text('Storage'), findsOneWidget);
@@ -123,121 +109,90 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  group('the About panel', () {
-    // The source scan in disguise_test.dart proves every cover CALLS
-    // showCoverAbout. It cannot prove the call is reachable: a handler on a
-    // widget that never renders, or on one the user cannot hit, satisfies it
-    // exactly. These pump the real cover and tap the real element, which is
-    // the property the change actually claims — an element the cover already
-    // draws opens the panel.
-    // Fixed pumps, not pumpAndSettle: Device Info runs a 3s refresh timer, so
-    // nothing on that cover ever settles. 400ms clears the sheet's animation.
-    Future<void> tapAbout(WidgetTester tester, Finder target) async {
-      await tester.tap(target);
-      await tester.pump();
+  group('the doors are gone', () {
+    // Every gesture below used to be a way in, or the About sheet that
+    // printed the way in. The source scan in disguise_test.dart proves no
+    // cover file names the gate; these prove the element the door hung on is
+    // now inert on the real widget.
+    testWidgets('holding = on a zeroed calculator opens nothing',
+        (tester) async {
+      await pumpCover(tester, const CalculatorCover());
+      await tester.longPress(find.text('='));
       await tester.pump(const Duration(milliseconds: 400));
-    }
-
-    testWidgets('Convert opens it from the title, and it names Miles and '
-        "Convert's own gesture", (tester) async {
-      var opened = false;
-      await pumpCover(tester, ConvertCover(onAuthenticated: () => opened = true));
-      await tapAbout(tester, find.text('Convert'));
-
-      expect(find.text('Miles'), findsOneWidget);
-      expect(find.text(profileForCover(DisguiseCover.convert).entry),
-          findsOneWidget,);
-      // Not another cover's instructions — the bug the apply dialog shipped.
-      expect(find.text(profileForCover(DisguiseCover.news).entry), findsNothing);
-      // Reading the way back is not walking through it.
-      expect(opened, isFalse);
+      await tester.tap(find.text('7'));
+      await tester.pump();
+      expectNoDoor(tester, 'Calculator');
     });
 
-    testWidgets('Timer opens it from the title', (tester) async {
-      await pumpCover(tester, TimerCover(onAuthenticated: () {}));
-      await tapAbout(tester, find.text('Timer').first);
-      expect(find.text(profileForCover(DisguiseCover.timer).entry),
-          findsOneWidget,);
+    testWidgets('holding swap on an empty converter opens nothing, and the '
+        'title is just a title', (tester) async {
+      await pumpCover(tester, const ConvertCover());
+      await tester.longPress(find.byIcon(Icons.swap_vert_rounded));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('Convert'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Convert');
     });
 
-    testWidgets('Device Info opens it from the title', (tester) async {
-      await pumpCover(tester, DeviceInfoCover(onAuthenticated: () {}));
-      await tapAbout(tester, find.text('Device Info'));
-      expect(find.text(profileForCover(DisguiseCover.device).entry),
-          findsOneWidget,);
-      // Same teardown as the sibling build test: this cover polls every 3s, so
-      // the in-flight platform call has to be let go before the binding checks
-      // for pending timers.
+    testWidgets('holding Reset on a resting stopwatch opens nothing',
+        (tester) async {
+      await pumpCover(tester, const TimerCover());
+      await tester.tap(find.text('Stopwatch'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('Reset'));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('Timer').first);
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Timer');
+    });
+
+    testWidgets('holding the temperature and tapping the date open nothing',
+        (tester) async {
+      await pumpCover(tester, const WeatherCover());
+      await tester.longPress(find.textContaining('°').first);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('Current location'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Weather');
+    });
+
+    testWidgets('holding the empty-state art on Notes opens nothing',
+        (tester) async {
+      await pumpCover(tester, const NotesCover());
+      await tester.pump();
+      await tester.longPress(find.text('Notes you add appear here'));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('Notes'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Notes');
+    });
+
+    testWidgets('holding the angle readout on Level opens nothing',
+        (tester) async {
+      await pumpCover(tester, const LevelCover());
+      await tester.longPress(find.text('0.0°  ·  0.0°'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Level');
+    });
+
+    testWidgets('holding 00:00 on Recorder opens nothing', (tester) async {
+      await pumpCover(tester, const RecorderCover());
+      await tester.pump();
+      await tester.longPress(find.text('00:00'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Recorder');
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('holding the battery ring on Device Info opens nothing',
+        (tester) async {
+      await pumpCover(tester, const DeviceInfoCover());
+      await tester.pump();
+      await tester.longPress(find.text('Device Info'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expectNoDoor(tester, 'Device Info');
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 3));
     });
-
-    testWidgets('the Recorder panel stays dark, like the cover behind it',
-        (tester) async {
-      // The four covers that hand-roll a palette pass it in; the five that
-      // build a coverTheme pass that. Recorder is the only dark one, so it is
-      // the only call site where losing `brightness` would be visible — a
-      // white sheet over a black recorder is the tell cover_theme.dart exists
-      // to prevent.
-      await pumpCover(tester, RecorderCover(onAuthenticated: () {}));
-      await tapAbout(tester, find.text('Recorder'));
-
-      final sheetTheme = Theme.of(
-        tester.element(find.text(profileForCover(DisguiseCover.recorder).entry)),
-      );
-      expect(sheetTheme.brightness, Brightness.dark);
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
-
-    testWidgets('Open Miles runs the entry flow; dismissing it does not',
-        (tester) async {
-      // The panel is a leaflet unless its button reaches the gate. With no
-      // App Lock enrolled the gate passes straight through to
-      // onCoverUnlocked, which is what onAuthenticated observes.
-      var opened = false;
-      await pumpCover(tester, ConvertCover(onAuthenticated: () => opened = true));
-      await tapAbout(tester, find.text('Convert'));
-      expect(opened, isFalse);
-
-      await tester.tap(find.text('Open Miles'));
-      await tester.pumpAndSettle();
-      expect(opened, isTrue);
-    });
-
-    testWidgets('the Open button survives a large font scale', (tester) async {
-      // It is the last thing in the column and the column is as tall as the
-      // gesture text makes it, so at the default sheet cap it clipped off the
-      // bottom — the recovery control, gone for the users likeliest to need
-      // it. Convert has the longest gesture string of the nine.
-      tester.view.physicalSize = const Size(1080, 2280);
-      tester.view.devicePixelRatio = 2.625;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(MaterialApp(
-        home: MediaQuery(
-          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-          child: ConvertCover(onAuthenticated: () {}),
-        ),
-      ),);
-      await tester.pump();
-      await tapAbout(tester, find.text('Convert'));
-
-      final button = find.text('Open Miles');
-      expect(button, findsOneWidget);
-      expect(tester.getRect(button).bottom,
-          lessThanOrEqualTo(tester.view.physicalSize.height /
-              tester.view.devicePixelRatio,),
-          reason: 'the Open button is off the bottom of the screen',);
-    });
-
-    testWidgets('the door is a 48dp target, not a line of text',
-        (tester) async {
-      // 20dp of glyph box is thin for the one control someone locked out of
-      // their own app has to find a month later. The AppBar toolbar is 56dp,
-      // so the height is free.
-      await pumpCover(tester, ConvertCover(onAuthenticated: () {}));
-      expect(tester.getSize(find.byType(CoverAboutTap)).height, 48);
-    });
   });
-
 }

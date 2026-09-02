@@ -84,10 +84,10 @@ Root working files that are present but gitignored: `Miles.apk`, `archive/`, `ar
 - `care` - gentle reminders sent to the partner, who taps Done.
 - `chat` - messages (text, image, voice, video, file), rapid camera, reactions, receipts, send queue, GIF picker, chat themes, albums, link cards.
 - `closer` - the intimacy module behind modest mode and the couple key: `memory_threads`, `mood_lamp`, `pick_for_us`, `touch_trace`, `warmth`, `wish_jar`, plus `secure_screen.dart`.
-- `covers` - the News cover: a working RSS reader with two hidden entry gestures that run the biometric gate.
+- `covers` - the News cover: a working RSS reader with no door of its own.
 - `cycle` - period calendar with optional sharing and a partner card. The pooled love notes are held back by `FeatureFlags`.
 - `daily_prompt` - one question a day; answers reveal only after both have answered.
-- `disguise` - launcher identity switching through `activity-alias`, the nine cover screens under `covers/`, the picker, the cover gate and host.
+- `disguise` - launcher identity switching through `activity-alias`, the nine cover screens under `covers/`, the picker, the cover gate and host, and under `entry/` the owner-recorded move: its model and store, the pointer layer that matches it and the backup hold, and the recorder.
 - `gallery` - the couple's shared roll, built on the chat media pipeline.
 - `games` - games hub: synced Truth or Dare, plus card decks (Would You Rather, Never Have I Ever).
 - `heartbeat` - fingertip over camera and torch reads a pulse; the partner's phone throbs with it live.

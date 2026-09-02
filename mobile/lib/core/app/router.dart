@@ -31,6 +31,8 @@ import 'package:miles/features/closer/wish_jar/wish_jar_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
 import 'package:miles/features/disguise/disguise_picker_screen.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/entry/cover_entry_recorder_screen.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/games/games_screen.dart';
 import 'package:miles/features/games/synced_card_game_screen.dart';
@@ -391,6 +393,23 @@ GoRouter buildRouter(Ref ref) {
         builder: (context, state) => DisguisePickerScreen(
           isOnboarding: state.uri.queryParameters['onboarding'] == '1',
         ),
+      ),
+      // The move recorder, for the cover named in the query. Only the picker
+      // and the Settings row push it, always with a real name; an unknown
+      // one records for the default cover rather than red-screening a route.
+      GoRoute(
+        path: '/app/disguise/entry',
+        builder: (context, state) {
+          // `none` is the absence of a cover, so there is nothing to record a
+          // move on: it would draw the recorder over an empty box.
+          final named =
+              DisguiseCover.values.asNameMap()[state.uri.queryParameters['cover']];
+          return CoverEntryRecorderScreen(
+            cover: named == null || named == DisguiseCover.none
+                ? kDefaultDisguise.cover
+                : named,
+          );
+        },
       ),
       GoRoute(
         path: '/app/rapid-camera',

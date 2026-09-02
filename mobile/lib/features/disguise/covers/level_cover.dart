@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 /// A bubble level and a compass.
@@ -16,23 +14,17 @@ import 'package:sensors_plus/sensors_plus.dart';
 /// use for ten seconds and never think about again — no content, no history,
 /// nothing that could belong to a person.
 ///
-/// **The way in: hold the angle readout with the phone lying flat**, within
-/// half a degree on both axes. Two conditions, and they fight each other with
-/// ordinary use: levelling something means holding the phone edge-on against
-/// it, hands on the frame, eyes on the bubble. Flat on a table with a finger
-/// held on a passive number is precisely the moment a real user has stopped
-/// using it.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen; nothing here knows it exists.
 class LevelCover extends StatefulWidget {
-  const LevelCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const LevelCover({super.key});
 
   @override
   State<LevelCover> createState() => _LevelCoverState();
 }
 
 class _LevelCoverState extends State<LevelCover>
-    with CoverGate<LevelCover>, SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 2, vsync: this);
 
   StreamSubscription<AccelerometerEvent>? _accel;
@@ -62,17 +54,13 @@ class _LevelCoverState extends State<LevelCover>
     super.dispose();
   }
 
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
-
   void _noCompass() {
     if (mounted && _hasCompass) setState(() => _hasCompass = false);
   }
 
   /// Raw accelerometer output is noisy enough that an untouched phone reads
-  /// ±0.3° of jitter, which would make the bubble twitch and — worse for the
-  /// entry gate — flicker in and out of "flat". A low-pass filter is what every
-  /// real level does about it.
+  /// ±0.3° of jitter, which would make the bubble twitch and flicker in and
+  /// out of "flat". A low-pass filter is what every real level does about it.
   void _onAccelerometer(AccelerometerEvent e) {
     const smoothing = 0.15;
     final pitch = math.atan2(e.y, math.sqrt(e.x * e.x + e.z * e.z)) * 180 / math.pi;
@@ -99,11 +87,6 @@ class _LevelCoverState extends State<LevelCover>
 
   bool get _isFlat => _pitch.abs() <= 0.5 && _roll.abs() <= 0.5;
 
-  /// The door — see the class doc for why this state and not another.
-  void _onReadoutHold() {
-    if (_isFlat) runEntryGate();
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = coverTheme(
@@ -114,13 +97,7 @@ class _LevelCoverState extends State<LevelCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: CoverAboutTap(
-            onTap: () => showCoverAbout(context,
-                cover: DisguiseCover.level,
-                onOpen: runEntryGate,
-                theme: theme,),
-            child: const Text('Level'),
-          ),
+          title: const Text('Level'),
           bottom: TabBar(
             controller: _tabs,
             tabs: const [Tab(text: 'Level'), Tab(text: 'Compass')],
@@ -155,22 +132,16 @@ class _LevelCoverState extends State<LevelCover>
           ),
         ),
         const SizedBox(height: 28),
-        // The door. A passive readout: no ripple, no tap handler, nothing that
-        // says it can be pressed.
-        GestureDetector(
-          onLongPress: _onReadoutHold,
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            child: Text(
-              '${_pitch.abs().toStringAsFixed(1)}°  ·  '
-              '${_roll.abs().toStringAsFixed(1)}°',
-              style: TextStyle(
-                fontSize: 40,
-                fontWeight: FontWeight.w200,
-                fontFeatures: const [FontFeature.tabularFigures()],
-                color: theme.colorScheme.onSurface,
-              ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: Text(
+            '${_pitch.abs().toStringAsFixed(1)}°  ·  '
+            '${_roll.abs().toStringAsFixed(1)}°',
+            style: TextStyle(
+              fontSize: 40,
+              fontWeight: FontWeight.w200,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: theme.colorScheme.onSurface,
             ),
           ),
         ),
@@ -283,8 +254,8 @@ class _VialPainter extends CustomPainter {
       );
     }
 
-    // The target the bubble has to land in, sized to the same half-degree the
-    // entry gate uses — so "inside the ring" and "flat" are the same thing to
+    // The target the bubble has to land in, sized to the same half-degree
+    // `_isFlat` uses — so "inside the ring" and "flat" are the same thing to
     // the eye and to the code.
     const bubbleR = 20.0;
     canvas.drawCircle(

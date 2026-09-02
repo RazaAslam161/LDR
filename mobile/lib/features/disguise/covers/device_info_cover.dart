@@ -3,9 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A wall of read-only device statistics.
 ///
@@ -16,26 +14,19 @@ import 'package:miles/features/disguise/disguise_profile.dart';
 /// boring is the entire product promise of this category, so nobody wonders why
 /// it is boring.
 ///
-/// **The way in: hold the battery ring.** It is a chart, not a control: normal
-/// use is read, scroll, maybe pull to refresh, and none of that involves
-/// touching it. Explicitly NOT the "tap the build number seven times" pattern —
-/// that is a famous Android easter egg, and a curious person is measurably
-/// likely to actually try it, which makes it the worst possible gesture here.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen; nothing here knows it exists.
 class DeviceInfoCover extends StatefulWidget {
-  const DeviceInfoCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const DeviceInfoCover({super.key});
 
   @override
   State<DeviceInfoCover> createState() => _DeviceInfoCoverState();
 }
 
-class _DeviceInfoCoverState extends State<DeviceInfoCover>
-    with CoverGate<DeviceInfoCover> {
+class _DeviceInfoCoverState extends State<DeviceInfoCover> {
   static const _channel = MethodChannel('miles/device_stats');
 
   Map<String, Object?> _stats = const {};
-  bool _loaded = false;
   Timer? _refresh;
 
   @override
@@ -53,9 +44,6 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
     super.dispose();
   }
 
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
-
   /// Reads what the platform will give us. A handset that answers nothing still
   /// gets a full screen — the Dart-side facts below are enough on their own.
   Future<void> _read() async {
@@ -69,15 +57,7 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
       // Not Android, or the platform refused. Fall through with what we have.
     }
     if (!mounted) return;
-    setState(() {
-      _stats = stats;
-      _loaded = true;
-    });
-  }
-
-  /// The door — see the class doc for why this control and not another.
-  void _onRingHold() {
-    if (_loaded) runEntryGate();
+    setState(() => _stats = stats);
   }
 
   int get _battery => (_stats['batteryPercent'] as int?) ?? -1;
@@ -97,13 +77,7 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: CoverAboutTap(
-            onTap: () => showCoverAbout(context,
-                cover: DisguiseCover.device,
-                onOpen: runEntryGate,
-                theme: theme,),
-            child: const Text('Device Info'),
-          ),
+          title: const Text('Device Info'),
         ),
         body: SafeArea(
           child: RefreshIndicator(
@@ -112,43 +86,38 @@ class _DeviceInfoCoverState extends State<DeviceInfoCover>
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
                 Center(
-                  // The door. A chart with no tap handler and no ripple.
-                  child: GestureDetector(
-                    onLongPress: _onRingHold,
-                    behavior: HitTestBehavior.opaque,
-                    child: SizedBox(
-                      width: 150,
-                      height: 150,
-                      child: CustomPaint(
-                        painter: _RingPainter(
-                          fraction: _battery < 0 ? 0 : _battery / 100,
-                          track: theme.colorScheme.surfaceContainerHighest,
-                          fill: theme.colorScheme.primary,
-                        ),
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _battery < 0 ? '—' : '$_battery%',
-                                style: TextStyle(
-                                  fontSize: 34,
-                                  fontWeight: FontWeight.w300,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                  color: theme.colorScheme.onSurface,
-                                ),
+                  child: SizedBox(
+                    width: 150,
+                    height: 150,
+                    child: CustomPaint(
+                      painter: _RingPainter(
+                        fraction: _battery < 0 ? 0 : _battery / 100,
+                        track: theme.colorScheme.surfaceContainerHighest,
+                        fill: theme.colorScheme.primary,
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _battery < 0 ? '—' : '$_battery%',
+                              style: TextStyle(
+                                fontSize: 34,
+                                fontWeight: FontWeight.w300,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                                color: theme.colorScheme.onSurface,
                               ),
-                              Text(
-                                _charging ? 'Charging' : 'Battery',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
+                            ),
+                            Text(
+                              _charging ? 'Charging' : 'Battery',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurfaceVariant,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

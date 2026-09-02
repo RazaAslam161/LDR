@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:miles/core/services/reach_notifications.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// A stopwatch and a countdown timer.
 ///
@@ -19,23 +17,17 @@ import 'package:miles/features/disguise/disguise_profile.dart';
 /// open" is itself a tell, whereas a timer that goes off is the entire point of
 /// a timer.
 ///
-/// **The way in: hold Reset on the Stopwatch tab while it reads 00:00.00.**
-/// The button is Lap while running and Reset at rest, and resetting a stopwatch
-/// that already reads zero is a no-op in every real one — so nobody arrives
-/// there by using the app. The instruction the picker prints says Reset, not
-/// Lap, because Reset is the word on the button in the only state the door
-/// opens.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen; nothing here knows it exists.
 class TimerCover extends StatefulWidget {
-  const TimerCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const TimerCover({super.key});
 
   @override
   State<TimerCover> createState() => _TimerCoverState();
 }
 
 class _TimerCoverState extends State<TimerCover>
-    with CoverGate<TimerCover>, SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 2, vsync: this);
 
   // ── Stopwatch ──────────────────────────────────────────────────────────────
@@ -56,9 +48,6 @@ class _TimerCoverState extends State<TimerCover>
     _tabs.dispose();
     super.dispose();
   }
-
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
 
   // ── Stopwatch behaviour ────────────────────────────────────────────────────
 
@@ -95,14 +84,6 @@ class _TimerCoverState extends State<TimerCover>
         _laps.clear();
       }
     });
-  }
-
-  bool get _watchAtRest =>
-      !_watch.isRunning && _watch.elapsed == Duration.zero && _laps.isEmpty;
-
-  /// The door — see the class doc for why this state and not another.
-  void _onLapHold() {
-    if (_watchAtRest) runEntryGate();
   }
 
   // ── Countdown behaviour ────────────────────────────────────────────────────
@@ -199,13 +180,7 @@ class _TimerCoverState extends State<TimerCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: CoverAboutTap(
-            onTap: () => showCoverAbout(context,
-                cover: DisguiseCover.timer,
-                onOpen: runEntryGate,
-                theme: theme,),
-            child: const Text('Timer'),
-          ),
+          title: const Text('Timer'),
           bottom: TabBar(
             controller: _tabs,
             tabs: const [Tab(text: 'Timer'), Tab(text: 'Stopwatch')],
@@ -288,10 +263,6 @@ class _TimerCoverState extends State<TimerCover>
           children: [
             OutlinedButton(
               onPressed: _lapOrReset,
-              // Inert at rest: this is the only long-press anywhere in the
-              // cover, and it is on the one control that already does nothing
-              // in the state it is checked for.
-              onLongPress: _onLapHold,
               child: Text(running ? 'Lap' : 'Reset'),
             ),
             const SizedBox(width: 16),

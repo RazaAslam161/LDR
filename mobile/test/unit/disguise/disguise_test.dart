@@ -1,12 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:miles/features/disguise/cover_gate.dart' show CoverGate;
+import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 
 /// The cover screen each identity renders. Read by the tests below, which
-/// assert on the source because the thing being protected — "this gesture is
-/// actually wired to something" — is not observable from the catalog alone.
+/// assert on the source because the thing being protected — "this cover
+/// carries no door of its own" — is not observable from the catalog alone.
 const _coverSources = {
   DisguiseCover.news: 'lib/features/covers/news_cover_screen.dart',
   DisguiseCover.calculator:
@@ -20,40 +20,12 @@ const _coverSources = {
   DisguiseCover.device: 'lib/features/disguise/covers/device_info_cover.dart',
 };
 
-/// Everything that runs the entry flow. The News cover predates the [CoverGate]
-/// mixin and still owns its own copy, which is why there are two names.
-final _gateCall = RegExp(r'\b(runEntryGate|_triggerEntry)\b');
-
-/// Source with comment lines blanked, so a gesture described in a doc comment
-/// cannot pass for one that is wired up.
+/// Source with comment lines blanked, so a door named in a doc comment (every
+/// cover's own history names the one it used to have) cannot trip a scan.
 String _code(String src) => src
     .split('\n')
     .map((l) => l.trimLeft().startsWith('//') ? '' : l)
     .join('\n');
-
-/// Whether [name], used as a gesture callback, ends up running the entry flow.
-///
-/// Three ways it can: it IS the gate; it is a handler whose body calls the
-/// gate; or it is a named argument bound to one of those further up the file —
-/// which is how the notepad passes `runEntryGate` down to its empty state.
-bool _reachesGate(String name, String code, [int depth = 0]) {
-  if (_gateCall.hasMatch('$name(')) return true;
-  if (depth > 2) return false;
-
-  final decl =
-      RegExp('\\b$name' r'\s*\([^)]*\)\s*(?:async\s*)?\{').firstMatch(code);
-  if (decl != null) {
-    // Handlers in these files are a few lines; 800 characters is comfortably
-    // past the end of one.
-    final end = (decl.start + 800).clamp(0, code.length);
-    if (_gateCall.hasMatch(code.substring(decl.start, end))) return true;
-  }
-
-  for (final m in RegExp('\\b$name' r':\s*([A-Za-z_]\w*)').allMatches(code)) {
-    if (_reachesGate(m.group(1)!, code, depth + 1)) return true;
-  }
-  return false;
-}
 
 void main() {
   group('disguise catalog', () {
@@ -111,188 +83,141 @@ void main() {
       expect(disguiseForAlias('Nonexistent').aliasId, kDefaultDisguise.aliasId);
       expect(disguiseForAlias('Calculator').cover, DisguiseCover.calculator);
     });
+
+    test('the host draws every cover from the one builder', () {
+      // The recorder and the host both call buildCoverWidget, so the owner's
+      // move is recorded on exactly the widget it is later matched on. A
+      // cover missing from the switch is a compile error in Dart; a cover
+      // added to the enum and drawn somewhere else is what this catches.
+      final host = _code(
+        File('lib/features/disguise/disguise_cover_host.dart')
+            .readAsStringSync(),
+      );
+      final at = host.indexOf('Widget buildCoverWidget');
+      expect(at, isNonNegative,
+          reason: 'buildCoverWidget is gone — the recorder and the host would '
+              'no longer draw the same cover',);
+      final builder = host.substring(at);
+      for (final cover in DisguiseCover.values) {
+        expect(builder.contains('DisguiseCover.${cover.name} =>'), isTrue,
+            reason: 'buildCoverWidget does not draw ${cover.name}',);
+      }
+    });
   });
 
-  group('entry doors', () {
-    test('every disguise documents a distinct way in', () {
-      // Non-empty first: the apply confirmation interpolates this string as
-      // the way back (play contract item 2), so a cover without one ships a
-      // lockout behind a dialog that promises nothing. Distinct second: two
-      // covers that describe the same gesture means one of them is wrong, and
-      // the user cannot tell which — the picker and that dialog are the only
-      // places these are ever written down.
-      final seen = <String, String>{};
-      for (final d in kDisguises) {
-        expect(d.entry.trim(), isNotEmpty,
-            reason: '${d.label} has no entry gesture written down',);
-        final key = d.entry.trim().toLowerCase();
-        expect(seen.containsKey(key), isFalse,
-            reason: '${d.label} and ${seen[key]} claim the same gesture: '
-                '${d.entry}',);
-        seen[key] = d.label;
-      }
-    });
-
-    test('no cover is a no-op — every door reaches the entry flow', () {
-      // The failure this exists for: a cover that renders beautifully and has
-      // no way in. It is invisible to the analyzer, invisible to a widget test
-      // that never long-presses, and it locks the owner out of their own app
-      // with no recovery short of a reinstall.
+  group('no cover owns a door', () {
+    // The app ships no entry gesture. Every way in is the owner's own
+    // recorded move or the backup hold, both matched by the host's pointer
+    // layer above the cover — so a cover file that reaches the gate, names
+    // the lock, or carries a hold handler of its own is a door the app
+    // authored, which is the one thing the owner asked to have none of.
+    test('no cover reaches the gate, the lock or the move store', () {
+      // Everything that opens the app, by any route: the gate and its
+      // sources, the lock and the reveal, the store and the layer, the
+      // scope's own open hook, and the two statics behind the cover itself.
+      final banned = RegExp(
+        r'\b(CoverEntry|EntrySource|onOpen|runEntryGate|showCoverAbout|'
+        'CoverAboutTap|LockScreen|IntroSplashScreen|CoverEntryStore|'
+        r'EntryTriggerLayer|onAuthenticated|showRealApp|raiseCover)\b',
+      );
+      const bannedImports = [
+        'cover_gate.dart',
+        'disguise_cover_host.dart',
+        'cover_entry_store.dart',
+        'entry_trigger_layer.dart',
+        'package:miles/main.dart',
+      ];
       for (final entry in _coverSources.entries) {
         final code = _code(File(entry.value).readAsStringSync());
-        expect(_gateCall.hasMatch(code), isTrue,
-            reason: '${entry.key} never calls the entry gate — it is a dead '
-                'cover with no way in',);
-      }
-    });
-
-    test('every door is wired to a real gesture', () {
-      // Calling the gate somewhere is not enough: it has to hang off a handler
-      // the user can actually reach. Reaching it only from initState, or only
-      // from the incoming-call listener every cover inherits, is exactly the
-      // shape of a cover with no door — and it would look completely finished.
-      final callback =
-          RegExp(r'on(?:LongPress|Tap|TapDown|Submitted|Selected)\w*:');
-      final identifier = RegExp(r'[A-Za-z_]\w*');
-
-      for (final entry in _coverSources.entries) {
-        final code = _code(File(entry.value).readAsStringSync());
-        final wired = <String>{};
-        for (final m in callback.allMatches(code)) {
-          // A callback often wraps onto the next line or sits inside a
-          // conditional, so take a window rather than the rest of the line.
-          final end = (m.end + 120).clamp(0, code.length);
-          wired.addAll(identifier
-              .allMatches(code.substring(m.end, end))
-              .map((i) => i.group(0)!),);
+        final hit = banned.firstMatch(code);
+        expect(hit, isNull,
+            reason: '${entry.key} names ${hit?.group(0)} — a cover carries '
+                'no door of its own',);
+        for (final import in bannedImports) {
+          expect(code.contains(import), isFalse,
+              reason: '${entry.key} imports $import',);
         }
-        expect(wired, isNotEmpty,
-            reason: '${entry.key} declares no gesture callbacks at all',);
-        expect(wired.any((name) => _reachesGate(name, code)), isTrue,
-            reason: '${entry.key} calls the entry gate, but no gesture the '
-                'user can perform reaches it',);
       }
     });
 
-    test('every cover names the way back, for its own identity', () {
-      // This used to pin a widget: every cover had to draw a CoverExitButton,
-      // a small unlabelled ring in the app bar. Conspicuous and mute is the
-      // worst pair on a screen pretending to be a weather app — it was the one
-      // thing worth tapping and it said nothing — so the ring is gone and an
-      // element each cover already draws opens an About sheet instead.
-      //
-      // The widget was never the property worth protecting. These three are:
-      // a way back exists on every cover; it names THIS cover's gesture, not
-      // another's; and its action reaches the same gate the hidden trigger
-      // does. A tenth cover that ships without one ships a lockout, and one
-      // that passes the wrong DisguiseCover hands the owner instructions that
-      // do not work — the exact bug the apply dialog shipped once, when it
-      // printed the News gesture under all nine covers.
+    test('no cover declares a hold of its own', () {
+      // The shapes every old door had: a long-press handler, a tap-down that
+      // armed a timer, or a raw recogniser. A cover may keep an InkWell's
+      // default long-press (which is nothing); it may not wire one to a
+      // handler, and it may not watch pointers itself.
+      final hold = RegExp(
+        r'(on(?:LongPress|TapDown|TapCancel)\w*:\s*(?!null\b))|'
+        r'\b(RawGestureDetector|LongPressGestureRecognizer|onPointerDown|'
+        r'onPointerUp)\b',
+      );
       for (final entry in _coverSources.entries) {
         final code = _code(File(entry.value).readAsStringSync());
-        final calls = RegExp(r'showCoverAbout\(').allMatches(code).toList();
-        expect(calls, isNotEmpty,
-            reason: '${entry.key} opens no About sheet — nothing on the screen '
-                'can tell the owner the way back',);
-        // Read out of the call itself, not the file: a cover that passed the
-        // wrong value while merely mentioning the right one somewhere else
-        // would satisfy a whole-file substring.
-        final identities = calls.map((m) {
-          final end = (m.end + 300).clamp(0, code.length);
-          return RegExp(r'cover:\s*DisguiseCover\.(\w+)')
-              .firstMatch(code.substring(m.start, end))
-              ?.group(1);
-        }).toSet();
-        expect(identities, {entry.key.name},
-            reason: '${entry.key} opens an About sheet for a different '
-                "identity — it would print another cover's gesture",);
-        // Opening the sheet is not enough: its Open action has to reach the
-        // entry flow, or the way out is a leaflet with no door behind it.
-        final wired = calls.any((m) {
-          final end = (m.end + 300).clamp(0, code.length);
-          final bound = RegExp(r'onOpen:\s*([A-Za-z_]\w*)')
-              .firstMatch(code.substring(m.start, end));
-          return bound != null && _reachesGate(bound.group(1)!, code);
-        });
-        expect(wired, isTrue,
-            reason: '${entry.key} opens the About sheet but its onOpen never '
-                'reaches the entry gate',);
+        expect(hold.hasMatch(code), isFalse,
+            reason: '${entry.key} wires a long-press handler',);
       }
     });
 
-    test('every disguise names what to tap for its About panel', () {
-      // The apply dialog interpolates this ("Tap ${d.about} to see this
-      // again"), which is the only place the About panel is ever advertised.
-      // It used to promise "a small ring near the top right" for all nine —
-      // true until the ring was deleted, and then a lie on all nine. Living
-      // beside `entry` is what stops that happening a third time.
-      final seen = <String, String>{};
-      for (final d in kDisguises) {
-        expect(d.about.trim(), isNotEmpty,
-            reason: '${d.label} names nothing to tap, so the apply dialog '
-                'advertises its About panel with a blank',);
-        expect(d.about.trim().endsWith('.'), isFalse,
-            reason: '${d.label}: `about` is interpolated mid-sentence, so a '
-                'trailing full stop lands in the middle of the dialog',);
-        final key = d.about.trim().toLowerCase();
-        expect(seen.containsKey(key), isFalse,
-            reason: '${d.label} and ${seen[key]} claim the same About '
-                'affordance: ${d.about}',);
-        seen[key] = d.label;
+    test('a committed word reaches the scope only from a control, never from '
+        'typing', () {
+      // The News search once opened the gate on `home`, which a person types
+      // on purpose; a keyboard's Enter is the same door. The three covers
+      // that take a secret word hand it over from a control they already
+      // have — the = key, the swap button, Save — and nothing else may.
+      final typing = RegExp(r'on(?:Submitted|Changed|Editing\w*):');
+      final feed = RegExp(r'feedText\(');
+      final commits = {
+        DisguiseCover.calculator,
+        DisguiseCover.convert,
+        DisguiseCover.notes,
+      };
+      for (final entry in _coverSources.entries) {
+        final code = _code(File(entry.value).readAsStringSync());
+        final feeds = feed.allMatches(code).toList();
+        if (!commits.contains(entry.key)) {
+          expect(feeds, isEmpty,
+              reason: '${entry.key} hands text to the scope but has no '
+                  'commit control to do it from',);
+          continue;
+        }
+        expect(feeds.length, 1,
+            reason: '${entry.key} must hand text over from exactly one '
+                'control',);
+        final call = code.substring(
+          feeds.single.start,
+          (feeds.single.end + 80).clamp(0, code.length),
+        );
+        expect(call.contains('commit: true'), isTrue,
+            reason: '${entry.key} hands text over uncommitted',);
+        for (final m in typing.allMatches(code)) {
+          final window = code.substring(
+            m.end,
+            (m.end + 300).clamp(0, code.length),
+          );
+          expect(feed.hasMatch(window), isFalse,
+              reason: '${entry.key} hands text over from a typing callback',);
+        }
       }
     });
 
-    test('the guide documents every disguise and its gesture', () {
-      // The picker prints these, but the owner needs them somewhere he can
-      // read without opening the app he is locked out of.
+    test('the guide documents the backup hold and every cover', () {
+      // The owner needs the one public way in somewhere they can read without
+      // opening the app they are locked out of.
       final guide = File('../docs/guides/disguises.md').readAsStringSync();
+      expect(guide.contains('two fingers'), isTrue);
+      expect(guide.contains('five seconds'), isTrue);
       for (final d in kDisguises) {
         expect(guide.contains(d.label), isTrue,
             reason: '${d.label} is missing from docs/guides/disguises.md',);
-        // Punctuation drifts; the words do not.
-        final words = d.entry
-            .toLowerCase()
-            .replaceAll(RegExp('[^a-z0-9 ]'), ' ')
-            .split(RegExp(r'\s+'))
-            .where((w) => w.length > 3)
-            .toList();
-        final text = guide.toLowerCase().replaceAll(RegExp('[^a-z0-9 ]'), ' ');
-        final missing = words.where((w) => !text.contains(w)).toList();
-        expect(missing, isEmpty,
-            reason: "${d.label}'s gesture is not described in the guide: "
-                'missing $missing',);
       }
     });
 
-    test('no door hangs off typing, which is ordinary use everywhere', () {
-      // The News cover opened the gate when `home` was submitted in its search
-      // box. Searching a news reader for "home" is something a person does on
-      // purpose, so the door was reachable by using the app as intended — and
-      // what it produced was a biometric prompt in front of whoever was
-      // holding the phone. Nothing a user types may be a door, in any cover.
-      for (final entry in _coverSources.entries) {
-        final code = _code(File(entry.value).readAsStringSync());
-        for (final m
-            in RegExp(r'on(?:Submitted|Changed|Editing\w*):\s*([A-Za-z_]\w*)')
-                .allMatches(code)) {
-          expect(_reachesGate(m.group(1)!, code), isFalse,
-              reason: '${entry.key} opens the entry gate from ${m.group(1)} — '
-                  'a text callback the user reaches by typing',);
-        }
-      }
-    });
-
-    test('the entry gate can never become a door with no key', () {
-      // A OnePlus 7 with no fingerprint, no face and no screen lock applied the
-      // Weather cover and could not get back in: the gesture fired, nothing
-      // appeared, and the phone stayed on the cover. The gate was
-      // `!enabled || await AppLock.authenticate()` — which reads that method's
+    test('the gate can never become a door with no key', () {
+      // A OnePlus 7 with no fingerprint, no face and no screen lock applied a
+      // cover and could not get back in: the gate read AppLock.authenticate()'s
       // `false` as a verdict, when its own doc says false means the CALLER
       // falls back to the PIN. On a handset where no credential is enrolled it
       // can only ever return false, so the way back in was a control that did
       // nothing. Same build, same code, worked on a OnePlus 8 that had a lock.
-      // Comments stripped: the fix's own doc quotes the broken one-liner it
-      // replaced, and the check below would match that quotation.
       final gate = _code(
         File('lib/features/disguise/cover_gate.dart').readAsStringSync(),
       );
@@ -305,12 +230,23 @@ void main() {
           reason: 'the PIN fallback belongs to LockScreen, which already '
               'prompts biometrics, retries, and drops to the pad — the gate '
               'must not re-implement a worse half of it',);
-      expect(
-        RegExp(r'!enabled\s*\|\|\s*await AppLock\.authenticate\(\)')
-            .hasMatch(gate),
-        isFalse,
-        reason: 'the one-line gate that caused the lockout is back',
+      expect(RegExp(r'await AppLock\.authenticate\(\)').hasMatch(gate), isFalse,
+          reason: "authenticate()'s bool is not a verdict; only LockScreen "
+              'may call it, because it retries and drops to the pad',);
+      // Asserted on the file that USES it — cover_gate.dart is where it is
+      // declared, so looking for it there can never fail.
+      final layer = _code(
+        File('lib/features/disguise/entry/entry_trigger_layer.dart')
+            .readAsStringSync(),
       );
+      expect(layer.contains('kCoverRecoveryHold'), isTrue,
+          reason: 'the layer must time the backup hold by the shared '
+              'constant, not by a number of its own',);
+      expect(kCoverRecoveryHold, const Duration(seconds: 5),
+          reason: 'every sentence in the app, the FAQ, the guide and the Play '
+              'Console notes quotes five seconds',);
+      expect(gate.contains('nameless: forced'), isTrue,
+          reason: 'the backup door lands on a lock screen that names no app',);
     });
   });
 }

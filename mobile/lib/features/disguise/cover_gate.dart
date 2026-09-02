@@ -1,135 +1,169 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/services/app_lock.dart';
-import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/intro/intro_splash_screen.dart';
 import 'package:miles/main.dart';
 
 /// The way in, from behind any disguise.
 ///
-/// Every cover screen fronts the same door, so the entry rules live here once
-/// rather than being re-implemented (and re-broken) per disguise:
+/// No cover owns a door. The nine cover screens are fake apps and nothing
+/// else; every way through them is decided here and driven from the host, so
+/// the entry rules live once rather than being re-implemented (and re-broken)
+/// per disguise:
 ///
-///  1. **A hidden trigger** the cover itself owns — five taps on a logo, a
-///     secret search word, a long-press. Nothing on screen hints at it.
-///  2. **The app lock** — biometric, with the PIN as the fallback. Skipped only
+///  1. **The owner's own move** — recorded on this cover from Settings and
+///     matched by the host's pointer layer. The app ships no default gesture:
+///     anything the app authored is in the APK and on the listing, and a door
+///     everyone knows is not a door.
+///  2. **The backup hold** — two still fingers on the cover's opening screen
+///     for [kCoverRecoveryHold]. Public by design (it is the one sentence Play
+///     Console gets), so with a move recorded it never opens the app on its
+///     own: it lands on a nameless PIN screen.
+///  3. **The app lock** — biometric, with the PIN as the fallback. Skipped only
 ///     when the user has never set one up, so a fresh install is not locked out
 ///     of its own app.
-///  3. **The intro reveal** — the cinematic hand-off. Also a deliberate beat of
+///  4. **The intro reveal** — the cinematic hand-off. Also a deliberate beat of
 ///     delay: a shoulder-surfer sees a brand splash, not the app.
 ///
-/// Failure is silent by design. A wrong biometric returns to the cover with no
-/// error, no toast, no ripple — someone who tripped the trigger by accident
-/// learns nothing, and someone probing gets no signal they were close.
-mixin CoverGate<T extends StatefulWidget> on State<T> {
+/// Failure is silent by design. A wrong move, a wrong PIN, a dismissed prompt
+/// all return to the cover with no error, no toast, no ripple — someone who
+/// tripped a door by accident learns nothing, and someone probing gets no
+/// signal they were close.
+
+/// How long two still fingers stay down before the backup door opens.
+const kCoverRecoveryHold = Duration(seconds: 5);
+
+/// Who is asking the gate to open.
+enum EntrySource {
+  /// The move the owner recorded for this cover, matched by the host's layer.
+  custom,
+
+  /// The two-finger backup hold. Ends at the PIN whenever a move exists.
+  backup,
+
+  /// A tapped call notification or an auth link: intent the user already
+  /// declared. Skips the trigger, never the lock.
+  system,
+}
+
+/// What the host knows about the rendered cover's recorded move.
+enum CoverEntryMode {
+  /// Nothing recorded for this cover. Only the backup hold works, and it runs
+  /// the ordinary lock — the exposure the old About sheet's button had.
+  none,
+
+  /// A move is loaded and the layer is matching it.
+  custom,
+
+  /// A move exists but could not be read (keystore pending or broken). The
+  /// backup hold still works and still ends at the PIN.
+  customUnknown,
+}
+
+/// Gates 3 and 4, run for every source by the host.
+class CoverEntry {
+  CoverEntry._();
+
   /// One entry flow at a time: two triggers firing together must not stack a
-  /// second splash or double-fire the reveal.
-  bool _entering = false;
+  /// second splash or double-fire the reveal. Static, because the host's layer
+  /// and the system doors share it; the host resets it on mount, since a fresh
+  /// host means no flow can be in progress on its navigator.
+  static bool entering = false;
 
-  /// Called once the user is through all three gates.
-  void onCoverUnlocked();
+  static Future<void> run(
+    BuildContext navContext, {
+    required VoidCallback onUnlocked,
+    required EntrySource source,
+    required CoverEntryMode mode,
+    bool forCall = false,
+  }) async {
+    if (entering) return;
+    entering = true;
+    try {
+      // authInProgress stops the biometric prompt's own `inactive` lifecycle
+      // event from dropping the cover out from under the prompt.
+      MilesApp.authInProgress = true;
+      final passed = await _passes(navContext, source: source, mode: mode);
+      MilesApp.authInProgress = false;
 
-  @override
-  void initState() {
-    super.initState();
-    // Every cover watches for a call and for an auth link, so none of them has
-    // to remember to.
-    pendingCall.addListener(openForPendingCall);
-    pendingAuthLink.addListener(openForAuthLink);
-    // Either may have arrived before this cover was built.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      openForPendingCall();
-      openForAuthLink();
-    });
+      if (!passed || !navContext.mounted) return;
+
+      // The splash is a deliberate beat of delay — but not while someone is
+      // ringing. 1.2s of branding against a caller who is counting seconds is
+      // the wrong trade, and the shoulder-surfer argument does not apply when
+      // the user is answering a call they were just notified about.
+      if (!forCall) {
+        await Navigator.of(navContext).push(
+          PageRouteBuilder<void>(
+            pageBuilder: (_, __, ___) => IntroSplashScreen(
+              onComplete: () => Navigator.of(navContext).pop(),
+            ),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+          ),
+        );
+      }
+
+      if (navContext.mounted) onUnlocked();
+    } finally {
+      // Always clear both guards, even on early return or error — a stuck
+      // guard would lock the user out of their own app permanently.
+      MilesApp.authInProgress = false;
+      entering = false;
+    }
   }
 
-  @override
-  void dispose() {
-    pendingCall.removeListener(openForPendingCall);
-    pendingAuthLink.removeListener(openForAuthLink);
-    super.dispose();
-  }
-
-  /// Open the door for an incoming call, without the hidden trigger.
+  /// Gate 3: biometric, WITH THE PIN AS THE FALLBACK.
   ///
-  /// A closed app woken by a call used to be unanswerable. The cover replaces
-  /// the whole app while showRealApp is false, so the router — and with it the
-  /// call route and the shell that listens for [pendingCall] — does not exist.
-  /// The phone rang, the user opened the app, and saw a news reader with no way
-  /// to reach the call before the caller gave up.
-  ///
-  /// The trigger is skipped, NOT the lock: the user already declared intent by
-  /// tapping a call notification, but nothing about this app is revealed until
-  /// they pass the same biometric as always. A shoulder-surfer sees the cover
-  /// and a nameless system prompt, exactly as before.
-  ///
-  /// That premise only holds when the ring was actually tapped, and it was not
-  /// checked. A push arriving while the app is foregrounded goes to
-  /// FcmService._onForeground, which posts no notification at all — so on a
-  /// handset sitting on its cover (where this app lands after every background,
-  /// main.dart:269-271) the partner pressing Call used to replace the cover
-  /// with the call screen, showing their avatar and real name, within a frame
-  /// and with nothing tapped. With a lock enrolled it was quieter and still
-  /// wrong: a biometric prompt raised by the other person, not by the user.
-  ///
-  /// So the door opens only on [CallTap.fromTap]. An untapped ring is left for
-  /// the notification _onForeground posts instead; the shell's own listener is
-  /// independent of this gate, so a ring arriving while the real app is already
-  /// visible still reaches the controller unchanged.
-  void openForPendingCall() {
-    final tap = pendingCall.value;
-    if (_entering || tap == null || !tap.fromTap) return;
-    runEntryGate(forCall: true);
-  }
-
-  /// Open the door for an email confirmation or password-reset link.
-  ///
-  /// The same hole as [openForPendingCall], reached a different way. Reading
-  /// the mail backgrounds this app, which drops it to the cover; tapping the
-  /// link wakes it there. supabase_flutter redeems the token off that link and
-  /// the session goes valid — behind a calculator, with nothing on screen to
-  /// say so and, for a reset, no /new-password route in existence to push.
-  ///
-  /// Consumed on the first attempt rather than on success, so a failed
-  /// biometric returns to the cover instead of re-prompting on every rebuild.
-  /// The hidden trigger still works; the intent was one-shot.
-  void openForAuthLink() {
-    if (_entering || !pendingAuthLink.value) return;
-    pendingAuthLink.value = false;
-    runEntryGate();
-  }
-
-  /// Gate 2, doing what the contract at the top of this file already says:
-  /// biometric, WITH THE PIN AS THE FALLBACK.
-  ///
-  /// This was `!enabled || await AppLock.authenticate()`, which read that
-  /// method's `false` as a verdict. Its own documentation says the opposite —
-  /// "on any failure returns false (caller falls back to the PIN)" — and this
-  /// caller never did. On a handset with no fingerprint, face or screen lock
-  /// enrolled, `authenticate()` can only ever return false, so the way back in
-  /// was a control that did nothing: the trigger fired, no prompt appeared, and
-  /// the cover simply stayed up. Reported from a OnePlus 7 with no enrolled
-  /// lock, while the same build behaved on a OnePlus 8 that had one.
-  Future<bool> _passesAppLock() async {
-    if (!await AppLock.isEnabled()) return true;
+  /// Never `AppLock.authenticate()`'s bool read as a verdict. That method's
+  /// own documentation says false means "the caller falls back to the PIN",
+  /// and a gate that once read it as a refusal locked a OnePlus 7 with no
+  /// enrolled lock out of its own app: the trigger fired, no prompt appeared,
+  /// and the cover simply stayed up. LockScreen is this app's real unlock
+  /// surface — it prompts biometrics, lets the prompt be retried, and drops
+  /// STRAIGHT to the PIN pad when no biometric is enrolled.
+  static Future<bool> _passes(
+    BuildContext navContext, {
+    required EntrySource source,
+    required CoverEntryMode mode,
+  }) async {
+    // The backup door is public knowledge, so with a move recorded it may not
+    // open on its own: it ends at the PIN whether or not App Lock is switched
+    // on. The owner's own move keeps App Lock's setting — with the lock off
+    // the move opens the app directly, which is the owner's choice.
+    final forced = source == EntrySource.backup && mode != CoverEntryMode.none;
+    if (!forced && !await AppLock.isEnabled()) return true;
     final bio = await AppLock.availableBiometrics();
     final hasPin = await AppLock.hasPin();
     // Nothing on this device can EVER satisfy the lock. Refusing forever is a
     // lockout, not security: a lock with no key protects nobody, and the only
     // person it holds out is the owner. Let them through rather than hand them
-    // a door that cannot open.
-    if (bio.isEmpty && !hasPin) return true;
-    if (!mounted) return false;
-    // LockScreen is this app's real unlock surface — it prompts biometrics,
-    // lets the prompt be retried, and drops STRAIGHT to the PIN pad when no
-    // biometric is enrolled. Pushed rather than toggled, because the overlay
-    // that normally renders it (main.dart) belongs to the real app's tree, and
-    // that tree does not exist while a cover is up.
-    final nav = Navigator.of(context);
+    // a door that cannot open — and lower the flag on the way, or the real
+    // app's own overlay (main.dart) raises the same keyless lock the moment
+    // this returns.
+    if (bio.isEmpty && !hasPin) {
+      AppLock.locked.value = false;
+      return true;
+    }
+    if (!navContext.mounted) return false;
+    return _pushLock(navContext, nameless: forced);
+  }
+
+  /// Pushed rather than toggled, because the overlay that normally renders
+  /// the lock (main.dart) belongs to the real app's tree, and that tree does
+  /// not exist while a cover is up.
+  static Future<bool> _pushLock(
+    BuildContext navContext, {
+    required bool nameless,
+  }) async {
+    final nav = Navigator.of(navContext);
+    final wasLocked = AppLock.locked.value;
     AppLock.locked.value = true;
     void popWhenOpen() {
+      // The cover tree can be torn down under a pending lock (a system door
+      // lowering the cover, a process-level swap); a navigator that is gone
+      // has nothing to pop.
+      if (!nav.mounted) return;
       if (!AppLock.locked.value && nav.canPop()) nav.pop();
     }
 
@@ -138,168 +172,18 @@ mixin CoverGate<T extends StatefulWidget> on State<T> {
       await nav.push(
         MaterialPageRoute<void>(
           fullscreenDialog: true,
-          builder: (_) => const LockScreen(),
+          builder: (_) => LockScreen(nameless: nameless),
         ),
       );
     } finally {
       AppLock.locked.removeListener(popWhenOpen);
     }
-    return !AppLock.locked.value;
+    final open = !AppLock.locked.value;
+    // The nameless screen can be backed out of, and the flag it raised must
+    // not outlive it: the real app's overlay reads the same notifier, and a
+    // later entry through the owner's move with App Lock off would otherwise
+    // land on a lock screen nobody asked for.
+    if (!open && nameless) AppLock.locked.value = wasLocked;
+    return open;
   }
-
-  /// Runs gates 2 and 3. Call from whatever hidden trigger the cover provides.
-  Future<void> runEntryGate({bool forCall = false}) async {
-    if (_entering) return;
-    _entering = true;
-    try {
-      // authInProgress stops the biometric prompt's own `inactive` lifecycle
-      // event from dropping the cover out from under the prompt.
-      MilesApp.authInProgress = true;
-      final passed = await _passesAppLock();
-      MilesApp.authInProgress = false;
-
-      if (!passed || !mounted) return;
-
-      // The splash is a deliberate beat of delay — but not while someone is
-      // ringing. 1.2s of branding against a caller who is counting seconds is
-      // the wrong trade, and the shoulder-surfer argument does not apply when
-      // the user is answering a call they were just notified about.
-      if (!forCall) {
-        await Navigator.of(context).push(
-          PageRouteBuilder<void>(
-            pageBuilder: (_, __, ___) => IntroSplashScreen(
-              onComplete: () => Navigator.of(context).pop(),
-            ),
-            transitionsBuilder: (_, anim, __, child) =>
-                FadeTransition(opacity: anim, child: child),
-          ),
-        );
-      }
-
-      if (mounted) onCoverUnlocked();
-    } finally {
-      // Always clear both guards, even on early return or error — a stuck
-      // guard would lock the user out of their own app permanently.
-      MilesApp.authInProgress = false;
-      _entering = false;
-    }
-  }
-}
-
-/// The way back, named — attached to something the cover already draws.
-///
-/// This replaces a small unlabelled ring that used to sit on every cover. On a
-/// weather app a bare circle is the one thing worth tapping and it tells
-/// whoever taps it nothing: conspicuous to a stranger, useless to the owner.
-/// So nothing is drawn any more. An element the cover already renders — its own
-/// title, a masthead, a location line — gains an `onTap`, and there is no new
-/// pixel to notice.
-///
-/// One rule, nine covers: **a single tap on the app's own name.** Where the
-/// cover shows no name (weather, calculator) it is the largest inert reading on
-/// the screen instead. Never a long-press — that shape belongs to the hidden
-/// doors ([DisguiseProfile.entry]), and a second long-press beside them is how
-/// a user finds the first one by accident.
-///
-/// What opens is a plain About sheet: the app's real name, and THIS cover's
-/// return gesture read from [profileForCover] rather than restated here, so the
-/// picker's promise and the cover's reminder cannot drift apart. A forgotten
-/// gesture used to be a lockout with no recovery short of a reinstall, and a
-/// lockout is the one failure a cover is never allowed to have.
-///
-/// Printing the gesture costs nothing a stranger can spend: App Lock is a
-/// precondition for applying a cover at all (gate 2 below, enforced by the
-/// picker and re-asked by the shell), so knowing the gesture still ends at a
-/// biometric prompt. Knowledge is not the guard; the lock is.
-///
-/// The `theme` is the cover's own `coverTheme`, passed rather than read from
-/// `Theme.of(context)`: the covers that build one do it INSIDE `build`, so the
-/// state's context sits above it and would hand back the host's stock blue
-/// (main.dart's cover [MaterialApp]) instead. Covers that have no theme of
-/// their own build one here — a sheet in Miles's own colours on top of a stock
-/// utility is the tell `cover_theme.dart` exists to prevent.
-/// The door itself: [child] gains a tap without gaining a pixel.
-///
-/// The 48dp box is Material's minimum tap target. Every label these hang on is
-/// a single line of 13-20pt text, so its own glyph box is around 20dp tall —
-/// thin for the one control an owner locked out of their app has to find a
-/// month later, and free to widen because an AppBar's toolbar is 56dp already.
-/// [Align.widthFactor] keeps the width shrink-wrapped: an AppBar title that
-/// expanded would swallow taps across the whole bar.
-class CoverAboutTap extends StatelessWidget {
-  const CoverAboutTap({required this.onTap, required this.child, super.key});
-
-  final VoidCallback onTap;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: SizedBox(
-          height: 48,
-          child: Align(widthFactor: 1, child: child),
-        ),
-      );
-}
-
-Future<void> showCoverAbout(
-  BuildContext context, {
-  required DisguiseCover cover,
-  required VoidCallback onOpen,
-  required ThemeData theme,
-}) {
-  final entry = profileForCover(cover).entry;
-
-  return showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: theme.colorScheme.surface,
-    // The Open button is last, and the column is as tall as the gesture text
-    // makes it. Left at the default 9/16-of-screen cap this sheet clips its
-    // own button off the bottom at large font scales — the one control the
-    // panel exists to offer, gone for exactly the users most likely to need
-    // it. Scroll-controlled sizes to content; the scroll view catches the
-    // rest.
-    isScrollControlled: true,
-    builder: (sheetContext) => Theme(
-      // The cover's palette, not the host's — and coverTheme leaves textTheme
-      // alone, which is what keeps the sheet in the system font.
-      data: theme,
-      child: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // The app's real name and this cover's gesture, and nothing
-                // else. An earlier draft also explained that the screen was a
-                // cover and why the launcher disagreed — which named the
-                // mechanism, not just the app, to anyone who opened this.
-                Text('Miles', style: theme.textTheme.headlineSmall),
-                const SizedBox(height: 20),
-                Text('To open Miles', style: theme.textTheme.labelLarge),
-                const SizedBox(height: 4),
-                Text(entry, style: theme.textTheme.bodyMedium),
-                const SizedBox(height: 20),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    // Pop first: the gate pushes the intro splash onto this
-                    // navigator, and it must not land under a sheet.
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                      onOpen();
-                    },
-                    child: const Text('Open Miles'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }

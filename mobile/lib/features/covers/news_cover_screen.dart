@@ -3,9 +3,6 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:miles/features/covers/rss_service.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
-import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Clean Google-News-style light palette — intentionally NOTHING like Miles.
@@ -16,41 +13,27 @@ const _textMuted = Color(0xFF70757A);
 const _accent = Color(0xFF1A73E8);
 const _divider = Color(0xFFE0E0E0);
 
-/// A convincing fake "News" reader shown on cold start. Two hidden triggers
-/// (5 quick logo taps, a 2.5s hold on the Local nav item) run the biometric
-/// gate; on success [onAuthenticated] swaps the whole app over to the real
-/// Miles experience. Everything else behaves like a real news app (live RSS,
-/// external article links, pull-to-refresh).
+/// A convincing fake "News" reader shown on cold start. Everything behaves
+/// like a real news app (live RSS, external article links, pull-to-refresh).
 ///
-/// Two doors that used to exist here are gone, because both were reachable by
-/// ordinary use of a news app — which is the one thing an entry gesture may not
-/// be. Submitting `home` in the search box opened the gate, and searching a
-/// news reader for "home" is something a person does on purpose; a plain
-/// long-press on the **Local** section tab opened it too, and long-pressing a
-/// tab to see whether it has a menu is a reflex. Either one put a biometric
-/// prompt in front of whoever was holding the phone.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen; nothing here knows it exists.
+/// The doors this cover used to carry — five taps on the mark, a hold on the
+/// Local item, and before those a search for `home` and a long-press on a tab
+/// — are all gone with the rest of the app-authored gestures: a door the app
+/// ships is a door everyone can read.
 class NewsCoverScreen extends StatefulWidget {
-  const NewsCoverScreen({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const NewsCoverScreen({super.key});
 
   @override
   State<NewsCoverScreen> createState() => _NewsCoverScreenState();
 }
 
 class _NewsCoverScreenState extends State<NewsCoverScreen>
-    with WidgetsBindingObserver, CoverGate<NewsCoverScreen> {
+    with WidgetsBindingObserver {
   List<RssArticle> _articles = [];
   bool _loading = true;
   bool _hasError = false;
-
-  // Entry 1 — logo tap counter (5 within 3s).
-  int _logoTapCount = 0;
-  DateTime? _firstLogoTap;
-
-  // Entry 2 — long-press (2.5s) on the Local nav item.
-  Timer? _localHoldTimer;
-  bool _localTriggered = false;
 
   // Search + section state.
   final TextEditingController _searchController = TextEditingController();
@@ -62,14 +45,12 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _resetEntryState();
     _loadNews();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _localHoldTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -77,20 +58,15 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Returning to the cover: clear any half-finished entry sequence so it
-      // can't carry over, and refresh (cache keeps this instant — no blank).
-      if (mounted) setState(_resetEntryState);
+      // Returning to the cover: close a search that was left open so nothing
+      // typed carries across a background, and refresh (cache keeps this
+      // instant — no blank).
+      if (mounted) setState(_resetSearch);
       _loadNews();
     }
   }
 
-  /// Clears entry counters + search so a partial sequence never carries across
-  /// background/foreground cycles.
-  void _resetEntryState() {
-    _logoTapCount = 0;
-    _firstLogoTap = null;
-    _localHoldTimer?.cancel();
-    _localTriggered = false;
+  void _resetSearch() {
     _searchController.clear();
     _query = '';
     _searchOpen = false;
@@ -134,45 +110,7 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
     }
   }
 
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
-
-  // ── Entry 1: 5 logo taps within 3 seconds ─────────────────────────────────
-  void _onLogoTap() {
-    final now = DateTime.now();
-    if (_firstLogoTap == null ||
-        now.difference(_firstLogoTap!) > const Duration(seconds: 3)) {
-      _logoTapCount = 1;
-      _firstLogoTap = now;
-    } else {
-      _logoTapCount++;
-    }
-    if (_logoTapCount >= 5) {
-      _logoTapCount = 0;
-      _firstLogoTap = null;
-      runEntryGate();
-    }
-  }
-
   void _onSearchSubmitted(String value) => setState(() => _query = value.trim());
-
-  // ── Entry 2: long-press (2.5s) on the Local nav item ──────────────────────
-  void _localHoldStart() {
-    _localTriggered = false;
-    _localHoldTimer?.cancel();
-    _localHoldTimer = Timer(const Duration(milliseconds: 2500), () {
-      _localTriggered = true;
-      runEntryGate();
-    });
-  }
-
-  void _localHoldCancel() => _localHoldTimer?.cancel();
-
-  void _localTap() {
-    _localHoldTimer?.cancel();
-    if (_localTriggered) return; // the long-press already handled it
-    setState(() => _section = 2);
-  }
 
   Future<void> _openArticle(RssArticle a) async {
     try {
@@ -231,30 +169,17 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
       elevation: 1,
       shadowColor: Colors.black12,
       titleSpacing: 12,
-      title: Row(
+      title: const Row(
         children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _onLogoTap,
-            child: const _NewsLogo(),
-          ),
-          const SizedBox(width: 10),
-          // The way back. The wordmark, not the mark beside it — that one is
-          // already the five-tap door, and two doors on one widget is how a
-          // user finds the hidden one by accident.
-          CoverAboutTap(
-            onTap: () => showCoverAbout(context,
-                cover: DisguiseCover.news,
-                onOpen: runEntryGate,
-                theme: coverTheme(primary: _accent, surface: _bg),),
-            child: const Text(
-              'News',
-              style: TextStyle(
-                color: _textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w500,
-                letterSpacing: -0.2,
-              ),
+          _NewsLogo(),
+          SizedBox(width: 10),
+          Text(
+            'News',
+            style: TextStyle(
+              color: _textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.2,
             ),
           ),
         ],
@@ -335,10 +260,15 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
 
   Widget _buildSectionTabs() {
     const labels = ['For You', 'Headlines', 'Local'];
+    // Scrollable, because three fixed tabs at 16dp padding overflow a 360dp
+    // handset by 35px — and an overflow stripe painted across a cover is the
+    // one thing on it that no real news app has.
     return Container(
       color: _bg,
       height: 44,
-      child: Row(
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        physics: const ClampingScrollPhysics(),
         children: [
           for (var i = 0; i < labels.length; i++)
             _SectionTab(
@@ -427,15 +357,12 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
               selected: _section == 1,
               onTap: () => setState(() => _section = 1),
             ),
-            // Local — rightmost. A 2.5s press here is Entry 2.
             _NavItem(
               icon: Icons.location_on_outlined,
               activeIcon: Icons.location_on,
               label: 'Local',
               selected: _section == 2,
-              onTap: _localTap,
-              onTapDown: _localHoldStart,
-              onTapCancel: _localHoldCancel,
+              onTap: () => setState(() => _section = 2),
             ),
           ],
         ),
@@ -444,7 +371,7 @@ class _NewsCoverScreenState extends State<NewsCoverScreen>
   }
 }
 
-/// The masthead mark, and the first hidden door (five taps).
+/// The masthead mark.
 ///
 /// It used to be a letterform in one company's brand colour beside bars in
 /// three more of that company's exact hexes — a counterfeit of a mark people
@@ -605,8 +532,6 @@ class _NavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
-    this.onTapDown,
-    this.onTapCancel,
   });
 
   final IconData icon;
@@ -614,8 +539,6 @@ class _NavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback? onTapDown;
-  final VoidCallback? onTapCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -624,9 +547,6 @@ class _NavItem extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        onTapDown: onTapDown == null ? null : (_) => onTapDown!(),
-        onTapUp: onTapCancel == null ? null : (_) => onTapCancel!(),
-        onTapCancel: onTapCancel,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

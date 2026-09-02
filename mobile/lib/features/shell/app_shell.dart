@@ -19,6 +19,7 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/ui/tab_dissolve.dart';
+import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/gilt_nav_icon.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
@@ -31,8 +32,11 @@ import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/widgets/chat_input_bar.dart';
 import 'package:miles/features/closer/closer_screen.dart';
+import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
+import 'package:miles/features/disguise/entry/cover_entry_store.dart';
+import 'package:miles/features/disguise/entry/cover_entry_trigger.dart';
 import 'package:miles/features/home/home_screen.dart';
 import 'package:miles/features/opening/opening_screen.dart';
 import 'package:miles/features/opening/opening_state.dart';
@@ -44,7 +48,6 @@ import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/unlink/unlink_completion.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/main.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 
@@ -482,14 +485,7 @@ class _AppShellState extends ConsumerState<AppShell>
     // key, and no reason to ever sign out and acquire one. They lose every
     // encrypted memory on their next reinstall. Asked once, here, because this
     // is the first point past login and pairing.
-    unawaited(EscrowPrompt.maybeShow(context));
-    // Covers shipped before App Lock was a precondition of wearing one. A
-    // phone that applied one back then and upgraded now carries a way back
-    // with no lock behind it — the picker refuses that combination today, so
-    // this is the standing repair for installs that predate the rule. Asked
-    // every session until the lock is on or the cover is off, because an
-    // unguarded door is a disguise that opens for whoever holds the phone.
-    unawaited(_nudgeLockForCover());
+    unawaited(_launchGuards());
     // The pin catches every partner-key change after the first sight; the one
     // thing it cannot catch is a directory that lied AT the first sight, and
     // only the two people can — by reading the same twenty digits to each
@@ -543,60 +539,177 @@ class _AppShellState extends ConsumerState<AppShell>
     _firstRunPrompts(couple.id);
   }
 
-  /// The repair half of the picker's App-Lock precondition: a cover applied
-  /// by an older build, still worn, with no lock enrolled.
-  /// Asked ONCE, and never again if the answer was no.
+  /// A worn cover with nothing recorded for it, or with a record this phone
+  /// can no longer read.
   ///
-  /// "Not now" used to just pop the dialog and persist nothing, so this fired
-  /// on every shell mount — and the disguise backgrounds the app, so Android
-  /// kills the process routinely and the shell mounts constantly. The result
-  /// was a prompt that reappeared for the rest of the install's life, which
-  /// reads as a bug rather than advice.
+  /// The first is the pinned handsets' state on their first launch after
+  /// this build, and it is not a state the app allows to stand: the app
+  /// ships no door, so the only way in is the backup hold, which with App
+  /// Lock off opens straight in. This dialog cannot be waved away — a
+  /// declinable prompt here is the public door staying open for good — and it
+  /// offers exactly the two things that end the state: record a move, or take
+  /// the cover off. Asked on every shell mount until one of them happens.
   ///
-  /// App Lock is the user's call. A recommendation that cannot be declined is
-  /// not a recommendation, and one that re-asks forever teaches people to
-  /// dismiss dialogs without reading them — which is the opposite of what a
-  /// security prompt is for.
-  static const _lockNudgeDeclinedKey = 'miles_lock_nudge_declined_v1';
-
-  Future<void> _nudgeLockForCover() async {
+  /// The second is reported once per process and offered a re-record; the
+  /// backup hold still lands on the PIN in the meantime, so it is a nuisance,
+  /// not a hole.
+  Future<void> _requireCoverSetup() async {
     final profile = await DisguiseService.current();
     if (profile.cover == DisguiseCover.none) return;
-    if (await AppLock.isEnabled()) return;
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_lockNudgeDeclinedKey) ?? false) return;
+    final (mode, _) = await CoverEntryStore.resolve(profile.cover);
     if (!mounted) return;
-    await showDialog<void>(
+    switch (mode) {
+      case CoverEntryMode.custom:
+        return;
+      case CoverEntryMode.customUnknown:
+        await _reportUnreadableMove(profile);
+        return;
+      case CoverEntryMode.none:
+        break;
+    }
+    if (!mounted) return;
+    final setUp = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Your cover needs App Lock'),
-        content: const Text(
-          'Your cover keeps a way back into this app — that is your '
-          'guarantee against being locked out. App Lock is what makes that '
-          'way back safe: with it on, it lands on your lock, not the app.\n\n'
-          'Turn on App Lock in Settings, or switch the cover off.',
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('Your cover has no way in yet'),
+          content: Text(
+            'This phone wears the ${profile.label} cover, and the app ships '
+            'no move to open it — only one you record.\n\n'
+            'You are not locked out: holding two fingers still in the middle '
+            'of the cover for five seconds always reaches your PIN. Record '
+            'your own way in now, or take the cover off.',
+          ),
+          actions: [
+            TextButton(
+              // The leftmost button is where people tap to make a dialog go
+              // away, and this one changes the icon and name on the home
+              // screen in front of whoever the cover was for. It asks first.
+              onPressed: () async {
+                if (await _confirmCoverOff(ctx, profile) && ctx.mounted) {
+                  Navigator.pop(ctx, false);
+                }
+              },
+              child: const Text('Take the cover off'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Set it up'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (setUp != true) {
+      final off = await DisguiseService.apply(kPlainProfile);
+      if (!mounted) return;
+      if (!off) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't take the cover off on this device."),
+          ),
+        );
+      }
+      return;
+    }
+    await _recordMove(profile);
+  }
+
+  /// The two launch prompts that must not land on top of each other.
+  ///
+  /// The cover-setup dialog cannot be dismissed, so it goes FIRST and alone:
+  /// fired in parallel with the escrow prompt (the failure _firstRunPrompts
+  /// below documents) it ends up underneath a dismissible dialog, and the
+  /// user answers whichever is in front.
+  Future<void> _launchGuards() async {
+    await _requireCoverSetup();
+    if (!mounted) return;
+    await EscrowPrompt.maybeShow(context);
+  }
+
+  Future<bool> _confirmCoverOff(
+    BuildContext ctx,
+    DisguiseProfile profile,
+  ) async {
+    final sure = await showDialog<bool>(
+      context: ctx,
+      builder: (inner) => AlertDialog(
+        title: const Text('Take the cover off?'),
+        content: Text(
+          'Your launcher goes back to the Miles name and icon, on the home '
+          'screen, now. The ${profile.label} cover can be put back on from '
+          'Settings.',
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              // Remembered, so this is genuinely "not now" and not "ask me
-              // again in ninety seconds". Turning App Lock on later clears
-              // nothing — the enabled check above short-circuits first.
-              unawaited(prefs.setBool(_lockNudgeDeclinedKey, true));
-              Navigator.pop(ctx);
-            },
-            child: const Text('Not now'),
+            onPressed: () => Navigator.pop(inner, false),
+            child: const Text('Keep the cover'),
           ),
           TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ctx.go('/app/settings');
-            },
-            child: const Text('Open Settings'),
+            onPressed: () => Navigator.pop(inner, true),
+            child: const Text('Take it off'),
           ),
         ],
       ),
     );
+    return sure ?? false;
+  }
+
+  /// PIN first — the backup hold lands on it — then the recorder, then the
+  /// store. Shared by both prompts above.
+  Future<void> _recordMove(DisguiseProfile profile) async {
+    final hasPin = await AppLock.hasPin();
+    if (!mounted) return;
+    if (!hasPin && !await showAppLockPinSetup(context)) return;
+    if (!mounted) return;
+    final trigger = await context.push<CoverEntryTrigger>(
+      '/app/disguise/entry?cover=${profile.cover.name}',
+    );
+    if (trigger == null || !mounted) return;
+    final saved = await CoverEntryStore.save(trigger);
+    if (!mounted) return;
+    if (!saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't save your move on this phone.")),
+      );
+    }
+  }
+
+  static bool _unreadableMoveReported = false;
+
+  Future<void> _reportUnreadableMove(DisguiseProfile profile) async {
+    if (_unreadableMoveReported) return;
+    _unreadableMoveReported = true;
+    ErrorReporter.report(
+      StateError('cover entry record unreadable'),
+      StackTrace.current,
+      kind: 'cover-entry',
+    );
+    final again = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Your way in could not be read'),
+        content: Text(
+          'The move you recorded for the ${profile.label} cover could not be '
+          'read on this phone. Until you record it again, only the backup '
+          'hold opens Miles.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Not now'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Record it'),
+          ),
+        ],
+      ),
+    );
+    if ((again ?? false) && mounted) await _recordMove(profile);
   }
 
   /// The one-time onboarding prompts, in sequence.

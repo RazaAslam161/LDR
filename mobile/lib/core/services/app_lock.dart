@@ -30,7 +30,7 @@ class AppLock {
   static const _legacyPinKey = 'app_lock_pin_hash';
 
   /// Today's home: the platform keystore via `flutter_secure_storage`, same
-  /// idiom as CryptoCore's key material, holding [_encode]'s
+  /// idiom as CryptoCore's key material, holding [hashSecret]'s
   /// `sha256:<saltB64>:<hashB64>` under a per-install random salt.
   static const _pinKey = 'app_lock_pin_v2';
   static const _storage = FlutterSecureStorage(
@@ -66,13 +66,16 @@ class AppLock {
   /// covering every install, and stops two users with the same PIN sharing a
   /// hash. Resistance comes from WHERE the value lives: the keystore-encrypted
   /// store, not a prefs file any filesystem reader can lift.
-  static String _encode(String pin) {
+  ///
+  /// Public because the cover's secret-word move is the same class of secret
+  /// in the same store, and one format means one verifier.
+  static String hashSecret(String pin) {
     final salt = List<int>.generate(16, (_) => _rng.nextInt(256));
     final digest = sha256.convert([...salt, ...utf8.encode(pin)]);
     return 'sha256:${base64Encode(salt)}:${base64Encode(digest.bytes)}';
   }
 
-  static bool _matches(String stored, String pin) {
+  static bool secretMatches(String stored, String pin) {
     final parts = stored.split(':');
     if (parts.length != 3 || parts[0] != 'sha256') {
       // Only setPin writes this key, so an unreadable value is a defect worth
@@ -105,7 +108,7 @@ class AppLock {
   }
 
   static Future<void> setPin(String pin) async {
-    await _storage.write(key: _pinKey, value: _encode(pin));
+    await _storage.write(key: _pinKey, value: hashSecret(pin));
     // Remove the legacy hash only AFTER the v2 write lands: this order means
     // a process death between the two leaves both present, and verifyPin
     // reads v2 first — the stale legacy copy is swept on the next verified
@@ -129,7 +132,7 @@ class AppLock {
       debugPrint('[applock] secure read failed: ${e.runtimeType}');
     }
     if (stored != null) {
-      final ok = _matches(stored, pin);
+      final ok = secretMatches(stored, pin);
       if (ok) {
         // A process death between setPin's two writes can leave the retired
         // constant-salt hash sitting in prefs; sweep it whenever a verified
@@ -149,7 +152,14 @@ class AppLock {
   }
 
   // ── Capability ────────────────────────────────────────────────────────────
-  static Future<List<BiometricType>> availableBiometrics() async {
+  /// A swappable static, the house seam: local_auth's channel never answers
+  /// under `flutter test`, and the cover gate awaits this before it can push
+  /// the lock screen — so a widget test of any door would hang here forever.
+  static Future<List<BiometricType>> Function() availableBiometrics =
+      availableBiometricsLive;
+
+  @visibleForTesting
+  static Future<List<BiometricType>> availableBiometricsLive() async {
     try {
       return await _auth.getAvailableBiometrics();
     } catch (_) {

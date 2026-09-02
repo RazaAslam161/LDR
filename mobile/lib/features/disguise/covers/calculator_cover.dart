@@ -1,32 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
-import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/entry/cover_entry_scope.dart';
 
-/// A working calculator that is also the front door.
+/// A working calculator.
 ///
 /// It has to actually calculate. A disguise that falls apart the moment someone
 /// presses a button is worse than none — it advertises that there is something
 /// to hide. Arithmetic, the display, and the key feel are all real.
 ///
-/// The hidden trigger is a **long-press on `=` while the display reads `0` with
-/// no pending operation** — a normal ~500ms InkWell long-press, not a timed
-/// hold.
-/// Chosen deliberately: pressing `=` with nothing entered is something no real
-/// user does by accident, it leaves no visible affordance, and it cannot be
-/// stumbled into while genuinely using the calculator.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen. The one thing this file does is
+/// hand whatever `=` commits to [CoverEntryScope], blind to what it means.
 class CalculatorCover extends StatefulWidget {
-  const CalculatorCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const CalculatorCover({super.key});
 
   @override
   State<CalculatorCover> createState() => _CalculatorCoverState();
 }
 
-class _CalculatorCoverState extends State<CalculatorCover>
-    with CoverGate<CalculatorCover> {
+class _CalculatorCoverState extends State<CalculatorCover> {
   String _display = '0';
   double? _accumulator;
   String? _pendingOp;
@@ -35,10 +27,15 @@ class _CalculatorCoverState extends State<CalculatorCover>
   /// instead of appending to the previous result.
   bool _startNewEntry = true;
 
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
-
   void _input(String key) {
+    // `=` is the calculator's commit: a secret number typed here and
+    // committed is the owner's move on this cover, and then it is not a
+    // calculation. Nothing typed without the `=` is ever looked at.
+    if (key == '=' &&
+        (CoverEntryScope.maybeOf(context)?.feedText(_display, commit: true) ??
+            false)) {
+      return;
+    }
     HapticFeedback.selectionClick();
     setState(() {
       switch (key) {
@@ -116,13 +113,6 @@ class _CalculatorCoverState extends State<CalculatorCover>
         .replaceAll(RegExp(r'\.$'), '');
   }
 
-  /// The way in — see the class doc for why this gesture.
-  void _onEqualsLongPress() {
-    if (_display == '0' && _accumulator == null) {
-      runEntryGate();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     const keys = [
@@ -144,30 +134,17 @@ class _CalculatorCoverState extends State<CalculatorCover>
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                // The way back. No name is drawn on a calculator, so the
-                // reading itself is the door — the only thing here that is not
-                // a key, and the one place a long-press already means nothing.
                 child: Align(
                   alignment: Alignment.bottomRight,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => showCoverAbout(context,
-                        cover: DisguiseCover.calculator,
-                        onOpen: runEntryGate,
-                        theme: coverTheme(
-                          primary: const Color(0xFF1A73E8),
-                          surface: const Color(0xFFF1F3F4),
-                        ),),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.bottomRight,
-                      child: Text(
-                        _display,
-                        style: const TextStyle(
-                          fontSize: 64,
-                          fontWeight: FontWeight.w300,
-                          color: Color(0xFF202124),
-                        ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.bottomRight,
+                    child: Text(
+                      _display,
+                      style: const TextStyle(
+                        fontSize: 64,
+                        fontWeight: FontWeight.w300,
+                        color: Color(0xFF202124),
                       ),
                     ),
                   ),
@@ -190,8 +167,6 @@ class _CalculatorCoverState extends State<CalculatorCover>
                                 child: _Key(
                                   label: k,
                                   onTap: () => _input(k),
-                                  onLongPress:
-                                      k == '=' ? _onEqualsLongPress : null,
                                 ),
                               ),
                           ],
@@ -209,11 +184,10 @@ class _CalculatorCoverState extends State<CalculatorCover>
 }
 
 class _Key extends StatelessWidget {
-  const _Key({required this.label, required this.onTap, this.onLongPress});
+  const _Key({required this.label, required this.onTap});
 
   final String label;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
 
   bool get _isOperator => '÷×−+='.contains(label);
   bool get _isFunction => label == 'AC' || label == '⌫' || label == '%';
@@ -241,9 +215,6 @@ class _Key extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: onTap,
-          // A long-press that does nothing on every other key, so the one that
-          // matters is indistinguishable from the rest.
-          onLongPress: onLongPress ?? onTap,
           child: Center(
             child: Text(
               label,

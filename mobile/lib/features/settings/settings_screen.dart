@@ -31,6 +31,11 @@ import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/features/disguise/cover_gate.dart';
+import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/disguise_service.dart';
+import 'package:miles/features/disguise/entry/cover_entry_store.dart';
+import 'package:miles/features/disguise/entry/cover_entry_trigger.dart';
 import 'package:miles/features/legal/faq_screen.dart';
 import 'package:miles/features/legal/terms_screen.dart';
 import 'package:miles/features/legal/terms_text.dart';
@@ -77,6 +82,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   LocationBlock _locationBlock = LocationBlock.none;
   bool _appLock = false;
   bool _escrowMissing = false;
+
+  /// The cover this phone wears and whether a move is recorded for it; the
+  /// row is only offered when there is a cover to open.
+  DisguiseProfile? _wornCover;
+  bool _moveSet = false;
   /// Whether this couple has ever compared their security code. Null while
   /// unknown — no partner, no published key, or the fetch did not land — and
   /// the row then says what it has always said, because "never compared" is a
@@ -118,6 +128,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadLocationMode();
       _loadAppLock();
+      _loadCoverEntry();
       _loadEscrow();
       _loadCodeVerified();
       _loadNotificationState();
@@ -141,6 +152,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       // be saying "waiting for them" about a couple whose Closer is open.
       _loadConsent();
     }
+  }
+
+  Future<void> _loadCoverEntry() async {
+    final worn = await DisguiseService.current();
+    // `resolve`, not `present`: the mirror is also true for a record this
+    // phone can no longer read, and telling the owner their way in is "Set"
+    // when it is dead is the one thing this row must not do.
+    var set = false;
+    if (worn.cover != DisguiseCover.none) {
+      final (mode, _) = await CoverEntryStore.resolve(worn.cover);
+      set = mode == CoverEntryMode.custom;
+    }
+    if (!mounted) return;
+    setState(() {
+      _wornCover = worn;
+      _moveSet = set;
+    });
+  }
+
+  /// Record or replace the move that opens the worn cover. Behind the App
+  /// Lock PIN when the lock is on (the same bar as switching the lock off),
+  /// and a PIN must exist either way: the backup hold lands on it.
+  Future<void> _changeCoverEntry() async {
+    final worn = _wornCover;
+    if (worn == null || worn.cover == DisguiseCover.none) return;
+    // The PIN is asked for whenever one exists, not only when App Lock is
+    // switched on: replacing the way into the cover is exactly what someone
+    // who found their way in once would do, and App Lock's toggle is not
+    // what makes this worth guarding.
+    final hasPin = await AppLock.hasPin();
+    if (!mounted) return;
+    if (hasPin) {
+      if (!await showAppLockPinVerify(context)) return;
+    } else if (!await showAppLockPinSetup(context)) {
+      return;
+    }
+    if (!mounted) return;
+    final trigger = await context.push<CoverEntryTrigger>(
+      '/app/disguise/entry?cover=${worn.cover.name}',
+    );
+    if (trigger == null || !mounted) return;
+    if (!await CoverEntryStore.save(trigger)) {
+      _toast("Couldn't save your move on this phone.");
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _moveSet = true);
+    _toast('Your way in is set');
   }
 
   Future<void> _loadAppLock() async {
@@ -876,9 +935,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               icon: Icons.palette_outlined,
               title: 'How this app looks',
               subtitle: 'The icon and name shown on your phone',
-              value: 'Miles',
-              onTap: () => context.push('/app/disguise'),
+              // The worn identity, not a hardcoded 'Miles': this row is the
+              // only place that answers "what does my phone look like now".
+              value: _wornCover?.label ?? '…',
+              onTap: () async {
+                await context.push('/app/disguise');
+                // The cover may be a different one now, and both this row and
+                // "Your way in" below it read from the same load. Without
+                // this, "Your way in" would record a move for the cover the
+                // phone has just stopped wearing.
+                if (mounted) await _loadCoverEntry();
+              },
             ),
+            if (DisguiseService.enabled &&
+                _wornCover != null &&
+                _wornCover!.cover != DisguiseCover.none)
+              _SettingsRow(
+                icon: Icons.touch_app_outlined,
+                title: 'Your way in',
+                // The backup hold is written here because this is the last
+                // screen the owner sees before they need it, and the FAQ
+                // that also carries it is inside the app they are locked out
+                // of.
+                subtitle: 'The move that opens Miles from the '
+                    '${_wornCover!.label} cover. Forgotten it? Hold two '
+                    'fingers still in the middle of the cover for five '
+                    'seconds, then unlock.',
+                value: _moveSet ? 'Set' : 'Not set',
+                onTap: _changeCoverEntry,
+              ),
           ],
         ),
         _SettingsGroup(

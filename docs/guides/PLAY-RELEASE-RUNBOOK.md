@@ -59,8 +59,8 @@ Console form:**
 | # | Requirement | Where | Status |
 |---|---|---|---|
 | 1 | No unprompted cover offer on first run | `app_shell.dart` | **done** — `_offerCoverAtFirstOpen()` removed; grep for it returns nothing |
-| 2 | Confirmation naming the consequence *and* the way back, before any cover applies | `disguise_picker_screen.dart:40-74` | **done** — names the new label, says Miles will not be findable by name, gives the re-entry gesture |
-| 3 | A way back the owner can find on every cover screen | `cover_gate.dart` | **done** — `showCoverAbout`, an About sheet on an element each cover already draws, naming Miles and that cover's gesture. **Not a policy requirement** — no Play text demands an on-screen affordance; items 4-5 carry the disclosure. See `disguises.md`. |
+| 2 | Confirmation naming the consequence *and* the way back, before any cover applies | `disguise_picker_screen.dart` | **done** — a PIN is set, the owner records their own move on the cover, then the dialog names the new label, says Miles will not be findable by name, and states the backup hold |
+| 3 | A way back the owner can find on every cover screen | `cover_gate.dart`, `entry_trigger_layer.dart` | **done** — the backup hold: two still fingers on the opening screen for five seconds, landing on the PIN. No About sheet any more — the app ships no door it could describe. **Not a policy requirement** — items 4-5 carry the disclosure. See `disguises.md`. |
 | 4 | The listing describes the feature, with the picker in ≥1 screenshot | store listing | **OPEN — phase 7** |
 | 5 | The unlock gesture + a working test account in Console → App access | Console | **OPEN — phase 5.6** |
 
@@ -70,9 +70,12 @@ them is shipping an undisclosed app-hider, which is the Behavior Transparency
 enforcement, not a resubmit. If you are not going to do 4 and 5, the decision to
 reverse is 0.1 itself, before the build — not the declaration.
 
-The exact re-entry gesture, read from the confirmation dialog rather than
-invented — **tap the logo 5 times quickly, or press and hold the "Local" tab for
-about 3 seconds**. That sentence goes in the Console App access notes verbatim.
+The exact way back, the same on every cover and in every state — **press and
+hold two fingers still in the middle of the cover's opening screen for five
+seconds, then unlock with the app PIN (a fingerprint prompt may appear first;
+cancel it to type the PIN)**. That sentence goes in the Console App access
+notes verbatim. The owner's own recorded move is per phone and is not something the
+notes can state.
 
 ### 0.2 One app, two build channels — not two products
 
@@ -553,11 +556,15 @@ is a policy violation with worse consequences than the rating itself.
   - a working test account (email + password) that is already paired, or a
     second account plus the invite code so the reviewer can pair the two;
   - the 18+ age gate and Terms gate stand in front of the app — say so;
-  - **the cover feature and the exact way out of it**: "Settings → How this app
-    looks changes the launcher icon and name. To get back in: open the app, then
-    tap the logo 5 times quickly, or press and hold the 'Local' tab for about 3
-    seconds." A reviewer who enables a cover and cannot get back writes the
-    rejection you cannot appeal.
+  - **the cover feature and the exact way out of it**: "Miles installs as
+    itself. If you turn a cover on (Settings → How this app looks) the app asks
+    you to set a 4-digit PIN and record your own gesture before anything
+    changes. To get back in from any cover: press and hold two fingers still in
+    the middle of the cover's opening screen for five seconds, then unlock with
+    that PIN (a fingerprint prompt may appear first; cancel it to type the
+    PIN)." A
+    reviewer who enables a cover and cannot get back writes the rejection you
+    cannot appeal.
 
 ### 5.7 Child safety standards (CSAE) — mandatory, and it blocks publishing
 
@@ -645,8 +652,9 @@ shape, adjusted to your voice:
 > If you would rather it looked like something ordinary on your home screen,
 > Settings → How this app looks lets you pick a different launcher name and
 > icon (for example Notes, Weather or Calculator). You choose it; nothing
-> changes until you confirm, and the app tells you exactly how to get back in
-> before it changes anything.
+> changes until you have set a PIN, recorded your own way back in on that
+> screen, and confirmed — and holding two fingers still on the cover for five
+> seconds always brings up your lock.
 
 Three properties matter more than the wording: the feature is **named**, it is
 **user-initiated**, and the **way back is stated**. Do not bury it in the last

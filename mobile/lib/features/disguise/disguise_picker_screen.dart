@@ -4,9 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
+import 'package:miles/features/disguise/entry/cover_entry_store.dart';
+import 'package:miles/features/disguise/entry/cover_entry_trigger.dart';
 
 /// Lets the user choose what this app looks like on their phone.
 ///
@@ -42,16 +45,25 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
     final choice = _selected;
     if (choice == null || _applying) return;
 
-    // App Lock is what makes the way back SAFE — with it on, the hidden
-    // trigger lands on your lock rather than straight in the app. It is not,
-    // however, what makes the way back EXIST, and treating it as a precondition
-    // made the whole feature unavailable to anyone who does not want a second
+    CoverEntryTrigger? entry;
+    var keptExisting = false;
+    if (choice.cover != DisguiseCover.none) {
+      // A PIN before anything else. The app ships no door, so the only
+      // public way in is the backup hold, and it lands on this PIN; a cover
+      // with a move behind it may never be one a forgotten move locks. The
+      // lock's own on/off switch stays the user's choice below.
+      final hasPin = await AppLock.hasPin();
+      if (!mounted) return;
+      if (!hasPin && !await showAppLockPinSetup(context)) return;
+      if (!mounted) return;
+    }
+
+    // App Lock is what puts a lock behind the owner's own move — with it on,
+    // the move lands on the lock rather than straight in the app. It is not
+    // what makes the way back EXIST, and treating it as a precondition made
+    // the whole feature unavailable to anyone who does not want a second
     // lock on their own phone. So the trade is stated once, plainly, and the
     // choice is the user's.
-    //
-    // It was also a requirement this app could not keep: forced on a handset
-    // with no enrolled credential, it produced a cover whose entry gate could
-    // never open — see CoverGate._passesAppLock, fixed in the same change.
     if (choice.cover != DisguiseCover.none && !await AppLock.isEnabled()) {
       if (!mounted) return;
       final goOn = await showDialog<bool>(
@@ -59,10 +71,9 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Apply without App Lock?'),
           content: Text(
-            'A cover always keeps a way back into this app. Without App Lock '
-            'that way back opens straight into Miles, so anyone holding your '
-            'unlocked phone who finds the gesture is in. With App Lock on, it '
-            'lands on your lock instead.'
+            'With App Lock off, your move opens Miles directly — anyone who '
+            'watches you do it is in. The backup hold always asks to unlock. '
+            'With App Lock on, your move lands on your lock instead.'
             '${widget.isOnboarding ? ' You can turn it on any time after '
                 'setup.' : ''}',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
@@ -74,9 +85,12 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
             ),
             if (!widget.isOnboarding)
               TextButton(
+                // The router is captured before the pop: `ctx` belongs to the
+                // dialog and is deactivated the moment it closes.
                 onPressed: () {
+                  final router = GoRouter.of(context);
                   Navigator.pop(ctx, false);
-                  ctx.go('/app/settings');
+                  router.go('/app/settings');
                 },
                 child: const Text('Turn on App Lock'),
               ),
@@ -90,14 +104,36 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
       if (goOn != true || !mounted) return;
     }
 
-    // Applying a cover changes the launcher icon and name, and the way back in
-    // is a gesture nobody discovers by accident — that is the point of it, and
-    // it is also how someone locks themselves out of their own app. Naming the
-    // consequence and the exact way back BEFORE the change is what separates a
-    // feature the user chose from one that was done to them — and it must be
-    // THIS cover's way back: this dialog used to print the News gesture under
-    // all nine covers, so eight of them promised a door that does not exist.
+    // The move itself, recorded on the cover it will open — before the alias
+    // switch, which is where Android may force-stop the process. A cover
+    // that already has one keeps it unless the owner wants a new one.
     if (choice.cover != DisguiseCover.none) {
+      // The payload, not the mirror: `present` is also true for a record
+      // that cannot be read, and offering to keep one of those applies a
+      // cover whose only door is the public hold.
+      if (await CoverEntryStore.load(choice.cover) != null) {
+        if (!mounted) return;
+        final answer = await _keepExistingMove(choice);
+        // Dismissed is "never mind", not "throw my move away".
+        if (answer == null || !mounted) return;
+        keptExisting = answer;
+      }
+      if (!mounted) return;
+      if (!keptExisting) {
+        entry = await context.push<CoverEntryTrigger>(
+          '/app/disguise/entry?cover=${choice.cover.name}',
+        );
+        if (entry == null || !mounted) return;
+      }
+    }
+
+    // Applying a cover changes the launcher icon and name, and the way back in
+    // is a move nobody but the owner knows — that is the point of it, and it
+    // is also how someone locks themselves out of their own app. Naming the
+    // consequence and the backup way in BEFORE the change is what separates a
+    // feature the user chose from one that was done to them.
+    if (choice.cover != DisguiseCover.none) {
+      if (!mounted) return;
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -105,8 +141,11 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
           content: Text(
             'Your launcher icon and name become "${choice.label}". Miles will '
             'not be findable by its own name until you change this back.\n\n'
-            'Way back in — ${choice.entry}\n\n'
-            'Forgotten it later? Tap ${choice.about} to see this again.',
+            'Way back in — ${keptExisting ? 'the move already recorded for '
+                'this cover' : 'the move you just recorded'}.\n\n'
+            "Forgotten it? Hold two fingers still in the middle of the cover's "
+            'opening screen for five seconds, then unlock with your '
+            'fingerprint or PIN.',
             style: const TextStyle(color: MilesColors.taupe, height: 1.5),
           ),
           actions: [
@@ -127,7 +166,7 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
     setState(() => _applying = true);
 
     final messenger = ScaffoldMessenger.of(context);
-    final ok = await DisguiseService.apply(choice);
+    final ok = await DisguiseService.apply(choice, entry: entry);
     if (!mounted) return;
     setState(() => _applying = false);
 
@@ -148,6 +187,29 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
       ),
     );
     if (widget.isOnboarding) unawaited(Navigator.of(context).maybePop());
+  }
+
+  Future<bool?> _keepExistingMove(DisguiseProfile choice) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Keep your ${choice.label} move?'),
+        content: const Text(
+          'You already recorded a way into this cover.',
+          style: TextStyle(color: MilesColors.taupe, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Record a new one'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Keep it'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _keepAsIs() async {
@@ -329,10 +391,13 @@ class _DisguiseTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    // The one thing nothing else will remind you of. A disguise
-                    // whose door you cannot remember is an app you cannot open.
+                    // The app prints no gesture here because it ships none:
+                    // the door is the move the owner records on the next
+                    // screen, and the backup hold is the reminder.
                     Text(
-                      'Way in — ${profile.entry}',
+                      profile.cover == DisguiseCover.none
+                          ? 'Opens straight into Miles.'
+                          : 'Way in — a move you record next.',
                       style: MilesType.inter(
                         fontSize: 11,
                         height: 1.4,

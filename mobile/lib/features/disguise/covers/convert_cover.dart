@@ -2,9 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
-import 'package:miles/features/disguise/disguise_profile.dart';
+import 'package:miles/features/disguise/entry/cover_entry_scope.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A unit and currency converter.
@@ -18,22 +17,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// network call is made. A converter that phones a third party is a request in
 /// the packet log of an app that only has to look like a converter to a person.
 ///
-/// **The way in: hold the swap control while both sides are on the same unit
-/// and the amount is empty.** Tapping swap is the only thing that control is
-/// for, and it is a tap. Same-unit + empty + hold is three coincidences at
-/// once, and it is a state the app permits — converting metres to metres is
-/// legal, just pointless — so nothing on screen looks disabled or special.
+/// No door of its own. The way in is the move the owner recorded, matched by
+/// the host's pointer layer over this screen. The one thing this file does is
+/// hand whatever the swap button commits to [CoverEntryScope], blind to what
+/// it means.
 class ConvertCover extends StatefulWidget {
-  const ConvertCover({required this.onAuthenticated, super.key});
-
-  final VoidCallback onAuthenticated;
+  const ConvertCover({super.key});
 
   @override
   State<ConvertCover> createState() => _ConvertCoverState();
 }
 
-class _ConvertCoverState extends State<ConvertCover>
-    with CoverGate<ConvertCover> {
+class _ConvertCoverState extends State<ConvertCover> {
   static const _prefsKey = 'convert_last_pair';
 
   final _input = TextEditingController();
@@ -53,9 +48,6 @@ class _ConvertCoverState extends State<ConvertCover>
     _input.dispose();
     super.dispose();
   }
-
-  @override
-  void onCoverUnlocked() => widget.onAuthenticated();
 
   /// Reopening where you left off is what a tool you actually use does.
   Future<void> _restore() async {
@@ -91,6 +83,15 @@ class _ConvertCoverState extends State<ConvertCover>
   }
 
   void _swap() {
+    // The swap button is the converter's commit: a secret number typed as
+    // the amount and committed is the owner's move on this cover. The
+    // keyboard's own Done key commits nothing — a door on typing is the
+    // door this app once deleted.
+    if (CoverEntryScope.maybeOf(context)
+            ?.feedText(_input.text, commit: true) ??
+        false) {
+      return;
+    }
     HapticFeedback.selectionClick();
     setState(() {
       final held = _from;
@@ -98,13 +99,6 @@ class _ConvertCoverState extends State<ConvertCover>
       _to = held;
     });
     unawaited(_remember());
-  }
-
-  /// The door — see the class doc for why this state and not another.
-  void _onSwapHold() {
-    if (_from.symbol == _to.symbol && _input.text.trim().isEmpty) {
-      runEntryGate();
-    }
   }
 
   Future<void> _pickUnit({required bool forSource}) async {
@@ -157,13 +151,7 @@ class _ConvertCoverState extends State<ConvertCover>
       data: theme,
       child: Scaffold(
         appBar: AppBar(
-          title: CoverAboutTap(
-            onTap: () => showCoverAbout(context,
-                cover: DisguiseCover.convert,
-                onOpen: runEntryGate,
-                theme: theme,),
-            child: const Text('Convert'),
-          ),
+          title: const Text('Convert'),
         ),
         body: SafeArea(
           child: Column(
@@ -217,10 +205,6 @@ class _ConvertCoverState extends State<ConvertCover>
                   alignment: Alignment.centerRight,
                   child: IconButton.filledTonal(
                     onPressed: _swap,
-                    // A long-press on the one control that has one. It does
-                    // nothing at all unless the app is in the resting state
-                    // described on the class.
-                    onLongPress: _onSwapHold,
                     icon: const Icon(Icons.swap_vert_rounded),
                     tooltip: 'Swap',
                   ),

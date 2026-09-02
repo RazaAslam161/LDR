@@ -21434,3 +21434,322 @@ their table was run here and the old behaviour read out of `git show HEAD:`.
 today — the film, the plate, the mood rail, the AppBar face, the 40
 expressions — is committed and unbuilt. Next step is a build (75) with the
 stamp-and-sentinel proof pasted BEFORE any install.
+
+## §262 — the covers ship no door: owner-recorded moves, a host-owned pointer layer, the backup hold on the PIN (2026-09-02)
+
+Owner: "I don't want default entry point on any cover page, it should totally
+user on custom entry points on all covers. app has no entry points." Plus, from
+the plan's four questions: a custom move requires a 4-digit App Lock PIN to
+exist (the toggle stays optional); a lone hold is bound to the spot recorded;
+the drawn-shape kind is a follow-up. Plan reviewed by three design agents and
+six critics before a line was written; everything below is in the tree,
+UNCOMMITTED, nothing built.
+
+### What changed
+
+- **Every app-authored door is gone.** The nine covers are plain fake apps:
+  no `CoverGate` mixin, no `onAuthenticated`, no long-press handlers, no About
+  sheet, no `entry`/`about` strings on `DisguiseProfile`. `disguise_test.dart`
+  now pins the inverse of its old laws: no cover file may reach the gate, the
+  lock or the store, or wire a long-press handler.
+- **One gate, in the host.** `cover_gate.dart` keeps the lock+splash body as a
+  static `CoverEntry.run(navContext, source, mode)` with a static `entering`
+  guard (reset on host mount). `EntrySource {custom, backup, system}`;
+  `CoverEntryMode {none, custom, customUnknown}`. The tapped-call and auth-link
+  system doors moved from nine mixins to the host. `LockScreen` gained a
+  `nameless` form (lock icon, "Locked", back allowed).
+- **`entry/` (new, 5 files):** `cover_entry_trigger.dart` (sealed
+  `TouchTrigger`/`TextTrigger`, versioned JSON, derivation from two
+  recordings with tolerances from the owner's variance, the accident-law
+  floor, tail matching, a final-hold timer arming), `cover_entry_store.dart`
+  (one keystore record per cover + a prefs mirror; `resolve()` → mode;
+  process cache), `cover_entry_scope.dart` (InheritedWidget + controller;
+  `feedText` for commit controls), `entry_trigger_layer.dart` (a translucent
+  raw `Listener`: counts pointers inside the safe box minus a 24 dp / gesture
+  inset band; taps/holds/drag; the two-finger 5 s backup hold; cancels the
+  live pointers on fire so nothing under the finger acts; resets on any
+  non-resumed lifecycle), `cover_entry_recorder_screen.dart` (draws the real
+  cover via `buildCoverWidget` under `coverHostTheme()`; choose → record →
+  confirm → rehearse → done; card at the TOP so `=`, swap and Save stay
+  reachable; refuses an attempt that leaves the app; suppresses the stealth
+  corner and the panic detector via `stealthSuppressed`).
+- **Text kind on three covers only**, each from a control the cover already
+  has: Calculator `=`, Convert swap, a new note's Save (the note is not
+  saved). News search excluded — keyboard Enter is the deleted `home` door.
+- **Picker:** PIN setup first → App Lock trade dialog (reworded) → "Keep my
+  move?" if one exists, else the recorder → confirmation naming the backup
+  hold → `DisguiseService.apply(choice, entry:)`, which writes the move and
+  its mirror BEFORE prefs and the alias switch and deletes only the target's
+  record on a failed switch.
+- **Shell:** `_nudgeLockForCover` replaced by `_requireCoverSetup`: a worn
+  cover in mode `none` gets a non-dismissible dialog, "Set it up" or "Take
+  the cover off", every mount until resolved; `customUnknown` is reported once
+  per process (`ErrorReporter kind cover-entry`) with a re-record offer.
+- **Settings:** "Your way in" row under Appearance (Set / Not set), PIN-verify
+  when App Lock is on, PIN setup if none, then the recorder.
+- **Router:** `/app/disguise/entry?cover=<name>`. **Host:** portrait pinned;
+  a11y "Unlock" node drawn only under `accessibleNavigation`, landing on the
+  PIN. **main.dart:** cover theme extracted to `coverHostTheme()`; the panic
+  detector ANDs `!stealthSuppressed`.
+- **AppLock:** `hashSecret`/`secretMatches` public (one verifier for the PIN
+  and the secret word); `availableBiometrics` is a swappable static because
+  local_auth's channel never answers under `flutter test` and the gate awaits
+  it before pushing the lock.
+- **Docs:** `disguises.md` rewritten (no table of doors); THREAT-MODEL §2(a)
+  bullets, "does NOT stop them", §2(g), the control table; runbook items 2-3
+  and the Console App-access sentence: *"press and hold two fingers anywhere
+  on the cover's opening screen for five seconds, then enter that PIN"*;
+  REFERENCE.md; `faq_text.dart` + `web/faq.html` (same wording).
+
+### Verified (pasted in the turn's report)
+
+`flutter analyze`: 0 errors, 0 warnings (176 pre-existing infos; the only new
+info is the picker's pre-existing `ScaffoldMessenger.of(context)` line, moved).
+`flutter test`: **1561 passed, 3 skipped** (the preview goldens). New suites:
+cover_entry_trigger_test (24), cover_entry_store_test (9),
+disguise_service_apply_test (4), cover_entry_layer_test (20),
+cover_entry_recorder_test (7), disguise_cover_host_test +7 door tests,
+disguise_covers_test rewritten (13), disguise_test rewritten (13).
+
+Proved in tests, not assumed: the pinned handsets' first launch (mode none,
+App Lock off) reaches the reveal through the backup hold; a mirror with an
+unreadable record lands the hold on a nameless PIN screen and never on the
+splash; a recorded lone hold opens on its spot and not 25% away; a fired hold
+cancels the touch under the finger (Notes' + button does not open the editor
+over the reveal); the a11y node reaches the PIN; a failed alias switch deletes
+the target's record and leaves the worn cover's.
+
+### Found, not fixed
+
+- `news_cover_screen.dart` `_buildSectionTabs` Row overflows by 35 px at
+  360 dp width (the three tabs with 16 px padding). Pre-existing; the OnePlus
+  is 412 dp so unseen. Surfaces in tests as an overflow exception the door
+  tests now drain.
+- `settings_screen.dart` "How this app looks" row prints `value: 'Miles'`
+  hardcoded whatever cover is worn.
+
+### Open — the riskiest path is unproven
+
+**BLOCKED: needs the device pass.** Step 10 of the plan — sideload over 73/74
+without uninstalling, first launch through the backup hold, the mandatory
+setup dialog, PIN, a recorded hold / rhythm / calculator number, cold-start
+match, silent miss, backup → nameless PIN, TalkBack → Unlock → PIN, shade pull
+mid-recording persisting nothing, auto-rotate staying portrait. No APK was
+built (standing rule: not unless asked); `adb devices` was empty per §261.
+Also unproven off-device: the raw pointer layer's `cancelPointer` under real
+Android multi-touch, and `SystemChrome.setPreferredOrientations` on a rotated
+handset. Play Console App-access notes must be updated by hand to the sentence
+above (runbook 0.1 and 5.6 carry it).
+
+### Next step
+
+Build 75 (owner's call), install over 74 on the OnePlus 8, run step 10, then
+append the addendum. If the two-finger hold misfires on the real digitiser,
+the numbers to tune are `kBackupSlop` (24 dp) and `kEdgeBand` (24 dp) in
+`entry_trigger_layer.dart`; if recorded holds miss, `kRadiusMin`/`kRadiusMax`
+in `cover_entry_trigger.dart`.
+
+### §262 addendum — the adversarial pass over the diff, six defects fixed (2026-09-02)
+
+One reviewer agent read the whole diff against main.dart's lifecycle and the
+framework's dispatch order. Six real defects, all fixed in the tree, each with
+a test where a test could reach it:
+
+1. **A tap-ending move fired the control under the last tap.** The up that
+   completes a move reaches the layer before the cover's recognisers (the
+   binding routes last), and `_fire` cancelled only pointers still live — the
+   hold path, not the tap path. Now the layer routes a `PointerCancelEvent`
+   through `GestureBinding.instance.pointerRouter` ahead of the real up, so
+   every recogniser tracking that pointer drops it. `cover_entry_layer_test`:
+   a two-tap move ending on a button — the move opens, the button does not.
+2. **The 2 s timeout on the keystore read killed the owner's move for the
+   session** on a cold keystore and could file a false "unreadable" report.
+   Nothing paints on that read (the mirror answers the mode first), so the
+   timeout is gone; the try/catch stays.
+3. **The source scan let four door shapes through:** `EntrySource`/`onOpen`
+   via the scope, `showRealApp`/`raiseCover` via main.dart, `onTapDown` +
+   timer, raw recognisers. The banned regex and a banned-imports list now
+   cover all four (`disguise_test.dart`).
+4. **Commit controls were dead during a touch-kind recording** (the text sink
+   was always set, so `=`, swap and Save were consumed). The sink is set only
+   while a word is being recorded. `cover_entry_recorder_test`: `7 + 2 =`
+   reads 9 while recording taps.
+5. **Stray touches made while reading the choice card became steps.**
+   `_pick` clears the attempt. Tested.
+6. **A failed switch on a same-cover re-record deleted the worn cover's only
+   move.** `apply` now clears the target's record only when the target is not
+   the cover already worn. `disguise_service_apply_test`: same-cover re-record
+   with a refused switch stays `custom`.
+
+Also from the review: `save()` now catches the mirror write too; the copy no
+longer promises "then enter your PIN" (a biometric prompt comes first where
+one is enrolled) or "anywhere" (the edge band does not count) — picker,
+recorder, FAQ x2, runbook and disguises.md all say "still in the middle ...
+then unlock with your fingerprint or PIN"; disguises.md states the keystore
+limit (the PIN lives in the same store) and the TalkBack node's exposure in
+mode `none`.
+
+Left as noted, not fixed: the escrow prompt and the forced setup dialog are
+both pushed unawaited on shell mount, so which is on top is not deterministic
+(the forced one cannot be dismissed, so nothing is lost, only order); an OEM
+palm-rejection cancel during the 5 s hold kills the hold silently — only the
+device pass can say whether that happens on the OnePlus.
+
+### Verified after the round
+
+`flutter analyze`: 0 errors, 0 warnings. `flutter test`: **1565 passed, 3
+skipped** (`02:27 +1565 ~3: All tests passed!`). Verdict unchanged: BLOCKED on
+the device pass; the four fixes that touch the pointer path (#1, #2, #4, #5)
+are in the tree so the pass exercises them.
+
+### §262 addendum 2 — build 75 on the handset, the owner's two changes, and a three-agent QA round (2026-09-02)
+
+**Build 75 exists, is proven, and is installed.** `bash tool/release.sh --bump`:
+gates (analyze 0/0, `flutter test` 1565 passed / 3 skipped), 74 -> 75, the
+Gradle daemon stopped and `build/` proven gone, then:
+
+    √ Built build\app\outputs\flutter-apk\app-sideload-release.apk (102.9MB)
+    sha256 95e74f8fb8a0f34b7737e0f52ec1bee697efbe953fa23813f49648bfe66881ff
+    checked 1 libapp.so, all stamped miles-build-75
+    the snapshot really is build 75
+
+**The install failed, and the cause is a repo defect, not this feature.**
+
+    INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package com.miles.miles
+    signatures do not match newer version
+
+Pulled the installed APK off the phone and compared certificates:
+
+| APK | Signer | SHA-256 |
+|---|---|---|
+| build 74, on the phone | `CN=Miles, O=R&D Dev, C=PK` | `a37c59a5…9bb2` |
+| build 75, as built | `CN=Android Debug` | `5f6a002c…93a5` |
+| `android/miles-upload.jks` | `CN=Miles, O=R&D Dev, C=PK` | `A3:7C:59:A5…9B:B2` |
+
+So the installed base is signed with the **upload key**, while
+`build.gradle.kts:119` pins the sideload flavour to the **debug** key. That
+line came from `7dc4ecd` — *"making a Play upload key re-signed the sideload
+channel, and orphaned every phone already running it"* — whose fix assumed the
+base was debug-signed. It was not. **That commit orphaned the base it was
+written to protect: every sideload build since cannot update these handsets.**
+
+Not resolved by uninstalling — that wipes FlutterSecureStorage and with it the
+X25519 seed. Instead the artifact was re-signed with the key the phone already
+trusts, leaving the build config untouched, and the stamp re-proved afterwards
+(`miles-build-75: True`, `miles-build-74: False`). `adb install -r` then said
+`Success`, `versionCode=75`.
+
+**Owner's decision still needed:** the sideload channel's permanent key.
+Re-signing by hand is not a process. Either `build.gradle.kts` signs sideload
+with `miles-upload.jks` (matches the base, one line), or the base is migrated
+deliberately with escrow proven first. Do not let a build config decide it.
+
+### What build 75 proved on the OnePlus 8, before the phone was disconnected
+
+Driven over adb by reading the real view hierarchy (uiautomator), not blind
+coordinates. `sendevent` is denied by SELinux, so the two-finger backup hold
+could not be synthesised at all — that one gesture remains unrun.
+
+- The picker prints **"Way in — a move you record next."** under every cover;
+  no fixed gesture appears anywhere.
+- The reworded App Lock dialog renders verbatim.
+- The recorder runs on the real Weather, Calculator and News covers, and
+  offers the word kind only where a commit control exists.
+- The derivation refusals fire on hardware: **"Not the same spot — try
+  again."** and **"That was a different move — 3 holds the first time."**
+- The full record -> confirm -> done flow completes for the secret number; the
+  done card prints the backup-hold sentence.
+- The alias switch works: `AliasCalculator` became the only enabled alias, the
+  launcher showed **Calculator**, and Android force-stopped the app during the
+  switch exactly as `disguise_service.dart` documents.
+- A cold start on the cover shows a bare working calculator — no name, no
+  About sheet, no hint of a door.
+
+Found on the device and fixed: the News section tabs overflowed a 360dp screen
+by 35px (an overflow stripe painted across a cover), and the Settings
+"How this app looks" row printed `Miles` whatever cover was worn.
+
+**The phone is on the Calculator cover with a move recorded that this session
+cannot name** (the flow was driven by a script whose stray taps completed a
+recorder). The owner's way in is the backup hold: two fingers still in the
+middle of the cover for five seconds, then their PIN. `pm enable/disable` from
+the adb shell cannot undo it — the shell lacks CHANGE_COMPONENT_ENABLED_STATE.
+
+### The owner's two changes (asked for mid-session)
+
+1. **Two performances, not three.** The rehearse step is gone —
+   `_Step.rehearse` and `EntryLayerMode.rehearse` with it. Record, then
+   confirm; the second is where the tolerances come from, so an unrepeatable
+   move is still refused.
+2. **The move is drawn as it is set.** A numbered mark per step over the
+   cover — a filled dot for a tap, a ring for a hold — with the first
+   attempt underneath as a faint guide on the second pass. Recorder only; the
+   layer still paints nothing on the cover.
+
+Added while implementing: the instruction card collapses (**Hide this**),
+because it covers the top of the cover, which is a place a move may go.
+
+### The QA round: three agents, everything real fixed
+
+Findings taken and fixed, worst first:
+
+- **The mode answered `none` while it was still unknown.** It was resolved
+  only after `reconcile()`'s 3s timeout, so for up to three seconds after
+  every cover raise — indefinitely on a channel that hangs, which the repo's
+  own test proves can happen — the backup hold was unforced. Now starts
+  `customUnknown` and only relaxes once a read says so.
+- **A lone hold matched at 2.0s while the recorder refuses to record one
+  under 3.0s** — the accident law relaxed by a third at match time, back into
+  the reflex-press band. The floor now binds both ends.
+- **A near-miss on the Notes secret was written to plain prefs** as a note, on
+  the cover an attacker is already reading — a plaintext credential at rest
+  and a signal separating a miss from a hit. A title offered to the scope is
+  never saved, matched or not.
+- **A half-failed alias switch deleted the move for the cover Android was
+  already wearing** (the native side enables the target before disabling the
+  rest). The move now stays.
+- **The TalkBack "Unlock" node inherited the mode**, so at `none` it was a
+  one-double-tap unauthenticated open. It now always runs the strict mode.
+- **Taking the no-key floor left `AppLock.locked` true**, so the real app's
+  own overlay could raise a keyless lock behind it. It lowers the flag.
+- **Android back at "That's it" discarded the move** — every caller reads a
+  null pop as "cancelled". `PopScope` hands it over instead.
+- **The recorder pinned the app to portrait forever**; `dispose` restores it.
+- **"Start over" on the second pass cleared only the current attempt and was
+  disabled exactly when it was needed** (a refusal clears the attempt). It now
+  returns to the first pass.
+- **Settings recorded a move for the cover the phone had stopped wearing**:
+  the row never reloaded after the picker.
+- **"Set" was shown for a record that could not be read** — both the picker
+  and Settings asked the mirror, not the payload.
+- **The confirmation dialog claimed "the move you just recorded" on the
+  "Keep it" path**, where nothing was recorded.
+- Dismissing "Keep your move?" meant "record a new one"; "Turn on App Lock"
+  used a popped dialog's context; the shell's un-dismissable setup dialog was
+  fired in parallel with two dismissible ones and its destructive button had
+  no confirmation; `cover=none` could build a recorder over an empty box; a
+  keystore write that landed with a failed mirror left an orphan record.
+
+Copy: one rule for a hold everywhere, the six-character minimum stated in the
+hint rather than only in the refusal, refusals that say what to do next, and
+one sentence for the backup door.
+
+Tests strengthened: the `kCoverRecoveryHold` assertion read the file that
+declares it (structurally green) — it now reads the layer that uses it and
+pins the number at five seconds; new end-to-end tests for a stored secret
+number opening from the cover's own `=`, a wrong number opening nothing
+silently, an untapped ring never opening the cover, and the Notes title never
+reaching disk.
+
+### Verified
+
+`flutter analyze`: **0 errors, 0 warnings**. `flutter test`: **1572 passed,
+3 skipped**.
+
+### Open
+
+- **BLOCKED: the two-finger backup hold has never been performed on hardware.**
+  SELinux denies `sendevent`, so it cannot be automated; it needs one person
+  and five seconds. It is the one door the app itself defines.
+- The sideload signing key decision above.
+- The phone wears a Calculator cover whose move this session cannot name.

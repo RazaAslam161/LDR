@@ -284,7 +284,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
       shouldDetect: () =>
           DisguiseService.enabled &&
           MilesApp.showRealApp.value &&
-          !stealthActive.value,
+          !stealthActive.value &&
+          !stealthSuppressed.value,
     );
     // Bridge native hardware volume keys (Android consumes them before they
     // reach Flutter's key pipeline) for the combo + stealth dismiss.
@@ -953,14 +954,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
         if (!isReal) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(
-              brightness: Brightness.light,
-              scaffoldBackgroundColor: Colors.white,
-              colorScheme: ColorScheme.fromSeed(
-                seedColor: const Color(0xFF1A73E8),
-              ),
-              useMaterial3: true,
-            ),
+            theme: coverHostTheme(),
             home: DisguiseCoverHost(
               onAuthenticated: () => MilesApp.showRealApp.value = true,
             ),

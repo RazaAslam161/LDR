@@ -155,16 +155,23 @@ take a screenshot, scroll a chat, look at the recent-apps thumbnails.
   (`features/disguise/`, `docs/guides/disguises.md`). Each cover is a real,
   functioning app, because an app that does nothing when tapped is what gets
   looked at twice.
-- **A hidden entry gesture per cover**, printed inside the picker under every
-  option so nobody locks themselves out, and chosen so a curious person does not
-  hit it by accident.
-- **App Lock** — biometric with a 4-digit PIN fallback, and it is a
-  **precondition for applying a cover at all**: the picker refuses to set a
-  disguise unless App Lock is enrolled (`disguise_picker_screen.dart:51`),
-  because a cover with no lock behind it is a one-tap bypass with extra steps.
-- **Silent failure at the gate.** A wrong biometric returns to the cover with no
-  error, no toast, no ripple (`features/disguise/cover_gate.dart`). Someone
-  probing gets no signal that they were close.
+- **A way in the app does not ship.** No cover carries a door of its own
+  (`disguise_test.dart` refuses a cover file that reaches the gate, the lock or
+  the store, or wires a long-press handler). The owner records their own move
+  on their cover — taps and holds at spots they choose, or a secret number or
+  word committed by a control the cover already has — and a pointer layer in
+  the host matches it (`features/disguise/entry/`). The recorder refuses,
+  out loud, any move a curious person performs by ordinary use.
+- **One backup way in, public by design, landing on the PIN.** Two still
+  fingers on the cover's opening screen for five seconds. It is the sentence
+  Play Console and the FAQ get, so with a move recorded it never opens the app:
+  it lands on a nameless lock screen. A PIN must exist before a move can be
+  recorded; App Lock's own switch stays the owner's choice (with it off, the
+  owner's move opens directly; the backup still asks for the PIN).
+- **Silent failure at the gate.** A wrong move, a wrong PIN, a dismissed prompt
+  return to the cover with no error, no toast, no ripple, no counter
+  (`features/disguise/cover_gate.dart`). Someone probing gets no signal that
+  they were close.
 - **The panic lock** — three shakes in 1.5s, or volume-up plus volume-down within
   1s, drops the app straight back to the cover
   (`core/services/emergency_lock_service.dart`).
@@ -187,8 +194,18 @@ take a screenshot, scroll a chat, look at the recent-apps thumbnails.
 
 **What does NOT stop them:**
 
-- Anyone who watches the user unlock the app, once, has the gesture and the
-  biometric prompt.
+- Anyone who watches the user unlock the app, once, has the move and the
+  prompt behind it.
+- The backup hold is public and lands on the PIN pad; so does the "Unlock"
+  node the host draws while a screen reader is on, which anyone can switch on
+  with the volume-key shortcut. Both end at four digits.
+- A cover worn with no move recorded (every install that wore one before the
+  app stopped shipping doors) is opened by the backup hold through the ordinary
+  lock, which off means straight in — until the shell's mandatory setup prompt
+  is answered.
+- A touch move is stored in the clear inside the keystore-encrypted store
+  (positions cannot be hashed); a phone with root and a live keystore reads
+  it, as it reads the PIN hash beside it.
 - The chat list itself is **not** `FLAG_SECURE` — chat is screenshotable.
 - App Lock's *enabled* flag lives in SharedPreferences (only the PIN hash moved
   to the keystore), so anything that can rewrite app files can clear it.
@@ -370,9 +387,10 @@ most dishonest sentence this app could publish.
 
 The sideload channel means the binary is public. Everything in it is public:
 unpack an APK in seconds and you have the Supabase URL, the anon JWT, every
-table and RPC name, every cover's entry gesture, and the whole client-side
-logic. **This is expected, and nothing in the app's security may depend on the
-binary being secret.**
+table and RPC name, the backup hold, and the whole client-side logic — but not
+the owner's way in, which is recorded per phone and lives in its keystore.
+**This is expected, and nothing in the app's security may depend on the binary
+being secret.**
 
 **What stops them:** the anon key is only a ticket to the API — RLS is what
 holds the doors, and it denies by default. No public tables, no views or
@@ -471,8 +489,8 @@ Only shipped defences appear here. Anything planned is in §5.
 | **TOFU partner-key pinning on all four derive doors**, human-only repin, 20-digit safety code | `mobile/lib/core/data/partner_key_pin.dart`; `couple_key.dart:99`, `closer_crypto.dart:56`, `wish_jar_repository.dart:107`, `partner_rewrap.dart:427`; `features/closer/partner_key_change_sheet.dart`; Settings › Security code | (d) — closes server key substitution |
 | **Argon2id key escrow**, per-row parameters, distinct wrap label | `mobile/lib/core/data/key_escrow.dart` | (d) against a stolen backup; **not** against (b) |
 | **Partner-assisted rewrap ceremony** — six digits read over a call, Argon2id-committed, publishes only at claim | `mobile/lib/core/data/partner_rewrap.dart`, `features/auth/rewrap_screen.dart` | recovery without handing the operator a second door |
-| **Launcher disguise + per-cover hidden gesture + silent failure** | `mobile/lib/features/disguise/`, `docs/guides/disguises.md` | (a) |
-| **App Lock as the covers' precondition** — biometric, PIN fallback, salted hash in the keystore | `core/services/app_lock.dart`, `features/disguise/disguise_picker_screen.dart:51`, `features/disguise/cover_gate.dart` | (a) |
+| **Launcher disguise + owner-recorded move + silent failure**; no app-shipped door | `mobile/lib/features/disguise/`, `mobile/lib/features/disguise/entry/`, `docs/guides/disguises.md` | (a), (g) — the move is not in the binary |
+| **The backup hold lands on the PIN** — nameless lock screen; a PIN precedes any recorded move | `features/disguise/cover_gate.dart`, `core/services/app_lock.dart`, `core/widgets/lock_screen.dart` | (a) |
 | **Panic lock** — shake ×3 or volume up+down | `core/services/emergency_lock_service.dart` | (a) |
 | **Vault PIN** — bcrypt server-side, 5 fails / 15 min, reset cannot clear a live lockout | `20260601001100_private_vault.sql`, `20260818090100_*.sql` | (a) |
 | **`FLAG_SECURE`** on vault, Memory Threads, Touch Trace, Touch Map; video pages only in the chat media viewer | `features/closer/secure_screen.dart`, `features/chat/widgets/media_viewer.dart:200` | (a), (e) |

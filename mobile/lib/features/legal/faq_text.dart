@@ -89,10 +89,13 @@ List<FaqSection> milesFaq() => [
               'cover identity — the app then looks like an ordinary utility '
               '(a calculator, a notes app, a weather app…) on your '
               'launcher and opens on a convincing stand-in screen until you '
-              'enter through a private gesture shown when you pick the '
-              'cover.\n\nMiles installs under its own name and icon; a cover '
-              'is something you choose to put on, and you can take it off any '
-              'time.',
+              'enter through a move you record yourself — on that screen, '
+              'when you put the cover on. The app ships no gesture of its '
+              'own. Forgotten it? Hold two fingers still in the middle of the '
+              'cover for five seconds, then unlock with your fingerprint or '
+              'app PIN.\n\nMiles installs '
+              'under its own name and icon; a cover is something you choose '
+              'to put on, and you can take it off any time.',
         ),
         FaqEntry(
           'If I turn on a cover, what still shows the real name?',
