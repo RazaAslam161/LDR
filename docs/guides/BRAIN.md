@@ -21414,3 +21414,23 @@ untouched by it. `_lastRow` is now seeded in `initState`.
 ### Open
 No device attached (`adb devices` empty). The tree holds two sessions' work on
 this file; whoever builds should take both.
+
+### §261 addendum — pushed as 6a35de1, CI green (2026-09-02)
+
+9 paths, staged by explicit path, count read BEFORE the commit (the split-commit
+lesson from §257 addendum 2, applied). Secrets grep clean. CI run on 6a35de1:
+**success**. Branch in sync, tree clean.
+
+**This commit is deliberately broad and says so.** It carries the concurrent
+session's `unlink_end_overlay.dart` + its test (their §260) alongside my plate
+and `_lastRow` work. Three reasons, all in the commit body: the tree was
+coherent at that exact state (0/0, 1490 passed); BRAIN's append-only diff
+already carried their §260 prose, so a commit describing a fix it did not
+contain would have been worse; and the next action is a BUILD — shipping code
+that exists in no commit is the hazard build 72 hit. Verified, not assumed:
+their table was run here and the old behaviour read out of `git show HEAD:`.
+
+**Still true: nothing is on a handset.** `adb devices` empty. Every fix from
+today — the film, the plate, the mood rail, the AppBar face, the 40
+expressions — is committed and unbuilt. Next step is a build (75) with the
+stamp-and-sentinel proof pasted BEFORE any install.
