@@ -21774,3 +21774,217 @@ Unchanged by the push, and still the two things that matter:
 
 The OnePlus 8 is on the Calculator cover with a move this session cannot name.
 The way in is the backup hold, then the PIN.
+
+## §263 — the build that reaches people is the PLAY build, and it installs (2026-09-03)
+
+Owner's ruling, verbatim: *"always build the apk in a play store variant — means
+the app is for play store, the build here is just for final testing using on
+random real users to get final feedbacks and testing before go for play store
+production. and the apk should always be clean, updated and for real users."*
+
+Recorded in `.claude/CLAUDE.md` as a standing project instruction, replacing the
+stale "ONE universal APK" rule that block had carried, flagged and unresolved,
+since 2026-08-23.
+
+### Why this was also the only honest arrangement
+
+Two things were wrong with shipping the sideload flavour to testers, and both
+are closed by the ruling rather than by a workaround:
+
+1. **Testers were never running the code that ships.** The play channel turns
+   R8 and resource shrinking on (`build.gradle.kts`, `beforeVariants`); the
+   sideload channel does not. Every finding from a sideload APK was a finding
+   about code the shrinker had never touched — and R8 is precisely what strips
+   the reflection and JNI entry points in WebRTC and ML Kit that fail only on
+   a device.
+2. **A sideload APK could not install over a handset.** Sideload is pinned to
+   the debug key unconditionally — not for safety, but because it used to be
+   `if (hasReleaseKey) release else debug`, so creating `key.properties` for
+   Play silently changed the sideload signature and build 45 met every handset
+   with "App not installed". The handsets carry the upload key. That is the
+   `INSTALL_FAILED_UPDATE_INCOMPATIBLE` of §262 addendum 2, whose only escape
+   is an uninstall that takes the X25519 seed with it. Build 75 reached the
+   phone yesterday only because the artifact was re-signed by hand — a step,
+   not a process. **That defect is now gone by construction: the play flavour
+   is signed with `miles-upload.jks`, which is the certificate already on the
+   phone.**
+
+### What changed
+
+- `tool/release.sh`: **the default is now the play APK.** `--play` still builds
+  the Console AAB; the old path is an explicit `--sideload` that prints a
+  warning and writes `Miles-sideload-debug.apk`, so a debug-signed build can
+  never occupy `Miles.apk`. Conflicting options are refused.
+- The play APK path adds two proofs the sideload path never had: the ABI set is
+  asserted (`['arm64-v8a']` or the artifact is refused) and the signing
+  certificate is asserted against the expected upload fingerprint, so an APK
+  signed by the wrong key is refused rather than handed over. Both the keystore
+  and apksigner are checked BEFORE the gates, so neither can spend a build
+  number on a machine that could never have produced the artifact.
+- `build.gradle.kts`: the ABI exclusion list is shared, and now also applies to
+  the play variant **when `-PmilesPlayApkArm64` is passed**. The APK carries one
+  ABI because it is handed to a tester whole and a partial APK installs on a
+  32-bit phone and then dies on a missing engine (build 64, §193). The AAB is
+  untouched and keeps every ABI, because Play splits per device itself. An
+  arm64 handset gets the same libraries either way.
+- `PLAY-RELEASE-RUNBOOK.md` §0.2 rewritten: it described "two build channels,
+  signed by different certificates" as a user-migration problem. There is one
+  channel that reaches people now.
+
+### Verified — build 76, the first play APK
+
+The bump run that created build 76, with the pre-fix script:
+
+    gate: flutter pub get
+    gate: flutter analyze
+    gate: flutter test
+    03:22 +1572 ~3: All tests passed!
+    bumped 75 -> 76
+    build/ is gone — every Gradle output below is recomputed, not reused
+    √ Built build\app\outputs\flutter-apk\app-play-release.apk (95.4MB)
+    sha256 fb0c6ce28ae8dda979a74077f2d51613b737b8a5e96733d8132d0eadb10b79df
+    checked 1 libapp.so, all stamped miles-build-76
+    ABIs in the APK: ['arm64-v8a']
+    the snapshot really is build 76
+    Signer #1 certificate DN: CN=Miles, O=R&D Dev, C=PK
+    Signer #1 certificate SHA-256 digest: a37c59a5f3801b5a52ca1654ec088cc90d4ee4602ec7cdde50c58b515fbe9bb2
+    tester copy: Miles.apk is build 76 (play variant)
+
+And the whole script AS IT NOW STANDS, re-run end to end afterwards with no
+`--bump`, because the transcript above was produced by a script the review
+round then changed — evidence for a script that no longer exists is not
+evidence. `SCRIPT EXIT=0`:
+
+    apksigner: /c/Users/RAZA/AppData/Local/Android/Sdk/build-tools/36.0.0/apksigner.bat
+    gate: flutter pub get
+    gate: flutter analyze
+    gate: flutter test
+    03:09 +1572 ~3: All tests passed!
+    build 76 (version 0.1.0)
+    √ Built build\app\outputs\flutter-apk\app-play-release.apk (95.4MB)
+    sha256 fb0c6ce28ae8dda979a74077f2d51613b737b8a5e96733d8132d0eadb10b79df
+    size   95 MB
+    checked 1 libapp.so, all stamped miles-build-76
+    ABIs in the APK: ['arm64-v8a']
+    the snapshot really is build 76
+    Signer #1 certificate DN: CN=Miles, O=R&D Dev, C=PK
+    Signer #1 certificate SHA-256 digest: a37c59a5f3801b5a52ca1654ec088cc90d4ee4602ec7cdde50c58b515fbe9bb2
+    certificate matches the installed base — this APK updates in place
+    tester copy: Miles.apk is build 76 (play variant)
+
+The sha256 is identical across the two runs, and that is correct rather than
+suspicious here: no Dart, Kotlin, manifest or asset changed between them — only
+`release.sh`, comments in `build.gradle.kts`, and docs. The second run reused
+up-to-date Gradle outputs on purpose (no `--bump`, so no cache purge), and the
+stamp assertion is what proves the artifact is build 76 either way. An
+identical hash after a CLEAN would be the finding; this is not that.
+
+That fingerprint is byte-identical to the signer on the installed build
+(§262 addendum 2 pulled it off the phone: `a37c59a5…9bb2`), so `adb install -r`
+updates in place with no uninstall. 95.4 MB against sideload's 102.9 MB — R8
+earning its place.
+
+**Same code, not the same signature Play will ship.** Play App Signing has
+Google re-sign the bundle with a key it holds, so a Play-delivered install does
+not carry the upload certificate. A tester who took this APK by cable still
+needs the escrow-then-uninstall of the runbook's phase 3 before Play can update
+them. The ruling closes the R8 gap and the cable-install gap; it does not close
+that migration, and the runbook's §0.2 now says so.
+
+### The adversarial pass over this change found five defects in it
+
+Fixed in the same turn, before the commit:
+
+1. **`-PmilesPlayApkArm64` gated the VARIANT, not the artifact.** A variant's
+   merged jniLibs feed `packagePlayReleaseBundle` as well as
+   `packagePlayRelease`, so the property arriving by any route — typed onto a
+   bundle build, left in `gradle.properties`, exported as
+   `ORG_GRADLE_PROJECT_milesPlayApkArm64` — would have uploaded an arm64-only
+   Console bundle. Play accepts that; the reach loss shows up weeks later in
+   Play's device numbers and nowhere else. Now the `gradle.taskGraph.whenReady`
+   block throws when the property is present while the bundle is packaged, and
+   `release.sh --play` additionally asserts the finished AAB still carries
+   armeabi-v7a, arm64-v8a and x86_64. The guard kills the cause; the assertion
+   proves the artifact.
+2. **The certificate check was a print, and its own comment called it an
+   assertion.** `hasReleaseKey` only tests that `key.properties` names *a*
+   keystore — repoint it and every gate still passed, `Miles.apk` was written,
+   and the mismatch would surface on a handset. That is how build 45 shipped.
+   `release.sh` now compares the SHA-256 against the expected upload
+   fingerprint and refuses the artifact, and a missing `apksigner` is a hard
+   stop rather than a warning.
+3. The runbook's phase 3 still said the installed base is debug-signed,
+   contradicting §0.2 two hundred lines above it. Corrected, and the reason
+   phase 3 survives anyway (Play re-signing) is now stated there.
+4. "Same upload key — the tester build is the shipping build" overclaimed.
+   Corrected in three places to "same code, different certificate".
+5. Four comments the change falsified were left standing, including one
+   promising the packaging excludes never reach the play channel and one
+   stating the reason sideload is debug-signed backwards. All corrected.
+
+### Round two, over the fixes — and the worst defect was one round one created
+
+A fix is a change, and a change is unreviewed until something adversarial has
+read it. Round two found seven more, three of them in round one's own work:
+
+6. **The fixed script did not run at all.** `apksigner="$( for … done | sort -V
+   | tail -1 )"`: the loop's last `[ -e "$cand" ] && printf` is FALSE whenever
+   the final candidate glob misses, `pipefail` carries that non-zero out of the
+   pipeline, the command substitution inherits it, and `set -e` kills the
+   script on the assignment — exit 1, empty log, no message. The isolated test
+   that "proved" the discovery used `set -uo pipefail` without `-e`, so it
+   passed on code that could not run. A harness that does not reproduce the
+   real shell options proves nothing. Now a full `if/fi`, and the harness now
+   lifts the block out of `release.sh` with awk and runs it under
+   `set -euo pipefail`: four environments, including the no-SDK case that used
+   to be fatal, all survive.
+7. **Two new hard failures landed AFTER the bump.** Missing `key.properties`
+   and missing `apksigner` are both preconditions of the play APK, and both
+   were being discovered after the build number had been spent, `build/` wiped
+   and a full analyze + test + R8 build run — the exact version-drift the
+   gates-before-bump ordering exists to prevent, and a class the old sideload
+   default never had. Both now run before the gates.
+8. **`apksigner` could not be found through `ANDROID_HOME`.** The env-var
+   candidate had no `.bat` suffix, and Windows ships only the `.bat` wrapper,
+   so any machine whose SDK is not under `%LOCALAPPDATA%` hard-stopped with
+   advice ("set ANDROID_HOME") that was already true and would not have helped.
+   Candidates now cover `.bat` under `ANDROID_HOME` and `ANDROID_SDK_ROOT`, and
+   `sort -V` picks the newest build-tools deliberately rather than by the
+   accident of line order.
+9. A failed `apksigner` run aborted with a raw Java stack trace and no
+   `REFUSING` line; it now says what failed and that nothing was copied. The
+   rotation message now names `EXPECT_CERT_SHA256` and warns that the leftover
+   `Miles.apk` is an older build.
+10. "Same flags" was false in three files — the APK adds
+    `-PmilesPlayApkArm64` and the bundle must never have it. Corrected to
+    "same code, same R8, same key".
+11. The runbook's phase 3 procedure still began "sideload build installed",
+    and its permission-audit recipe still claimed the play APK "needs no extra
+    tool" while pointing at a script that now demands apksigner, the exact
+    fingerprint, a production `.env` and a full test pass. Both corrected; the
+    audit recipe now uses a bare `flutter build apk`.
+
+Found, not fixed (outside this change):
+- `docs/guides/PLAY-RELEASE-RUNBOOK.md` still instructs writing
+  `mobile/android/maps.properties`, a file and concept removed 2026-09-02 when
+  Mapbox replaced Google Maps.
+- `mobile/android/gradle.properties` still says "the project lives on the E:
+  drive"; the repo moved to `D:` on 2026-08-23.
+
+### Open
+
+- **BLOCKED: build 76 has not been installed or run.** The handsets were
+  disconnected before it existed. `adb devices` empty.
+- **The R8 risk is now live and is the top field risk.** The AAB was only ever
+  uploaded, never installed, so build 76 is the FIRST shrunk build anyone runs.
+  If R8 has stripped a reflection or JNI path, it fails on the device and
+  nowhere else. First launch, a call, and a Mapbox screen are the checks.
+- **The two-finger backup hold on the cover is still unperformed** (§262).
+  SELinux denies `sendevent`, so it needs a person and five seconds.
+- The OnePlus is on the Calculator cover with a move this session cannot name;
+  the way in is that hold, then the PIN.
+
+### Next step
+
+Install build 76 over 75 with `adb install -r`, expect `Success` and
+`versionCode=76`, then exercise the R8 paths and the backup hold.

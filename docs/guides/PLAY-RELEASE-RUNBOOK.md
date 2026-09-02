@@ -77,16 +77,43 @@ cancel it to type the PIN)**. That sentence goes in the Console App access
 notes verbatim. The owner's own recorded move is per phone and is not something the
 notes can state.
 
-### 0.2 One app, two build channels — not two products
+### 0.2 One app, one channel that reaches people
 
-`sideload` and `play` are packaging of the same app. `sideload` is the universal
-APK the two test handsets already run (R8 off); `play` is the AAB that ships
-(R8 on). Neither carries a self-updater any more: it was removed on
-2026-09-02 (BRAIN §258); a sideload install updates by cable.
+Owner's ruling, 2026-09-03: **everything a real person installs is the `play`
+flavour.** `bash tool/release.sh` builds it as an APK for testers; the same
+flavour builds the AAB for the Console. Same R8, same upload key, same code —
+the tester build is the shipping **code**, delivered by cable instead of by
+Play. (One flag differs, deliberately; see the ABI note below.)
 
-The one hard consequence: **they are signed by different certificates, so
-Android will not update one over the other.** That is a user-migration problem
-(phase 3), not a licence to let the two drift in behaviour or content.
+Code, not certificate. §2.4 enrols this app in Play App Signing, so Google
+re-signs the bundle with a key it holds and a Play-delivered install does NOT
+carry the upload certificate. A tester who took the APK by cable therefore
+still needs phase 3's escrow-then-uninstall before Play can update them. That
+migration is not closed by the ruling below and must not be assumed away.
+
+What the ruling does close is the two problems the old arrangement had:
+
+- **Testers were never testing the shipping code.** `play` shrinks and
+  minifies and `sideload` does not, so every finding from a sideload APK was a
+  finding about code R8 had never touched — and R8 is what strips the
+  reflection/JNI paths in WebRTC and ML Kit that only fail on a device.
+- **A sideload APK could not update a handset.** `sideload` is debug-signed by
+  design; the handsets carry the upload key, so Android refused it with
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and the only way past was an uninstall,
+  which takes the X25519 seed with it (BRAIN §262 addendum 2).
+
+`sideload` still exists for debugging the unshrunk build
+(`bash tool/release.sh --sideload`). It warns, and it writes
+`Miles-sideload-debug.apk` so it cannot be mistaken for the tester artifact.
+`Miles.apk` at the repo root is the play build from the last run that
+**succeeded**. A refused artifact is never copied, so after a failed run the
+file is the previous build — the script says so when it refuses.
+
+One difference between the two play artifacts, deliberate: the **APK** carries
+arm64 only (`-PmilesPlayApkArm64`), because it is handed to a tester whole and
+a partial APK installs on a 32-bit phone and then dies on a missing engine
+(build 64, BRAIN §193). The **AAB** keeps every ABI, because Play splits per
+device itself. An arm64 handset gets the same libraries either way.
 
 ### 0.3 Rating and category
 
@@ -315,8 +342,13 @@ page. You need them for:
 This is the phase most likely to be skipped and the one that destroys user data
 if it is. **It has never been run** (audit §5, phase 5).
 
-**The problem:** every install in the field today is debug-signed. A Play-signed
-build has a different certificate, so Android refuses to update over it. Users
+**The problem:** every install in the field today is signed with the **upload**
+key — measured off the handset, BRAIN §262 addendum 2 and §263; the older
+"debug-signed" note here predates the play-APK ruling in §0.2 and was wrong by
+the time phase 3 mattered. It changes nothing about this phase. Under Play App
+Signing (§2.4) Google re-signs with an app signing key it holds, so a
+Play-delivered build still has a different certificate from anything installed
+by cable, and Android still refuses to update over it. Users
 must **uninstall** — and uninstall wipes `flutter_secure_storage`, which is
 where the X25519 private key lives. Everything end-to-end encrypted (Memory
 Threads, Private Vault, Wish Jar entry text) becomes unreadable on the new
@@ -336,7 +368,8 @@ reasoned about:
 **The test, in order, on two handsets:**
 
 ```
-1. sideload build installed, couple paired, encrypted content written on both
+1. the current cable-installed build (upload-key signed, §0.2) on both
+   handsets, couple paired, encrypted content written on both
 2. uninstall on phone A  (this is the destructive step — do it deliberately)
 3. install the play AAB on phone A (via internal testing, phase 8)
 4. sign in with the password        -> escrow restore should return the seed
@@ -444,18 +477,21 @@ the aliases are supposed to be there now):
 - No `REQUEST_INSTALL_PACKAGES` and no FileProvider — both are declared only in
   `src/sideload`.
 
-If bundletool is not to hand, the same check against the APK the AAB is built
-from needs no extra tool:
+If bundletool is not to hand, the same check runs against the play APK, which
+is the one testers are running. A bare Gradle build is enough for a permission
+audit — `tool/release.sh` would also work but insists on apksigner, the exact
+upload fingerprint, a production `.env` and a full analyze + test pass, none of
+which a manifest check needs:
 
 ```bash
 cd /d/Miles/mobile && flutter build apk --release --flavor play
 aapt2 dump permissions build/app/outputs/flutter-apk/app-play-release.apk
 ```
 
-The sideload channel is unchanged and still builds as before:
+The unshrunk sideload build, for debugging only:
 
 ```bash
-cd /d/Miles/mobile && flutter build apk --release --flavor sideload
+cd /d/Miles/mobile && bash tool/release.sh --sideload
 ```
 
 ---

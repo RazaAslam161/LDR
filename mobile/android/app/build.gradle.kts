@@ -166,12 +166,14 @@ android {
 
     buildTypes {
         release {
-            // R8 (minify + resource shrink) is OFF for the directly-shared
-            // universal APK: it can strip reflection/JNI paths in WebRTC and
-            // ML Kit that only fail on a real device, and that cannot be
-            // verified from a build machine. The play channel turns both on in
-            // the androidComponents block below, because an AAB has to be
-            // shrunk and is going through review anyway.
+            // R8 (minify + resource shrink) is OFF here, which is the SIDELOAD
+            // channel's setting and nothing else: R8 can strip reflection/JNI
+            // paths in WebRTC and ML Kit that fail only on a real device, so
+            // the unshrunk build is what you reach for to prove a crash is not
+            // the shrinker's doing. The play channel turns both on in the
+            // androidComponents block below and is what real people install
+            // (BRAIN §263) — a tester must run the code that ships, shrinker
+            // included, or the shrinker is first exercised in production.
             isMinifyEnabled = false
             isShrinkResources = false
             // Explicit, though it is AGP 8.13's default for a non-debuggable
@@ -191,9 +193,13 @@ android {
             )
         }
     }
-    // sideload: one APK carrying exactly one ABI (arm64-v8a), stripped in the
-    // androidComponents block below. play: an AAB, which Play splits per device
-    // itself, so it keeps every ABI it is given.
+    // The sideload RELEASE APK is arm64-only (debug is untouched, so an
+    // emulator still runs). The play channel is arm64-only
+    // ONLY when -PmilesPlayApkArm64 is passed, which tool/release.sh does for
+    // the tester APK and never for the Console bundle — the bundle keeps every
+    // ABI because Play splits per device itself. Both strips live in the
+    // androidComponents block below; the guard that keeps the property off the
+    // bundle is at the bottom of this file.
 }
 
 androidComponents {
@@ -231,24 +237,51 @@ androidComponents {
     // it is every ABI Android has ever defined except the one we keep, so an
     // AAR that starts shipping a new one cannot quietly reopen this.
     //
-    // Deliberately NOT in the android { packaging } block: that would reach the
-    // play channel too, and an AAB Play splits per device loses reach for every
-    // ABI removed while saving nobody a byte. Release-only for the same reason
-    // in the other direction — `flutter run` on an x86_64 emulator builds a
-    // debug APK for the emulator's own architecture, and stripping it here
-    // would make the sideload flavour undebuggable.
+    // Deliberately NOT in the android { packaging } block: that block cannot
+    // tell the channels apart, and the Console AAB must keep every ABI — Play
+    // splits per device, so each one removed is reach lost for nobody's
+    // benefit. The play channel does get this list, but only for the tester
+    // APK and only behind -PmilesPlayApkArm64, and the taskGraph check at the
+    // bottom of this file stops the build if that property is ever present
+    // while the bundle is being packaged. Release-only for the same reason in
+    // the other direction — `flutter run` on an x86_64 emulator builds a debug
+    // APK for the emulator's own architecture, and stripping it here would
+    // make the sideload flavour undebuggable.
+    val onlyArm64 = listOf(
+        "lib/armeabi/**",
+        "lib/armeabi-v7a/**",
+        "lib/x86/**",
+        "lib/x86_64/**",
+        "lib/mips/**",
+        "lib/mips64/**",
+        "lib/riscv64/**",
+    )
     onVariants(
         selector().withFlavor("channel", "sideload").withBuildType("release"),
     ) { variant ->
-        variant.packaging.jniLibs.excludes.addAll(
-            "lib/armeabi/**",
-            "lib/armeabi-v7a/**",
-            "lib/x86/**",
-            "lib/x86_64/**",
-            "lib/mips/**",
-            "lib/mips64/**",
-            "lib/riscv64/**",
-        )
+        variant.packaging.jniLibs.excludes.addAll(onlyArm64)
+    }
+
+    // The play channel builds TWO artifacts from one variant, and they want
+    // opposite things from the ABI list:
+    //
+    //   the AAB   — every ABI, because Play splits per device and each one
+    //               removed is reach lost for nobody's benefit;
+    //   the APK   — one ABI, because it is handed to a tester whole, and the
+    //               measurement above says a partial APK installs on a 32-bit
+    //               phone and then dies on a missing engine. One ABI means an
+    //               incompatible phone is told so by the installer instead.
+    //
+    // A variant cannot know which task will consume it, so the caller says:
+    // tool/release.sh passes -PmilesPlayApkArm64 for the tester APK and
+    // nothing at all for the Console bundle. An arm64 handset gets the same
+    // set of libraries either way — this is what Play would have delivered it.
+    if (providers.gradleProperty("milesPlayApkArm64").isPresent) {
+        onVariants(
+            selector().withFlavor("channel", "play").withBuildType("release"),
+        ) { variant ->
+            variant.packaging.jniLibs.excludes.addAll(onlyArm64)
+        }
     }
 }
 
@@ -269,6 +302,28 @@ gradle.taskGraph.whenReady {
             "android/key.properties is missing, so the play channel has no " +
                 "upload key. Create the keystore and key.properties, or " +
                 "build --flavor sideload.",
+        )
+    }
+
+    // -PmilesPlayApkArm64 strips every non-arm64 ABI from the play VARIANT,
+    // and a variant's merged jniLibs feed mergePlayReleaseNativeLibs, which
+    // packages the BUNDLE as well as the APK. Nothing about the property says
+    // "APK" — only the command the caller happened to run does, and that is
+    // not a guarantee. Reaching the bundle it would upload a Console artifact
+    // serving arm64 devices alone: accepted by Play, shrinking reach for every
+    // other phone, and visible nowhere but Play's own device numbers weeks
+    // later. So the property is refused on a bundle build rather than applied
+    // to the wrong artifact. This catches every route it can arrive by — typed
+    // on the command line, left in gradle.properties, or exported as
+    // ORG_GRADLE_PROJECT_milesPlayApkArm64.
+    if (allTasks.any { it.project == project && it.name == "packagePlayReleaseBundle" } &&
+        providers.gradleProperty("milesPlayApkArm64").isPresent
+    ) {
+        throw GradleException(
+            "-PmilesPlayApkArm64 strips non-arm64 ABIs from the play variant, " +
+                "and the variant feeds the bundle too. It would cripple the " +
+                "Console AAB's reach. It is for the tester APK only. Build the " +
+                "bundle without it.",
         )
     }
 }

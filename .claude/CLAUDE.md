@@ -37,17 +37,58 @@ this machine.
 - Raise `app_release.min_build` only AFTER the build is installed and proven.
 - "Package appears to be invalid" = transfer corruption, not the build.
 
-### Two rules here are contradicted by the current code — owner has not ruled (flagged 2026-08-23)
+### The build that goes to people is the PLAY build (owner's ruling, 2026-09-03)
 
-- Rule as written: *"When a build IS asked for: ONE universal APK, no `--split-per-abi`."*
-  `mobile/tool/release.sh:337` runs `flutter build apk --release --flavor sideload
-  --target-platform android-arm64`, and `:321` calls that "the ONLY lever that works". The
-  output is arm64-only, not universal. **Measured on the real build-64 APK (BRAIN §193),
-  the consequence is worse than "cannot install": `lib/armeabi-v7a/` still ships nine
-  third-party `.so` files and NO `libflutter.so`/`libapp.so`, because `--target-platform`
-  filters only Flutter's own libraries and never the AAR ones. Android matches that ABI
-  directory, installs, and the loader then fails — a 32-bit handset installs a broken app
-  and crashes on launch.** Do not silently follow either version; ask.
+**Verbatim: "always build the apk in a play store variant — means the app is for
+play store, the build here is just for final testing using on random real users
+to get final feedbacks and testing before go for play store production. and the
+apk should always be clean, updated and for real users."**
+
+So: `bash tool/release.sh` with no arguments builds the **play** flavour as an
+APK, and that is what any real person ever installs. It is not a separate
+edition — same flavour, same R8, same upload key and the same code as the AAB
+that goes to the Console. Not literally the same flags: the APK adds
+`-PmilesPlayApkArm64` and the bundle must never have it. Same CODE, to be exact: once Play App Signing is on,
+Google re-signs with a key it holds, so a build delivered by Play carries a
+different certificate than this APK does. Four consequences, all load-bearing:
+
+- **R8 is on.** The play channel shrinks and minifies (`build.gradle.kts`,
+  `beforeVariants`); the sideload channel never did. Every sideload APK a
+  tester ran was code that had never been through the shrinker that ships, and
+  R8 is exactly what strips the reflection/JNI entry points in WebRTC and ML
+  Kit that fail only on a device.
+- **It installs over what is already on the phone.** The play flavour is signed
+  with `miles-upload.jks` (`CN=Miles, O=R&D Dev, C=PK`), which is the
+  certificate the handsets already carry. The sideload flavour is DEBUG-signed
+  on purpose and cannot update them — `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and
+  the only way past is an uninstall, which takes the X25519 seed with it
+  (BRAIN §262 addendum 2).
+- **One ABI in the APK, every ABI in the AAB.** `release.sh` passes
+  `-PmilesPlayApkArm64`, and that property excludes every other ABI from the
+  play **variant** — which feeds the bundle as well as the APK. Only the
+  command being run keeps them apart, so a `gradle.taskGraph` check in
+  `build.gradle.kts` refuses the property outright when the bundle is being
+  packaged, and `release.sh --play` asserts the finished AAB still carries
+  armeabi-v7a, arm64-v8a and x86_64. **Never pass it to a bundle build.** The
+  APK is arm64-only because a partial APK installs on a 32-bit phone and then
+  dies on a missing engine (measured on build 64, BRAIN §193); one ABI means
+  that phone is told the app is incompatible instead.
+- **It is not the signature Play will ship.** Play App Signing has Google
+  re-sign the bundle with an app signing key it generates and holds. A tester
+  who installed this APK by cable therefore still cannot be updated by Play:
+  moving them over needs the escrow-then-uninstall ceremony in
+  `docs/guides/PLAY-RELEASE-RUNBOOK.md` phase 3. Same code, different
+  certificate — do not let "same build" blur the two.
+
+`bash tool/release.sh --sideload` still exists for debugging the unshrunk
+build. It prints a warning, and it copies to `Miles-sideload-debug.apk` so it
+can never be mistaken for the tester artifact. `Miles.apk` at the repo root is
+always the play build.
+
+Still true, and unchanged by the above: **don't build unless asked**, and never
+install to a device unprompted.
+### One rule here is contradicted by the current code — owner has not ruled (flagged 2026-08-23)
+
 - Rule as written: *"Launcher disguise is intentional — 'News' label + generic icon +
   selectable identities. Never revert."* Both manifests set `android:label="Miles"`,
   `PLAIN_DEFAULT=true` on both flavors, and `.AliasMiles` is the only alias shipping
