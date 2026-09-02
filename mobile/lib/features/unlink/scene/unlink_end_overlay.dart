@@ -47,6 +47,24 @@ class UnlinkEndOverlay extends StatefulWidget {
   /// and still a complete farewell.
   static final ValueNotifier<bool?> initiatorMale = ValueNotifier<bool?>(null);
 
+  /// Whether anything is still owed to the screen.
+  ///
+  /// THE RULE THAT WAS MISSING. The light's envelope is 900ms; the reunion
+  /// film is ten seconds. When the light completed, the status listener
+  /// nulled the ending and the build collapsed the whole surface — film and
+  /// all — which the owner saw as "appears for a second, then Home". And
+  /// on a cold handset `initialize()` can outlast the light, so the surface
+  /// could collapse before the film's FIRST frame: the earlier "never plays".
+  /// Pure and static so the table of cases is a unit test, not a handset.
+  @visibleForTesting
+  static bool surfaceLives({
+    required bool hasKind,
+    required bool lightRunning,
+    required bool hasFilm,
+    required bool filmPending,
+  }) =>
+      hasKind && (lightRunning || hasFilm || filmPending);
+
   @override
   State<UnlinkEndOverlay> createState() => _UnlinkEndOverlayState();
 }
@@ -61,14 +79,20 @@ class _UnlinkEndOverlayState extends State<UnlinkEndOverlay>
   UnlinkEnding? _kind;
   VideoPlayerController? _film;
 
+  /// A film has been asked for and has not yet finished or failed. Set
+  /// SYNCHRONOUSLY with the ending, before `initialize()` is even awaited —
+  /// the surface has to know a film is coming from the very first frame.
+  bool _filmPending = false;
+
   @override
   void initState() {
     super.initState();
     UnlinkEndOverlay.play.addListener(_onPlay);
     _c.addStatusListener((status) {
-      if (status == AnimationStatus.completed && mounted) {
-        setState(() => _kind = null);
-      }
+      if (status != AnimationStatus.completed || !mounted) return;
+      // The light is done. The ending is over only if nothing else is on
+      // the surface or on its way to it.
+      if (_film == null && !_filmPending) setState(() => _kind = null);
     });
   }
 
@@ -82,13 +106,27 @@ class _UnlinkEndOverlayState extends State<UnlinkEndOverlay>
     final male = UnlinkEndOverlay.initiatorMale.value;
     UnlinkEndOverlay.initiatorMale.value = null; // consumed with the ending
     if (!mounted || MilesMotion.off(context)) return;
-    setState(() => _kind = kind);
+    setState(() {
+      _kind = kind;
+      _filmPending = male != null;
+    });
     _c
       ..duration = kind == UnlinkEnding.relink
           ? MilesMotion.floodOpen
           : MilesMotion.duskFall
       ..forward(from: 0);
     if (male != null) unawaited(_playFilm(kind, initiatorMale: male));
+  }
+
+  /// The film is gone — ended or failed. If the light has finished too, the
+  /// surface has nothing left to show and folds.
+  void _filmOver() {
+    if (!mounted) return;
+    setState(() {
+      _film = null;
+      _filmPending = false;
+      if (!_c.isAnimating) _kind = null;
+    });
   }
 
   /// The film, over the light. It rides the SAME IgnorePointer surface as the
@@ -116,6 +154,9 @@ class _UnlinkEndOverlayState extends State<UnlinkEndOverlay>
     } catch (e) {
       debugPrint('ending film failed, the light plays alone: $e');
       unawaited(c.dispose().catchError((Object _) {}));
+      // Nothing is coming any more; let the light's own end fold the
+      // surface, or fold it now if the light already went.
+      _filmOver();
     }
   }
 
@@ -123,9 +164,9 @@ class _UnlinkEndOverlayState extends State<UnlinkEndOverlay>
     final c = _film;
     if (c == null || !c.value.isInitialized) return;
     if (c.value.position >= c.value.duration && !c.value.isPlaying) {
-      setState(() => _film = null);
       c.removeListener(_watchFilmEnd);
       unawaited(c.dispose().catchError((Object _) {}));
+      _filmOver();
     }
   }
 
@@ -147,11 +188,18 @@ class _UnlinkEndOverlayState extends State<UnlinkEndOverlay>
           builder: (context, _) {
             final kind = _kind;
             final film = _film;
-            // The film outlives the light's short envelope; either alone
-            // keeps the surface mounted, and both gone collapses it.
-            if (kind == null || (!_c.isAnimating && film == null)) {
+            // The film outlives the light's short envelope; either alone —
+            // or a film still on its way — keeps the surface mounted, and
+            // all three gone collapses it. One predicate, tested as a table.
+            if (!UnlinkEndOverlay.surfaceLives(
+              hasKind: kind != null,
+              lightRunning: _c.isAnimating,
+              hasFilm: film != null,
+              filmPending: _filmPending,
+            )) {
               return const SizedBox.shrink();
             }
+            if (kind == null) return const SizedBox.shrink();
             if (film != null && film.value.isInitialized) {
               return FittedBox(
                 fit: BoxFit.cover,

@@ -118,6 +118,13 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
   void initState() {
     super.initState();
     UnlinkState.current.addListener(_onState);
+    // SEEDED HERE, not only in _onState. _lastRow is what the ending reads to
+    // decide WHOSE film plays, and _onState only ever runs on a CHANGE — so a
+    // ceremony that is re-linked before any update lands (the row arrives with
+    // the screen, the gate is already open, the key is tapped) reached the
+    // teardown with a null row, no gender, and therefore no film at all: the
+    // 900ms light alone, which looks exactly like the film being cut off.
+    _lastRow = UnlinkState.current.value;
     final coupleId = UnlinkState.current.value?.coupleId;
     final myUid = ref.read(currentProfileProvider)?.id;
     if (coupleId != null && myUid != null) {
@@ -600,6 +607,25 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       ? 'You stepped outside.'
       : '$partnerName stepped out to the porch.';
 
+  /// The corner plate's inner width, and the whole box the scene must keep
+  /// its conversation out of.
+  ///
+  /// Sized DOWN from 138 after the handset showed the plate covering the
+  /// cat's line mid-word: it is a glance, not a panel. The scene is told the
+  /// rectangle rather than left to guess, because the plate paints after the
+  /// stage and would otherwise always win.
+  static const _plateInnerWidth = 92.0;
+  static const _plateWidth = _plateInnerWidth + 16;
+
+  /// "in 23h" / "in 45m" — the whole ceremony's remaining span, short enough
+  /// to sit on one line beside a 34pt clock.
+  String _deadlineShort(UnlinkRow row) {
+    final left = row.endsAt.difference(ServerClock.now());
+    if (left.isNegative) return 'now';
+    if (left.inHours >= 1) return 'in ${left.inHours}h';
+    return 'in ${left.inMinutes}m';
+  }
+
   /// How long until MY gate opens. Zero once it has.
   Duration _gateLeft(UnlinkRow row) {
     final left = _myGate(row).difference(ServerClock.now());
@@ -640,7 +666,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
         Text(
           _mmss(left),
           style: MilesType.inter(
-            fontSize: 21,
+            fontSize: 17,
             color: MilesColors.gilt,
             decoration: TextDecoration.none,
           ).copyWith(
@@ -649,37 +675,34 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
             height: 1.05,
           ),
         ),
-        SizedBox(
-          width: 118,
-          child: Text(
-            mine
-                ? 'until you can open the door'
-                : 'until you can answer this',
-            textAlign: TextAlign.right,
-            style: const TextStyle(color: MilesColors.taupe, fontSize: 11.5),
-          ),
+        Text(
+          // One line at this width, both roles. "until you can answer this"
+          // wrapped to two and pushed the plate down over the cat.
+          mine ? 'till the door opens' : 'till you can answer',
+          textAlign: TextAlign.right,
+          style: const TextStyle(color: MilesColors.taupe, fontSize: 9.5),
         ),
       ] else
         SizedBox(
-          width: 118,
+          width: _plateInnerWidth,
           child: Text(
-            mine ? 'The key is on the door.' : 'You can answer this now.',
+            mine ? 'The key is on the door.' : 'You can answer now.',
             textAlign: TextAlign.right,
-            style: const TextStyle(color: MilesColors.gilt, fontSize: 12.5),
+            style: const TextStyle(color: MilesColors.gilt, fontSize: 11.5),
           ),
         ),
-      const SizedBox(height: 3),
       Text(
-        'Ends ${_deadlineClock(row)}',
-        style: const TextStyle(color: MilesColors.faint, fontSize: 11),
+        // Relative, not absolute, on the STAGE only: "Ends 11:33am tomorrow"
+        // wraps at this width and the calm layout already states the clock
+        // time in full. The day is context here, not an appointment.
+        'Ends ${_deadlineShort(row)}',
+        style: const TextStyle(color: MilesColors.faint, fontSize: 9.5),
       ),
-      if (!mine) ...[
-        const SizedBox(height: 1),
+      if (!mine)
         const Text(
-          'kept safe for 30 days',
-          style: TextStyle(color: MilesColors.faint, fontSize: 11),
+          'kept safe 30 days',
+          style: TextStyle(color: MilesColors.faint, fontSize: 9.5),
         ),
-      ],
     ];
   }
 
@@ -761,6 +784,17 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                 ref.watch(currentProfileProvider)?.gender,
               ),
               talkBottomInset: h * 0.20,
+              // The clock plate's own corner, handed over so the conversation
+              // keeps out from under it. Height is the plate at its tallest
+              // (clock + figures + three small lines) plus the safe area it
+              // sits inside; over-reserving costs a narrower bubble, while
+              // under-reserving costs a sentence nobody can read.
+              talkAvoid: Rect.fromLTWH(
+                MediaQuery.sizeOf(context).width - _plateWidth - 14,
+                0,
+                _plateWidth + 14,
+                MediaQuery.paddingOf(context).top + 118,
+              ),
               // The owner's symbols: outside, the key appears when the way
               // back opens — using it is coming home. Inside, the framed
               // photo arms when the partner's gate opens — tearing it is
@@ -802,9 +836,9 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                  padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
                   child: SizedBox(
-                  width: 138,
+                  width: _plateInnerWidth,
                   child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisSize: MainAxisSize.min,
@@ -813,6 +847,9 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                       remaining: _remainingWindow(row),
                       total: _totalWindow(row),
                       lastCall: row.lastCall && !row.due,
+                      // Half the size it was. The object is the owner's design
+                      // and stays; it just stops being the subject.
+                      dimension: row.lastCall ? 40 : 34,
                       body: FilmLibrary.still(
                         mine
                             ? FilmLibrary.clockPorch
@@ -820,7 +857,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                       ),
                       dial: mine ? DialSpec.porch : DialSpec.room,
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 2),
                     ..._gateReadout(row, mine: mine),
                   ],
                   ),

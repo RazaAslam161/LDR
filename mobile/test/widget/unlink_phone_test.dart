@@ -72,6 +72,49 @@ void main() {
         reason: "the companion's line belongs at the companion",);
   });
 
+  testWidgets('words keep out from under the clock plate', (tester) async {
+    // The plate paints AFTER the stage, so without this it simply covers
+    // whoever is speaking: the owner's handset showed the cat's line cut off
+    // mid-word behind it ("Because I'm the one who go|"). The talk narrows
+    // rather than moving — a bubble slid out from under its own speaker is a
+    // worse lie than a short one.
+    await phoneBench(tester);
+    const plate = Rect.fromLTWH(232, 0, 128, 150);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ColoredBox(
+          color: const Color(0xFF120A0C),
+          child: SizedBox(
+            width: canvas.width,
+            height: canvas.height,
+            child: conversationStackForTest(
+              lines: const [
+                // The companion's head sits at y=210 in the seam, so this
+                // line lands squarely in the plate's band.
+                Exchange(0.5, Speaker.companion, 'Because I am the one who '
+                    'got left, and the whole street heard it.'),
+              ],
+              lateLine: null,
+              outside: false,
+              canvas: canvas,
+              avoid: plate,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final box = tester.getRect(
+      find.textContaining('Because I am the one'),
+    );
+    expect(box.right, lessThanOrEqualTo(plate.left),
+        reason: 'the words run under the plate: right=${box.right} vs '
+            'plate.left=${plate.left}',);
+    expect(box.width, greaterThan(100),
+        reason: 'narrowed past the point of being a sentence',);
+  });
+
   testWidgets('no message renders no bubble at all', (tester) async {
     await phoneBench(tester);
     await tester.pumpWidget(host());

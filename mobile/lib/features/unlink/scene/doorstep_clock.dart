@@ -60,8 +60,14 @@ class DoorstepClock extends StatelessWidget {
     required this.lastCall,
     this.body,
     this.dial = DialSpec.drawn,
+    this.dimension,
     super.key,
   });
+
+  /// Edge length in logical pixels. The stage's corner asks for a small one:
+  /// at 64 the plate around it grew tall enough to cover the conversation it
+  /// was timing, which is what the owner saw on the handset.
+  final double? dimension;
 
   final DialSpec dial;
 
@@ -78,7 +84,7 @@ class DoorstepClock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = lastCall ? 76.0 : 64.0;
+    final size = dimension ?? (lastCall ? 76.0 : 64.0);
     return SizedBox.square(
       dimension: size,
       child: CustomPaint(

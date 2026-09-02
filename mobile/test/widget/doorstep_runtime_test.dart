@@ -149,7 +149,7 @@ void main() {
       expect(atStart, greaterThan(14 * 60),
           reason: 'the window is fifteen minutes, not the 24-hour day — '
               'counting the day is what made the hand look frozen',);
-      expect(find.text('until you can open the door'), findsOneWidget,
+      expect(find.text('till the door opens'), findsOneWidget,
           reason: 'a number with no sentence does not tell anyone that a '
               're-link is coming — the second thing reported',);
 
@@ -178,13 +178,13 @@ void main() {
     testWidgets('the partner is told they can answer, and when', (tester) async {
       await pump(tester, initiator: themId);
       expect(countdown(tester), isNotNull);
-      expect(find.text('until you can answer this'), findsOneWidget,
+      expect(find.text('till you can answer'), findsOneWidget,
           reason: '"how would user know ... for inside character to un-link '
               'too" — this sentence is the answer',);
 
       await travel(tester, const Duration(minutes: 16));
       expect(countdown(tester), isNull);
-      expect(find.text('You can answer this now.'), findsOneWidget);
+      expect(find.text('You can answer now.'), findsOneWidget);
     });
   });
 

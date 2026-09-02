@@ -176,7 +176,10 @@ void main() {
               'widget the calm layout uses',);
       expect(find.textContaining('Ends '), findsOneWidget,
           reason: 'the 24-hour end is stated absolutely, never ticked',);
-      expect(find.text('until you can open the door'), findsOneWidget,
+      // Shortened from "until you can open the door" on 2026-09-02: at the
+      // plate's width it wrapped to two lines and grew the box over the
+      // conversation. Same law, fewer syllables.
+      expect(find.text('till the door opens'), findsOneWidget,
           reason: 'the figures must say what they are counting towards',);
       expect(find.text('You stepped outside.'), findsNothing,
           reason: 'the film already says it; a headline would say it twice',);
@@ -287,7 +290,7 @@ void main() {
       // lying by omission at its highest-stakes moment.
       await pump(tester, row: ceremony(initiator: themId));
       expect(find.textContaining('Ends '), findsOneWidget);
-      expect(find.textContaining('kept safe for 30 days'), findsOneWidget);
+      expect(find.textContaining('kept safe 30 days'), findsOneWidget);
     });
 
     testWidgets('is offered no chat door — the note is the channel',

@@ -21299,3 +21299,118 @@ Secrets grep over the diff before the commit: hits were the env-var name
 This addendum is committed on its own, with §259 (theirs, uncommitted at
 the time) left in the working tree: the index got HEAD's file plus this
 text, never the whole working copy.
+
+## §259 — the clock plate was covering the conversation (2026-09-02)
+
+Owner's handset screenshot: the cat's line reading "Because I'm the one who
+go|" — cut off mid-word behind the corner plate. Two faults, not one.
+
+1. **The plate was far too big.** ~40% of the width and 22% of the height: a
+   64pt clock, 21pt figures, and "until you can answer this" wrapping to two
+   lines, over "Ends 11:12am tomorrow" wrapping to two more. Now a 34pt clock,
+   17pt figures, and one line each — `till you can answer` / `till the door
+   opens`, `Ends in 23h` (relative on the STAGE only; the calm layout still
+   states the clock time in full), `kept safe 30 days`. Plate width 138 -> 108.
+   Roughly a third of the area.
+2. **It painted over the talk regardless of size.** The plate is a `Positioned`
+   at index 787 and the scene at 757, so it always wins. `DoorstepScene` now
+   takes `talkAvoid` (a Rect of chrome) and `_TalkLayer` NARROWS a column whose
+   band intersects it — never moves it, because a bubble slid out from under
+   its own speaker is a worse lie than a short one; below `_minTalkWidth` (120)
+   it goes to the other side of the plate instead.
+
+The copy laws in `unlink_screen_test` and `doorstep_runtime_test` were
+re-pointed at the shorter strings with the reason written beside them: same
+law, fewer syllables.
+
+### Verified
+- New law in `unlink_phone_test`: a companion line placed squarely in the
+  plate's band has `right <= plate.left` and still measures >100pt wide.
+- `flutter analyze lib/ test/` 0/0. Previews regenerated and LOOKED AT: the
+  plate is a glance, every line sits on one row, nothing overlaps.
+- Full suite: running; addendum follows.
+
+### Open
+Still no device pass on this (one phone attached). Nothing committed.
+
+### §259 addendum — full suite green (2026-09-02)
+`flutter test` → **1486 passed** (+1: the plate-avoidance law). Analyze 0/0.
+Renumbered from §258 — a concurrent session had already taken that number.
+Nothing committed.
+
+## §260 — the reunion film was cut at 900ms by the light under it (2026-09-02)
+
+Owner: "reunion video doesn't play — it appears only for a second and gone,
+and the home screen appears." A different failure from §250's (which never
+fired at all): this one FIRES, so the notifier and the asset are fine, and
+something tears the player down.
+
+**Root cause, one sentence:** the light envelope's status listener nulled
+`_kind` when it completed at `floodOpen` (900ms), and the build's first
+condition — `kind == null` — collapsed the whole surface, film and all; the
+comment right under it saying the film should outlive the light was dead code
+behind that condition. A ten-second reunion got ~600ms of screen.
+
+Second hazard in the same lines: on a cold handset `initialize()` can outlast
+the 900ms, so the surface could fold BEFORE the film's first frame — which is
+almost certainly a share of §250's "never plays" too.
+
+### Fix
+- `_filmPending`, set SYNCHRONOUSLY with the ending (before initialize is
+  awaited), cleared when the film ends or fails.
+- The status listener nulls the ending only when no film is playing or
+  pending; `_filmOver()` folds the surface when the film ends if the light
+  has already gone.
+- One pure predicate, `UnlinkEndOverlay.surfaceLives(hasKind, lightRunning,
+  hasFilm, filmPending)`, decides whether the surface stands. Tested as a
+  table: the reported case (light done, film playing → lives), the cold-start
+  case (light done, film pending → lives), and the fold (nothing owed → gone;
+  no ending → gone whatever else is set). Plus a widget law: a failed film
+  folds the surface by two seconds — an ending must never trap the app.
+
+### Verified
+- `unlink_end_overlay_test`: 7 passed (3 old laws + 4 new).
+- `flutter analyze lib/ test/` 0/0. Full suite: addendum follows.
+
+### Open
+- Not on a device (one phone attached). The film's own end (`position >=
+  duration && !isPlaying`) is unchanged and was already the path §250's
+  reunion relied on; if the handset shows the film holding on its last frame
+  instead of folding, that is the next thing to look at.
+- Nothing committed.
+
+### §260 addendum — full suite green (2026-09-02)
+`flutter test` → **1490 passed** (+4: the surface table and the fold law).
+Analyze 0/0. Nothing committed.
+
+## §261 — §260's fix is correct, is NOT in any build, and had a second door (2026-09-02)
+
+A concurrent session diagnosed and fixed the 900ms collapse in §260 above. This
+section adds only what that one does not cover.
+
+**1. It has never been built.** `git show HEAD:...unlink_end_overlay.dart`
+still has the unconditional `setState(() => _kind = null)` on light-complete;
+the `surfaceLives` fix is UNCOMMITTED in the shared working tree. Build 74 —
+what is on the handset, and what the owner just reported from — contains the
+old code. Nothing on a phone can change until this is built. Verified rather
+than assumed, by reading HEAD:
+
+    light DONE, film playing          old=COLLAPSED  new=ALIVE
+    light DONE, film still loading    old=COLLAPSED  new=ALIVE
+    everything over                   old=COLLAPSED  new=COLLAPSED
+
+**2. A second door to the same symptom, now closed.** `_lastRow` was assigned
+ONLY inside `_onState`, which runs on a CHANGE. A ceremony re-linked before any
+row update lands — the row arrives with the screen, the gate is already open,
+the key is tapped — reached `_released` with a null row, so no initiator, no
+gender, `initiatorMale` null, `_filmPending` false: **no film at all, just the
+900ms light**. Indistinguishable on a handset from the bug §260 fixed, and
+untouched by it. `_lastRow` is now seeded in `initState`.
+
+### Verified
+- `unlink_end_overlay_test` 7 passed (§260's table, run here rather than taken
+  on trust). `flutter analyze lib/ test/` 0/0; `flutter test` **1490 passed**.
+
+### Open
+No device attached (`adb devices` empty). The tree holds two sessions' work on
+this file; whoever builds should take both.

@@ -111,6 +111,7 @@ class DoorstepScene extends StatefulWidget {
     required this.role,
     required this.variant,
     this.talkBottomInset = 12,
+    this.talkAvoid,
     this.onAction,
     this.actionArmed = false,
     this.phoneGlow = false,
@@ -151,6 +152,12 @@ class DoorstepScene extends StatefulWidget {
   /// Height reserved under the conversation stack, so the talk lands above
   /// whatever the screen parks on the stage's lower edge.
   final double talkBottomInset;
+
+  /// A rectangle of chrome the talk must not run under, in widget space —
+  /// today the clock plate in the top corner. The plate paints AFTER the
+  /// stage, so without this it simply covers whatever is speaking: the owner's
+  /// handset showed the cat's line cut off mid-word behind it.
+  final Rect? talkAvoid;
 
   /// Same contract the Doorstep and the Distance both honoured: no stage when
   /// animations are off or the text scale needs the room.
@@ -547,6 +554,7 @@ class _DoorstepSceneState extends State<DoorstepScene>
                         characterAt: mapPoint(geom.characterAt),
                         canvas: canvas,
                         bottomInset: widget.talkBottomInset,
+                        avoid: widget.talkAvoid,
                         enter: motionOff ? 1.0 : _enter.value,
                         pulse: motionOff ? 1.0 : _ambient.value,
                         phoneGlow: widget.phoneGlow && !motionOff,
@@ -633,8 +641,12 @@ class _TalkLayer extends StatelessWidget {
     required this.bottomInset,
     required this.enter,
     required this.pulse,
+    this.avoid,
     this.phoneGlow = false,
   });
+
+  /// Chrome the words must not run under. See [DoorstepScene.talkAvoid].
+  final Rect? avoid;
 
   final bool phoneGlow;
 
@@ -708,18 +720,41 @@ class _TalkLayer extends StatelessWidget {
     final latest = mine.isEmpty ? null : mine.last;
 
     final companion = who == Speaker.companion;
-    final width = math.min(canvas.width * 0.62, _maxTalkWidth);
+    var width = math.min(canvas.width * 0.62, _maxTalkWidth);
     final rightward = at.dx <= canvas.width / 2;
-    final rawLeft = rightward ? at.dx - 18 : at.dx + 18 - width;
-    final left = rawLeft
-        .clamp(10.0, math.max(10.0, canvas.width - width - 10))
-        .toDouble();
 
     // Pushed away from the other speaker, unless that walks off the frame.
     var hangs = below;
     if (!hangs && at.dy - 24 - _talkRoom < 8) hangs = true;
     if (hangs && at.dy + 24 + _talkRoom > canvas.height - bottomInset) {
       hangs = false;
+    }
+
+    // The band this column will occupy once it has laid itself out. Only an
+    // estimate — the text has not been measured yet — but _talkRoom is the
+    // same figure the side-choice above trusts, and it only has to be right
+    // enough to know whether the chrome is in the way.
+    final top = hangs ? at.dy + 24 : at.dy - 24 - _talkRoom;
+    final bottom = hangs ? at.dy + 24 + _talkRoom : at.dy - 24;
+    final box = avoid;
+    // Narrow, never move: a bubble slid out from under its own speaker is a
+    // worse lie than a short one. If there is no room left to be a sentence,
+    // the words go to the other side of the plate instead.
+    var maxRight = canvas.width - 10;
+    if (box != null && bottom > box.top && top < box.bottom) {
+      maxRight = math.min(maxRight, box.left - 8);
+    }
+
+    final rawLeft = rightward ? at.dx - 18 : at.dx + 18 - width;
+    var left = rawLeft.clamp(10.0, math.max(10.0, canvas.width - width - 10))
+        .toDouble();
+    if (left + width > maxRight) {
+      if (maxRight - left >= _minTalkWidth) {
+        width = maxRight - left;
+      } else {
+        left = math.max(10, maxRight - width);
+        if (left + width > maxRight) width = math.max(_minTalkWidth, maxRight - left);
+      }
     }
 
     final parts = <Widget>[
@@ -766,6 +801,11 @@ const _maxTalkWidth = 264.0;
 /// Head-room a bubble is assumed to need when deciding which side of a head
 /// it can live on. Two or three lines of 13pt with its padding and tail.
 const _talkRoom = 92.0;
+
+/// Below this a bubble stops being a sentence and becomes a column of
+/// syllables, so the words move out from under the chrome instead of
+/// shrinking any further.
+const _minTalkWidth = 120.0;
 
 /// One spoken thing. Gilt edge and starlight for the companion, cream for the
 /// character's own voice, ember for a real message off their phone.
@@ -970,6 +1010,7 @@ Widget conversationStackForTest({
   Size canvas = const Size(360, 700),
   bool phoneGlow = false,
   PuppetVariant? variant,
+  Rect? avoid,
 }) {
   // Given a real stage, the preview hangs the talk exactly where the shipped
   // scene hangs it — through the same geometry and the same cover fit. Given
@@ -994,6 +1035,7 @@ Widget conversationStackForTest({
     enter: 1,
     pulse: 0.5,
     phoneGlow: phoneGlow,
+    avoid: avoid,
   );
 }
 
