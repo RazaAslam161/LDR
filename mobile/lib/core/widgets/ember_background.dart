@@ -90,7 +90,7 @@ class _EmberBackgroundWishesState extends State<EmberBackgroundWishes> {
   /// routes covered by an opaque one, and (since the root builder wraps the
   /// tree) the app's own lock and stealth covers turn it off too.
   void _sync() {
-    final want = TickerMode.of(context);
+    final want = TickerMode.valuesOf(context).enabled;
     if (want == _claimed) return;
     _claimed = want;
     EmberBackground.wishing.value += want ? 1 : -1;

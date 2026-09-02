@@ -21,11 +21,9 @@ class FaqSection {
   final List<FaqEntry> entries;
 }
 
-/// The one answer that genuinely differs by channel: a Play install updates
-/// through Play, a direct-link install updates through the app itself.
-/// [selfUpdate] is UpdateService.allowed — the same flag that decides whether
-/// the app may install its own APK at all.
-List<FaqSection> milesFaq({required bool selfUpdate}) => [
+/// One answer for every install: updates come through Play. The in-app
+/// updater the direct-link build once carried is retired (BRAIN §258).
+List<FaqSection> milesFaq() => [
       const FaqSection('Getting started', [
         FaqEntry(
           'What is Miles?',
@@ -158,36 +156,18 @@ List<FaqSection> milesFaq({required bool selfUpdate}) => [
               '(Android Settings → Battery).',
         ),
       ]),
-      FaqSection('Updates', [
-        if (selfUpdate)
-          const FaqEntry(
-            'How do updates work?',
-            'From inside the app: it checks for a new version when it starts '
-                'and shows an update prompt — there’s also an “Update '
-                'available” row in Settings. One tap downloads the update '
-                '(currently the full app, roughly 220 MB, so Wi-Fi is kinder), '
-                'verifies it against a cryptographic fingerprint, and hands it '
-                'to Android’s installer. Your messages, photos and login '
-                'survive updates.\n\nThe first time, Android asks you to allow '
-                'installs from Miles — that’s its standard step for any '
-                'app that updates outside the Play Store, and Android itself '
-                'refuses any update not signed by the same key as the app you '
-                'already have.',
-          )
-        else
-          const FaqEntry(
-            'How do updates work?',
-            'Through the Play Store, like any app — automatically if you have '
-                'auto-update enabled, or from the app’s Play Store page. '
-                'Your messages, photos and login survive updates. Occasionally '
-                'a version is required to keep working with the server; the '
-                'app will tell you plainly when that happens.',
-          ),
-        const FaqEntry(
-          'How do I know if I’m up to date?',
-          'Settings → About shows your version and build number, and a '
-              '“Latest” line reading either “up to date” or the newer build '
-              'number.',
+      const FaqSection('Updates', [
+        FaqEntry(
+          'How do updates work?',
+          'Through the Play Store, like any app — automatically if you have '
+              'auto-update enabled, or from the app’s Play Store page. '
+              'Your messages, photos and login survive updates. Occasionally '
+              'a version is required to keep working with the server; the '
+              'app will tell you plainly when that happens.',
+        ),
+        FaqEntry(
+          'How do I know which version I have?',
+          'Settings → About shows your version and build number.',
         ),
       ]),
       const FaqSection('Your account and your data', [

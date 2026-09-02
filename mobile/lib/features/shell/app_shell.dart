@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/providers.dart';
-import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/core/app/root_scaffold_key.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
@@ -19,13 +18,11 @@ import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
-import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/tab_dissolve.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/gilt_nav_icon.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
-import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
@@ -153,7 +150,6 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingMemory.addListener(_onPendingMemory);
     pendingUnlink.addListener(_onPendingUnlink);
     realtimeResumed.addListener(_rearmAlwaysOn);
-    ReleaseGate.revision.addListener(_onReleaseChanged);
     // Before the first build, not after it: deciding this in a
     // post-frame callback paints the tab they left for one frame and
     // then swaps it, which is the jump this change exists to avoid.
@@ -474,7 +470,6 @@ class _AppShellState extends ConsumerState<AppShell>
   void _onReady() {
     // First: a shared link is the user's own stated intent for this launch.
     unawaited(_drainSharedLink());
-    unawaited(_maybeOfferUpdate());
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     // Foreground realtime path — works whether or not push is configured.
@@ -604,40 +599,6 @@ class _AppShellState extends ConsumerState<AppShell>
     );
   }
 
-  /// A resume re-read the gate and the answer moved. Offer the update from the
-  /// screen the user is already on — without this the re-check updates statics
-  /// nothing consults again until the next cold start, which is the whole bug.
-  void _onReleaseChanged() {
-    if (!mounted) return;
-    unawaited(_maybeOfferUpdate());
-  }
-
-  static int _offeredForBuild = 0;
-
-  /// A newer sideload build exists — offered once PER BUILD, and only when no
-  /// more important prompt (escrow, first-run permissions) already holds the
-  /// screen. The Settings row carries the same action for any launch this skips,
-  /// so nothing is lost by yielding.
-  ///
-  /// Keyed on the build rather than a bool because the gate is re-read on
-  /// resume: a long-lived process that declined build N must still be offered
-  /// N+1, and a plain "offered once per process" latch swallowed it forever.
-  Future<void> _maybeOfferUpdate() async {
-    if (_offeredForBuild == ReleaseGate.latestBuild ||
-        !UpdateService.available) {
-      return;
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    // A more important prompt (escrow, first-run permissions) is holding the
-    // screen — yield without spending the once-a-session offer, since Settings
-    // is the only other path and a later launch should still try.
-    final route = ModalRoute.of(context);
-    if (route != null && !route.isCurrent) return;
-    _offeredForBuild = ReleaseGate.latestBuild;
-    await showUpdateSheet(context);
-  }
-
   /// The one-time onboarding prompts, in sequence.
   ///
   /// Fired in parallel they land on top of one another and the user dismisses
@@ -764,7 +725,6 @@ class _AppShellState extends ConsumerState<AppShell>
     pendingMemory.removeListener(_onPendingMemory);
     pendingUnlink.removeListener(_onPendingUnlink);
     realtimeResumed.removeListener(_rearmAlwaysOn);
-    ReleaseGate.revision.removeListener(_onReleaseChanged);
     _rewrapSub?.dispose();
     _unlinkSub?.dispose();
     final ch = _reachChannel;

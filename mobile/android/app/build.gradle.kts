@@ -87,13 +87,6 @@ android {
             // having been shown what it does. The play channel no longer offers
             // them at all.
             buildConfigField("boolean", "PLAIN_DEFAULT", "true")
-            // Only this channel may install its own APK. Kept as its own flag
-            // rather than inferred from the two above, both of which have
-            // legitimately changed meaning more than once — a self-updater
-            // gated on DISGUISE_ENABLED would have started offering downloads
-            // inside a Play build during the window where that flag was true on
-            // both channels.
-            buildConfigField("boolean", "SELF_UPDATE", "true")
             // ALWAYS the debug key, and never the release one — the opposite of
             // what this used to do, for a reason that cost a shipped release.
             //
@@ -165,10 +158,6 @@ android {
             // Installs as Miles, under its own name and icon, and stays that
             // way until the owner asks otherwise.
             buildConfigField("boolean", "PLAIN_DEFAULT", "true")
-            // Never. An app that downloads and installs its own APK is a Device
-            // and Network Abuse strike, and the permission plus FileProvider
-            // that back it are declared only in src/sideload.
-            buildConfigField("boolean", "SELF_UPDATE", "false")
             // No fallback: the taskGraph check below stops the build instead of
             // handing back an artifact Play will reject.
             if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
@@ -185,6 +174,13 @@ android {
             // shrunk and is going through review anyway.
             isMinifyEnabled = false
             isShrinkResources = false
+            // Explicit, though it is AGP 8.13's default for a non-debuggable
+            // variant: the four .sym files Play does get (libapp, libflutter,
+            // libdartjni, libxeno_native) depend on it, and an AGP default
+            // change would drop them silently. It cannot add symbols for the
+            // seven prebuilt, already-stripped libs (WebRTC, Mapbox, CameraX,
+            // DataStore, libc++) — their vendors publish none (BRAIN §258).
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
             // Wired while minification is off, because R8 reads these only when
             // isMinifyEnabled is true. Without them here, flipping that flag
             // silently ran R8 on its defaults alone - which strips exactly the
@@ -292,5 +288,5 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
-// (No version pins needed — AGP 8.13 + Kotlin 2.2.0 supports the latest
+// (No version pins needed — AGP 8.13 + Kotlin 2.2.20 supports the latest
 // transitive deps pulled by the plugin chain.)

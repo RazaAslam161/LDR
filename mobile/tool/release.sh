@@ -1,40 +1,24 @@
 #!/usr/bin/env bash
-# Cut a sideload release. With --ship it is the whole thing in one command:
-# bump the build number, build, upload to R2, prove the hosted bytes are the
-# built bytes, and publish the row that makes every phone offer the update.
+# Cut a release. Gates first, then the artifact, then the proof that the Dart
+# inside it is the Dart just compiled.
 #
-#   bash tool/release.sh                  # build + hash only
-#   bash tool/release.sh --ship           # bump, build, upload, verify, publish
-#   bash tool/release.sh --upload --verify --publish   # ...without bumping
+#   bash tool/release.sh                  # sideload APK: build + hash
+#   bash tool/release.sh --bump           # bump the build number first
 #   bash tool/release.sh --play           # gates + play AAB for the Console
 #
-# Uploads with curl's built-in SigV4 against R2's S3 API and publishes through
-# PostgREST — no aws CLI, no rclone, no psql. Never put a key in this file;
-# credentials come from the environment. See
-# docs/archive/SIDELOAD-UPDATE-RUNBOOK.md (the updater is retired; --play is the live path).
+# The sideload APK is installed by hand (adb install -r); the in-app updater,
+# the R2 upload and the app_release publish step that used to live here were
+# retired on 2026-09-02 (BRAIN §258). Distribution is Play, or a cable.
 set -euo pipefail
 
-bump=false; upload=false; verify=false; publish=false; play=false
+bump=false; play=false
 for arg in "$@"; do
   case "$arg" in
-    --ship) bump=true; upload=true; verify=true; publish=true ;;
     --bump) bump=true ;;
-    --upload) upload=true ;;
-    --verify) verify=true ;;
-    --publish) publish=true ;;
     --play) play=true ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
-
-# The play artifact goes to the Console by hand; R2 and app_release are the
-# sideload channel. Mixing them would upload an .aab no phone can install.
-if $play && { $upload || $verify || $publish; }; then
-  echo "--play cannot combine with --upload/--verify/--publish (sideload only)" >&2
-  exit 1
-fi
-
-cd "$(dirname "$0")/.."   # mobile/
 
 # ── The backend the APK will carry is decided by a GITIGNORED file. ─────────
 # A sideload build pointing at staging shipped on 2026-08-28 (builds 53-55:
@@ -48,60 +32,8 @@ if ! grep -q "sopictusdonlvuezmfep" .env 2>/dev/null; then
   [ "${MILES_ALLOW_NONPROD:-0}" = "1" ] || exit 1
 fi
 
-# Credentials, if they are kept in a file rather than exported by hand.
-# tool/.release-env is gitignored and holds the MILES_* exports. It exists
-# because a non-interactive shell never sources ~/.bashrc, so an agent or a
-# cron running this would otherwise see none of them and stop at the first
-# check. Anything already in the environment wins.
-if [ -f tool/.release-env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . tool/.release-env
-  set +a
-fi
-
 APK="build/app/outputs/flutter-apk/app-sideload-release.apk"
 GATE="lib/core/app/release_gate.dart"
-
-# The object name is derived from the published URL rather than configured
-# separately. Setting them apart is how the first release broke: the script
-# uploaded news.apk while app_release pointed at Miles.apk, and every phone
-# would have been sent to a 404. One source of truth, so they cannot drift.
-if [ -n "${MILES_APK_URL:-}" ]; then
-  object="${MILES_APK_URL##*/}"
-else
-  object="${MILES_R2_OBJECT:-news.apk}"
-fi
-
-# ── Environment, checked BEFORE the ten-minute build ────────────────────────
-if $upload; then
-  for v in MILES_R2_ACCOUNT_ID MILES_R2_BUCKET MILES_R2_KEY MILES_R2_SECRET; do
-    [ -n "${!v:-}" ] || { echo "--upload needs $v set (see the runbook)" >&2; exit 1; }
-  done
-fi
-if { $verify || $publish; } && [ -z "${MILES_APK_URL:-}" ]; then
-  echo "--verify/--publish need MILES_APK_URL set to the public URL" >&2
-  exit 1
-fi
-if $publish; then
-  for v in MILES_SUPABASE_URL MILES_SUPABASE_SERVICE_KEY; do
-    [ -n "${!v:-}" ] || { echo "--publish needs $v set (see the runbook)" >&2; exit 1; }
-  done
-  # The other half of the .env guard above, on the other input from the same
-  # gitignored file. That one was checked against production and this one only
-  # for non-emptiness — so a stale export writes the release row to STAGING
-  # while the script prints the production deployment as done, and every phone
-  # keeps being offered the previous build.
-  case "$MILES_SUPABASE_URL" in
-    *sopictusdonlvuezmfep*) ;;
-    *)
-      echo "REFUSING: MILES_SUPABASE_URL does not point at the PRODUCTION project." >&2
-      echo "A release row published elsewhere reaches no phone and reports success." >&2
-      echo "Publishing to another project on purpose: MILES_ALLOW_NONPROD=1" >&2
-      [ "${MILES_ALLOW_NONPROD:-0}" = "1" ] || exit 1
-      ;;
-  esac
-fi
 
 # ── 0. Gates ────────────────────────────────────────────────────────────────
 # Before the bump, deliberately. Gating after it meant a red tree still spent a
@@ -314,9 +246,8 @@ if $play; then
   echo "size   $(( bytes / 1048576 )) MB"
 
   # The stale-snapshot proof, on every libapp.so in the bundle — one ABI can
-  # be stale alone. No updater-copy assertion here: self-update is
-  # deliberately absent from the play flavor, and the buildStamp is the part
-  # that proves the Dart inside is the Dart just compiled.
+  # be stale alone. The buildStamp is what proves the Dart inside is the Dart
+  # just compiled.
   python -c "
 import sys, zipfile
 z = zipfile.ZipFile('$AAB')
@@ -374,11 +305,11 @@ bytes="$(wc -c < "$APK" | tr -d ' ')"
 echo "sha256 $sha"
 echo "size   $(( bytes / 1048576 )) MB"
 
-# Prove the updater is actually IN the artifact. A build once shipped without it
-# — the code was in the tree, reachable from three call sites, and simply not in
-# the APK — so both phones sat on a release that could never offer another one,
-# and nothing anywhere said so. The string is a literal in update_sheet.dart; if
-# Dart tree-shook the file away or the build used a stale snapshot, it is absent.
+# The stale-snapshot proof, on every libapp.so in the APK. Gradle re-stamps
+# versionCode while Flutter can reuse a cached AOT snapshot, and releases went
+# out that way carrying build-31 code under fresh version numbers. The literal
+# comes from ReleaseGate.buildStamp; if the build used a stale snapshot, the
+# number inside is the old one.
 python -c "
 import sys, zipfile
 z = zipfile.ZipFile('$APK')
@@ -386,103 +317,26 @@ sos = [n for n in z.namelist() if n.endswith('libapp.so')]
 if not sos:
     print('no libapp.so in the APK'); sys.exit(1)
 stamp = b'miles-build-' + b'$pubspec_build'
-# Every ABI, not sos[0]: the universal APK carries three snapshots and one
+# Every ABI, not sos[0]: a universal APK carries several snapshots and one
 # can be stale alone.
 for n in sos:
-    blob = z.read(n)
-    if stamp not in blob:
+    if stamp not in z.read(n):
         print('STALE SNAPSHOT: ' + n + ' has no ' + stamp.decode())
         sys.exit(1)
-    if b'Update available' not in blob:
-        print('UPDATER MISSING from ' + n + '. The literal comes from')
-        print('update_sheet.dart; if that copy was reworded, update this')
-        print('gate in the same change - it is load-bearing, not decorative.')
-        sys.exit(1)
-print('checked %d libapp.so: stamped %s, updater present' % (len(sos), stamp.decode()))
+print('checked %d libapp.so, all stamped %s' % (len(sos), stamp.decode()))
 " || {
-  echo "REFUSING TO SHIP THIS ARTIFACT." >&2
-  echo "Either update_sheet.dart is missing from libapp.so, or the Dart in it" >&2
-  echo "is NOT the Dart just compiled. Gradle re-stamps versionCode while" >&2
-  echo "Flutter can reuse a cached AOT snapshot, and releases went out that" >&2
-  echo "way carrying build-31 code under fresh version numbers." >&2
+  echo "REFUSING THIS ARTIFACT — the Dart inside is NOT build $pubspec_build." >&2
   echo "Run: flutter clean && bash tool/release.sh ..." >&2
   exit 1
 }
-echo "self-updater present, and the snapshot really is build $pubspec_build"
+echo "the snapshot really is build $pubspec_build"
 
 # The sideload copy. This script uploaded to R2 but never refreshed it, so
-# E:\LDR\Miles.apk kept whatever was last copied by hand — a file named like the
+# Miles.apk at the repo root kept whatever was last copied by hand — a file named like the
 # latest release and one build behind it. Build 39 went to R2 while Miles.apk
 # still held 38, which is the shipped-artifact-is-not-the-claimed-artifact bug
 # one layer out from the stale snapshot above. Copied only after the stamp check
 # passes, so a refused artifact can never land here.
 cp "$APK" ../Miles.apk
 echo "sideload copy: Miles.apk is build $pubspec_build"
-
-# ── 3. Upload ───────────────────────────────────────────────────────────────
-if $upload; then
-  endpoint="https://${MILES_R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${MILES_R2_BUCKET}/${object}"
-  echo "uploading to r2://${MILES_R2_BUCKET}/${object} ..."
-  # -f so an HTTP error is a failure rather than an error page written over the
-  # release.
-  curl -fsS --aws-sigv4 "aws:amz:auto:s3" \
-    --user "${MILES_R2_KEY}:${MILES_R2_SECRET}" \
-    -H "Content-Type: application/vnd.android.package-archive" \
-    -T "$APK" "$endpoint"
-  echo "uploaded"
-fi
-
-# ── 4. Prove what is actually being served ──────────────────────────────────
-# The check that stops a fleet-brick. A blocked phone's only way back is this
-# URL, so truncated, stale or wrong bytes there strand it with no second door.
-if $verify; then
-  echo "verifying $MILES_APK_URL ..."
-  served="$(curl -fsSL "$MILES_APK_URL" | sha256sum | cut -d' ' -f1)"
-  if [ "$served" != "$sha" ]; then
-    echo "MISMATCH — that URL is serving $served, this build is $sha." >&2
-    echo "Not publishing. Do not raise min_build." >&2
-    exit 1
-  fi
-  echo "verified: the hosted bytes are this build"
-fi
-
-# ── 5. Publish ──────────────────────────────────────────────────────────────
-# Only latest_build moves, which makes this an OPTIONAL update. min_build is the
-# hard gate and is never touched here: raising it strands every older phone on
-# the block screen, and that is a decision to take deliberately, after watching
-# a real phone update itself.
-if $publish; then
-  echo "publishing to app_release ..."
-  published="$(curl -fsS -X PATCH "${MILES_SUPABASE_URL%/}/rest/v1/app_release?id=eq.true" \
-    -H "apikey: ${MILES_SUPABASE_SERVICE_KEY}" \
-    -H "Authorization: Bearer ${MILES_SUPABASE_SERVICE_KEY}" \
-    -H "Content-Type: application/json" \
-    -H "Prefer: return=representation" \
-    -d "{\"latest_build\":${pubspec_build},\"latest_version_name\":\"${version_name}\",\"apk_url\":\"${MILES_APK_URL}\",\"apk_sha256\":\"${sha}\"}")"
-  # The representation was ASKED for and then thrown away, which made exit 0 the
-  # only evidence the release row moved — and a PATCH whose filter matches
-  # nothing is a 200 with an empty array. Read the postcondition instead: the
-  # row must come back carrying the build we just wrote.
-  case "$(printf '%s' "$published" | tr -d ' \r\n')" in
-    *"\"latest_build\":${pubspec_build}"*) ;;
-    *)
-      echo "PATCH touched no row carrying build ${pubspec_build} — app_release is unchanged." >&2
-      echo "server said: ${published:-<empty>}" >&2
-      exit 1
-      ;;
-  esac
-  echo "published build $pubspec_build — phones will offer it on their next cold start"
-else
-  cat <<SQL
-
-Publish it by running this against production:
-
-  update public.app_release set
-    latest_build        = $pubspec_build,
-    latest_version_name = '$version_name',
-    apk_url             = '${MILES_APK_URL:-<the public URL of $object>}',
-    apk_sha256          = '$sha'
-  where id = true;
-
-SQL
-fi
+echo "install it with: adb install -r $APK"

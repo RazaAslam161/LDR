@@ -37,12 +37,18 @@ class UnlinkMessages {
 class UnlinkRepository {
   UnlinkRepository._();
 
+  /// The fetch the screen polls, swappable so a widget test with no Supabase
+  /// behind it is not a fetch that throws every fifteen seconds. Not marked
+  /// visible-for-testing: the screen calls it, the tests reassign it.
+  static Future<UnlinkMessages> Function(UnlinkRow row) fetchMessages =
+      fetchMessagesLive;
+
   /// One decoded phone message.
   ///
   /// [sender] tells the UI whose bubble it is; [failedToOpen] marks a row
   /// whose bytes arrived but would not decrypt — counted and SHOWN as such,
   /// never silently dropped (parsed N of M is a finding, §208 law).
-  static Future<UnlinkMessages> fetchMessages(UnlinkRow row) async {
+  static Future<UnlinkMessages> fetchMessagesLive(UnlinkRow row) async {
     final rows = await SupabaseService.client
         .from('unlink_messages')
         .select()

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/widgets/media_viewer.dart';
 import 'package:miles/features/profile/shared_media_window.dart';
@@ -17,6 +18,11 @@ import 'package:miles/features/profile/shared_media_window.dart';
 /// owns the horizontal drag — and none of that should depend on a signature
 /// or on bytes arriving.
 void main() {
+  // The failed state on purpose (see the file comment), without the throw
+  // that used to reach ErrorReporter for every page the pager warmed.
+  setUp(() => MediaUrls.signForTest = (_, __) async => null);
+  tearDown(() => MediaUrls.signForTest = null);
+
   Message photo(int seq) => Message(
         id: 'm$seq',
         senderId: 'them',

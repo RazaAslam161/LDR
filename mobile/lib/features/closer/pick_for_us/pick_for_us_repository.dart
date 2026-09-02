@@ -118,7 +118,7 @@ class PickForUsRepository {
     final out = <DiceRoll>[];
     Object? firstError;
     StackTrace? firstStack;
-    for (final r in rows as List) {
+    for (final r in rows) {
       try {
         out.add(DiceRoll(
           id: JsonUtils.parseString(r['id']),
@@ -140,7 +140,7 @@ class PickForUsRepository {
       ErrorReporter.report(
         ParseShortfall('dice rolls',
             parsed: out.length,
-            of: (rows as List).length,
+            of: rows.length,
             first: '${firstError.runtimeType}',),
         firstStack,
         // Its own kind, not a shared 'pick-for-us': dedup keys on kind
@@ -166,7 +166,7 @@ class PickForUsRepository {
     var parsed = 0;
     Object? firstError;
     StackTrace? firstStack;
-    for (final row in rows as List) {
+    for (final row in rows) {
       try {
         final tier = JsonUtils.parseString(row['tier']);
         final uid = JsonUtils.parseString(row['user_id']);
@@ -185,7 +185,7 @@ class PickForUsRepository {
       ErrorReporter.report(
         ParseShortfall('dice tier consents',
             parsed: parsed,
-            of: (rows as List).length,
+            of: rows.length,
             first: '${firstError.runtimeType}',),
         firstStack,
         kind: 'pick-for-us-consents',

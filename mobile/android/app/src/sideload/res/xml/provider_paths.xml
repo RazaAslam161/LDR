@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- The only path the FileProvider shares: the internal cache dir that Flutter's
-     getTemporaryDirectory() maps to (context.getCacheDir()), where UpdateService
-     writes update_<build>.apk. Nothing else is exposed. -->
-<paths>
-    <cache-path name="update" path="." />
-</paths>

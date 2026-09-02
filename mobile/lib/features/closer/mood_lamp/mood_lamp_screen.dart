@@ -63,7 +63,7 @@ class _MoodLampScreenState extends ConsumerState<MoodLampScreen> {
 
   void _pickColor(Color c) {
     setState(() => _myColor = c);
-    final rgb = (c.red << 16) | (c.green << 8) | c.blue;
+    final rgb = c.toARGB32() & 0x00FFFFFF;
 
     final me = ref.read(sessionProvider).profile;
     _channel?.channel?.sendBroadcastMessage(

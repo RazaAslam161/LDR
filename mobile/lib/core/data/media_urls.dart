@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Chat photos, voice notes, GIFs, avatars and check-in snaps. Private
 /// since the audit found 255 of them served without authentication.
@@ -69,9 +70,9 @@ class MediaUrls {
     try {
       final signed = await SupabaseService.client.storage
           .from(bucket)
-          .createSignedUrls(need, _ttl.inSeconds);
+          .createSignedUrlsResult(need, _ttl.inSeconds);
       final expires = DateTime.now().add(_ttl);
-      for (final s in signed) {
+      for (final s in signed.whereType<SignedUrlSuccess>()) {
         _cache[_key(bucket, s.path)] = _Signed(s.signedUrl, expires);
       }
     } catch (e) {
@@ -81,10 +82,20 @@ class MediaUrls {
     }
   }
 
+  /// Stands in for the signing call under test. A widget test has no
+  /// Supabase behind it, and without this every page a pager warms threw a
+  /// LateInitializationError into ErrorReporter — 153 lines per run, none of
+  /// them about the pager. Returning null here is the exact failed state
+  /// those tests are built on.
+  @visibleForTesting
+  static Future<String?> Function(String bucket, String path)? signForTest;
+
   /// Sign one object, for the paths that arrive outside a page load.
   static Future<String?> sign(String bucket, String path) async {
     final hit = cached(bucket, path);
     if (hit != null) return hit;
+    final seam = signForTest;
+    if (seam != null) return seam(bucket, path);
     try {
       final url = await SupabaseService.client.storage
           .from(bucket)

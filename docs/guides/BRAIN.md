@@ -21027,3 +21027,234 @@ staged count checked between them — the count was printed and ignored.
 - Nothing left uncommitted except this note.
 - CI on fcf62fd: **analyze + test: success; dependency advisories: success**
   (run 33588934986). The branch is whole again.
+
+## §258 — the rating's leftovers, done: deprecations, dynamic calls, test noise, the updater gone, toolchain floors, crash visibility, two device checks (2026-09-02)
+
+Owner: "do the worth doing points and missing ones too" (the §254-era
+rating). Six read-only readers inventoried every item first (workflow, 227
+tool calls); then one change per item, gates after each. Everything below is
+in the tree, uncommitted.
+
+### Deprecated APIs: 19 -> 3
+
+Sixteen were renames with identical bodies in the package source, applied
+verbatim: `createSignedUrls` -> `createSignedUrlsResult` + `whereType<
+SignedUrlSuccess>()` (media_urls.dart), `anonKey` -> `publishableKey`
+(supabase_service.dart), `TickerMode.of` -> `valuesOf(context).enabled` (x2),
+`setScreenBrightness`/`resetScreenBrightness` -> the `Application` forms,
+`Color.red/green/blue` -> `toARGB32() & 0x00FFFFFF` (mood lamp, bit-identical)
+and `(c.r * 255.0).round().clamp(0, 255)` (touch trace wire ints, unchanged
+on the wire), `Matrix4.scale/translate` -> `scaleByDouble/translateByDouble`
+(x4, same four values). The three left are Mapbox `cameraOptions` ->
+`viewport`: NOT a rename — `viewport` applies after onMapCreated, so the map
+would paint at the style's default camera and snap; kept, deliberately.
+
+### avoid_dynamic_calls: 35 -> 6
+
+Three root causes, not 35: `rows as List` upcasts of an already-typed
+PostgrestList in pick_for_us_repository (4 sites) and wish_jar_repository (3);
+`dynamic profile, dynamic partner` on three settings_screen helpers, now
+`Profile?` with the `as String?` casts gone. The six left are in the
+concurrent session's new partner_bust_test (a private painter read through
+`dynamic`); theirs, untouched.
+
+### Test-log noise: ~200 lines a run -> 0 of the six kinds
+
+- media_pager_test: 153 `media-sign error: LateInitializationError` lines —
+  every page the pager warmed threw into ErrorReporter. `MediaUrls.signForTest`
+  seam (returns null = the failed state the test is built on).
+- unlink_screen_test + doorstep_runtime_test: `unlink messages fetch failed`
+  on every mount and 15 s tick — `UnlinkRepository.fetchMessages` is now a
+  swappable static (`fetchMessagesLive` is the real one); the intro film is
+  latched in prefs before the mount (`latchIntro()`), so no
+  VideoPlayerController is ever created where the plugin does not exist.
+- doorstep_intro_film_test: the ONE intended failure now asserts its own log
+  line (debugPrint captured and restored inline — flutter_test checks the
+  foundation debug vars before tearDowns run).
+- chat_send_queue_test / chat_signed_out_send_test: `uploader` stubbed to a
+  named StateError; new `textSender` seam beside it for the text path; the
+  queue's SharedPreferences mocked + binding initialised (21 `persist failed`
+  lines).
+- unlink_screen_test's reachability test: a hit test at the button's centre
+  instead of a tap that ran the verb against a Supabase that is not there.
+- reactions_test outbox group: SharedPreferences mocked (MissingPlugin x2).
+Left on purpose: proximity_error_test and voice_duration_test print the
+failure they are about.
+
+### The self-updater is gone
+
+Deleted: update_service.dart, update_sheet.dart, update_service_test.dart,
+src/sideload/res/xml/provider_paths.xml, tool/.release-env.example. Removed
+from: main.dart (startup Future.wait entry, the block screen's "Update now"
+branch — the store button and 'Check again' remain), app_shell.dart (the
+resume offer), settings_screen.dart (the "Update available" row and the
+About "Latest" row; `_AboutRow.accent` with it), faq_screen/faq_text (one
+Play answer for every install; web/faq.html mirrored), release_gate.dart
+(apk_url/apk_sha256/latest_version_name out of all three column sets;
+`latestBuild` kept, informational), MainActivity.kt (isAllowed/canInstall/
+openInstallSettings/install arms), build.gradle.kts (both SELF_UPDATE
+fields), the sideload manifest (REQUEST_INSTALL_PACKAGES + FileProvider),
+release.sh (--ship/--upload/--verify/--publish, the R2 upload, the
+app_release PATCH, the load-bearing `Update available` artifact guard — the
+per-ABI buildStamp check stays). Docs: PLAY-RELEASE-RUNBOOK, THREAT-MODEL.
+The `app_release` columns apk_url/apk_sha256/latest_version_name are now
+unread by any client and stay in the DB (an additive-only repo drops them
+in a later migration if ever).
+
+### Toolchain
+
+Gradle wrapper 8.13 -> 8.14.5, Kotlin 2.2.0 -> 2.2.20 (both confirmed to
+exist upstream by the reader; AGP 8.13.0 stays — compatible). Flutter's
+"plugins that apply KGP" warning survives at any plugin version while AGP <
+9; flutter_foreground_task 11.0.1 is the only one that dropped KGP and is a
+two-major bump, not taken. `ndk { debugSymbolLevel = "SYMBOL_TABLE" }` is now
+explicit in the release buildType.
+
+### Native symbols: what is and is not fixable
+
+The seven libs without .sym (WebRTC 12 MB, Mapbox maps 13 MB + common 7 MB,
+libc++_shared, DataStore counter, two CameraX JNI helpers) ship STRIPPED in
+their AARs; AGP extracts symbols only from libs it can strip itself. The
+vendors publish none: webrtc-sdk's release assets are stripped AARs, Mapbox
+said "we do not publish symbols for NDK 27" (issue #2707, 2026-06-30),
+AndroidX publishes no native symbols. Play's "missing native debug symbols"
+warning is permanent for this app; the Flutter engine, Dart AOT, dartjni
+and mediapipe symbolicate, WebRTC/Mapbox/CameraX do not.
+
+### Crash and ANR visibility, without an SDK (the "missing entirely" item)
+
+`core/diag/exit_reasons.dart` + an `exitReasons` arm on MainActivity's
+app-level channel: on every launch, Android's own record of process deaths
+(`ActivityManager.getHistoricalProcessExitReasons`, API 30+) is read and
+what is newer than a prefs watermark is filed through ErrorReporter as
+`exit-crash` / `exit-native` / `exit-anr` / `exit-init` / `exit-resources`,
+build-stamped, with the OS description on the stack's first line and the
+ANR/tombstone trace head (API 31+) below it. The first run after this ships
+sets the watermark without filing, so an older build's death is never
+filed as the new build's. Unit-tested (exit_reasons_test.dart, 4 tests).
+Device proof: build 74, OnePlus 8 `1896b4b3` (Android 13): launch, 35 s,
+`adb shell am crash com.miles.miles`; the OS record reads `reason=4 (APP
+CRASH(EXCEPTION)) description=crash|J:0 timestamp=10:48:34.445`; relaunch;
+7 s later the edge log shows `POST /rest/v1/client_errors 201`
+(05:48:41.535Z) and the row is `build 74 / exit-crash / ProcessExit /
+stack "crash|J:0 @1788328114445"` — the instant in the stack IS the OS
+timestamp (1788328114445 ms = 05:48:34.445Z).
+
+The first attempt, on the OnePlus 7, filed nothing, and the API log says
+why: the watermark launch got 10 s before the kill and never made its
+`app_release` GET (token refresh 05:37:37.97Z, kill 05:37:50.7Z; the one
+app_release GET, 05:37:54Z, is the relaunch's). So the relaunch was the
+first run, learned the record, and the crash became the watermark. Not a
+timing accident to shrug at: the read sat below the init group and the gate
+line — two network awaits — so a launch killed before them read nothing,
+and in a crash loop no launch ever would, which is the one report a broken
+build produces. Moved (in the tree, NOT in build 74): `ExitReasons.report()`
+runs right after the error nets, before dotenv; the insert cannot land yet
+(no client), parks in the buffer, and `flushBuffered` below the gate
+delivers it in the same launch. exit_reasons_test has that case (5 tests);
+startup_order_test still holds. The handsets run the OLD placement; the
+next build proves the new one with the same three commands, and the
+OnePlus 7 gets its re-run then.
+
+### The two "missing" checks, as tools
+
+- `tool/two_phone_chat_check.py --a <serial> --b <serial>`: the §254 run,
+  repeatable — a person types one message per phone; the script proves the
+  rows cipher-only (24-byte nonce), no `chat-decrypt` row filed, both read
+  watermarks reached the newest seq, same versionCode on both phones. Needs
+  MILES_SUPABASE_SERVICE_KEY (client_errors has no client select policy).
+- `tool/perf_budget.py --serial <serial>`: median cold start of three
+  `am start -W` and PSS on Home against the rating's budgets (1500 ms /
+  150 MB). Fails today by design. Baselines: OnePlus 7 (Android 12), build 74 — cold
+  start median 1070 ms (948/1070/1219), PSS 314 MB: green on start, RED on
+  memory. OnePlus 8: not measured today — its adb link flapped through the
+  run (device/none five times in a minute) and the tool read a dead adb call
+  as "not installed"; both handset tools now exit with adb's own message
+  instead (`adb shell getprop ro.product.model failed on 1896b4b3: device
+  not found`, proven against the absent phone). Build-73 baselines for both
+  phones are in the tool's docstring.
+
+### Gates
+
+    flutter analyze --no-pub (after the last edit): 176 issues found,
+    0 errors, 0 warnings.
+    flutter test: 03:30 +1485 ~3: All tests passed! exit 0 (1484 before the
+    exit_reasons case).
+    Build 74 (cut BEFORE the exit-read reorder and the tool helper fix):
+    tool/release.sh --bump --play, then the play APK from the same
+    intermediates; libapp.so identical per ABI between AAB and APK, stamped
+    miles-build-74, no 73.
+      AAB sha256 31c52043f6928eac83db0d6173a1256219cfca9fcaded5845de7a39b3c674ce7
+      APK sha256 1baffd30cffd689a9314181401df6b5b3cfb7f5d8ef650da8f86c2b671949093
+    Installed in place on both phones, signer unchanged: OnePlus 7 a959ee2b
+    lastUpdateTime 2026-09-02 10:37:32, OnePlus 8 1896b4b3 lastUpdateTime
+    2026-09-02 10:46:20 (versionCode=74 read back on both).
+
+### Still open
+
+- Cold start and size (the rating's must-fix #2/#3): measured, not moved.
+- The early exit read is gate-green and unproven on a handset: build 74
+  carries the old placement. First thing the next build does is the
+  OnePlus 8 three-command proof above, then the same on the OnePlus 7.
+- The OnePlus 8 perf number for build 74 (its link dropped).
+- A death of build N read by build N+1's first launch after an update is
+  stamped N+1 — the record carries no version. Cheap fix if it ever
+  matters: `lastUpdateTime` from the Kotlin side, deaths older than it
+  stamped with the build stored beside the watermark.
+- Mapbox `cameraOptions` (3 deprecations) and the 6 dynamic calls in
+  partner_bust_test.
+- The Play Console pipeline and the Maps key rotation (owner).
+
+**Exact next step:** commit when asked (this is one batch; the updater
+removal is the largest single diff in it). The next build — when asked —
+re-proves the crash path on both phones before anything else.
+
+### §258 addendum 1 — the adversarial pass over the reorder found three things (2026-09-02)
+
+The rulebook's second round, over the fix itself. One read-only reviewer,
+the reorder diff and every file it touches. Three confirmed, all fixed, all
+in the tree and none in build 74:
+
+- **Channel contention.** `ReleaseGate._loadChannel` asks `'channel'` on
+  the same `miles/updater` channel under a 2 s timeout, and platform
+  messages are served in order on the Android main thread. The
+  `exitReasons` handler now runs there first and `readText()` materialised
+  a whole ANR trace (megabytes) before `.take(1900)`; overrun the 2 s and
+  a Play install lands on the block screen with no store button. Before
+  the move the two could never overlap. Fix: the handler reads 1900 chars
+  and stops (`CharArray(1900)` + one `read`), MainActivity.kt.
+- **Cap burned first.** `force: true` skipped the per-run cap check but
+  still counted toward it, so the exit rows — filed before dotenv now —
+  spent the run's five on a crash-looping handset before the app had a
+  chance to report anything of its own. Fix: `if (!force) _sent++` in
+  ErrorReporter.report; a forced row is outside the budget. No test pinned
+  the old count (grep: the export shortfall row is the only other caller).
+- **"Never throws" was only true of the channel call.** The prefs read and
+  the watermark write sat outside the try; either escaping would have
+  landed in platformDispatcher.onError — contained, but a lie in the one
+  place main() trusts it. Fix: the whole body is inside the try
+  (`report()` -> `_file(list)`), exit_reasons.dart.
+
+Not defects, noted: the buffer/flush race is loss-free (a late write is
+delivered next launch; the watermark has moved so nothing is re-read) —
+the main.dart comment now says "this launch when the write lands first,
+the next one otherwise" instead of promising the same launch. The exit
+row's description and ANR trace head now touch SharedPreferences on every
+launch with a death to report, not only on failed delivery: OS text —
+signal names, thread frames — never a message or a name. startup_order_test
+does not see `ExitReasons.report()` (it is outside the Future.wait it
+inspects), and its `checked >= 3` floor is now exactly met after the
+updater's `loadAllowed()` left the group — one more removal guts that test
+silently. Left as is; one line here is the flag.
+
+Gates after the fixes:
+
+    flutter analyze --no-pub: 176 issues found, 0 errors, 0 warnings.
+    flutter test (targeted: exit_reasons, error_buffer, startup_order,
+    data_export): 00:09 +47: All tests passed!
+    flutter test (full): 07:50 +1485 ~3: All tests passed! exit 0
+    gradlew --no-daemon -q :app:compileSideloadDebugKotlin: exit 0 (JDK 17;
+    only third-party javac Notes printed).
+
+The Kotlin change compiles; it runs on no handset yet. Build 74 on both
+phones has the pre-reorder placement and the unbounded trace read.

@@ -16,6 +16,7 @@ import 'package:miles/core/app/router.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/diag/exit_reasons.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/core/services/app_lock.dart';
@@ -24,14 +25,12 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
-import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart' show partnerScreenProvider;
 import 'package:miles/core/widgets/stealth_overlay.dart';
-import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/core/widgets/warmth_overlay.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/call/call_controller.dart';
@@ -72,6 +71,17 @@ Future<void> main() async {
     return true;
   };
 
+  // Deaths the OS remembers — a crash, a native crash, an ANR — filed by the
+  // launch after them. Read HERE, ahead of everything below that can take
+  // this launch down too: behind the init group and the gate line it needed
+  // two network round trips first, and a launch killed before them — a
+  // build that dies on its way to the first frame — read nothing, on every
+  // launch. The insert cannot land yet (no client), so the row parks in the
+  // buffer and flushBuffered, below the gate, delivers it — this launch
+  // when the write lands first, the next one otherwise. Not awaited: the
+  // first frame owes nothing to old crashes, and it never throws.
+  unawaited(ExitReasons.report());
+
   await dotenv.load();
   // An empty url/key would FormatException on every Supabase request — log
   // (masked) and fail fast with a clear message rather than a cryptic crash.
@@ -96,9 +106,6 @@ Future<void> main() async {
     // because the answer decides whether the first frame is a cover at all —
     // asking later would flash one on a build that has no disguise to show.
     DisguiseService.loadEnabled(),
-    // Whether this channel may install its own APK. Read here rather than at
-    // the point of use so the answer is settled before AppShell can offer one.
-    UpdateService.loadAllowed(),
     // One-time chore, not instrumentation: clears the retired upload flag and
     // deletes the trace file every install still carries. Runs until every
     // handset has run it once.
@@ -110,8 +117,7 @@ Future<void> main() async {
   // in that group and had therefore never once run: it threw
   // LateInitializationError into its own fail-open catch on every launch,
   // logging "gate unreachable, allowing" and taking the min_build block with
-  // it — and UpdateService.available, which needs the apkUrl only check()
-  // assigns.
+  // it.
   //
   // Both awaited, because the first frame consults both and neither has
   // anything to rebuild it later: the redirect reads TermsGate on its very
@@ -120,10 +126,11 @@ Future<void> main() async {
   // ReleaseGate.isBlocked, a plain static with no listenable.
   await Future.wait([TermsGate.load(), ReleaseGate.check()]);
   // Crash reports parked by launches that could not deliver them — signed out,
-  // offline, or dead before SupabaseService.init assigned the client. Sent now
-  // because reaching this line is the thing those launches failed to do, and
-  // below the group above so the client exists to send with. Not awaited: the
-  // first frame owes nothing to old crashes, and it never throws.
+  // offline, or dead before SupabaseService.init assigned the client — and
+  // the death record this launch read above, parked for the same reason.
+  // Sent now because reaching this line is the thing those launches failed
+  // to do, and below the group above so the client exists to send with. Not
+  // awaited: the first frame owes nothing to old crashes, and it never throws.
   unawaited(ErrorReporter.flushBuffered());
   // Not awaited: nothing before the first frame reads it, and the server-side
   // mute is the real enforcement — this copy only exists so the ring that
@@ -839,57 +846,20 @@ class _MilesAppState extends ConsumerState<MilesApp>
                         style: const TextStyle(
                             color: MilesColors.cream50, fontSize: 16, height: 1.5,),
                       ),
-                      // A blocked client can now rescue itself instead of being
-                      // told to go find an APK by hand — the whole reason the
-                      // self-updater exists. On the play build the way out is
-                      // the store listing instead: a block screen with no
-                      // button at all is a dead end on exactly the install
-                      // that must update.
+                      // On the play build the way out is the store listing: a
+                      // block screen with no button at all is a dead end on
+                      // exactly the install that must update. The self-updater
+                      // that once offered the sideload channel an in-app
+                      // download is retired (BRAIN §258); a sideload install
+                      // updates by hand, so its only control here is 'Check
+                      // again' below.
                       //
-                      // The store button is gated on the CHANNEL, never on
-                      // !available: available goes false on a sideload phone
-                      // too (slow platform call, no APK published yet), and
-                      // sending that phone to Play offers it a release-signed
-                      // package over a debug-signed install — refused, and the
-                      // uninstall "fix" wipes secure storage and the X25519
-                      // seed with it.
-                      //
-                      // An UNRESOLVED channel counts as play here. The 2s
-                      // platform timeout in ReleaseGate leaves the field at its
-                      // sideload DEFAULT without ever having been answered, and
-                      // a Play install that lost that race would otherwise
-                      // inherit the sideload dead end for the whole session.
-                      // The default itself stays sideload — that is what keeps
-                      // an unknown client on the floor min_build governs — this
-                      // only stops an unanswered question from removing the one
-                      // exit a store install has.
-                      if (UpdateService.available) ...[
-                        const SizedBox(height: 28),
-                        Builder(
-                          builder: (ctx) => ElevatedButton(
-                            onPressed: () =>
-                                showUpdateSheet(ctx, mandatory: true),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: MilesColors.ember,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 32, vertical: 14,),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),),
-                            ),
-                            child: const Text('Update now',
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.w600,),),
-                          ),
-                        ),
                       // Only a KNOWN play channel earns the store button. An
                       // unresolved channel query used to fall in here too, and
                       // a sideload install sent to the Play listing installs a
                       // different signing identity — Android replaces the app,
-                      // and the X25519 seed in its storage goes with it. The
-                      // 'Check again' button below is the exit for a client
-                      // whose channel query lost the race.
-                      ] else if (ReleaseGate.channelKnown &&
+                      // and the X25519 seed in its storage goes with it.
+                      if (ReleaseGate.channelKnown &&
                           ReleaseGate.channel == 'play') ...[
                         const SizedBox(height: 28),
                         ElevatedButton(
@@ -934,12 +904,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
                                   fontSize: 16, fontWeight: FontWeight.w600,),),
                         ),
                       ],
-                      // UNCONDITIONAL, and that is the point: both branches
-                      // above are conditional and a sideload install with no
-                      // published APK satisfies neither, so this screen could
-                      // render as an icon and a sentence with nothing to tap —
-                      // a hard requirement (update) handed to the user as a
-                      // dead control.
+                      // UNCONDITIONAL, and that is the point: the store button
+                      // above is conditional and a sideload install never earns
+                      // it, so this screen could otherwise render as an icon
+                      // and a sentence with nothing to tap — a hard requirement
+                      // (update) handed to the user as a dead control.
                       //
                       // The check is genuinely re-runnable: it re-asks the
                       // platform for a channel a 2s timeout may have left

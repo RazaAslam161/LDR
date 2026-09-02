@@ -286,13 +286,13 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
 
   Future<void> _boostBrightness() async {
     try {
-      await ScreenBrightness().setScreenBrightness(1);
+      await ScreenBrightness().setApplicationScreenBrightness(1);
     } catch (_) {}
   }
 
   Future<void> _restoreBrightness() async {
     try {
-      await ScreenBrightness().resetScreenBrightness();
+      await ScreenBrightness().resetApplicationScreenBrightness();
     } catch (_) {}
   }
 

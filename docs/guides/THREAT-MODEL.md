@@ -35,7 +35,7 @@ disguise — one of nine covers — and it holds the most private material two
 people produce. User data lives in one production Supabase project (Postgres +
 storage + realtime + edge functions, `ap-south-1`; a second project exists for
 staging and holds no user data), and the app ships through two channels:
-sideloaded APK with a self-updater, and Google Play.
+a hand-installed APK (no self-updater since 2026-09-02), and Google Play.
 
 Two structural facts drive everything below. **The app has no strangers in it**,
 so the classic open-network adversaries — spam, grooming by an unknown account,

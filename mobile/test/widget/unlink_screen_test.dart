@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,7 @@ import 'package:miles/core/widgets/tilt_parallax.dart';
 import 'package:miles/features/unlink/scene/film_library.dart';
 import 'package:miles/features/unlink/scene/scene_assets.dart';
 import 'package:miles/features/unlink/scene/scene_sync.dart';
+import 'package:miles/features/unlink/unlink_repository.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -59,6 +61,13 @@ void main() {
     // stage's parallax has no accelerometer behind it either.
     MilesSound.enabled = false;
     TiltParallax.debugDefaultSource = const Stream.empty();
+    // No Supabase behind a widget test: the phone-message poll answers empty
+    // instead of throwing on every mount and every fifteen-second tick.
+    UnlinkRepository.fetchMessages =
+        (_) async => const UnlinkMessages(items: [], failedToOpen: 0);
+    addTearDown(
+      () => UnlinkRepository.fetchMessages = UnlinkRepository.fetchMessagesLive,
+    );
   });
 
   const meId = 'aaaaaaaa-0000-0000-0000-000000000001';
@@ -115,6 +124,7 @@ void main() {
     Size size = const Size(360, 800),
   }) async {
     UnlinkState.applyRow(row);
+    latchIntro();
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     tester.view.devicePixelRatio = 1.0;
@@ -227,9 +237,14 @@ void main() {
           reason: 'the way back is below the bottom edge — the ceremony is '
               'uncancellable by anyone, which is the audit CRITICAL',);
       expect(box.top, greaterThanOrEqualTo(0));
-      // Hit-testable, not merely laid out inside the rectangle.
-      await tester.tap(finder);
-      await tester.pump();
+      // Hit-testable, not merely laid out inside the rectangle: the button's
+      // own render object is on the hit path at its centre. A real tap would
+      // run the verb against a Supabase that is not there.
+      final hit = HitTestResult();
+      tester.binding.hitTestInView(hit, tester.getCenter(finder), tester.view.viewId);
+      final button = tester.renderObject(finder);
+      expect(hit.path.any((HitTestEntry e) => e.target == button), isTrue,
+          reason: 'something above the button is eating its taps',);
     });
   });
 
@@ -462,5 +477,18 @@ void main() {
     );
     await tester.pump();
     expect(find.text('Nothing here anymore.'), findsOneWidget);
+  });
+}
+
+/// Marks the Doorstep's intro film as already seen for the ceremony
+/// [UnlinkState] currently holds, both roles. The film needs a video plugin
+/// that does not exist in a widget test — its init() threw "not implemented"
+/// on every mount — and a spent latch is a state the scene handles by design
+/// (doorstep_scene.dart: the latch is set BEFORE playback).
+void latchIntro() {
+  final at = UnlinkState.current.value!.startedAt.millisecondsSinceEpoch;
+  SharedPreferences.setMockInitialValues({
+    for (final role in const ['outside', 'inside'])
+      'doorstep_intro_${at}_$role': true,
   });
 }

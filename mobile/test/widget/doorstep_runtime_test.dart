@@ -12,6 +12,7 @@ import 'package:miles/core/widgets/tilt_parallax.dart';
 import 'package:miles/features/unlink/scene/film_library.dart';
 import 'package:miles/features/unlink/scene/scene_assets.dart';
 import 'package:miles/features/unlink/scene/scene_sync.dart';
+import 'package:miles/features/unlink/unlink_repository.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -45,6 +46,13 @@ void main() {
     UnlinkSceneSync.debugDisabled = true;
     MilesSound.enabled = false;
     TiltParallax.debugDefaultSource = const Stream.empty();
+    // No Supabase behind a widget test: the phone-message poll answers empty
+    // instead of throwing on every mount and every fifteen-second tick.
+    UnlinkRepository.fetchMessages =
+        (_) async => const UnlinkMessages(items: [], failedToOpen: 0);
+    addTearDown(
+      () => UnlinkRepository.fetchMessages = UnlinkRepository.fetchMessagesLive,
+    );
   });
 
   tearDown(() async {
@@ -87,6 +95,7 @@ void main() {
 
   Future<void> pump(WidgetTester tester, {required String initiator}) async {
     UnlinkState.applyRow(ceremony(initiator: initiator));
+    latchIntro();
     await tester.binding.setSurfaceSize(const Size(360, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     tester.view.devicePixelRatio = 1.0;
@@ -212,5 +221,18 @@ void main() {
           reason: 'reads after the await must go through the container, which '
               'outlives this widget, not through ref',);
     });
+  });
+}
+
+/// Marks the Doorstep's intro film as already seen for the ceremony
+/// [UnlinkState] currently holds, both roles. The film needs a video plugin
+/// that does not exist in a widget test — its init() threw "not implemented"
+/// on every mount — and a spent latch is a state the scene handles by design
+/// (doorstep_scene.dart: the latch is set BEFORE playback).
+void latchIntro() {
+  final at = UnlinkState.current.value!.startedAt.millisecondsSinceEpoch;
+  SharedPreferences.setMockInitialValues({
+    for (final role in const ['outside', 'inside'])
+      'doorstep_intro_${at}_$role': true,
   });
 }

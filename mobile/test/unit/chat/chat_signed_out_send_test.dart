@@ -25,9 +25,17 @@ void main() {
       File('lib/core/data/supabase_repository.dart').readAsStringSync();
 
   group('a repository throw keeps the send, a return would delete it', () {
-    setUp(ChatSendQueue.instance.clear);
+    setUp(() {
+      ChatSendQueue.instance.clear();
+      // The insert fails by NAME — the signed-out refusal this file is about —
+      // rather than with the LateInitializationError of a client that does
+      // not exist in a unit test.
+      ChatSendQueue.instance.textSender =
+          (_) async => throw StateError('not signed in');
+    });
+    tearDown(() => ChatSendQueue.instance.textSender = null);
 
-    /// No Supabase in a unit test, so the insert always throws. Let it settle.
+    /// The insert always throws (see setUp). Let it settle.
     Future<void> settle() =>
         Future<void>.delayed(const Duration(milliseconds: 50));
 

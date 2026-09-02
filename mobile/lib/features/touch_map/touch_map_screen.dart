@@ -1201,8 +1201,8 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
                     child: Transform(
                       alignment: Alignment.center,
                       transform: Matrix4.identity()
-                        ..translate(f.dx * w, f.dy * h)
-                        ..scale(f.scale),
+                        ..translateByDouble(f.dx * w, f.dy * h, 0, 1)
+                        ..scaleByDouble(f.scale, f.scale, f.scale, 1),
                       child: photoUrl != null
                           ? Image.network(photoUrl,
                               fit: BoxFit.cover,
@@ -2230,7 +2230,7 @@ class _ReactionFullCameraState extends State<_ReactionFullCamera>
       // reliable across devices than Transform.scale(scaleX: -1).
       preview = Transform(
         alignment: Alignment.center,
-        transform: Matrix4.identity()..scale(-1.0, 1, 1),
+        transform: Matrix4.identity()..scaleByDouble(-1, 1, 1, 1),
         child: preview,
       );
     }

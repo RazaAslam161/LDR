@@ -41,8 +41,7 @@ void main() {
       final steady = {
         'min_build': 1,
         'latest_build': ReleaseGate.buildNumber,
-        'apk_url': 'https://example.invalid/Miles.apk',
-      };
+        };
       ReleaseGate.applyRow(steady);
       final settled = ReleaseGate.revision.value;
 

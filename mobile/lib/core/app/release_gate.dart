@@ -27,7 +27,7 @@ class ReleaseGate {
   /// This build. Bump with every release that a server change will depend on.
   /// Kept here rather than read from pubspec because the number that matters is
   /// the one the SERVER compares against, and it has to be legible in a diff.
-  static const buildNumber = 73;
+  static const buildNumber = 74;
 
   /// The human-facing version, shown in Settings > About. Kept beside
   /// [buildNumber] and mirrored from pubspec's `version:` — the About card used
@@ -55,7 +55,7 @@ class ReleaseGate {
   ///
   /// [check] used to run once in main() into plain statics, which meant a client
   /// already running when a release was published never learned about it: the
-  /// update sheet and the block screen both read values frozen at process start.
+  /// block screen and the switches read values frozen at process start.
   /// A phone that Android keeps alive for days therefore sat on a superseded
   /// build indefinitely, and the release reached only whoever happened to cold
   /// start afterwards. That is most of a fleet, not an edge case.
@@ -69,14 +69,11 @@ class ReleaseGate {
   static String get message =>
       _message ?? 'Please update to keep using the app.';
 
-  /// The newest build the server knows about, and where to get it. Read from the
-  /// same `app_release` row as the gate above so the self-updater (UpdateService)
-  /// costs no second fetch. `latestBuild` defaults to this build, so "no newer
-  /// version" is the safe answer when the column is absent.
+  /// The newest build the server knows about, from the same `app_release`
+  /// row as the gate above. Defaults to this build, so "no newer version" is
+  /// the safe answer when the column is absent. Informational since the
+  /// self-updater was retired (BRAIN §258): a change still bumps [revision].
   static int latestBuild = buildNumber;
-  static String? apkUrl;
-  static String? apkSha256;
-  static String? latestVersionName;
 
   /// Whether this fleet has been declared ready to stop writing chat message
   /// bodies in the clear.
@@ -121,7 +118,8 @@ class ReleaseGate {
   /// without a platform channel.
   static String channel = 'sideload';
 
-  /// The same native handler UpdateService talks to; it answers 'channel' on
+  /// The app-level native handler (MainActivity's 'miles/updater' channel,
+  /// named for the self-updater it once also served); it answers 'channel' on
   /// both flavours.
   static const _updater = MethodChannel('miles/updater');
   static bool _channelKnown = false;
@@ -184,18 +182,16 @@ class ReleaseGate {
     // Settled before the row is read — the row's meaning depends on it.
     await _loadChannel();
     // PostgREST 400s the WHOLE select when ONE column is missing, and a
-    // swallowed 400 here would not fail open — it would turn the updater off:
-    // apkUrl/latestBuild never load, UpdateService.available stays false, and
-    // the sideload fleet quietly loses its only update channel. So the column
-    // list degrades in steps, newest column first, and each step gives up only
-    // what the environment below it cannot answer.
+    // swallowed 400 here would not fail open — it would silently drop every
+    // switch this row carries (min_build, chat_cipher_only, ui_sound_kill) on
+    // an environment that lacks the newest column. So the column list degrades
+    // in steps, newest column first, and each step gives up only what the
+    // environment below it cannot answer.
     const withSoundKill = 'min_build, min_build_play, latest_build, message, '
-        'apk_url, apk_sha256, latest_version_name, chat_cipher_only, '
-        'ui_sound_kill';
+        'chat_cipher_only, ui_sound_kill';
     const withCipher = 'min_build, min_build_play, latest_build, message, '
-        'apk_url, apk_sha256, latest_version_name, chat_cipher_only';
-    const legacy = 'min_build, latest_build, message, '
-        'apk_url, apk_sha256, latest_version_name';
+        'chat_cipher_only';
+    const legacy = 'min_build, latest_build, message';
     const columnSets = [withSoundKill, withCipher, legacy];
     try {
       await _readRow(columnSets).timeout(budget);
@@ -250,9 +246,6 @@ class ReleaseGate {
     _blocked = buildNumber < min;
     _message = row['message'] as String?;
     latestBuild = (row['latest_build'] as num?)?.toInt() ?? buildNumber;
-    apkUrl = row['apk_url'] as String?;
-    apkSha256 = row['apk_sha256'] as String?;
-    latestVersionName = row['latest_version_name'] as String?;
     // `== true`, not a cast: the fallback select above omits this column
     // entirely, so on a rolled-back or fresh environment the key is absent and
     // this must read false. Anything other than an explicit true keeps chat

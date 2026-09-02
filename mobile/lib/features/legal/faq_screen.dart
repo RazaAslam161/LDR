@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/legal/faq_text.dart';
 
@@ -11,7 +10,7 @@ class FaqScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sections = milesFaq(selfUpdate: UpdateService.allowed);
+    final sections = milesFaq();
     return Scaffold(
       backgroundColor: MilesColors.night,
       appBar: AppBar(title: const Text('FAQ')),

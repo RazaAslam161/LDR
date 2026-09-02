@@ -13,7 +13,7 @@ class SupabaseService {
   static Future<void> init() async {
     await Supabase.initialize(
       url: dotenv.get(MilesConfig.supabaseUrlKey),
-      anonKey: dotenv.get(MilesConfig.supabaseAnonKeyKey),
+      publishableKey: dotenv.get(MilesConfig.supabaseAnonKeyKey),
       debug: false,
       // Every request gets a ceiling. Without this a stalled socket on a poor
       // connection leaves whichever screen is awaiting it spinning forever,

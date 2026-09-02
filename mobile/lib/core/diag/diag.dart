@@ -61,7 +61,9 @@ class ErrorReporter {
   /// The data export's single end-of-run shortfall row is why it exists: a
   /// run failing across hundreds of items shares its broken backend with the
   /// rest of the app, so by the time that one summary row is built the cap
-  /// is usually already spent on the same outage's other reports.
+  /// is usually already spent on the same outage's other reports. A forced
+  /// row is outside the budget, not the first to spend it: the exit read
+  /// files its rows before anything else in main() has run.
   static void report(
     Object error,
     StackTrace? stack, {
@@ -81,7 +83,7 @@ class ErrorReporter {
     // inside Message.fromJson with the same type and first frame, and one
     // must not suppress the other for the whole run.
     if (!_seen.add('$kind\n$type\n${trace.split('\n').first}')) return;
-    _sent++;
+    if (!force) _sent++;
 
     final detail = _detail(error);
     final row = <String, Object?>{

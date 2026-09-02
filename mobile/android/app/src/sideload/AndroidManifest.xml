@@ -6,30 +6,9 @@
          Behavior under Play policy, which is an account strike rather than a
          rejection. See src/play/AndroidManifest.xml for the honest one. -->
 
-    <!-- In-app self-update. There is no store for this channel, so the app
-         installs its own updates (UpdateService + the miles/updater channel).
-         Deliberately declared HERE and not in main: an app that downloads and
-         installs its own APK is a Device and Network Abuse strike on Play, so
-         the play channel must never carry this permission or the FileProvider. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
     <application
         android:label="Miles"
         android:icon="@mipmap/ic_launcher_play">
-
-        <!-- Hands the downloaded APK to the system installer as a content:// URI.
-             Authority matches MainActivity's install(): "$packageName.fileprovider".
-             Paths in src/sideload/res/xml/provider_paths.xml expose only the cache
-             dir getTemporaryDirectory() writes to. -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths" />
-        </provider>
 
         <!-- ── Launcher identities ───────────────────────────────────────────
              One alias per identity the user can choose; MainActivity.kt enables

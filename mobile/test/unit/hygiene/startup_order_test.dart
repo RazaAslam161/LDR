@@ -12,9 +12,8 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// `ReleaseGate.check()` sat in that list for thirty-odd builds. Its own
 /// fail-open catch swallowed the error and logged "gate unreachable, allowing"
-/// on every launch, so nothing ever surfaced: the min_build gate, the block
-/// screen, and UpdateService — which needs the `apkUrl` only `check()` assigns
-/// — were dead the whole time, and a fleet that looked gated was not.
+/// on every launch, so nothing ever surfaced: the min_build gate and the block
+/// screen were dead the whole time, and a fleet that looked gated was not.
 ///
 /// The failure is silent by construction. That is why it gets a test and not a
 /// comment.

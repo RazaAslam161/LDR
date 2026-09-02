@@ -12,6 +12,9 @@ import 'package:uuid/uuid.dart';
 /// One upload+insert — the real one, or a fake in a test.
 typedef SendOne = Future<void> Function(PendingSend send);
 
+/// One text insert — the real one, or a fake in a test.
+typedef SendText = Future<void> Function(PendingText send);
+
 /// A send that has been accepted from the user but has not landed yet.
 class PendingSend {
   PendingSend({
@@ -132,6 +135,10 @@ class ChatSendQueue extends ChangeNotifier {
   /// path that can only ever fail (no Supabase) or only ever succeed.
   @visibleForTesting
   SendOne? uploader;
+
+  /// The text insert, swappable for the same reason as [uploader].
+  @visibleForTesting
+  SendText? textSender;
 
   /// Sends still in flight or failed, oldest first.
   List<PendingSend> get pending => List.unmodifiable(_pending);
@@ -410,12 +417,7 @@ class ChatSendQueue extends ChangeNotifier {
 
   Future<void> _runText(PendingText send) async {
     try {
-      await ChatRepository.sendText(
-        send.coupleId,
-        send.body,
-        id: send.id,
-        replyToId: send.replyToId,
-      );
+      await (textSender ?? _sendText)(send);
       // Landed. The DB echo carries the same id, so the chat reconciles the
       // optimistic bubble rather than showing it twice.
       _text.removeWhere((s) => s.id == send.id);
@@ -427,6 +429,13 @@ class ChatSendQueue extends ChangeNotifier {
     }
     _changed();
   }
+
+  static Future<void> _sendText(PendingText send) => ChatRepository.sendText(
+        send.coupleId,
+        send.body,
+        id: send.id,
+        replyToId: send.replyToId,
+      );
 
   static Future<void> _upload(PendingSend send) async {
     if (send.kind == 'file') {

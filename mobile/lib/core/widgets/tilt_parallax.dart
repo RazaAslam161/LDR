@@ -109,7 +109,7 @@ class _TiltParallaxState extends State<TiltParallax>
   void _sync() {
     final want = _resumed &&
         !MilesMotion.off(context) &&
-        TickerMode.of(context); // false under a covered/inactive route
+        TickerMode.valuesOf(context).enabled; // false under a covered/inactive route
     if (want && _sub == null) {
       _sub = (widget.debugSource ??
               TiltParallax.debugDefaultSource ??

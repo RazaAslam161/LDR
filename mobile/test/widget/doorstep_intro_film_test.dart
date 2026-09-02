@@ -63,10 +63,19 @@ void main() {
     // been set BEFORE the attempt, so a crash mid-film can never earn the
     // user a rewatch.
     SharedPreferences.setMockInitialValues({});
+    // The failure is the subject here, so its log line is asserted rather
+    // than left as noise in the run.
+    final saved = debugPrint;
+    final seen = <String?>[];
+    debugPrint = (m, {wrapWidth}) => seen.add(m);
     final r = row();
     await tester.pumpWidget(host(r));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
+    // Restored HERE, not in a tearDown: the framework asserts every
+    // foundation debug variable is back before tearDowns run.
+    debugPrint = saved;
+    expect(seen, contains(startsWith('doorstep: intro failed to play')));
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool(latchKey(r)), isTrue,

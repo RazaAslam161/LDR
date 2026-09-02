@@ -16,7 +16,7 @@ disabled by default and opt-in from Settings; see [`docs/guides/disguises.md`](d
 | `mobile/lib/features/` | One directory per feature. Screens, controllers and repositories stay together. |
 | `mobile/test/` | Unit and widget tests, including the hygiene suite that asserts the repo's shape. |
 | `mobile/third_party/flutter_webrtc/` | The one vendored dependency, patched in one Java file (`Miles patch` markers). Android only. |
-| `mobile/tool/` | Release script, dependency audit, icon and art generators. |
+| `mobile/tool/` | Release script, dependency audit, icon and art generators, and the two handset checks: `two_phone_chat_check.py` (E2EE both ways, DB as oracle) and `perf_budget.py` (cold start and memory budgets). |
 | `supabase/migrations/` | The database, in replay order. The **only** place DDL belongs. |
 | `supabase/functions/` | Edge Functions (Deno). |
 | `supabase/diagnostics/` | Read-only SQL for investigating a live project. Never applied. |

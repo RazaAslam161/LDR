@@ -41,7 +41,7 @@ This reverses what this section said until 2026-08-17. The owner chose it
 Console form:**
 
 - `mobile/android/app/build.gradle.kts` → `create("play")` sets
-  `DISGUISE_ENABLED = true`, `PLAIN_DEFAULT = true`, `SELF_UPDATE = false`.
+  `DISGUISE_ENABLED = true`, `PLAIN_DEFAULT = true`.
 - `mobile/android/app/src/play/AndroidManifest.xml` **keeps all nine cover
   activity-aliases** — ten aliases in total. `AliasMiles` is
   `android:enabled="true"`; the nine covers (`News`, `Calculator`, `Notes`,
@@ -77,9 +77,9 @@ about 3 seconds**. That sentence goes in the Console App access notes verbatim.
 ### 0.2 One app, two build channels — not two products
 
 `sideload` and `play` are packaging of the same app. `sideload` is the universal
-APK the two test handsets already run (R8 off, `SELF_UPDATE = true`); `play` is
-the AAB that ships (R8 on, `SELF_UPDATE = false`, no self-updater at the
-manifest, BuildConfig or Dart layer).
+APK the two test handsets already run (R8 off); `play` is the AAB that ships
+(R8 on). Neither carries a self-updater any more: it was removed on
+2026-09-02 (BRAIN §258); a sideload install updates by cable.
 
 The one hard consequence: **they are signed by different certificates, so
 Android will not update one over the other.** That is a user-migration problem

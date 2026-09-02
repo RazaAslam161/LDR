@@ -20,7 +20,6 @@ import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
-import 'package:miles/core/services/update_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/ember_press.dart';
@@ -30,7 +29,6 @@ import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/signed_image.dart';
-import 'package:miles/core/widgets/update_sheet.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/legal/faq_screen.dart';
@@ -794,24 +792,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            // A newer sideload build is published — the on-demand way to update,
-            // beside the once-a-launch prompt. Hidden on the play build and when
-            // nothing newer exists (UpdateService.available).
-            if (UpdateService.available) ...[
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.system_update,
-                    color: MilesColors.ember,),
-                title: const Text('Update available'),
-                subtitle: Text(
-                  ReleaseGate.latestVersionName != null
-                      ? 'Install version ${ReleaseGate.latestVersionName}'
-                      : 'Install the latest version',
-                ),
-                onTap: () => showUpdateSheet(context),
-              ),
-              const SizedBox(height: 8),
-            ],
             ...switch (widget.page) {
               SettingsPage.root => _rootGroups(profile, partner),
               SettingsPage.profile => _profilePage(profile, partner),
@@ -832,13 +812,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// VALUE at the end of its own row ("On", "Asia/Karachi", "Backup on"), so a
   /// row explains itself without a header above it. Recovered from build 52;
   /// see docs/archive/BUILD-52-AUDIT.md.
-  List<Widget> _rootGroups(dynamic profile, dynamic partner) => [
+  List<Widget> _rootGroups(Profile? profile, Profile? partner) => [
         _ProfileCard(
-          name: profile?.displayName as String? ?? '',
+          name: profile?.displayName ?? '',
           pairState: partner == null
               ? 'Not linked yet. Pair with your partner to share this app'
               : 'Paired with ${partner.displayName}',
-          avatarUrl: _localAvatarUrl ?? profile?.avatarUrl as String?,
+          avatarUrl: _localAvatarUrl ?? profile?.avatarUrl,
           onTap: () => context.push('/app/settings/profile'),
         ),
         _SettingsGroup(children: [
@@ -885,7 +865,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             icon: Icons.schedule,
             title: 'Timezone',
             subtitle: 'Used for the countdown & sky',
-            value: profile?.timezone.replaceAll('_', ' ') as String? ?? '—',
+            value: profile?.timezone.replaceAll('_', ' ') ?? '—',
             onTap: _changeTimezone,
           ),
         ],),
@@ -926,7 +906,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 null => 'A code you both compare to verify your encryption',
               },
               onTap: () =>
-                  showSecurityCodeDialog(context, partnerId: partner?.id as String?),
+                  showSecurityCodeDialog(context, partnerId: partner?.id),
             ),
             _SettingsRow(
               icon: Icons.location_on_outlined,
@@ -1006,7 +986,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   /// only once both agree, so drawing the switch from it made a recorded
   /// consent look like a rejected one and left the waiting member holding the
   /// single control that could only ever say yes again.
-  Widget _closerRow(dynamic partner) {
+  Widget _closerRow(Profile? partner) {
     const icon = Icons.favorite_border;
     final error = _consentError;
     if (error != null) {
@@ -1029,7 +1009,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         subtitle: 'Checking who has turned it on…',
       );
     }
-    final name = partner?.displayName as String?;
+    final name = partner?.displayName;
     final them =
         (name == null || name.trim().isEmpty) ? 'your partner' : name.trim();
     // The server's count of live members, not the session's partner: the
@@ -1061,7 +1041,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     );
   }
 
-  List<Widget> _profilePage(dynamic profile, dynamic partner) => [
+  List<Widget> _profilePage(Profile? profile, Profile? partner) => [
         Center(
           child: Semantics(
             button: true,
@@ -1072,8 +1052,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             child: EmberPress(
               onTap: _changingAvatar ? null : _changeAvatar,
               child: _AvatarEditor(
-                url: _localAvatarUrl ?? profile?.avatarUrl as String?,
-                name: profile?.displayName as String? ?? '',
+                url: _localAvatarUrl ?? profile?.avatarUrl,
+                name: profile?.displayName ?? '',
                 busy: _changingAvatar,
               ),
             ),
@@ -1107,8 +1087,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             children: [
               _SettingsRow(
                 icon: Icons.favorite,
-                title: partner.displayName as String,
-                subtitle: partner.timezone.replaceAll('_', ' ') as String,
+                title: partner.displayName,
+                subtitle: partner.timezone.replaceAll('_', ' '),
               ),
               // The sheet owns every word of the unpair ceremony, including
               // the confirmation. A row that restates it here is the copy
@@ -1349,23 +1329,6 @@ class _AboutCard extends StatelessWidget {
               ],
             ),
           ),
-          // Split out of the const block because it reads runtime state. What
-          // the release check actually came back with: "no prompt appeared" was
-          // three separate causes over two days — a stale snapshot, a channel
-          // flag, and a version already current — and from the outside all
-          // three look identical. This says which.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: _AboutRow(
-              label: 'Latest',
-              value: ReleaseGate.apkUrl == null
-                  ? 'not reachable'
-                  : ReleaseGate.latestBuild > ReleaseGate.buildNumber
-                      ? '${ReleaseGate.latestBuild} · update ready'
-                      : 'up to date',
-              accent: ReleaseGate.latestBuild > ReleaseGate.buildNumber,
-            ),
-          ),
           const SizedBox(height: 14),
           const Divider(height: 1, thickness: 1, color: MilesColors.hairline),
 
@@ -1534,15 +1497,10 @@ class _AboutRow extends StatelessWidget {
   const _AboutRow({
     required this.label,
     required this.value,
-    this.accent = false,
   });
 
   final String label;
   final String value;
-
-  /// Draws the value in ember. Used for the one row that is an invitation
-  /// rather than a fact — an update waiting to be installed.
-  final bool accent;
 
   @override
   Widget build(BuildContext context) {
@@ -1570,10 +1528,10 @@ class _AboutRow extends StatelessWidget {
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                color: accent ? MilesColors.ember : MilesColors.cream50,
+              style: const TextStyle(
+                color: MilesColors.cream50,
                 fontSize: 12.5,
-                fontWeight: accent ? FontWeight.w600 : FontWeight.w500,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),

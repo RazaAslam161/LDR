@@ -205,7 +205,7 @@ class WishJarRepository {
 
     final out = <WishEntry>[];
     var unreadable = 0;
-    for (final row in rows as List) {
+    for (final row in rows) {
       try {
         final plain = await CryptoCore.decryptString(
           _unpack(row['ciphertext'], row['nonce']),
@@ -247,7 +247,7 @@ class WishJarRepository {
         .eq('author', partnerId);
 
     final out = <String>{};
-    for (final row in rows as List) {
+    for (final row in rows) {
       for (final h in (row['tag_hashes'] as List? ?? [])) {
         out.add(h.toString());
       }
@@ -267,7 +267,7 @@ class WishJarRepository {
         .eq('author', myId);
 
     final out = <String>{};
-    for (final row in rows as List) {
+    for (final row in rows) {
       for (final h in (row['tag_hashes'] as List? ?? [])) {
         out.add(h.toString());
       }

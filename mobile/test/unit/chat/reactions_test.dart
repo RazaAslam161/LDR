@@ -10,6 +10,7 @@ import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/widgets/reaction_bar.dart';
 import 'package:miles/features/chat/widgets/reaction_chips.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Emoji reactions, and the four properties the feature is actually about:
@@ -595,6 +596,10 @@ void main() {
   });
 
   group('the outbox', () {
+    // The outbox persists through SharedPreferences; without the mock the
+    // real plugin channel is hit and both restore and persist log a
+    // MissingPluginException they then swallow.
+    setUp(() => SharedPreferences.setMockInitialValues({}));
     tearDown(ChatReactionOutbox.instance.endSession);
 
     test('a refusal retrying cannot fix is not retried forever', () {

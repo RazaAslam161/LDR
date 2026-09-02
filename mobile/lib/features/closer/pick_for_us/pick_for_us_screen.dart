@@ -330,7 +330,7 @@ class _PickForUsScreenState extends ConsumerState<PickForUsScreen>
                 alignment: Alignment.center,
                 transform: Matrix4.identity()
                   ..rotateZ(angle)
-                  ..scale(scale),
+                  ..scaleByDouble(scale, scale, scale, 1),
                 child: child,
               );
             },

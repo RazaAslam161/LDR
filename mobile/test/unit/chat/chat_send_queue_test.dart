@@ -3,27 +3,41 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// The queue is what stands between "the user tapped send" and the photo
 /// actually existing somewhere. It runs with no chat screen mounted and it is
 /// the only thing holding the file, so the property that matters is that it
 /// never quietly loses one.
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory tmp;
   late File photo;
 
   setUp(() {
+    // The queue persists every media send; without a mocked store that is a
+    // "Binding has not yet been initialized" line per enqueue.
+    SharedPreferences.setMockInitialValues({});
     tmp = Directory.systemTemp.createTempSync('sendq');
     photo = File('${tmp.path}/snap.jpg')..writeAsBytesSync([1, 2, 3]);
     // Each test starts from an empty queue — it is a singleton by design.
     for (final s in ChatSendQueue.instance.pending.toList()) {
       ChatSendQueue.instance.discard(s.id);
     }
+    // The upload fails by NAME. Without this seam the failure was a
+    // LateInitializationError from a Supabase client that does not exist in
+    // a unit test, which reads like a bug in the bench rather than the path
+    // being pinned.
+    ChatSendQueue.instance.uploader =
+        (_) async => throw StateError('no upload on the bench');
   });
-  tearDown(() => tmp.deleteSync(recursive: true));
+  tearDown(() {
+    ChatSendQueue.instance.uploader = null;
+    tmp.deleteSync(recursive: true);
+  });
 
-  /// Supabase is not initialised in a unit test, so the upload always throws —
-  /// which is exactly the path worth pinning. Let it settle.
+  /// The upload always throws (see setUp) — which is exactly the path worth
+  /// pinning. Let it settle.
   Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 50));
 
   test('a send appears immediately, before anything is uploaded', () {

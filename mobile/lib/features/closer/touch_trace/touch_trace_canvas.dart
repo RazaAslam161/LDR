@@ -37,9 +37,9 @@ class _TraceStroke {
   final List<_TracePoint> points;
 
   Map<String, dynamic> toJson() => {
-        'r': color.red,
-        'g': color.green,
-        'b': color.blue,
+        'r': (color.r * 255.0).round().clamp(0, 255),
+        'g': (color.g * 255.0).round().clamp(0, 255),
+        'b': (color.b * 255.0).round().clamp(0, 255),
         'points': points.map((p) => p.toJson()).toList(),
       };
 }

@@ -1,9 +1,17 @@
 # Device checklist — the Sensory Overhaul
 
-Everything in this file is a thing **this machine cannot decide**. It has no
-Android SDK, no handset, no speaker and no accelerometer, so every claim
-below was designed carefully and proven only as far as source and host tests
-reach. What follows is the shortest path from "built" to "trusted".
+Everything in this file is a thing **a host test cannot decide**: it needs a
+handset, a speaker, an accelerometer or a second phone. What follows is the
+shortest path from "built" to "trusted". Two of the checks are scripted
+(run from `mobile/` with a phone on the cable):
+
+- `python tool/perf_budget.py --serial <serial>` — cold start (median of
+  three `am start -W`) and resident memory against the rating's budgets;
+  fails today by design (BRAIN §258 records the first numbers).
+- `MILES_SUPABASE_SERVICE_KEY=... python tool/two_phone_chat_check.py --a
+  <serial> --b <serial>` — one message each way, then the database as the
+  oracle: cipher-only rows, no `chat-decrypt` error, both read watermarks
+  moved. The §254 run, repeatable.
 
 Order matters: §1 can invalidate work, §2–4 are feel, §5 is the go/no-go
 that unlocks a future performance win.

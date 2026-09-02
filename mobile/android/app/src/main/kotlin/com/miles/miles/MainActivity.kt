@@ -2,6 +2,7 @@ package com.miles.miles
 
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Intent
@@ -407,20 +408,12 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
-        // In-app self-update, sideload channel only (Dart gates on the disguise
-        // flag; the REQUEST_INSTALL_PACKAGES permission and the FileProvider that
-        // backs install() are declared in src/sideload, so this cannot run on a
-        // play build). Downloading the APK and verifying it is Dart's job — this
-        // side only asks whether we may install, sends the user to grant it, and
-        // hands a finished file to the system installer.
+        // App-level queries: which channel this build is (the release gate's
+        // floor) and the notification-channel settings deep link. The name is
+        // the self-updater's, which once lived here too and is retired.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/updater")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    // Whether this channel may self-update at all. Its own
-                    // BuildConfig flag, not inferred from the disguise ones:
-                    // those describe what the launcher shows and have already
-                    // changed meaning once.
-                    "isAllowed" -> result.success(BuildConfig.SELF_UPDATE)
                     // Which channel this build is — "sideload" or "play",
                     // verbatim from the flavour name AGP wrote into
                     // BuildConfig, so it cannot drift from the artifact the
@@ -428,6 +421,53 @@ class MainActivity : FlutterFragmentActivity() {
                     // pick which floor (min_build vs min_build_play) applies
                     // to this install.
                     "channel" -> result.success(BuildConfig.FLAVOR)
+                    // How the last processes died, from the OS's own record
+                    // (API 30+): crash, native crash, ANR, init failure. The
+                    // app ships no crash SDK on purpose, and without this a
+                    // SIGSEGV in WebRTC or Mapbox left nothing anywhere. Dart
+                    // files what is newer than its watermark to client_errors.
+                    // The trace (ANR stacks, native tombstone head) is capped;
+                    // it holds thread and frame names, never user content.
+                    "exitReasons" -> {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                            result.success(emptyList<Map<String, Any?>>())
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val am = getSystemService(ActivityManager::class.java)
+                            val list = am.getHistoricalProcessExitReasons(packageName, 0, 20)
+                                .map { info ->
+                                    val wantsTrace = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                                        (info.reason == ApplicationExitInfo.REASON_ANR ||
+                                            info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE)
+                                    // The head of the trace, read as such: an
+                                    // ANR trace can run to megabytes, and this
+                                    // handler shares the main thread with the
+                                    // release gate's 2 s 'channel' call.
+                                    val trace = if (wantsTrace) {
+                                        try {
+                                            info.traceInputStream?.bufferedReader()?.use { r ->
+                                                val head = CharArray(1900)
+                                                val n = r.read(head)
+                                                if (n > 0) String(head, 0, n) else null
+                                            }
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                    } else null
+                                    mapOf(
+                                        "reason" to info.reason,
+                                        "description" to info.description,
+                                        "timestamp" to info.timestamp,
+                                        "importance" to info.importance,
+                                        "trace" to trace,
+                                    )
+                                }
+                            result.success(list)
+                        } catch (e: Exception) {
+                            result.error("exit_reasons_failed", e.javaClass.simpleName, null)
+                        }
+                    }
                     // Android's own per-notification-type controls (sound,
                     // vibration, importance) already exist as channel pages in
                     // system settings; this deep-links straight to one instead
@@ -465,53 +505,6 @@ class MainActivity : FlutterFragmentActivity() {
                             result.success(null)
                         } catch (e: Exception) {
                             result.error("settings_failed", e.javaClass.simpleName, null)
-                        }
-                    }
-                    "canInstall" -> {
-                        result.success(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                packageManager.canRequestPackageInstalls()
-                            } else {
-                                true
-                            }
-                        )
-                    }
-                    "openInstallSettings" -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startActivity(
-                                Intent(
-                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                    Uri.parse("package:$packageName")
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                        result.success(null)
-                    }
-                    "install" -> {
-                        val path = call.argument<String>("path")
-                        if (path.isNullOrBlank()) {
-                            result.error("bad_args", "path is required", null)
-                            return@setMethodCallHandler
-                        }
-                        try {
-                            val uri = androidx.core.content.FileProvider.getUriForFile(
-                                this,
-                                "$packageName.fileprovider",
-                                java.io.File(path)
-                            )
-                            startActivity(
-                                Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(
-                                        uri,
-                                        "application/vnd.android.package-archive"
-                                    )
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                            )
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.error("install_failed", e.javaClass.simpleName, null)
                         }
                     }
                     else -> result.notImplemented()
