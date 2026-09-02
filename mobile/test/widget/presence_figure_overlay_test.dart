@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/providers.dart';
+import 'package:miles/core/app/router.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/widgets/partner_here_badge.dart';
@@ -78,16 +79,7 @@ void main() {
         for (final path in ['/app', '/app/touch', '/app/care'])
           GoRoute(
             path: path,
-            // Mounted the way main.dart mounts it: filling the screen, above
-            // the page, positioning itself.
-            builder: (_, __) => MediaQuery(
-              data: MediaQueryData(disableAnimations: animationsOff),
-              child: const Scaffold(
-                body: Stack(
-                  children: [Positioned.fill(child: PresenceFigureOverlay())],
-                ),
-              ),
-            ),
+            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
           ),
       ],
     );
@@ -109,8 +101,28 @@ void main() {
           partnerScreenProvider
               .overrideWith((ref) => _StubScreen(ref, theirScreen)),
           myScreenProvider.overrideWith((ref) => myScreen),
+          // The overlay reaches the router through this provider, never
+          // through its context — see the builder below for why.
+          routerProvider.overrideWithValue(router),
         ],
-        child: MaterialApp.router(routerConfig: router),
+        child: MaterialApp.router(
+          routerConfig: router,
+          // Mounted the way main.dart mounts it: in the app's `builder`, as a
+          // Stack sibling ABOVE the Router. This used to sit inside a route,
+          // below the Router, which is why every tap test passed while build
+          // 73 threw `_TypeError` from GoRouter.of on the real phone: there is
+          // no InheritedGoRouter above this Stack to find.
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(disableAnimations: animationsOff),
+            child: Stack(
+              children: [
+                child!,
+                const Positioned.fill(child: PresenceFigureOverlay()),
+              ],
+            ),
+          ),
+        ),
       ),
     );
     await tester.pump(const Duration(milliseconds: 300));

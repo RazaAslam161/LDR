@@ -197,7 +197,7 @@ class _PresenceFigureOverlayState extends ConsumerState<PresenceFigureOverlay>
 
     void act() => isHere
         ? ref.read(partnerScreenProvider.notifier).warm()
-        : joinPartner(context, ref, route: joinRoute, tab: joinTab);
+        : joinPartner(ref, route: joinRoute, tab: joinTab);
 
     return Align(
       alignment: Alignment.bottomLeft,

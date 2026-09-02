@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/app/router.dart';
 import 'package:miles/core/data/supabase_service.dart';
@@ -308,12 +307,17 @@ class PartnerScreenNotifier extends StateNotifier<String?> {
 /// — the AppBar badge and the standing figure — and a second copy of this
 /// would be free to drift from the first.
 void joinPartner(
-  BuildContext context,
   WidgetRef ref, {
   String? route,
   String? tab,
 }) {
-    final here = GoRouter.of(context).state.uri.path;
+    // The router comes from the provider, never from a BuildContext: the standing
+    // figure is mounted in MaterialApp.router's `builder`, ABOVE the Router,
+    // where GoRouter.of has no InheritedGoRouter to find — build 73 threw a
+    // `_TypeError` on every tap of the figure (client_errors, 2026-09-01).
+    // Same GoRouter instance main.dart passes as routerConfig.
+    final router = ref.read(routerProvider);
+    final here = router.state.uri.path;
     // Asked to go where we already are. Reachable in the moment before our own
     // screen has been published, and pushing would stack a second copy of the
     // page on top of itself.
@@ -323,7 +327,7 @@ void joinPartner(
     if (tab != null) {
       ref.read(shellTabProvider.notifier).state = tab;
       // Already inside the shell? Selecting the tab is the whole journey.
-      if (here != '/app') context.go('/app');
+      if (here != '/app') router.go('/app');
       // A tab change is a setState, not a navigation, so the observer cannot
       // see it. Without this the user has moved and nobody has been told: their
       // partner keeps seeing the old tab, and this badge keeps offering a trip
@@ -331,5 +335,5 @@ void joinPartner(
       presenceRouteObserver?.publishActiveTab();
       return;
     }
-  if (route != null) context.push(route);
+  if (route != null) router.push(route);
 }
