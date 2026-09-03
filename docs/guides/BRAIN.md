@@ -23027,3 +23027,31 @@ delete after the run". One was breaking `flutter analyze` with an unused import.
 - The §269 subagent audit was stopped mid-run; 5 of its 20 areas died to API 529s and
   were never reported. Those areas are unaudited, not clean.
 - Nothing is committed.
+
+### §270 addendum — 0fd0163 pushed, CI green on run 33811803934
+
+    git ls-remote origin refs/heads/fix-sprint
+      0fd01631c0797432e0a48d2fd7c5d458348c5c14   <- matches local HEAD exactly
+
+    gh run view 33811803934
+      status     : completed
+      conclusion : success
+      headSha    : 0fd01631c0797432e0a48d2fd7c5d458348c5c14
+      analyze + test in 5m34s — every step green
+
+Worth having on the record: CI is the first time these fixes ran on **Linux**.
+Every local gate in §270 was Windows, and this repo has already been bitten once
+by exactly that gap (§268: every analyzer grep matched the Windows separator
+` - ` while the CI runner prints ` • `, so the error count had been structurally
+zero for the life of the workflow). 1577 tests passing on ubuntu with the same
+pinned 3.44.2 is the half of the verification a Windows box cannot give.
+
+Still not device-verified, and that has not changed: the Mapbox annotation
+guard, the call-path ErrorReporter wiring and the pre-14
+ACTION_APP_NOTIFICATION_SETTINGS intent are all reachable only on hardware. CI
+green is not evidence about any of them.
+
+One imprecision in the commit message, recorded rather than amended: it says it
+"removes four zz_audit_*_test.dart harnesses". They were UNTRACKED, so the
+commit diff contains no deletion for them — they were removed from the working
+tree only, and were never on the remote to begin with.
