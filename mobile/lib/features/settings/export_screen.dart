@@ -308,12 +308,21 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 ],
               ),
               SizedBox(height: 10),
+              // "The app's own copies stay encrypted" was not true and had not
+              // been since 2026-08-28: the vault stores its bytes plaintext in
+              // a private bucket (vault_repository.saveMedia) and the shared
+              // gallery always has (gallery_repository, "Deliberately NOT
+              // encrypted"). Only chat is end-to-end encrypted. This is the one
+              // screen whose whole job is telling somebody what is and is not
+              // protected, so it is the last place that may round the answer up.
               Text(
                 'This creates an unencrypted copy of everything you select, '
                 'in a folder you choose. Anyone with that folder can read '
                 "it. Your phone's gallery app and any cloud backup covering "
-                "that folder can pick these files up. The app's own copies "
-                'stay encrypted.',
+                'that folder can pick these files up. Inside the app, your '
+                'messages are end-to-end encrypted; gallery and vault photos '
+                'are kept in private storage only the two of you can open, '
+                'but they are not encrypted.',
                 style: TextStyle(color: MilesColors.taupe, height: 1.5),
               ),
             ],

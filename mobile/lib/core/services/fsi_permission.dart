@@ -32,10 +32,19 @@ class FsiPermission {
   }
 
   /// Opens the system page where the user toggles full-screen alerts on.
-  static Future<void> openSettings() async {
+  /// Opens the system page where these alerts are turned back on.
+  ///
+  /// Answers whether a page actually opened. It used to return void and
+  /// swallow everything with `catch (_) {}`, over a native handler that did
+  /// nothing at all below API 34 — so the one control offered to a user whose
+  /// notifications are off was silent in both halves at once.
+  static Future<bool> openSettings() async {
     try {
-      await _channel.invokeMethod<void>('openSettings');
-    } catch (_) {}
+      return await _channel.invokeMethod<bool>('openSettings') ?? false;
+    } catch (e) {
+      debugPrint('[fsi] openSettings failed: ${e.runtimeType}');
+      return false;
+    }
   }
 
   /// Mirrors the live permission into SharedPreferences so the FCM background

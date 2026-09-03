@@ -156,6 +156,12 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
   Future<void> _upload(List<_PendingUpload> batch) async {
     if (mounted) setState(() => _uploading += batch.length);
     var failed = 0;
+    // Counted apart from [failed] because these must never be offered a Retry:
+    // the file is bigger than the bucket accepts and every attempt ends the
+    // same way. They are dropped from the queue here rather than left as
+    // failed tiles the user taps forever.
+    var oversize = 0;
+    var oversizeMb = 0;
     for (final item in batch) {
       try {
         await GalleryRepository.upload(
@@ -164,6 +170,9 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
           file: item.file,
           mimeType: item.isVideo ? 'video/mp4' : 'image/jpeg',
         );
+      } on GalleryTooLarge catch (e) {
+        oversize++;
+        if (e.megabytes > oversizeMb) oversizeMb = e.megabytes;
       } catch (e, st) {
         // Never the exception text to the user — one failed picture out of
         // thirty must not read as a backend error message. Reported though,
@@ -175,6 +184,20 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
       } finally {
         if (mounted) setState(() => _uploading--);
       }
+    }
+    // Said first and on its own: it names a cause the user can act on, and
+    // "check your connection" over a file that is simply too big is the app
+    // sending somebody to their router over a video.
+    if (oversize > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(oversize == 1
+              ? 'That one is ${oversizeMb}MB — too big to add. '
+                  'The limit is ${GalleryRepository.maxUploadBytes ~/ (1024 * 1024)}MB.'
+              : '$oversize were too big to add. The limit is '
+                  '${GalleryRepository.maxUploadBytes ~/ (1024 * 1024)}MB each.'),
+        ),
+      );
     }
     if (failed > 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

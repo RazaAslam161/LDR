@@ -68,10 +68,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) => _startLocationUpdates());
   }
 
+  /// Whether location may be pushed right now.
+  ///
+  /// Separate from [_locationTimer] because cancelling a timer does not stop a
+  /// [_startLocationUpdates] that is currently suspended on one of its own
+  /// awaits — and that call goes on to install a NEW timer after the pause has
+  /// already been handled. `mounted` does not help: a backgrounded screen is
+  /// still mounted, so the ticks kept firing and the app kept pushing GPS
+  /// after telling the user it only shares "while the app is open".
+  bool _locationActive = false;
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _locationActive = false;
     _locationTimer?.cancel();
+    _locationTimer = null;
     super.dispose();
   }
 
@@ -81,7 +93,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _startLocationUpdates();
     } else {
       // Foreground-only: stop pushing location the moment we leave the app.
+      _locationActive = false;
       _locationTimer?.cancel();
+      _locationTimer = null;
     }
   }
 
@@ -94,16 +108,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final couple = ref.read(currentCoupleProvider);
     if (couple == null) return;
     _locationTimer?.cancel();
+    _locationActive = true;
 
-    await _refreshMyCoords();
-    // One immediate push so the partner sees a fresh position without waiting.
-    _noteBlock(await LocationService.shareCurrent(couple.id));
-
+    // Installed BEFORE the first await, so a background landing during the
+    // two calls below always has a timer to cancel and a flag to lower.
     _locationTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
-      if (!mounted) return;
+      if (!mounted || !_locationActive) return;
       _noteBlock(await LocationService.shareCurrent(couple.id));
       await _refreshMyCoords();
     });
+
+    await _refreshMyCoords();
+    if (!mounted || !_locationActive) return;
+    // One immediate push so the partner sees a fresh position without waiting.
+    _noteBlock(await LocationService.shareCurrent(couple.id));
   }
 
   /// [shareCurrent] already read the saved mode and the OS state to decide

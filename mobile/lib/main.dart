@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -181,6 +182,46 @@ Future<void> main() async {
 
   runApp(const ProviderScope(child: MilesApp()));
 }
+
+/// Absorbs an OS route push that neither plain [MaterialApp] above can answer.
+///
+/// Both of them are built with `home:` and no route table, so Android handing
+/// Flutter a deep link — a tapped notification, an app link — reaches
+/// `_WidgetsAppState._onUnknownRoute`, which has no route to return and throws
+/// `_TypeError` out of `didPushRouteInformation`. Build 76 reported it from
+/// the field. It is only reachable while the cover is up or the build is
+/// gated, which is to say: every time the app has been backgrounded.
+///
+/// Ignoring the push is the CORRECT answer, not merely the safe one. Neither
+/// screen may be navigated past — the cover exists to be unskippable, and the
+/// gate screen sits above a schema this build may not understand — and no
+/// notification payload is routed by name anyway: FcmService parks them in
+/// `pendingReach` / `pendingMemory` and AppShell drains them after the
+/// unlock. So this returns a transparent, empty route: nothing is drawn over
+/// the screen underneath, back pops it harmlessly, and the swap to
+/// `MaterialApp.router` on unlock discards it with the whole navigator.
+@visibleForTesting
+Route<void> ignoreRoutePush(RouteSettings settings) => PageRouteBuilder<void>(
+      settings: settings,
+      opaque: false,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      // Removed on the very next frame, and that is the load-bearing part.
+      // Every ModalRoute installs a modal barrier whether or not it paints
+      // one, and an invisible barrier still SWALLOWS every touch aimed at the
+      // screen underneath: measured, not assumed — a transparent route left
+      // standing made the cover untappable, which is worse than the crash it
+      // was written to stop. Popping it means the barrier exists for one
+      // frame nobody can act inside.
+      pageBuilder: (context, _, __) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final nav = Navigator.maybeOf(context);
+          final route = ModalRoute.of(context);
+          if (nav != null && route != null && route.isCurrent) nav.pop();
+        });
+        return const SizedBox.shrink();
+      },
+    );
 
 class MilesApp extends ConsumerStatefulWidget {
   const MilesApp({super.key});
@@ -830,6 +871,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
         if (ReleaseGate.isBlocked) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
+            onUnknownRoute: ignoreRoutePush,
             home: Scaffold(
               backgroundColor: MilesColors.night,
               body: Center(
@@ -955,6 +997,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             theme: coverHostTheme(),
+            onUnknownRoute: ignoreRoutePush,
             home: DisguiseCoverHost(
               onAuthenticated: () => MilesApp.showRealApp.value = true,
             ),

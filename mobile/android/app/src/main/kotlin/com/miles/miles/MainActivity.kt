@@ -394,15 +394,38 @@ class MainActivity : FlutterFragmentActivity() {
                             result.success(true)
                         }
                     }
+                    // Answers whether a settings page was actually opened, so
+                    // Dart can say something instead of appearing to do nothing.
+                    //
+                    // The SDK<34 branch used to fall straight through to
+                    // success(null) and open NOTHING. The banner that offers
+                    // this is gated on areNotificationsEnabled(), which answers
+                    // on every Android version — so on Android 13 and below
+                    // "Go to settings" was a button that did nothing at all,
+                    // silently, on the majority of handsets.
                     "openSettings" -> {
-                        if (Build.VERSION.SDK_INT >= 34) {
-                            val intent = Intent(
+                        val intent = if (Build.VERSION.SDK_INT >= 34) {
+                            Intent(
                                 Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
                                 Uri.parse("package:$packageName")
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            startActivity(intent)
+                            )
+                        } else {
+                            // The right destination below 34: the app's own
+                            // notification settings, where "alerts are off"
+                            // is actually turned back on. API 26+, and this
+                            // app's minSdk is above that.
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
                         }
-                        result.success(null)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        try {
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            // OEM ROMs do ship without these screens. Saying so
+                            // beats a button that swallows the tap.
+                            result.success(false)
+                        }
                     }
                     else -> result.notImplemented()
                 }

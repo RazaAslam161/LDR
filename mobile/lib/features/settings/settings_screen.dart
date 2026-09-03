@@ -99,6 +99,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     final file = await PhotoPickerService.pickFromSheet(context,
         shape: PhotoShape.square,);
     if (file == null) return;
+    // The picker owns the screen for as long as it likes, and leaving Settings
+    // while it is open disposes this element — `ref.read` on a disposed
+    // ConsumerStatefulElement throws StateError, which is what build 76 was
+    // reporting from the field. Nothing below can run without the element, so
+    // the picked photo is dropped here deliberately rather than half-uploaded.
+    if (!mounted) return;
     final couple = ref.read(sessionProvider).couple;
     setState(() => _changingAvatar = true);
     try {
@@ -380,17 +386,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       ),
     );
     if (mode == null) return;
+    // Whether the SERVER agreed. Turning sharing off is the one control on
+    // this screen where a failed write is a privacy event and not a cosmetic
+    // one: the partner keeps receiving the last precise fix, so a row that
+    // reads "Off" over a server that still says "precise" is the app telling
+    // the user something untrue about who can see them.
+    final bool wrote;
     if (mode == 'off') {
       // setSharingMode writes only the mode, so the last precise fix stayed
       // on the server after the user turned sharing off. This nulls the
       // coordinates with it.
-      await PresenceService.setLocation(couple.id, mode: 'off');
+      wrote = await PresenceService.setLocation(couple.id, mode: 'off');
       if (mounted) setState(() => _locationBlock = LocationBlock.none);
     } else {
       // Written first and unconditionally. The mode used to be a side effect of
       // a successful fix, so choosing "City only" without permission left the
       // server on the old mode while this screen showed the new one.
-      await PresenceService.setSharingMode(couple.id, mode);
+      wrote = await PresenceService.setSharingMode(couple.id, mode);
       if (!mounted) return;
       // Picking a mode IS the request to share, so a handset that is not
       // allowing it has to say so here rather than do nothing.
@@ -399,10 +411,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       // Push one fix now; Home's foreground loop keeps it fresh while open.
       await LocationService.shareOnce(couple.id, mode);
     }
-    if (mounted) {
-      setState(() => _locationMode = mode);
-      _toast('Location sharing updated');
+    if (!mounted) return;
+    if (!wrote) {
+      // The row keeps showing what the server actually holds, so the next
+      // thing the user reads is the truth rather than the request.
+      _toast(mode == 'off'
+          ? "Couldn't turn sharing off — you're still sharing. Try again."
+          : "Couldn't change sharing — check your connection.");
+      return;
     }
+    setState(() => _locationMode = mode);
+    _toast('Location sharing updated');
   }
 
   String get _locationLabel => _locationMode == 'off'
@@ -1201,17 +1220,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         ],),
       ];
 
+  /// The banner's only action, and it has to be able to fail out loud: some
+  /// OEM builds ship without the page, and a tap that opens nothing while
+  /// saying nothing is indistinguishable from a broken app.
+  Future<void> _openNotificationSettings() async {
+    if (await FsiPermission.openSettings()) return;
+    if (!mounted) return;
+    _toast("This phone won't open that page — "
+        'turn alerts on from Android Settings > Apps.');
+  }
+
   List<Widget> _notificationsPage() => [
         // Said at the top, because every row below is a lie while this is
         // true: they all open the right pages and none of them can ring.
         if (_notif.appBlocked)
-          const _SettingsGroup(children: [
+          _SettingsGroup(children: [
             _SettingsRow(
               icon: Icons.notifications_off_outlined,
               title: 'Alerts are off for this app, so nothing below can '
                   'reach you.',
               value: 'Go to settings',
-              onTap: FsiPermission.openSettings,
+              onTap: _openNotificationSettings,
             ),
           ],)
         else if (_notif.appEnabled == null)

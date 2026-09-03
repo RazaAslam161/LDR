@@ -135,6 +135,35 @@ void main() {
       expect(await AppLock.verifyPin('4321'), isFalse);
       expect(await AppLock.verifyPin('5678'), isTrue);
     });
+
+    // The app lock is the whole of what stands between somebody holding an
+    // unlocked phone and the conversation. Four digits is 10 000 guesses, the
+    // check is local, and until this existed there was no counter, no delay
+    // and no ceiling anywhere on the path.
+    test('the pad shuts after repeated wrong PINs, and a success clears it',
+        () async {
+      await AppLock.setPin('1234');
+
+      // Four wrong is still free. A mistyped PIN is the ordinary case and must
+      // not cost the owner a wait.
+      for (var i = 0; i < 4; i++) {
+        expect(await AppLock.verifyPin('0000'), isFalse);
+      }
+      expect(await AppLock.pinLockRemaining(), 0);
+      expect(await AppLock.verifyPin('1234'), isTrue,
+          reason: 'the owner must not be locked out below the threshold',);
+
+      // ...and getting in resets the tally, so the count is CONSECUTIVE
+      // failures rather than a lifetime total.
+      for (var i = 0; i < 5; i++) {
+        expect(await AppLock.verifyPin('0000'), isFalse);
+      }
+      expect(await AppLock.pinLockRemaining(), greaterThan(0),
+          reason: 'the fifth consecutive miss starts the penalty',);
+      expect(await AppLock.verifyPin('1234'), isFalse,
+          reason: 'while the penalty runs even the correct PIN is refused — '
+              'otherwise the guess rate is never actually capped',);
+    });
   });
 
   group('MemoryPinGate', () {

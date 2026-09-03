@@ -422,7 +422,7 @@ class CallController extends ChangeNotifier {
         'video': video,
       });
       Diag.record(DiagArea.call, 'invite_inserted', corr: id);
-    } catch (e) {
+    } catch (e, st) {
       // `catch (_) {}` before. This insert is what fires the push that rings a
       // closed app, so when it fails the caller waits the full 35s and tears
       // down with no reason to show.
@@ -443,6 +443,13 @@ class CallController extends ChangeNotifier {
         'pg_code': e is PostgrestException ? e.code : null,
         'pg_msg': e is PostgrestException ? e.message : null,
       },);
+      // And to the sink that actually leaves the handset. Diag.record is
+      // `_capture = false` in every shipped build, so every field above is
+      // written into a ring buffer that release never allocates — the fields
+      // were assembled for a diagnosis nobody could ever read. ErrorReporter
+      // renders a PostgrestException's `code` into `detail` on its own, which
+      // is the 42501-vs-PGRST204 distinction this catch was written for.
+      ErrorReporter.report(e, st, kind: 'call-invite');
     }
   }
 
@@ -457,11 +464,13 @@ class CallController extends ChangeNotifier {
     try {
       await SupabaseService.client.from('call_invites').delete().eq('id', id);
       Diag.record(DiagArea.call, 'invite_deleted', corr: id);
-    } catch (e) {
+    } catch (e, st) {
       Diag.record(DiagArea.call, 'invite_delete_failed', corr: id, fields: {
         'error': e.runtimeType.toString(),
         'pg_code': e is PostgrestException ? e.code : null,
       },);
+      // A row left behind is a phone that rings for a call nobody is placing.
+      ErrorReporter.report(e, st, kind: 'call-invite-delete');
     }
   }
 
@@ -497,7 +506,7 @@ class CallController extends ChangeNotifier {
         from: fromName,
       );
       Diag.record(DiagArea.call, 'pending_call_rang', corr: callId);
-    } catch (e) {
+    } catch (e, st) {
       // The whole FCM ring path, silent. An RLS denial or a deleted row here
       // means the phone buzzed and then nothing happened — which the user
       // reports as a missed call, not as an error.
@@ -506,6 +515,10 @@ class CallController extends ChangeNotifier {
         'pg_code': e is PostgrestException ? e.code : null,
         'pg_msg': e is PostgrestException ? e.message : null,
       },);
+      // "Reports it as a missed call, not as an error" is exactly why this
+      // needs the live sink: nobody files a bug, so the only way it is ever
+      // seen is a row arriving on its own.
+      ErrorReporter.report(e, st, kind: 'call-pending');
     }
   }
 
@@ -1146,7 +1159,7 @@ class CallController extends ChangeNotifier {
       _startConnectTimeout();
       _pendingOffer = null;
       await CallForegroundService.start();
-    } catch (e) {
+    } catch (e, st) {
       if (attempt != _attempt) return;
       // `catch (_)` before: the exception was bound and dropped. It covers
       // _openMedia (permissions, camera in use by another app), _routeAudio,
@@ -1159,6 +1172,9 @@ class CallController extends ChangeNotifier {
         'has_pc': _pc != null,
         'remote_set': _remoteSet,
       },);
+      // The five causes above are only distinguishable by their type, and the
+      // type only leaves the handset through here.
+      ErrorReporter.report(e, st, kind: 'call-accept');
       _send('hangup', {});
       unawaited(_teardown(CallState.ended));
     }
@@ -2242,7 +2258,7 @@ class CallController extends ChangeNotifier {
       _send('answer', {'sdp': answer.sdp, 'type': answer.type});
       _startConnectTimeout();
       await CallForegroundService.start();
-    } catch (e) {
+    } catch (e, st) {
       if (attempt != _attempt) return;
       // The failure that is invisible from the other phone: it won the
       // tie-break, so it is sitting on "Calling…" waiting for an answer that
@@ -2252,6 +2268,7 @@ class CallController extends ChangeNotifier {
         'has_pc': _pc != null,
         'remote_set': _remoteSet,
       },);
+      ErrorReporter.report(e, st, kind: 'call-glare');
       _lastError = _readableCallError(e);
       _send('hangup', {});
       unawaited(_teardown(CallState.ended));

@@ -214,8 +214,14 @@ class SessionNotifier extends StateNotifier<SessionState> {
       debugPrint('[tz] device=$name stored=${profile.timezone} — updating');
       await SupabaseRepository.updateMyProfile(timezone: name);
       await loadProfile();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('[tz] sync failed: $e');
+      // debugPrint is nulled in release, so "the one thing that silently goes
+      // wrong when someone travels" was silent in exactly the builds people
+      // travel with. Every scheduled thing — rituals, capsule unlocks, the
+      // daily question — is computed against the stored zone, so a failure
+      // here fires all of them at the wrong hour with nothing to say why.
+      ErrorReporter.report(e, st, kind: 'timezone-sync');
     }
   }
 
@@ -288,6 +294,13 @@ class SessionNotifier extends StateNotifier<SessionState> {
         return;
       }
 
+      // Which couple this handset thought it was in, read BEFORE the
+      // setCouple below can clear it. A couple that is gone from the server
+      // while this value still holds an id is a couple that ended while the
+      // app was closed — the only way to tell that apart from an account that
+      // never paired, and the difference decides whether a device wipe is owed.
+      final knownCoupleId = SessionScope.coupleId ?? await SessionScope.readCouple();
+
       state = SessionState(
         loading: false,
         session: state.session,
@@ -331,6 +344,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
       if (couple != null) unawaited(UnlinkState.load());
 
       if (couple == null) {
+        // The couple ended while this app was CLOSED — the partner tapped it,
+        // or the ceremony completed — and this load is the first thing that
+        // knows. Nothing else calls endCouple on this path: _endSession is
+        // sign-out only, so the whole local teardown below it (chat drafts,
+        // EncryptedMediaCache, the PLAINTEXT DefaultCacheManager store, voice
+        // notes, the gallery's failed-upload tiles rendering the ex-partner's
+        // photograph straight off disk) was skipped for exactly the case it
+        // was written for. Awaited, because everything after this returns.
+        if (knownCoupleId != null) await endCouple(knownCoupleId);
         // Only ever asked for when there is no couple. A paired account has
         // nothing to restore and the server would answer null for it anyway,
         // so this is a round trip nobody else pays for. Unawaited: the pairing

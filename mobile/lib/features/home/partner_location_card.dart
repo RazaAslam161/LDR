@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:miles/core/data/models.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/map_token.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -148,12 +149,32 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
 
   Future<void> _onMapCreated(MapboxMap map) async {
     _map = map;
-    await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
-    await map.compass.updateSettings(CompassSettings(enabled: false));
-    _points = await map.annotations.createPointAnnotationManager();
-    _lines = await map.annotations.createPolylineAnnotationManager();
-    await _syncAnnotations();
+    // Every line here is a platform-channel call into the Mapbox SDK, and each
+    // one is a MissingPluginException away from leaving `_points` null — at
+    // which point _syncAnnotations early-returns forever and the card paints a
+    // working map with no partner on it and nothing to say why. Five reports
+    // across builds 70, 74 and 76 arrived exactly this way, from
+    // createPointAnnotationManager and createPolylineAnnotationManager, with
+    // no try/catch anywhere on the path.
+    try {
+      await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
+      await map.compass.updateSettings(CompassSettings(enabled: false));
+      _points = await map.annotations.createPointAnnotationManager();
+      _lines = await map.annotations.createPolylineAnnotationManager();
+      await _syncAnnotations();
+      if (mounted && _mapBroken) setState(() => _mapBroken = false);
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'map-annotations');
+      // Said on the card rather than swallowed: a partner who IS sharing and
+      // simply cannot be drawn is the one case indistinguishable from a
+      // partner who has stopped sharing, and those need opposite reactions.
+      if (mounted) setState(() => _mapBroken = true);
+    }
   }
+
+  /// The map surface came up but its annotation layer did not, so nothing can
+  /// be drawn on it however good the location data is.
+  bool _mapBroken = false;
 
   /// Mapbox annotations are imperative where Google's were declarative: the
   /// build method computes the positions and this pushes them at the map.
@@ -445,6 +466,31 @@ class _PartnerLocationCardState extends State<PartnerLocationCard> {
                             // the card is glanced at, not explored.
                             styleUri: MapboxStyles.DARK,
                             onMapCreated: _onMapCreated,
+                          ),
+                        ),
+                      // The map drew but nothing can be placed on it. Said out
+                      // loud because an empty map and a partner who stopped
+                      // sharing look identical, and only one of them is worth
+                      // reopening the screen for.
+                      if (_mapBroken)
+                        Positioned(
+                          left: 8,
+                          top: 8,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              // scrim over the map tiles behind it
+                              color: Colors.black.withValues(alpha: 0.55),
+                              child: const Text(
+                                "Map didn't load fully — reopen to retry",
+                                style: TextStyle(
+                                    color: MilesColors.cream50,
+                                    fontSize: 11,
+                                    fontFamily: 'Inter'),
+                              ),
+                            ),
                           ),
                         ),
                       Positioned(

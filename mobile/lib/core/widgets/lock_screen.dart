@@ -28,11 +28,54 @@ class _LockScreenState extends State<LockScreen> {
   int _errorSignal = 0;
   String? _message;
 
+  /// Seconds left on the wrong-PIN penalty, and the ticker that counts it
+  /// down. Without the countdown the pad just refuses everything typed into
+  /// it, which reads as a broken lock rather than a deliberate wait.
+  int _lockLeft = 0;
+  Timer? _lockTicker;
+
   @override
   void initState() {
     super.initState();
     _init();
+    unawaited(_syncLock());
   }
+
+  @override
+  void dispose() {
+    _lockTicker?.cancel();
+    super.dispose();
+  }
+
+  /// Re-reads the penalty and runs a one-second ticker while it lasts.
+  Future<void> _syncLock() async {
+    final left = await AppLock.pinLockRemaining();
+    if (!mounted) return;
+    setState(() {
+      _lockLeft = left;
+      if (left > 0) _message = _waitMessage(left);
+    });
+    _lockTicker?.cancel();
+    if (left <= 0) return;
+    _lockTicker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        _lockLeft--;
+        if (_lockLeft <= 0) {
+          t.cancel();
+          // Back to the ordinary invitation, not the last error: the wait is
+          // over and the pad works again.
+          _message = null;
+        } else {
+          _message = _waitMessage(_lockLeft);
+        }
+      });
+    });
+  }
+
+  static String _waitMessage(int seconds) => seconds >= 60
+      ? 'Too many attempts. Try again in ${(seconds / 60).ceil()} min'
+      : 'Too many attempts. Try again in ${seconds}s';
 
   Future<void> _init() async {
     final bio = await AppLock.availableBiometrics();
@@ -64,16 +107,26 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Future<void> _onPin(String pin) async {
+    // Refuse locally too, so a pad tapped during the penalty does not spend an
+    // attempt and does not read as an ordinary wrong PIN.
+    if (_lockLeft > 0) {
+      setState(() => _errorSignal++);
+      return;
+    }
     final ok = await AppLock.verifyPin(pin);
     if (!mounted) return;
     if (ok) {
+      _lockTicker?.cancel();
       AppLock.unlock();
-    } else {
-      setState(() {
-        _message = 'Wrong PIN';
-        _errorSignal++;
-      });
+      return;
     }
+    setState(() {
+      _message = 'Wrong PIN';
+      _errorSignal++;
+    });
+    // A wrong PIN may have just started or extended a penalty; ask rather than
+    // recompute the schedule here, so the rule lives in exactly one place.
+    await _syncLock();
   }
 
   @override
@@ -114,7 +167,7 @@ class _LockScreenState extends State<LockScreen> {
                     Text(_message ?? 'Unlock to continue',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            color: _message == 'Wrong PIN'
+                            color: _message == 'Wrong PIN' || _lockLeft > 0
                                 ? MilesColors.blush
                                 : MilesColors.taupe,
                             fontSize: 13,),),

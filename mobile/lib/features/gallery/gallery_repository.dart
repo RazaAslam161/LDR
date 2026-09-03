@@ -241,6 +241,15 @@ class GalleryRepository {
   /// nothing re-derives it. The ORIGINAL is uploaded byte-for-byte: re-encoding
   /// to save space would be a quality drop the user did not ask for, and the
   /// thumbnail already covers the cost of showing it small.
+  /// What the bucket itself will accept, mirrored here.
+  ///
+  /// `couple_intimate` is created with `file_size_limit = 104857600`, and
+  /// without this check the only thing that enforced it was storage answering
+  /// 413 after the whole file had been pushed up a phone uplink — which the
+  /// screen then reported as "check your connection" and offered to retry
+  /// forever. Keep in step with the bucket if that limit ever moves.
+  static const maxUploadBytes = 100 * 1024 * 1024;
+
   static Future<GalleryItem> upload({
     required String coupleId,
     required String uploadedBy,
@@ -251,6 +260,11 @@ class GalleryRepository {
     final ext = _extFor(mimeType);
     final original = _originalPath(coupleId, id, ext);
     final bytes = await file.readAsBytes();
+    // Before the thumbnail, not after: a poster for a file that can never be
+    // stored is an orphaned object nothing will ever reference or reap.
+    if (bytes.lengthInBytes > maxUploadBytes) {
+      throw GalleryTooLarge(bytes.lengthInBytes);
+    }
 
     String? thumbPath;
     int? w;
@@ -373,4 +387,21 @@ class GalleryRepository {
     return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
+}
+
+/// A file the bucket will refuse on size, caught before it is sent.
+///
+/// Its own type because the screen has to treat it differently from every
+/// other upload failure: no amount of retrying makes a 200 MB video fit, so
+/// offering Retry for it is a control that cannot work.
+class GalleryTooLarge implements Exception {
+  const GalleryTooLarge(this.bytes);
+
+  final int bytes;
+
+  /// Whole megabytes, for a sentence a person can act on.
+  int get megabytes => (bytes / (1024 * 1024)).round();
+
+  @override
+  String toString() => 'GalleryTooLarge';
 }

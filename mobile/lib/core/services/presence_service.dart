@@ -255,14 +255,22 @@ class PresenceService {
   /// [isAppActivity] true ⇒ also stamp `app_last_active_at` (the GPS-isolated
   /// presence clock). Location upserts pass false (the default) so GPS pings
   /// never pollute online / last-seen.
-  static Future<void> _upsert(
+  /// Answers whether the row actually landed.
+  ///
+  /// Most callers here are a heartbeat and rightly ignore it — presence is
+  /// best-effort and a dropped typing flag costs nothing. The exception is a
+  /// control the user believes is a promise: turning location sharing OFF is
+  /// a consent decision, not a heartbeat, and "best-effort, never surface an
+  /// error" applied to it is how the app came to say "Location sharing
+  /// updated" while the server kept the mode and the last coordinates.
+  static Future<bool> _upsert(
     String coupleId,
     Map<String, dynamic> patch, {
     required String op,
     bool isAppActivity = false,
   }) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    if (uid == null) return false;
     // Sent as a marker only. A BEFORE trigger replaces both with now(), so the
     // value here is never trusted — what matters is WHETHER the column is
     // present, which is how the server knows this write counts as activity.
@@ -310,7 +318,8 @@ class PresenceService {
             'server_ts_ms': serverAt?.millisecondsSinceEpoch,
             'app_active_ts_ms': activeAt?.millisecondsSinceEpoch,
           },);
-    } catch (e) {
+      return true;
+    } catch (e, st) {
       // presence is best-effort; never surface an error to the user — but a
       // silent write failure here means no online status and no partner
       // screen, which is worth a line in the log.
@@ -327,6 +336,12 @@ class PresenceService {
         if (e is PostgrestException) 'err_msg_len': e.message.length,
         'ms': sw.elapsedMilliseconds,
       },);
+      // Both lines above are no-ops in a shipped build — debugPrint is nulled
+      // by silenceLogsInRelease and Diag never captures — so "WHICH failure it
+      // was has never been recorded anywhere" stayed true for the release
+      // fleet. This is the line that leaves the handset.
+      ErrorReporter.report(e, st, kind: 'presence-$op');
+      return false;
     }
   }
 
@@ -576,11 +591,11 @@ class PresenceService {
   // ║ user is asleep; it must never touch the app-activity / last-seen clock.║
   // ╚═══════════════════════════════════════════════════════════════════════╝
 
-  static Future<void> setSharingMode(String coupleId, String mode) =>
+  static Future<bool> setSharingMode(String coupleId, String mode) =>
       _upsert(coupleId, {'location_sharing_mode': mode},
           op: 'set_sharing_mode',);
 
-  static Future<void> setLocation(
+  static Future<bool> setLocation(
     String coupleId, {
     required String mode,
     double? lat,

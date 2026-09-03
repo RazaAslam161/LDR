@@ -117,12 +117,80 @@ class AppLock {
     await (await SharedPreferences.getInstance()).remove(_legacyPinKey);
   }
 
+  /// Consecutive wrong PINs, and when the pad reopens after them.
+  ///
+  /// In SharedPreferences, NOT beside the PIN in secure storage, and the
+  /// reason is a test: `pin_migration_test` asserts that a failed verify
+  /// writes nothing to secure storage at all, which is the invariant keeping a
+  /// wrong PIN from ever touching the stored secret. That guarantee is worth
+  /// more than the marginal tamper-resistance of putting a counter next to it
+  /// — both stores are cleared together by "Clear data" anyway, and the
+  /// adversary this lock is built for is somebody holding an unlocked phone,
+  /// not somebody with a root shell.
+  static const _pinFailsKey = 'app_lock_pin_fails';
+  static const _pinUntilKey = 'app_lock_pin_until';
+
+  /// How long the pad stays shut after [fails] consecutive wrong PINs.
+  ///
+  /// Nothing for the first four: a fat-fingered PIN is the ordinary case and
+  /// must not cost the owner a wait. Then escalating, because four digits is
+  /// 10 000 combinations and the threat this whole app is built around is
+  /// somebody else holding the phone — at no delay that is an evening's work,
+  /// and the disguise, FLAG_SECURE and owner-only RLS are all downstream of
+  /// this one gate.
+  static Duration _penaltyFor(int fails) => switch (fails) {
+        < 5 => Duration.zero,
+        < 8 => const Duration(seconds: 30),
+        < 11 => const Duration(minutes: 5),
+        _ => const Duration(minutes: 30),
+      };
+
+  /// Seconds still to wait before the pad accepts anything. 0 when open.
+  ///
+  /// Clock-jump safe in the direction that matters: a deadline further away
+  /// than the longest penalty can only have come from the clock moving
+  /// backwards, and is treated as expired rather than locking the owner out
+  /// of their own app until the date it names.
+  static Future<int> pinLockRemaining() async {
+    final prefs = await SharedPreferences.getInstance();
+    final until = prefs.getInt(_pinUntilKey) ?? 0;
+    final left = until - DateTime.now().millisecondsSinceEpoch;
+    if (left <= 0) return 0;
+    if (left > const Duration(minutes: 30).inMilliseconds) return 0;
+    return (left / 1000).ceil();
+  }
+
+  static Future<void> _clearPinFailures() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_pinFailsKey);
+    await prefs.remove(_pinUntilKey);
+  }
+
+  static Future<void> _recordPinFailure() async {
+    final prefs = await SharedPreferences.getInstance();
+    final fails = (prefs.getInt(_pinFailsKey) ?? 0) + 1;
+    await prefs.setInt(_pinFailsKey, fails);
+    final penalty = _penaltyFor(fails);
+    if (penalty > Duration.zero) {
+      await prefs.setInt(
+        _pinUntilKey,
+        DateTime.now().add(penalty).millisecondsSinceEpoch,
+      );
+    }
+  }
+
   /// Verify-then-upgrade. The new home is checked first; a PIN still in the
   /// legacy prefs is verified against the old constant-salt hash and — only
   /// on SUCCESS — rewritten in the new format and deleted from prefs. A wrong
   /// PIN migrates nothing, so a typo can never move or corrupt the stored
   /// secret, and no existing user is ever locked out by the format change.
+  ///
+  /// The throttle lives INSIDE this method for the same reason
+  /// [authInProgress] lives inside authenticate(): the vault pad, the cover's
+  /// backup door and the lock screen all call it, and a guard at one call site
+  /// is a guard the next call site reintroduces the hole through.
   static Future<bool> verifyPin(String pin) async {
+    if (await pinLockRemaining() > 0) return false;
     // Same guard as hasPin, same reason: a throwing keystore must degrade to
     // the legacy branch, not to a lockout.
     String? stored;
@@ -133,7 +201,9 @@ class AppLock {
     }
     if (stored != null) {
       final ok = secretMatches(stored, pin);
+      if (!ok) await _recordPinFailure();
       if (ok) {
+        await _clearPinFailures();
         // A process death between setPin's two writes can leave the retired
         // constant-salt hash sitting in prefs; sweep it whenever a verified
         // unlock proves the new record is the live one.
@@ -146,7 +216,14 @@ class AppLock {
     }
     final legacy =
         (await SharedPreferences.getInstance()).getString(_legacyPinKey);
-    if (legacy == null || legacy != _legacyHash(pin)) return false;
+    if (legacy == null || legacy != _legacyHash(pin)) {
+      // Only a PRESENT-but-wrong legacy hash is a failed attempt. A missing
+      // record means no PIN was ever set on this install, and counting that
+      // would lock a pad nobody can open anyway.
+      if (legacy != null) await _recordPinFailure();
+      return false;
+    }
+    await _clearPinFailures();
     await setPin(pin);
     return true;
   }

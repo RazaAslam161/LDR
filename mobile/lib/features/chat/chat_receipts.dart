@@ -71,6 +71,10 @@ class ChatReceiptRepository {
       _traceAck('ack_delivered', seq, trigger, skipped: 'seq_not_positive');
       return;
     }
+    if (!_signedIn) {
+      _traceAck('ack_delivered', seq, trigger, skipped: 'signed_out');
+      return;
+    }
     final couple = await _couple();
     if (seq <= await DeliveredMark.acked(couple)) {
       // Coalesced. The watermark only moves on a confirmed 200, so this can
@@ -98,6 +102,18 @@ class ChatReceiptRepository {
     }
   }
 
+  /// Whether an ack can possibly land.
+  ///
+  /// `ack_read` and `ack_delivered` are granted to `authenticated` and NOT to
+  /// `anon`, so calling either without a session is a guaranteed Postgres
+  /// 42501. That is not hypothetical: chat_screen's dispose() flushes the read
+  /// watermark on the way out, and signing out disposes the chat — so every
+  /// sign-out from the conversation fired one, and build 76 reported it from
+  /// the field. Guarded HERE rather than at the call site because dispose() is
+  /// not the only teardown path and the next one would reintroduce it.
+  static bool get _signedIn =>
+      SupabaseService.client.auth.currentSession != null;
+
   /// The user has SEEN everything up to [seq].
   ///
   /// Only the chat screen may call this. `ack_read` advances `delivered_seq`
@@ -107,6 +123,10 @@ class ChatReceiptRepository {
   static Future<void> ackRead(int seq, {required String trigger}) async {
     if (seq <= 0) {
       _traceAck('ack_read', seq, trigger, skipped: 'seq_not_positive');
+      return;
+    }
+    if (!_signedIn) {
+      _traceAck('ack_read', seq, trigger, skipped: 'signed_out');
       return;
     }
     final sw = Stopwatch()..start();

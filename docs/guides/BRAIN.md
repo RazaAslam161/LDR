@@ -22663,3 +22663,367 @@ Metered branch in it. Repo-green is not field-green:
 Run that deploy, then confirm with the Supabase MCP that the live function no
 longer contains `METERED_TURN_`. Until then the three-INSERT path to an
 undisclosed relay is open in production regardless of what this repo says.
+
+### §268 addendum 2 — the relay removal is now IN THE FIELD (2026-09-04)
+
+The gap §268 left open is closed. `turn-credentials` deployed to production:
+
+    version 5 -> 6, status ACTIVE, verify_jwt true (preserved)
+    ezbr_sha256 fe9bdfe1c2d46e8ec2e183f66658f3df1c3ac0bfcae4af521c775dbd70f25530
+             -> 9593c0b2e5e133b656108bcdcd387fce480feb528c19cdf4c6d2351c8fd9f835
+
+**Verified by fetching the live source back, not by the deploy's return code.**
+In deployed v6:
+
+- `.in("key", ["CF_TURN_KEY_ID", "CF_TURN_API_TOKEN"])` — the three
+  `METERED_TURN_*` secrets are no longer read.
+- No `iceServers.push(` anywhere. The append block is gone.
+- `METERED` appears only inside the `//` tombstone comment.
+
+So the hazard is now **structural rather than conventional**: inserting
+`METERED_TURN_HOST` / `_USERNAME` / `_CREDENTIAL` into `app_secrets` would have
+no effect, because nothing reads them. It is no longer a matter of remembering
+not to.
+
+Before deploying, production was confirmed byte-equal to git HEAD by six
+distinctive markers (`claim_turn_mint failed, allowing mint`, `const ttl =
+86400`, `NORMALISE THE SHAPE HERE`, `cloudflare_no_ice_servers`, `Ten mints an
+hour per account`, the pinned `supabase-js@2.45.0` import), so the deploy could
+not overwrite another session's fix. Rollback remains one redeploy of
+`git show edbc9aa~1:supabase/functions/turn-credentials/index.ts`.
+
+Behaviourally this is a no-op today: `app_secrets` holds no `METERED_*` rows, so
+v5 never appended anything and v6 returns the same Cloudflare-only `iceServers`.
+
+### A correction to §263/§266's "open" list
+
+**"Build 76 has never been installed or launched" is no longer true and should
+stop being repeated.** It has been installed (`versionCode=76`, §265) and used
+hard: a new account created, a partner paired, escrow written. Auth, realtime,
+pairing and storage on the first R8-shrunk build are therefore all exercised in
+the field and working. What remains unexercised on R8 is narrower and should be
+stated that way:
+
+- **a voice or video call** (WebRTC is the classic R8 casualty), and
+- **a Mapbox screen** (native SDK + reflection).
+
+### Still open
+
+- Those two R8 paths above.
+- **The ten-second backup hold has never run on hardware, and cannot yet:**
+  build 76 carries the old five-second constant. `kCoverRecoveryHoldSeconds = 10`
+  and the derived `kBackupSlop` are committed but unbuilt. Testing it needs a
+  new build, which the owner has not asked for.
+- ~~the legal pages are corrected in the repo but not republished~~ — **wrong,
+  and checked rather than assumed.** Vercel auto-deploys `miles-legal` from the
+  GitHub push, so all three pages were already live within minutes:
+
+        curl https://miles-legal.vercel.app/privacy-policy.html
+          Last updated: 3 September 2026
+          matches for "Google Fonts|Maps SDK"      -> 0
+          matches for "STUN|BBC News|Vercel"       -> 7
+        csae.html     Last updated: 3 September 2026
+          "Three qualifications|News cover"        -> 1
+          "pinned to that one site"                -> 0
+        security.html Last updated: 3 September 2026
+
+  Left in as a struck-through line rather than deleted, because the instinct
+  that produced it was right — repo-green is not field-green — and it was the
+  same instinct that caught the deployed edge function an hour earlier. The
+  lesson is not to stop being suspicious; it is that suspicion is a reason to
+  run the check, never a licence to write the conclusion.
+- This addendum is uncommitted.
+
+## §269 — 2026-09-04 — strict whole-app user-facing defect audit (build 76, no code changed)
+
+Owner asked for every defect in the whole app, walked as a real user. Audit only —
+**nothing in `mobile/` or `supabase/` was edited this session.** The only changed file
+is this one.
+
+### Gates first, so the shape of the problem is clear
+
+    flutter analyze   -> exit 0, 177 issues, ALL info-level and ALL in test/ or tool/
+    flutter test      -> All tests passed! 1575 passed, 3 skipped, exit 0
+
+Both green. So no defect below is reachable by the gates — every one is behavioural,
+and that is the finding about the gates, not about the code.
+
+### The strongest evidence was already on the server: `client_errors`
+
+30 rows. Ten are build 76, the tree's own build. These are not inferences — they are
+real failures from real handsets, with file:line. Each was then re-read in source:
+
+- `settings_screen.dart:102` — `ref.read(sessionProvider)` runs after
+  `await PhotoPickerService.pickFromSheet(...)` with **no `mounted` guard**. Leave
+  Settings while the picker is open -> `StateError` from a disposed
+  `ConsumerStatefulElement`; the chosen photo is dropped, no message.
+  (client_errors id 545, 2026-09-03 11:14.)
+- `partner_location_card.dart:153-154` — `createPointAnnotationManager()` /
+  `createPolylineAnnotationManager()` throw `MissingPluginException`; `_onMapCreated`
+  has **no try/catch**, so `_points`/`_lines` stay null and `_syncAnnotations()`
+  early-returns forever. The map paints, the partner's pin and route never appear,
+  nothing is said. **Most frequent live defect: 5 occurrences across builds 70/74/76.**
+- `chat_receipts.dart:114` <- `chat_screen.dart:821` <- `dispose()` at `:1999` —
+  `PostgrestException 42501`. Root cause found on prod: `ack_read` has
+  `anon_exec = false`, and `dispose()` fires `_flushReadAck('chat_close')`
+  unconditionally, including during sign-out teardown when the JWT is already gone.
+  Partner's read watermark does not advance. Self-heals next chat open.
+- `gallery_repository.dart:289` — `storage.413`. There is **no client-side size
+  guard** (`byte_size` is only recorded *after* upload, line 310) and the server's
+  `storage_quota_ok` RPC is **never called from the client** (grep: zero hits). On a
+  413 the snackbar says **"Nothing uploaded — check your connection."** — the wrong
+  diagnosis — and offers a Retry that can never succeed.
+- `main.dart:831` and `main.dart:955` — two plain `MaterialApp(home:)` branches (the
+  release-gate block screen and the disguise cover host) with no `onGenerateRoute`
+  and no `onUnknownRoute`. A platform route push while either is up hits
+  `_WidgetsAppState._onUnknownRoute` -> `_TypeError`. **A notification tap or deep
+  link does nothing whenever the cover is up.** (client_errors id 536.) The normal
+  path is `MaterialApp.router` and is unaffected.
+
+### The systemic one: two error sinks that are no-ops in the shipped build
+
+    logging.dart:2-4   silenceLogsInRelease() -> debugPrint = (...) {}  in kReleaseMode
+    diag.dart:375      static bool _capture = false;  // "In production this records nothing"
+
+`Diag._capture` is flipped only by `resetForTest`. So **both** `debugPrint` and
+`Diag.record` are dead ends on a real handset.
+
+- **130 catch blocks** whose only reaction is `debugPrint` (mechanical sweep;
+  upper bound — `crypto_core.dart:809/872` are false positives, they capture into
+  `ringError` and re-surface later). Verified genuinely silent by hand:
+  `session_provider.dart:217` (timezone sync — its own comment says this is "the one
+  thing that silently goes wrong when someone travels"; rituals/capsules then fire at
+  the wrong hour after travel, with no signal), `main.dart:589` (resume profile
+  refresh fails -> stale data shown as fresh), `fcm_service.dart:_save` (token write
+  to the server fails -> this handset is never registered for push).
+- **8 catch blocks whose only reaction is `Diag.record`**, five of them in the call
+  path. The worst is `call_controller.dart:425`, the `call_invites` insert that fires
+  the push that rings the callee. Its own comment states the symptom — *"the caller
+  waits the full 35s and tears down with no reason to show"* — and records that a
+  fresh couple *"failed here six times out of six"*. The carefully-assembled
+  `pg_code`/`pg_msg`/`couple` fields go into a ring buffer that is **never allocated
+  in release**. Same at `:500` (`handlePendingCall`), whose comment says the user
+  "reports it as a missed call, not as an error".
+  **Missed calls are undiagnosable in the field by construction.** Note this exact
+  class was already fixed once — `video_surface.dart:63` was moved off Diag onto
+  `ErrorReporter` — the call path was not brought along.
+
+### Privacy claims the app makes that are not true
+
+- `export_screen.dart:315` tells the user **"The app's own copies stay encrypted."**
+  False for both large media stores: the vault is plaintext by an explicit owner
+  decision (`vault_repository.dart:189-199`, 2026-08-28 — PIN gate + FLAG_SECURE +
+  owner-only RLS instead of E2EE) and the gallery is plaintext by design
+  (`gallery_repository.dart:88`, "Deliberately NOT encrypted"). This is on the one
+  screen whose entire job is explaining what is and is not protected. It also
+  contradicts the "no plaintext at rest" line in `.claude/CLAUDE.md`, which should
+  be narrowed to chat.
+- `settings_screen.dart:383-397` — turning location sharing **Off** calls
+  `PresenceService.setLocation(...)`, whose `_upsert` catches every failure and
+  returns normally; its only two reactions are `debugPrint` and `Diag.record`, both
+  no-ops in release. The screen then unconditionally sets the row to Off and toasts
+  **"Location sharing updated"**. On a failed write the server keeps
+  `location_sharing_mode` and the last coordinates, and the partner keeps seeing the
+  user's precise position. The heartbeat's "best-effort, never surface an error"
+  policy is being applied to a **privacy consent control**.
+- `session_provider.dart:363` — when `loadProfile` finds `couple == null` it returns
+  early ("No couple = nothing more to load") and **never calls `endCouple`**. So if
+  the partner ends the couple while this app is closed, the entire local wipe at
+  `:544-632` — chat drafts, `EncryptedMediaCache`, the **plaintext**
+  `DefaultCacheManager` store, voice notes, failed-upload tiles — never runs. That
+  wipe was written for exactly this moment.
+- `lock_screen.dart:65-75` — `_onPin` has **no attempt counter, no delay, no
+  lockout** (grep for attempt/lockout/tries/backoff: zero hits), and `AppLock.verifyPin`
+  is a purely local salted SHA-256 in the keystore, so there is no server rate limit
+  either. Unlimited guesses on a 4-digit PIN, in an app whose whole threat model is
+  someone else holding the phone.
+
+### Two more, both proven by the repo contradicting itself
+
+- `memory_thread_repository.dart:335` builds `MemoryThread.fromJson(payload.newRecord)`
+  straight off a realtime payload. `byteaToBytes` documents the hazard verbatim —
+  *"Exactly double means the value was hex-encoded twice, which is what
+  postgres_changes delivers — refetch the row through PostgREST rather than opening a
+  realtime payload."* `chat_repository.dart:1104` obeys it (*"A ciphered row is
+  REFETCHED, never opened from this payload"*); memory threads does not. The §208
+  double-hex fix landed on chat and was not carried across.
+- `MainActivity.kt:397-405` — the `openSettings` method channel only calls
+  `startActivity` when `SDK_INT >= 34`; below that it falls through to
+  `result.success(null)`. `fsi_permission.dart:38` wraps the call in `catch (_) {}`.
+  The banner that offers it is gated on `areNotificationsEnabled()`, which works on
+  every Android version. **On Android 13 and below, "Go to settings" on the
+  alerts-are-off banner is a silently dead button.**
+- `home_screen.dart:96-106` — `_startLocationUpdates()` awaits `_refreshMyCoords()`
+  and `shareCurrent()` *before* assigning `_locationTimer`. Background the app during
+  those awaits and `didChangeAppLifecycleState` cancels nothing, then the pending
+  call installs a live 15s timer; `mounted` stays true while backgrounded, so GPS
+  keeps pushing. The blanket "it always runs in the background" claim is **false**
+  (pause and dispose both cancel) — this is the narrow race only.
+
+### Refuted — checked and dropped, so nobody re-opens them
+
+- Cold start cannot hang offline: `TimeoutHttpClient` + `PostgrestClientOptions
+  .requestTimeout = 10s` (`supabase_service.dart:21-33`), `ReleaseGate.check` has a
+  6s budget, `terms_gate.dart:121,131` have their own 10s timeouts.
+- Second device is **handled**, not broken: `router.dart:236` auto-redirects a
+  keyless device to `/rewrap`, and that screen offers both "Not now"
+  (`deferRecovery`) and "Start fresh". No lockout.
+- Backend is clean. All 9 `rls_enabled_no_policy` tables are service-role-only from
+  edge functions. All 9 authenticated-callable SECURITY DEFINER functions with a
+  caller-supplied id scope through `current_user_couple_id()`; `purge_couple`,
+  `dissolve_couple` and `couple_has_content` are not grantable to `authenticated`.
+  (`storage_quota_ok(p_owner)` does leak a boolean for an arbitrary known uuid — low.)
+- Prod `messages`: 7 rows, **all ciphertext, 0 plaintext**. The E2EE promise holds
+  for chat.
+- Forgetting the vault PIN is a **lockout, not data loss** — the PIN does not derive
+  the key (content uses `CryptoCore._vaultKey`) and `set_vault_pin` takes only the new
+  pin, so a reset is possible; the app simply never offers one.
+  `memory_threads_screen.dart:99` already implements the "Forgot your PIN?" pattern
+  the vault lacks.
+- No trivial dead controls: zero empty `onPressed`/`onTap`, zero `onPressed: null`.
+- R8 keep rules are thorough (WebRTC, ML Kit, FCM, flutter_local_notifications).
+
+### Stale facts corrected
+
+- `.claude/CLAUDE.md` says rows 4636/4637 still hold plaintext. Production
+  `messages` now holds **7 rows total, zero plaintext** — the table was purged since.
+- `app_release` on prod reads `min_build 42, min_build_play 0, latest_build 46`
+  against a tree at build 76. Expected, not a defect: the self-updater is retired.
+
+### Still open
+
+- The 20-area subagent audit (61 raw candidate findings across every feature area)
+  was **still running its two adversarial verification passes when this was written**
+  — 5 of its agents died to transient API 529s and their areas are therefore
+  unreported, not clean. Everything written above is independently verified by
+  hand against source and does not depend on it.
+- Nothing here is fixed. No code was changed.
+
+## §270 — 2026-09-04 — the §269 defects, fixed (build 76 tree, nothing committed)
+
+Owner: "fix all of these". All 14 from §269 are fixed. Gates green after the last
+edit. **No commit, no APK, no device install.**
+
+### Gates, after the final edit
+
+    flutter analyze  -> 179 issues, 0 errors, 0 warnings   (baseline was 177 info)
+    flutter test     -> All tests passed! 1577 passed, 3 skipped
+                        (baseline 1575; +2 are the two new tests below)
+
+`repo_hygiene_test`'s own "the analyzer reports no errors and no warnings" passes,
+which is the gate that actually enforces the first line.
+
+### Kotlin is compiled by NEITHER gate — checked separately
+
+`flutter analyze` and `flutter test` never touch `MainActivity.kt`, so the Android
+half of the notification fix would have shipped unverified. Compile task only, no APK:
+
+    cd mobile/android && ./gradlew :app:compilePlayReleaseKotlin   -> EXIT=0
+
+Exit 0 is not proof, so the postcondition was asserted instead:
+
+    source  MainActivity.kt  2026-09-04 02:35:06
+    class   MainActivity.class 2026-09-04 03:02:06   -> newer, so it recompiled
+    grep -a build/app/tmp/kotlin-classes/playRelease/.../MainActivity.class
+      android.settings.APP_NOTIFICATION_SETTINGS          <- the NEW pre-14 branch
+      android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT  <- control, the 34+ branch
+      android.provider.extra.APP_PACKAGE
+
+### What changed
+
+- `call_controller.dart` ×5 (`:425` invite, `:460` invite-delete, `:500` pending ring,
+  `:1149` accept, `:2245` glare) — each `Diag.record`-only catch now also calls
+  `ErrorReporter.report`, the sink that leaves the handset. `Diag._capture` is false
+  in every shipped build, so the pg_code/pg_msg fields those catches assemble were
+  written into a ring buffer release never allocates. `_detail` already renders a
+  `PostgrestException`'s code, so 42501-vs-PGRST204 now arrives on its own.
+- `presence_service.dart` — `_upsert` returns whether the row landed and reports the
+  failure through `ErrorReporter`; `setLocation` / `setSharingMode` propagate it. The
+  other ten callers stay `Future<void>` (a `Future<bool>` is assignable to it), so the
+  heartbeat is untouched.
+- `settings_screen.dart:383+` — location mode only claims success when the server
+  agreed. Turning sharing off over a failed write now says "you're still sharing"
+  instead of "Location sharing updated".
+- `settings_screen.dart:102` — `if (!mounted) return;` between the photo picker's
+  await and `ref.read`. That is client_errors id 545 verbatim.
+- `session_provider.dart` — captures `knownCoupleId` BEFORE `setCouple` can clear it,
+  and calls `endCouple(knownCoupleId)` when the server says the couple is gone. This
+  matches `endCouple`'s own doc ("caller must capture it BEFORE loadProfile() nulls
+  it"). Solo accounts are unaffected: `knownCoupleId` is null for them.
+- `session_provider.dart:217` — timezone sync failure reports instead of debugPrint.
+- `app_lock.dart` + `lock_screen.dart` — PIN throttle: 4 free, then 30s / 5min / 30min,
+  enforced INSIDE `verifyPin` so the vault pad and the cover's backup door get it too.
+  Lock screen shows a live countdown rather than "Wrong PIN".
+- `partner_location_card.dart:150+` — the Mapbox annotation-manager calls are wrapped;
+  a failure sets `_mapBroken` and shows "Map didn't load fully — reopen to retry".
+  Five field reports across builds 70/74/76 came in through that unguarded path.
+- `main.dart` — `onUnknownRoute: ignoreRoutePush` on both plain `MaterialApp`s.
+- `gallery_repository.dart` / `gallery_screen.dart` — `maxUploadBytes` = 100MB mirrors
+  the `couple_intimate` bucket's real `file_size_limit` (read off prod: 104857600),
+  thrown as `GalleryTooLarge` BEFORE the thumbnail so no orphan object is created.
+  The screen names the size and offers no Retry for it.
+- `MainActivity.kt:397+` — `openSettings` uses `ACTION_APP_NOTIFICATION_SETTINGS`
+  below SDK 34 and returns whether a page opened; `fsi_permission.dart` returns that
+  instead of `catch (_) {}`, and Settings says so when it fails.
+- `memory_thread_repository.dart` — realtime deltas REFETCH the row through PostgREST
+  (`fetchOne`, same `_columns` as the seed read) instead of parsing double-hex bytea
+  out of the payload. Deltas are serialized through a future chain so two events can't
+  race each other's awaits.
+- `chat_receipts.dart` — `ackRead` / `ackDelivered` skip when there is no session.
+  `ack_read` is granted to `authenticated` and not `anon`, so the dispose-during-
+  sign-out path was a guaranteed 42501.
+- `home_screen.dart` — `_locationTimer` is installed BEFORE the two awaits and a new
+  `_locationActive` flag stops an in-flight `_startLocationUpdates`. `mounted` is true
+  while backgrounded, so it could not have been the guard.
+- `export_screen.dart:315` — the false line is gone. Now: messages are end-to-end
+  encrypted; gallery and vault are private storage but NOT encrypted.
+
+### The near-miss worth keeping
+
+The first version of the route fix returned a transparent `PageRouteBuilder` and left
+it on the stack. A probe measured what that actually does: **every ModalRoute installs
+a modal barrier whether or not it paints one, and an invisible barrier swallows every
+touch aimed at the screen underneath.** Taps after the push: 1, not 2 — the cover would
+have become untappable, which is worse than the crash it was written to stop. The
+shipped version pops itself on the next frame. `test/widget/cover_route_push_test.dart`
+asserts BOTH halves (no throw, and taps==2) so the simplification cannot come back.
+
+### Two tests added, and why they are not scope creep
+
+- `cover_route_push_test.dart` — the regression above; nothing else in 1577 tests
+  would have caught it.
+- `pin_migration_test.dart` +1 case — the PIN throttle is a new security control, and
+  FINAL requires the riskiest new path be exercised. It asserts 4 misses stay free, a
+  success clears the tally, and the 5th consecutive miss refuses even the CORRECT PIN.
+
+### A gate that was right, and was not weakened
+
+`pin_migration_test` asserts a failed verify writes NOTHING to secure storage. The
+first throttle stored its counter there and went red. The counter moved to
+SharedPreferences rather than the assertion being narrowed — both stores are cleared
+together by "Clear data", and the adversary this lock is for is holding an unlocked
+phone, not a root shell. The invariant protecting the secret is worth more.
+
+### Four stray files removed
+
+`mobile/test/widget/zz_audit_{glow,inputbar,overflow,pin}_test.dart` — written into
+the tree by §269's audit subagents, each self-labelled "TEMPORARY AUDIT HARNESS -
+delete after the run". One was breaking `flutter analyze` with an unused import. The
+§269 workflow was still running and still mutating the tree during the first gate run
+(a `zz2_drawer_test.dart` appeared and vanished mid-suite); it has been stopped.
+
+### Still open
+
+- **Nothing has run on a device.** Every fix is gate-verified and source-verified; none
+  is field-verified. The three that can only be proven on hardware are the Mapbox
+  annotation guard (the plugin exception only happens on a real device), the call
+  ErrorReporter wiring (needs a real failed invite), and the pre-14 notification
+  settings intent (needs an Android 13 handset).
+- **#4 is only half fixed, and the half left is the owner's.** The copy no longer lies.
+  Whether the vault and gallery should actually BE encrypted is a product decision from
+  2026-08-28 that stands until reversed. `.claude/CLAUDE.md` still says "E2EE stays; no
+  plaintext at rest", which is true of chat and false of both media stores — it should
+  be narrowed, but a rule file is not edited without being asked.
+- The §269 subagent audit was stopped mid-run; 5 of its 20 areas died to API 529s and
+  were never reported. Those areas are unaudited, not clean.
+- Nothing is committed.

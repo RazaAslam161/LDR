@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/closer/closer_crypto.dart';
@@ -271,6 +272,23 @@ class MemoryThreadRepository {
     );
   }
 
+  /// One row, read through PostgREST so its `bytea` columns arrive in the
+  /// encoding every decoder in this app expects.
+  ///
+  /// Null when the row is gone or will not parse — both of which mean "do not
+  /// touch what is already on screen".
+  static Future<MemoryThread?> fetchOne(String id) async {
+    try {
+      final row =
+          await _c.from('memory_threads').select(_columns).eq('id', id).maybeSingle();
+      if (row == null) return null;
+      return MemoryThread.fromJson(JsonUtils.asMap(row));
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'memory-fetch-one');
+      return null;
+    }
+  }
+
   /// How many proposals are waiting for THIS user to answer.
   ///
   /// `state` and `proposer` are both plaintext, so this needs no key, no
@@ -324,7 +342,12 @@ class MemoryThreadRepository {
       );
     }
 
-    void apply(PostgresChangePayload payload) {
+    // Deltas are applied one at a time, in arrival order. A ciphered row costs
+    // a refetch (below), and two changes landing together would otherwise race
+    // each other's awaits and let the older answer overwrite the newer one.
+    var chain = Future<void>.value();
+
+    Future<void> applyOne(PostgresChangePayload payload) async {
       try {
         switch (payload.eventType) {
           case PostgresChangeEvent.delete:
@@ -332,16 +355,37 @@ class MemoryThreadRepository {
             if (id != null) byId.remove(JsonUtils.parseString(id));
           case PostgresChangeEvent.insert:
           case PostgresChangeEvent.update:
-            final row = MemoryThread.fromJson(payload.newRecord);
-            byId[row.id] = row;
+            // NEVER MemoryThread.fromJson(payload.newRecord). postgres_changes
+            // and PostgREST do not hand `bytea` over in the same encoding —
+            // the realtime copy arrives hex-encoded TWICE — and byteaToBytes
+            // says so in its own FormatException: "refetch the row through
+            // PostgREST rather than opening a realtime payload". Every row in
+            // this table carries title_cipher, so opening the payload broke
+            // every insert and every update, and the catch below turned that
+            // into a silently dropped delta. chat_repository.dart does the
+            // same refetch for the same reason; this table was not brought
+            // along with it.
+            final id = JsonUtils.parseString(payload.newRecord['id']);
+            if (id.isEmpty) return;
+            final fresh = await fetchOne(id);
+            // Gone between the event and the read, or unreadable: leaving the
+            // stale entry in place beats replacing it with a broken one.
+            if (fresh == null) return;
+            byId[fresh.id] = fresh;
           case PostgresChangeEvent.all:
             return;
         }
-      } catch (e) {
-        debugPrint('memory threads delta: ${e.runtimeType}');
+      } catch (e, st) {
+        // Was debugPrint only, which release nulls — so a delta that never
+        // arrived looked exactly like a partner who had not done anything.
+        ErrorReporter.report(e, st, kind: 'memory-delta');
         return;
       }
       if (open) controller.add(snapshot());
+    }
+
+    void apply(PostgresChangePayload payload) {
+      chain = chain.then((_) => applyOne(payload));
     }
 
     controller = StreamController<CloserLoadResult<MemoryThread>>.broadcast(
