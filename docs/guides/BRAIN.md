@@ -22624,3 +22624,42 @@ remaining `METERED` string in the tree is now either a deliberate tombstone or
   hash. Harmless under PKCE, which is the current flow; a project-level switch
   to the implicit flow would put a session token in a URL Vercel logs and would
   silently falsify the Vercel row.
+
+### §268 addendum — committed and pushed, CI green (2026-09-04)
+
+`edbc9aa` on `fix-sprint`, pushed and confirmed
+(`git rev-list --left-right --count origin/fix-sprint...HEAD` → `0 0`).
+CI run `33796422610` on headSha `edbc9aa7…`: **analyze + test green in 5m47s**,
+dependency advisories green in 48s. (The first `gh run watch` returned exit 1 on
+`error connecting to api.github.com` — a watcher network failure, not a red
+gate; re-read after it reconnected.)
+
+Eight files, staged by explicit path, nothing else in the tree:
+
+    docs/guides/BRAIN.md
+    mobile/lib/features/call/call_controller.dart
+    mobile/pubspec.yaml
+    mobile/test/unit/hygiene/repo_hygiene_test.dart
+    supabase/functions/turn-credentials/index.ts
+    web/csae.html
+    web/privacy-policy.html
+    web/security.html
+
+Gates immediately before staging: `flutter analyze` 177 info / 0 error /
+0 warning, `flutter test` 1575 passed. BRAIN's diff was 242 insertions and
+**zero** deletions — a pure append, so no other session's section was touched.
+The relay function was checked for leftover test poison before staging
+(`x.example`, `relay.example.net`, `iceServers.push` all absent) because it had
+been deliberately broken three times to prove the new guard fires.
+
+**The commit does not close the one thing that matters most, and its message
+says so in its own section.** Deployed `turn-credentials` is still v5 with the
+Metered branch in it. Repo-green is not field-green:
+
+    npx supabase functions deploy turn-credentials --project-ref sopictusdonlvuezmfep
+
+### Next step
+
+Run that deploy, then confirm with the Supabase MCP that the live function no
+longer contains `METERED_TURN_`. Until then the three-INSERT path to an
+undisclosed relay is open in production regardless of what this repo says.
