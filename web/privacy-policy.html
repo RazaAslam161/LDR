@@ -32,7 +32,7 @@
 <article class="paper">
 
 <h1>Miles — Privacy Policy</h1>
-<p class="updated">Last updated: 26 August 2026</p>
+<p class="updated">Last updated: 3 September 2026</p>
 
 <p class="lede">Miles is a private app for two people in a relationship. This
 policy says what it stores, what it cannot read, who else touches your data, how
@@ -79,8 +79,11 @@ default</strong> — there is a switch on the cycle screen to stop that, but it
 starts on. Cycle data is not end-to-end encrypted; see section 2.</p>
 
 <p><strong>Where you are, if you turn it on.</strong> Location sharing is
-per-account and has three modes: off, city (only a “City, Country” label leaves
-your phone — never coordinates), or precise (coordinates plus a finer label).
+per-account and has three modes: off, city (only a “City, Country” label
+reaches your partner or our servers — never coordinates), or precise
+(coordinates plus a finer label). In city mode your phone still asks Android’s
+own geocoder to turn a coarse fix into that label, which on a phone with Google
+services means Google answers it; section 4 says so.
 A new account starts at <strong>off</strong>, and nothing is shared until the
 feature is switched on.</p>
 
@@ -110,10 +113,12 @@ activity, an avatar emoji and a check-in photo. This is what lets your partner
 see that you are there.</p>
 
 <p><strong>A push token.</strong> A Firebase Cloud Messaging registration token
-for your device, so your partner’s messages and calls can reach you.</p>
+for your device, and the Firebase installation id that issuing it requires, so
+your partner’s messages and calls can reach you.</p>
 
 <p><strong>Crash reports.</strong> One narrow stream, and the only diagnostic
-Miles still sends. A crash uploads your account id, the app’s build number, the
+Miles itself sends — the map SDK sends its own, which section 4 names. A crash
+uploads your account id, the app’s build number, the
 exception’s <strong>type</strong>, a machine-readable code (an SQLSTATE, an auth
 error code, an errno) and the Dart stack frames — at most five a run. The
 exception’s <strong>message is discarded on your device before anything is
@@ -137,9 +142,11 @@ accepting it from your phone. It stores no copy of the reported content. Miles
 also records that you accepted a given version of the Terms and when, and any
 notification or contact pause you set against your partner.</p>
 
-<p>Miles contains no advertising SDK, no analytics SDK, and no third-party
-tracking. Nothing here is sold, and nothing here is used to build an
-advertising profile.</p>
+<p>Miles contains no advertising SDK and no analytics SDK of its own, and
+nothing here is sold or used to build an advertising profile. One qualification,
+because a flat claim would be untrue: the Mapbox SDK that draws the map sends
+its own session and telemetry events, and Miles does not switch them off.
+Section 4 lists it.</p>
 
 <h2>2. What is end-to-end encrypted — and what is not</h2>
 
@@ -247,65 +254,107 @@ key derivation instead; those are re-sealed the first time they are opened.</p>
     <td>Supabase</td>
     <td>everything in section 1 that is stored at all</td>
     <td>Hosting: database, file storage, authentication, realtime and server
-    functions. Data is held in the <strong>ap-south-1 (Mumbai, India)</strong>
-    region.</td>
+    functions.</td>
   </tr>
   <tr>
     <td>Google — Firebase Cloud Messaging</td>
-    <td>your device’s push token, and per notification: a type word
-    (<code>reach</code>, <code>care</code>, <code>call</code>,
-    <code>message</code>, <code>memory</code>, <code>ritual</code>), your
-    couple’s id, the id of the row that triggered it, and for a call whether it
-    is a video call</td>
+    <td>your device’s push token, a Firebase installation id, and per
+    notification: a type word (<code>reach</code>, <code>care</code>,
+    <code>call</code>, <code>message</code>, <code>msg_sync</code>,
+    <code>memory</code>, <code>ritual</code>, and four that mark stages of
+    unlinking), your couple’s id, the id of the row that triggered it, for a
+    chat message its sequence number, and for a call whether it is a video
+    call</td>
     <td>Delivering notifications. <strong>No names, no message text, no
     photographs, and no location pass through Google.</strong> The notification
     you see is composed on your own phone from those identifiers.</td>
   </tr>
   <tr>
+    <td>Google — STUN servers</td>
+    <td>your device’s public IP address, on every voice or video call</td>
+    <td>Working out how to reach your partner’s phone. Two Google STUN servers
+    are tried on every call, not only when a call has to be relayed. No audio,
+    video or message content passes through them.</td>
+  </tr>
+  <tr>
     <td>Cloudflare</td>
-    <td>the encrypted media stream and both devices’ IP addresses, only when a
-    direct connection fails</td>
-    <td>TURN relay for voice and video calls.</td>
+    <td>your device’s public IP address on every call, from its STUN server;
+    and the encrypted media stream plus both devices’ IP addresses when a
+    direct connection fails and the call has to be relayed</td>
+    <td>Finding a route for calls, and relaying them when there is no direct
+    one. A relayed stream stays encrypted end to end.</td>
   </tr>
   <tr>
     <td>Mapbox</td>
     <td>map tile requests, which reveal the area of the map you are looking at,
-    and your IP address</td>
+    your IP address, and the Mapbox SDK’s own session and telemetry events,
+    which Miles does not switch off</td>
     <td>Drawing the world map.</td>
   </tr>
   <tr>
-    <td>Google — Maps SDK</td>
-    <td>map tile requests for the area being drawn, and your IP address</td>
-    <td>The map that shows where your partner is. Only reached from the
-    location screens.</td>
+    <td>Google Maps (the app or site on your phone)</td>
+    <td>your partner’s exact latitude and longitude, in a link</td>
+    <td>Only when you tap <em>Navigate</em> on the location screen. Miles hands
+    the coordinates to whatever handles map links on your phone and takes no
+    further part.</td>
   </tr>
   <tr>
     <td>Google — Android geocoder</td>
     <td>the coordinates your phone turns into a place name</td>
     <td>Turning a fix into the “City, Country” label. This is Android’s own
-    geocoder, which on a device with Google services is answered by Google.</td>
+    geocoder, which on a device with Google services is answered by Google.
+    This happens in city mode too, from the coarse fix that mode asks for —
+    city mode governs what reaches your partner, which is the label alone and
+    never the coordinates.</td>
   </tr>
   <tr>
     <td>Google — ML Kit</td>
-    <td>nothing leaves the device</td>
-    <td>Pose detection and subject cut-out for Touch Map photo reactions. The
-    models run on your phone; the photograph is not uploaded to Google.</td>
+    <td>no photograph, and no part of one</td>
+    <td>Pose detection and subject cut-out for Touch Map photo reactions, both
+    of which run on your phone. The pose models ship inside the app; the
+    cut-out model does not, so Google Play services fetches it from Google the
+    first time you use that feature. The photograph itself is never
+    uploaded.</td>
   </tr>
   <tr>
     <td>Giphy</td>
-    <td>your GIF search terms, your IP address, and a request for each GIF
-    shown</td>
-    <td>The GIF picker in chat. Only when you open it.</td>
+    <td>your GIF search terms, your IP address, and a request for each GIF the
+    picker previews</td>
+    <td>The GIF picker in chat, only when you open it. A GIF you
+    <em>attach</em> to a message is fetched once by your phone and re-uploaded
+    to Miles. A GIF you <em>fling</em> from the picker is sent as a Giphy link
+    instead, so your partner’s phone loads it from Giphy and Giphy sees their
+    IP address too.</td>
   </tr>
   <tr>
-    <td>YouTube and other video sites</td>
-    <td>ordinary web requests from the embedded player</td>
-    <td>Watch Together, only for a link you paste.</td>
+    <td>YouTube, Vimeo, TikTok — and any site you open in Watch Together</td>
+    <td>ordinary web requests carrying your IP address and the video id</td>
+    <td>Watch Together plays a link you paste, and anything that is not one of
+    those three opens as a full web page inside Miles, with that site’s own
+    cookies and scripts. Separately, a YouTube link sent in chat fetches its
+    thumbnail picture from Google on both phones, without either of you
+    tapping it.</td>
   </tr>
   <tr>
-    <td>Google Fonts</td>
-    <td>a font request on first launch</td>
-    <td>Typefaces.</td>
+    <td>BBC News, Al Jazeera, NPR</td>
+    <td>your IP address, a request for their headline feed, and one image
+    request per headline</td>
+    <td>Only if you turn on the News cover, which fills itself with real
+    headlines so that it looks like what it claims to be. Tapping one leaves
+    Miles and opens that publisher’s page in your own browser; the cover’s
+    search box filters what has already been fetched and sends them
+    nothing.</td>
+  </tr>
+  <tr>
+    <td>Vercel</td>
+    <td>the IP address and browser of anyone who opens any page on this site;
+    and, when you confirm an email address or reset your password, whatever the
+    sign-in link carries in its address — the one-time code, and any error
+    Supabase reports alongside it</td>
+    <td>Hosting this site, including the sign-in landing page and the
+    account-deletion page. That code cannot be used on its own — completing a
+    sign-in also needs a secret that stays on your phone and is never sent
+    here.</td>
   </tr>
 </table>
 </div>
@@ -472,9 +521,13 @@ it, are set out in full on the
 <h2>9. Where your data is</h2>
 
 <p>Data is stored and processed in the <strong>ap-south-1 (Mumbai, India)</strong>
-region. Notification delivery (Google), call relaying (Cloudflare) and map tiles
-(Mapbox) route through those providers’ global infrastructure, which may be
-outside your country.</p>
+region. Everything in the section 4 table leaves it: notification delivery
+(Google), call routing and relaying (Google’s and Cloudflare’s servers), map
+tiles (Mapbox), place names (Android’s geocoder), this site (Vercel), and —
+only if you use those features — the GIF picker (Giphy), Watch Together and
+chat link previews (YouTube, Vimeo, TikTok, or whatever you paste) and the News
+cover (BBC News, Al Jazeera, NPR). Each routes through that provider’s global
+infrastructure, which may be outside your country.</p>
 
 <h2>10. Security, and what it does not cover</h2>
 

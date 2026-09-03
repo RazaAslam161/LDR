@@ -756,9 +756,11 @@ class CallController extends ChangeNotifier {
       (_turnFetchedAt == null && _cachedTurn.isEmpty) ? null : relayAvailable;
 
   /// Full WebRTC ICE config: Google/Cloudflare STUN + Cloudflare TURN (which
-  /// includes TURN-over-TLS:443 for carrier-NAT / UDP-blocked networks). A static
-  /// TURN from .env (METERED_TURN_*) is appended if present, as a manual override.
-  /// Make sure a relay is available before a call goes out.
+  /// includes TURN-over-TLS:443 for carrier-NAT / UDP-blocked networks).
+  /// Cloudflare is the only relay; a second provider is a disclosure decision,
+  /// not a config one (turn-credentials/index.ts, and the law in
+  /// repo_hygiene_test.dart). Make sure a relay is available before a call
+  /// goes out.
   ///
   /// A fresh install has nothing cached, so its FIRST call depends entirely on
   /// one network fetch landing. On mobile data against a cold edge function
@@ -862,10 +864,12 @@ class CallController extends ChangeNotifier {
     // it reads as a configured fallback. It cost a later reader several hours on
     // the belief that live credentials were shipping in the binary.
     //
-    // `turn-credentials` (v5) now appends Metered from `app_secrets` when the
-    // three rows exist, so a second provider arrives through _cachedTurn above
-    // with the rest — same fetch, same cache, no second round trip and nothing
-    // to read from disk here.
+    // `turn-credentials` used to append a second provider from `app_secrets`
+    // when three METERED_TURN_* rows existed. That branch was removed on
+    // 2026-09-03: it turned three INSERTs into an undisclosed recipient of
+    // call media and both partners' IP addresses. Whatever relays a call now
+    // arrives through _cachedTurn above, from Cloudflare, and adding another
+    // means naming it in the privacy policy in the same change.
 
     debugPrint('[turn] ice config: ${servers.length} servers, '
         'relay=${relayAvailable ? 'YES' : 'NO'}'

@@ -32,7 +32,7 @@
 <article class="paper">
 
 <h1>Miles — Security &amp; Vulnerability Disclosure</h1>
-<p class="updated">Last updated: 18 August 2026</p>
+<p class="updated">Last updated: 3 September 2026</p>
 
 <p class="lede">If you have found a way to reach data in Miles that should not
 be reachable, we want to hear about it, and this page is the route. It says what
@@ -200,10 +200,13 @@ will get a short answer rather than a fix.</p>
   <li><strong>The unencrypted half of section 2.</strong> That the operator of
   the database could read chat is documented, not discovered.</li>
   <li><strong>Third-party services.</strong> Issues in Supabase, Google
-  (Firebase Cloud Messaging, Maps, ML Kit), Cloudflare, Mapbox, Giphy or an
-  embedded video site belong to those companies and should be reported to them.
-  Tell us as well if the issue reaches Miles users through us, and we will
-  relay it.</li>
+  (Firebase Cloud Messaging, STUN, the Android geocoder, ML&nbsp;Kit, and Maps
+  when you tap Navigate), Cloudflare, Mapbox, Giphy, Vercel, an embedded video
+  site or a news publisher the News cover reads belong to those companies and
+  should be reported to them. Section&nbsp;4 of the
+  <a href="privacy-policy.html">Privacy&nbsp;Policy</a> is the full list and
+  says what each one receives. Tell us as well if the issue reaches Miles users
+  through us, and we will relay it.</li>
   <li><strong>Best-practice findings with no path to impact</strong> — a missing
   header, a permissive setting, a version number in a banner. These are read and
   answered, and some of them get fixed, but they are not treated as

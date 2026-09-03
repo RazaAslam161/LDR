@@ -66,15 +66,7 @@ Deno.serve(async (req: Request) => {
     const { data, error } = await admin
       .from("app_secrets")
       .select("key,value")
-      .in("key", [
-        "CF_TURN_KEY_ID",
-        "CF_TURN_API_TOKEN",
-        // Optional second relay provider. Absent today, and absence is a
-        // supported state — see the append below.
-        "METERED_TURN_HOST",
-        "METERED_TURN_USERNAME",
-        "METERED_TURN_CREDENTIAL",
-      ]);
+      .in("key", ["CF_TURN_KEY_ID", "CF_TURN_API_TOKEN"]);
     if (error) return json({ error: "secret_read_failed" }, 500);
 
     const map: Record<string, string> = {};
@@ -134,39 +126,27 @@ Deno.serve(async (req: Request) => {
       return json({ error: "cloudflare_no_ice_servers", body: text.slice(0, 500) }, 502);
     }
 
-    // A SECOND relay provider, appended to Cloudflare's rather than replacing
-    // it. Two providers matter on the networks this app cannot see: symmetric
-    // NAT, corporate wifi and some mobile carriers defeat one relay and not
-    // another, and a call that fails there fails silently as "it just rings".
+    // ONE relay provider, deliberately. A dormant second provider (Metered)
+    // used to be appended here whenever three METERED_TURN_* rows appeared in
+    // app_secrets. It was removed on 2026-09-03 because of what it made
+    // possible rather than what it did: three INSERTs — no release, no review,
+    // no document change — would have routed encrypted call media and both
+    // partners' IP addresses to a company the privacy policy does not name.
+    // Production held no METERED_* rows, so it had never carried a single
+    // call.
     //
-    // These used to live in the app's bundled .env, which ships INSIDE the
-    // artifact — `.env` is a Flutter asset (pubspec.yaml:129), and an APK
-    // unzips in seconds. Anyone holding a build could spend the account's
-    // quota, and the first symptom would have been calls degrading for
-    // everyone with no obvious cause. Serving them from `app_secrets` puts
-    // them where the Cloudflare token already lives and makes rotation one
-    // UPDATE instead of a build.
+    // The reason it existed is still real: symmetric NAT, corporate wifi and
+    // some mobile carriers defeat one relay and not another, and a call that
+    // fails there fails silently as "it just rings". So adding a second
+    // provider back is a fair decision — it is just not one that may happen
+    // quietly. Add the branch AND a row for that company in section 4 of
+    // web/privacy-policy.html in the same change;
+    // repo_hygiene_test.dart ("every relay provider this function can offer is
+    // named in the policy") fails the build until both exist.
     //
-    // ABSENCE IS NORMAL. All three keys must be present or none are appended,
-    // so this is a no-op until the rows exist and the response is byte-identical
-    // to before. A partially-filled set is treated as absent rather than
-    // half-configured: a TURN entry with a blank credential is a candidate that
-    // always fails, which is worse than one that was never offered.
-    const mHost = (map["METERED_TURN_HOST"] ?? "").trim();
-    const mUser = (map["METERED_TURN_USERNAME"] ?? "").trim();
-    const mCred = (map["METERED_TURN_CREDENTIAL"] ?? "").trim();
-    if (mHost && mUser && mCred) {
-      iceServers.push(
-        { urls: `turn:${mHost}:80`, username: mUser, credential: mCred },
-        { urls: `turn:${mHost}:443`, username: mUser, credential: mCred },
-        {
-          urls: `turns:${mHost}:443?transport=tcp`,
-          username: mUser,
-          credential: mCred,
-        },
-      );
-    }
-
+    // That test reads THIS FILE. The deployed function is the artifact that
+    // actually serves calls, so a change here is not in force until it is
+    // redeployed - repo-green is not field-green.
     return json({ iceServers });
   } catch (e) {
     return json({ error: "exception", detail: String(e) }, 500);

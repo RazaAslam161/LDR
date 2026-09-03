@@ -22382,3 +22382,245 @@ Build, install over the existing app **without uninstalling** (the play flavour
 carries the upload key, which is what makes that possible), and hold two
 fingers still for ten seconds on a cover. If it does not open first try,
 `kBackupSlop` is the one number to raise and everything else follows from it.
+
+## §267 — the published privacy policy was wrong in both directions (2026-09-03)
+
+Owner: *"fix the privacy policy and security page too."* What looked like
+deleting one stale Google Maps row turned into correcting a disclosure that was
+wrong in both directions. A six-agent read-only audit (Dart network, Android
+native, edge functions, shipped APK, row-by-row verification, omission hunt)
+plus my own checks found the table listing parties that receive nothing and
+omitting four that do.
+
+### Deleted — both provably false, not merely stale
+
+- **Google — Maps SDK.** Mapbox replaced it 2026-09-02. Zero
+  `maps.googleapis.com` in `libapp.so`, zero `com/google/android/gms/maps` in
+  any DEX, no `com.google.android.geo.API_KEY` in any of the five manifests.
+- **Google Fonts.** Worse than stale: it asserted a request that cannot happen.
+  The eight faces ship as bundled TTFs (`pubspec.yaml:184-206`), and
+  `fonts.googleapis.com` / `fonts.gstatic.com` are absent from `libapp.so` and
+  from every DEX. The only `google_fonts` string in the repo is a **comment** at
+  `pubspec.yaml:181` explaining why they were bundled.
+
+### Added — four parties that receive data and were never disclosed
+
+- **Google STUN.** `call_controller.dart:846-849` seeds `stun.l.google.com` and
+  `stun1.l.google.com` unconditionally on **every** call, before the TURN list.
+  Google gets both partners' IP on every call. The old table did not mention it,
+  and the Cloudflare row's "only when a direct connection fails" was false for
+  STUN as well (`stun.cloudflare.com` is in the same unconditional list).
+- **Google Maps, the app or site.** `location_map_screen.dart:525-531` hands the
+  partner's exact latitude and longitude to `google.navigation:q=` and falls back
+  to `https://maps.google.com/?q=`. Deleting the Maps SDK row without adding this
+  would have replaced a wrong disclosure with a missing one.
+- **BBC News, Al Jazeera, NPR.** The News cover fetches real headlines and one
+  image per item. `feeds.bbci.co.uk`, `aljazeera.com` and `npr.org` are all
+  present in `libapp.so`.
+- **Vercel.** Hosts these pages, and `auth-callback.html:135-142` reads the
+  sign-in `code` from `location.search`, so it reaches Vercel's logs. The row
+  says why that is survivable (PKCE: the verifier never leaves the phone).
+
+### Round two — and the worst finding was mine
+
+The adversarial pass over my own edit found the reassurance I had just published
+about Giphy to be **false**:
+
+> "A GIF you send is fetched once by your phone and re-uploaded to Miles, so
+> your partner's phone never contacts Giphy."
+
+True of the attach path only. `_pickGifBurst` (`chat_screen.dart:276-279`) takes
+the picker's `fullUrl` and `_sendGifBurst` (`:247-250`) broadcasts `{'gif': url}`
+over the realtime channel; the receiver renders it with `Image.network`
+(`:2969-2977`). The partner's phone loads it straight from Giphy. Corrected to
+distinguish attach from fling. The neighbouring `_flingGifFile` uploads first,
+which is how the code shows its author knew the difference.
+
+Also fixed in round two, all self-contradictions the first edit created or
+exposed:
+
+- §1 still said city mode sends "never coordinates" while the new geocoder row
+  conceded coordinates reach Google. §1 now scopes the promise to what reaches
+  the partner and points at §4.
+- "no advertising SDK, no analytics SDK, and no third-party tracking" is
+  contradicted by the Mapbox telemetry the same edit disclosed. Qualified rather
+  than deleted — it is true of Miles' own code.
+- "the only diagnostic Miles still sends" → "the only diagnostic Miles itself
+  sends".
+- §9 international transfers named three providers; now names every one in the
+  §4 table.
+- §1's inventory omitted the Firebase installation id that §4 discloses.
+- The geocoder row said "your exact position even in city mode"; city mode asks
+  for `LocationAccuracy.low`, so the fix says "the coarse fix that mode asks
+  for". An overstatement against ourselves costs the same credibility as an
+  understatement.
+- `security.html` had dropped Maps from its Google list while the policy kept a
+  Google Maps row, and claimed a parity that did not hold.
+
+### Deliberately NOT added: Metered TURN
+
+`supabase/functions/turn-credentials/index.ts:69-76,152-166` appends three
+**Metered** relay entries the moment `METERED_TURN_HOST` / `_USERNAME` /
+`_CREDENTIAL` exist in `app_secrets`, and the client swallows whatever it is
+given (`call_controller.dart:850`). Production was queried:
+
+    select key, length(value) from public.app_secrets;
+    -> CF_TURN_API_TOKEN, CF_TURN_KEY_ID, FUNCTIONS_BASE_URL,
+       GIPHY_API_KEY, MAPBOX_PUBLIC_TOKEN, NOTIFY_SHARED_SECRET
+
+No `METERED_*`. The relay is dormant, so naming it would be its own false
+disclosure. **But three INSERTs would route encrypted call media and both
+partners' IPs to a company the policy does not name, with no release and no
+document change.** If those rows are ever added, §4 must gain a Metered row in
+the same change.
+
+### Verified
+
+    flutter analyze -> 177 info, 0 error, 0 warning
+    flutter test    -> 02:03 +1574 ~3: All tests passed!   (before round two)
+    HTML tag balance checked on both files after every edit
+    libapp.so: stun.l.google.com, stun1.l.google.com, stun.cloudflare.com,
+      api.giphy.com, i.ytimg.com, feeds.bbci.co.uk, aljazeera.com, npr.org
+      PRESENT; fonts.googleapis.com, fonts.gstatic.com, maps.googleapis.com
+      ABSENT
+    DEX: events.mapbox.com, api.mapbox.com, sdk-sessions PRESENT
+
+Both pages' "Last updated" moved to 3 September 2026 — §15 promises it on a
+material change, and the 26 August date is exactly why two rows went stale.
+
+### Open
+
+- **`web/csae.html:77-90` is now contradicted by our own table.** It says Giphy
+  and Watch Together are "the only third-party content the app puts in front of
+  anyone". The News cover renders BBC / Al Jazeera / NPR headlines and their
+  images in-app and opens the publisher's full site on tap
+  (`news_cover_screen.dart:117`, `:506-512`). That is a **Play-facing child
+  safety document understating an unmoderated third-party surface**, and the
+  privacy table we just published is the evidence against it. Out of the scope
+  the owner set for this turn; it is the most consequential thing still wrong.
+- The privacy row for the news publishers does not mention the tap-through to
+  the publisher's full site.
+- `auth-callback.html:142` reads `access_token` from the query string before the
+  hash. Harmless under PKCE, which is the current flow, but a project-level
+  switch to the implicit flow would put a session token in a URL Vercel logs and
+  would silently falsify the Vercel row's reassurance.
+- Nothing in this section is committed.
+
+## §268 — the CSAE document, and defusing the second-relay landmine (2026-09-03)
+
+Owner: *"fix all of them and handle them professionally."*
+
+### The relay landmine — removed in the repo, and STILL LIVE IN PRODUCTION
+
+`turn-credentials` appended a second relay provider (Metered) the moment three
+`METERED_TURN_*` rows appeared in `app_secrets`. Three INSERTs — no release, no
+review, no document change — would have routed encrypted call media and both
+partners' IP addresses to a company the privacy policy does not name.
+
+The branch is removed from `supabase/functions/turn-credentials/index.ts`, and a
+new law in `repo_hygiene_test.dart` stops another arriving the same way.
+
+**But the deployed function is v5 and still contains it.** The adversarial pass
+caught this and it is the single most important line in this section: the repo
+change is not in force in the field. The MCP deploy was **refused by this
+session's permission classifier**, and I did not route around it. Until someone
+redeploys, the property this work exists to establish is false in production:
+
+    npx supabase functions deploy turn-credentials --project-ref sopictusdonlvuezmfep
+
+Rollback is `git show <this commit>~1:supabase/functions/turn-credentials/index.ts`
+redeployed. The deploy is behaviourally a no-op today — production holds no
+`METERED_*` rows (queried: only CF_TURN_API_TOKEN, CF_TURN_KEY_ID,
+FUNCTIONS_BASE_URL, GIPHY_API_KEY, MAPBOX_PUBLIC_TOKEN, NOTIFY_SHARED_SECRET),
+so the removed branch has never fired and the response is unchanged. Production
+was confirmed byte-equal to git HEAD before the change, so nothing else is being
+overwritten.
+
+**A gate that measures the repo cannot prove anything about the field.** That is
+the general lesson and it is now written into the function's own comment.
+
+### The law, and the three nets it needed
+
+`repo_hygiene_test.dart` — "every relay provider this function can offer is
+named in the policy". The first version was written with one net and **failed
+open**: it scanned for `*_TURN_*` secret prefixes, so a provider added as
+`TWILIO_ICE_USERNAME` or as a hardcoded `turn:` URL was invisible, and
+`expect(prefixes, isNotEmpty)` could never catch it because `CF_TURN_*` keeps
+the set non-empty for ever. Three nets now, each proven to fire alone:
+
+- no `iceServers.push` → *"something appends relay entries to the Cloudflare
+  response"*
+- no literal `turn:`/`turns:` URI → *"a relay is being offered that did not come
+  from Cloudflare"*
+- every `*_TURN_*` prefix maps to a company **named in the third-party table**
+  (scoped to the table, not the whole document, because the failure message
+  promises a row) → *"unrecognised provider (METERED)"*
+
+Comments are stripped before scanning, and that is load-bearing rather than
+tidy: the tombstone comment left where the branch used to be names
+`METERED_TURN_*` itself, so a raw scan would match its own epitaph and fail for
+ever.
+
+### web/csae.html — the child-safety declaration had a false claim in it already
+
+Correcting it exposed one that was not mine and mattered more than the omission
+I set out to fix:
+
+> "The player is pinned to that one site: a tap that would leave it is cancelled
+> and it cannot open a new window."
+
+**False.** `watch_source.dart:28-31` defines `WatchKind.cobrowse` — *"Anything
+else with a real URL: opened INSIDE Miles"* — and `staysInViewer`
+(`watch_viewer.dart:30-43`) cancels only non-http(s) schemes and app-store
+hosts. Every ordinary http(s) navigation, cross-site included, is allowed. Watch
+Together is an in-app browser for any pasted link, which is exactly what §267's
+new privacy row already said — so two Play-facing documents contradicted each
+other in one session.
+
+Also corrected there:
+
+- "the only third-party content the app puts in front of anyone" was not
+  exhaustive by §267's own evidence (chat link previews fetch a thumbnail from
+  the linked site; map tiles come from Mapbox). It now points at §4 of the
+  privacy policy as the exhaustive list rather than claiming exhaustiveness
+  itself.
+- The News cover was missing entirely — added: BBC News, Al Jazeera and NPR
+  headlines with one thumbnail each, rendered in-app.
+- "does not choose, rank or moderate" overstated the app's passivity:
+  `rss_service.dart:57-59` sorts newest-first and takes 30, so Miles does order
+  and select. Now "does not write or moderate ... puts the newest items first
+  and keeps the first thirty".
+- "opens in your phone's browser" — `news_cover_screen.dart:112` uses
+  `LaunchMode.externalApplication`, which may open the publisher's own app.
+- "applies only if you switch that particular one on" → the accurate form,
+  "Miles installs with no cover on at all".
+- The date. `csae.html:307` says the date at the top is the date of the last
+  review; it still read 17 August. Now 3 September, matching its siblings.
+
+### Orphaned by the removal, and fixed
+
+Three comments still described the Metered path as live: two in
+`call_controller.dart` (one claiming "turn-credentials (v5) now appends Metered
+from app_secrets") and one in `pubspec.yaml`. Removing code and leaving its
+documentation is how a repo teaches the next reader something false. Every
+remaining `METERED` string in the tree is now either a deliberate tombstone or
+`docs/archive/**`, which is a historical record and is left alone.
+
+### Verified
+
+    flutter analyze -> 0 error, 0 warning
+    flutter test    -> All tests passed (the relay law included)
+    the law proven to FAIL three separate ways, then the file restored
+    app_secrets queried: no METERED_* rows in production
+    deployed turn-credentials confirmed byte-equal to git HEAD before the change
+
+### Open
+
+- **BLOCKED: the production deploy.** Refused by the permission classifier. The
+  repo and the field disagree until someone runs the command above. This is the
+  only item in §267-§268 that is not actually fixed.
+- Nothing in §267 or §268 is committed.
+- `auth-callback.html:142` reads `access_token` from the query string before the
+  hash. Harmless under PKCE, which is the current flow; a project-level switch
+  to the implicit flow would put a session token in a URL Vercel logs and would
+  silently falsify the Vercel row.

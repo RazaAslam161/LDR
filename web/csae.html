@@ -32,7 +32,7 @@
 <article class="paper">
 
 <h1>Miles — Child Safety Standards</h1>
-<p class="updated">Last updated: 17 August 2026</p>
+<p class="updated">Last updated: 3 September 2026</p>
 
 <p class="lede">Miles is a private messaging app for two adults in a
 relationship. It is rated 18+, it has no public surface, and it has no place for
@@ -74,20 +74,46 @@ sexual material of any kind. There is no feed, no timeline, no recommendation
 engine and nothing any user posts is discoverable by anyone but their
 partner.</p>
 
-<p>Two qualifications, because they are the only third-party content the app
-puts in front of anyone. The first is the GIF picker in chat, and the GIFs come
+<p>Three places where the app puts content it did not write in front of
+someone, and none of them is a feed, a recommendation or anything another user
+can reach you through. (Two smaller ones, for completeness: a link posted in
+chat shows a preview thumbnail fetched from the linked site, and the map draws
+its tiles from Mapbox. Section 4 of the
+<a href="privacy-policy.html">Privacy Policy</a> is the exhaustive list.)
+The first is the GIF picker in chat, and the GIFs come
 from <strong>Giphy</strong>: it opens on Giphy's trending list and you can
 search it. Miles does not host, choose or moderate that catalogue. What we do
 control is the ceiling we ask for — every request is sent with
 <code>rating=pg-13</code>, which is Giphy's own classification, not ours.</p>
 
 <p>The second is <strong>Watch Together</strong>, which plays a link one of you
-pastes inside an embedded player belonging to the site that link came from —
-YouTube and a few others. The player is pinned to that one site: a tap that
-would leave it is cancelled and it cannot open a new window. Within that site,
-though, its page is its own — including anything it recommends beside the
-video — and we neither choose nor moderate it. Nothing Miles writes, and nothing
-any Miles user posts, is browsable, searchable or recommended anywhere.</p>
+pastes. For YouTube and a few other sites that publish a player API, it is an
+embedded player with the two of you kept in sync. <strong>For any other link it
+is a web view: that page opens inside Miles and ordinary links on it work, so
+it behaves as a browser rather than a pinned player.</strong> Miles refuses the
+ways out of the app — a link that would hand off to another app, or to an app
+store, is cancelled — but it does not filter, rank or moderate what the site
+itself shows, and neither of you can be sent anything there by a third party:
+the only address it ever opens is the one the other of you pasted.</p>
+
+<p>The third is the <strong>News cover</strong>, one of the optional cover
+identities in Settings. Miles installs with no cover on at all, so this
+applies only once someone turns that particular one on. So that it looks like what it claims to be, it fills itself with real
+headlines from three public news feeds — <strong>BBC News</strong>,
+<strong>Al Jazeera</strong> and <strong>NPR</strong> — showing each headline
+and, where the feed supplies one, a single thumbnail image. Miles does not
+write or moderate what those newsrooms publish, and shows no comments, no
+recommendations and nothing any user has posted; all it does with the feeds is
+put the newest items first and keep the first thirty. They are three established
+organisations operating under their own editorial standards, which is why they
+were chosen. The cover’s search box filters only the headlines
+already fetched and sends nothing to the publishers. Tapping a headline hands the
+address to your phone and leaves Miles entirely — it opens in your browser, or
+in that publisher’s own app if you have it installed, where that app’s and your
+device’s own protections apply. It is never displayed inside Miles.</p>
+
+<p>Nothing Miles writes, and nothing any Miles user posts, is browsable,
+searchable or recommended anywhere.</p>
 
 <h2>2. Why the exposure surface is narrow, and what that does not fix</h2>
 

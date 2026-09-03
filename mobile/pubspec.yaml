@@ -136,8 +136,9 @@ flutter:
     # are fine there; RLS assumes both are known. A value that has to stay
     # revocable goes to app_secrets behind an edge function instead - see
     # map-token, and giphy_service.dart for the key that used to be in here.
-    # METERED_TURN_* (call_controller.dart:688) is the one name left that would
-    # publish a credential to every handset if it were ever filled in.
+    # Nothing in here is a credential any more. METERED_TURN_* was the last
+    # name that would have published one to every handset; the relay it fed was
+    # removed on 2026-09-03 and the keys have no consumer.
     - .env
     - assets/emoji/
     # 15 UI cues + one ambient bed, OGG Vorbis, ~730KB. Names are generic

@@ -758,6 +758,84 @@ void main() {
     });
   });
 
+  test('every relay provider this function can offer is named in the policy',
+      () {
+    // A TURN relay carries the encrypted call media and sees both partners' IP
+    // addresses. Adding one is a change to who receives user data, so it may
+    // not happen quietly.
+    //
+    // A dormant Metered provider used to sit in this function, appended the
+    // moment three METERED_TURN_* rows appeared in app_secrets - three INSERTs,
+    // no release, no review, no document change. It was removed 2026-09-03
+    // (BRAIN 267). This law is what stops the next one arriving the same way:
+    // add a provider and the build fails until the privacy policy names it.
+    final fn = File('../supabase/functions/turn-credentials/index.ts')
+        .readAsStringSync();
+    // Comments stripped first, and that is load-bearing rather than tidy: the
+    // comment standing where the Metered branch used to be names
+    // METERED_TURN_* itself, so a raw scan would match its own tombstone and
+    // fail for ever.
+    final code = fn
+        .replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '')
+        .split('\n')
+        .map((l) => l.replaceAll(RegExp(r'//.*$'), ''))
+        .join('\n');
+
+    // TWO nets, because either alone fails open.
+    //
+    // (a) Shape. Exactly one thing produces relay entries: Cloudflare's
+    //     response, normalised. Nothing appends to it and no relay URI is
+    //     written by hand. A provider added as TWILIO_ICE_USERNAME or as a
+    //     literal turn: URL is invisible to the *_TURN_* scan below, and the
+    //     prefix set can never be empty while CF_TURN_* exists - so the scan
+    //     alone would fail open for ever.
+    expect(code.contains('iceServers.push'), isFalse,
+        reason: 'something appends relay entries to the Cloudflare response. '
+            'A relay carries call media and sees both partners IP addresses: '
+            'name the provider in section 4 of web/privacy-policy.html and '
+            'add it to the map in this test, in the same change.',);
+    expect(RegExp('''["'`]turns?:''').hasMatch(code), isFalse,
+        reason: 'a turn:/turns: URI is written directly in this function, so a '
+            'relay is being offered that did not come from Cloudflare. Declare '
+            'it as above.',);
+
+    // (b) Naming. Every provider reached through an upper-case secret key.
+    final prefixes = RegExp(r'\b([A-Z][A-Z0-9]*)_TURN_[A-Z_]+\b')
+        .allMatches(code)
+        .map((m) => m.group(1)!)
+        .toSet();
+    expect(prefixes, isNotEmpty,
+        reason: 'no *_TURN_* secret found at all - either the function stopped '
+            'serving relays or this matcher has gone blind. Both need a '
+            'human.',);
+
+    const named = <String, String>{'CF': 'Cloudflare'};
+    final policy =
+        File('../web/privacy-policy.html').readAsStringSync();
+    for (final p in prefixes) {
+      final company = named[p];
+      expect(company, isNotNull,
+          reason: 'turn-credentials can offer a relay from an unrecognised '
+              'provider ($p). Add it to this map AND give it a row in section '
+              '4 of web/privacy-policy.html: it will carry call media and see '
+              "both partners' IP addresses.",);
+      // Scoped to the third-party table, not the whole document: the
+          // failure message promises a row, so the assertion has to be about
+          // one. The table runs from the Supabase row to the end of its
+          // <table>.
+      final tableStart = policy.indexOf('<td>Supabase</td>');
+      final tableEnd = policy.indexOf('</table>', tableStart);
+      expect(tableStart, greaterThan(-1),
+          reason: 'the third-party table in web/privacy-policy.html has moved; '
+              'this law can no longer find it',);
+      final table = policy.substring(tableStart, tableEnd);
+      expect(table.contains(company!), isTrue,
+          reason: '$company relays calls but has no row in the third-party '
+              'table of web/privacy-policy.html. A relay receives user data; '
+              'the policy must say so in the same change that enables it.',);
+    }
+  });
+
   test('no storage object is served without authentication', () {
     // getPublicUrl builds a /object/public/... link, which bypasses RLS
     // entirely: no token, no expiry, no revocation. couple_media held 255 of a
