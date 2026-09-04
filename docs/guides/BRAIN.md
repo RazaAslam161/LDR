@@ -23137,3 +23137,33 @@ Also: `app_release_read` is `for select to anon using (true)`, which is how the
 pre-login version gate works, but it makes `apk_url`/`apk_sha256` publicly
 readable. And leaked-password protection is off (advisor), as
 `sign_up_page.dart:51-53` already notes.
+
+### §271 addendum — CI green on Linux, and the verification gap in §271 is closed
+
+**2026-09-04.** Run `33826446955` on `b5cf0a9101b0c191a8455ebb9e7a404be30b2bef`,
+which is the branch tip exactly:
+
+      analyze + test        : success, 5m29s
+      dependency advisories : success, 1m04s
+      Vercel Preview        : success
+      🎉 1580 tests passed, 3 skipped.
+
+§270's green run recorded **1577** passing. Five commits added exactly three
+tests — one in `auth_key_lifecycle_test.dart`, two in `repo_hygiene_test.dart` —
+and 1577 + 3 = 1580, so the new tests ran rather than merely failing to break
+anything. That arithmetic is the evidence; a green tick alone would not be,
+which is the §268 lesson.
+
+One nuance worth recording because it is not obvious from the count. The new
+`.env` allowlist test returns early when `mobile/.env` is absent, and an early
+return counts as a PASS, not a skip — so "1580 passed" would look identical if
+the assertion had never executed. It did: `gates.yml` writes the placeholder
+`.env` and then guards with `test -f .env` **before** `flutter analyze`, and
+`flutter test` runs after both, so the file exists for the whole test phase and
+the job would have died at that guard otherwise.
+
+What this does NOT verify, unchanged from §271: the two edge functions
+(`reach-notify`, `turn-credentials`) have no test harness in this repo and CI
+never deploys, so they are still unexecuted — `deno check` has not been run on
+them anywhere. Migration `20260904130000` remains applied to **no** project.
+No APK was built.
