@@ -240,12 +240,14 @@
       <dl class="deflist">
         <div>
           <dt>End-to-end encryption, where it applies</dt>
-          <dd>Memory Threads, Wish Jar entries and your Personal Vault files are
-            sealed with <span class="code-chip">XChaCha20-Poly1305</span> using
-            keys held on your two phones — the server stores ciphertext it
-            cannot open. Chat is not among them: it is encrypted in transit and
-            at rest, but the operator of the database could read it. Section 2
-            of the privacy policy lists both sides in full.</dd>
+          <dd>Memory Threads, Wish Jar entries, message reactions and the
+            messages written during a separation are sealed with
+            <span class="code-chip">XChaCha20-Poly1305</span> using keys held on
+            your two phones — the server stores ciphertext it cannot open. Chat
+            and the Personal Vault are not among them: they are encrypted in
+            transit and at rest and reachable by nobody else, but the operator
+            of the database could read them. Section 2 of the privacy policy
+            lists both sides in full.</dd>
         </div>
         <div>
           <dt>App lock &amp; covers</dt>

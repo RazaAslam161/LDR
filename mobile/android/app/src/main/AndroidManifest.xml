@@ -47,20 +47,35 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Camera for photo + video capture -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- No READ_MEDIA_IMAGES / READ_MEDIA_VIDEO. Every gallery entry point is
-         image_picker, and neither of its two paths needs them: PickVisualMedia
-         (the system photo picker, which PhotoPickerService switches on) and
-         ACTION_GET_CONTENT (the default, still used by capsule_fill,
-         propose_memory and touch_map) both hand back a URI carrying its own
-         read grant. Nothing in lib/ scans the gallery, so broad media access
-         has no justification to give Play's Photo and Video Permissions
-         declaration. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+    <!-- NO MEDIA-STORAGE PERMISSIONS AT ALL, and that is the whole story now.
+         Every gallery entry point is image_picker, and neither of its two paths
+         needs one: PickVisualMedia (the system photo picker, which
+         PhotoPickerService switches on) and ACTION_GET_CONTENT (the default,
+         still used by capsule_fill, propose_memory and touch_map) both hand
+         back a URI carrying its own read grant. Nothing in lib/ scans the
+         gallery on any version.
+
+         READ_MEDIA_VISUAL_USER_SELECTED and READ_EXTERNAL_STORAGE
+         (maxSdkVersion 32) were declared here until 2026-09-04 and removed
+         because they did nothing. Both are runtime permissions, and the only
+         two the app ever requests are Permission.camera and
+         Permission.microphone — so neither was ever granted, and an ungranted
+         dangerous permission grants no access. No dependency declares either
+         (checked against every plugin manifest in the pub cache AND every
+         merged manifest under build/: `app` was the sole declarer), so removing
+         them genuinely shortens the list Play and the user see. Re-adding one
+         means writing the runtime request in the same change, or it is
+         decoration again. -->
     <!-- Reach: full-screen wake alert (foreground now; FCM background later) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- No consumer in lib/ — nothing calls zonedSchedule, so no notification
+         needs re-arming after a reboot. Kept rather than deleted because
+         flutter_foreground_task declares it in its own manifest (verified in
+         build/flutter_foreground_task/intermediates/merged_manifest/), so
+         removing this line changes the merged artifact not at all and only
+         hides where the permission comes from. Delete it here AND drop that
+         plugin if it ever needs to leave the app's permission list. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 13+ runtime notification permission -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

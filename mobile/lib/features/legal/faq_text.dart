@@ -84,15 +84,14 @@ List<FaqSection> milesFaq() => [
         ),
         FaqEntry(
           'What are covers?',
-          'An optional layer of discretion. In Settings → Disguise → '
+          'An optional layer of discretion. In Settings → Appearance → '
               '“How this app looks” you can pick a '
               'cover identity — the app then looks like an ordinary utility '
               '(a calculator, a notes app, a weather app…) on your '
               'launcher and opens on a convincing stand-in screen until you '
               'enter through a move you record yourself — on that screen, '
-              'when you put the cover on. The app ships no gesture of its '
-              'own, and nothing but your move opens the cover — so choose one '
-              'you will not forget. With App Lock on it lands on your '
+              'when you put the cover on — so choose one you will not '
+              'forget. With App Lock on it lands on your '
               'fingerprint or app PIN.\n\nMiles installs '
               'under its own name and icon; a cover is something you choose '
               'to put on, and you can take it off any time.',
@@ -106,12 +105,14 @@ List<FaqSection> milesFaq() => [
         ),
         FaqEntry(
           'Can I lock the app?',
-          'Yes. “Biometric app lock” (Settings → Security) requires your '
+          'Yes. “App lock” (Settings → Privacy & security) requires your '
               'fingerprint, face, or a PIN every time the app opens. There is '
               'also a panic gesture — shake the phone three times, or press '
-              'volume-up and volume-down together — that drops the app '
-              'straight back to its cover screen if someone picks up your '
-              'phone.',
+              'volume-up and volume-down together. It only does something '
+              'once you have a cover on: it drops the app straight back to '
+              'that cover screen. With no cover set there is nothing to drop '
+              'to, so on a normal install the app lock is the control that '
+              'protects you here.',
         ),
         FaqEntry(
           'Does my partner see my location?',
@@ -208,10 +209,14 @@ List<FaqSection> milesFaq() => [
         FaqEntry(
           'What happens if we break up?',
           'Either of you can end it: Settings → Partner → “Remove partner”. '
-              'It takes one of you — the connection is cut for both, '
-              'immediately, and neither needs the other’s agreement. Nothing '
-              'is sent to the other person; they find out by opening the '
-              'app.\n\nFrom that moment the shared history — messages, photos, '
+              'It takes one of you, and neither needs the other’s agreement. '
+              'You are offered two ways: end it outright, which cuts the '
+              'connection for both immediately, or take the 24-hour '
+              'separation, which leaves a last day in which either of you can '
+              'call it off and ends the couple automatically if nobody does. '
+              'Nothing is sent to the other person; they find out by opening '
+              'the app.\n\nFrom the moment it ends the shared history — '
+              'messages, photos, '
               'videos, Closer content — is kept for 30 days and then '
               'permanently deleted. Within those 30 days it can still be '
               'brought back, but it takes both of you: one asks to reconnect '
@@ -219,9 +224,11 @@ List<FaqSection> milesFaq() => [
               'once someone has declined a request that same person cannot ask '
               'again. Pairing again with a fresh code is not the same thing — '
               'that starts a new couple, and the old history is still erased '
-              'on schedule.\n\nYour private vault is not part of that. It is '
-              'sealed with a key derived from your own account, not from the '
-              'two of you, so it survives a breakup untouched.\n\nDeleting '
+              'on schedule.\n\nYour private vault is not part of that. It '
+              'belongs to your account rather than to the couple, so it '
+              'survives a breakup untouched — but it is not end-to-end '
+              'encrypted, and the encryption answer above says what that '
+              'means.\n\nDeleting '
               'your account is the faster route and the '
               'more thorough one: if your partner has already gone, it '
               'removes the shared history immediately and erases the stored '
@@ -229,7 +236,8 @@ List<FaqSection> milesFaq() => [
         ),
         FaqEntry(
           'How do I delete my account?',
-          'Settings → Account → Delete account removes your '
+          'Settings → Delete account (the last row on that screen) removes '
+              'your '
               'account and everything recorded against it alone — a real '
               'deletion, not a deactivation. Shared conversation history is '
               'the one thing that can outlive it, and only while your partner '
@@ -248,7 +256,8 @@ List<FaqSection> milesFaq() => [
       const FaqSection('Safety', [
         FaqEntry(
           'What if I need space from my partner inside the app?',
-          '“Pause notifications” (Settings → Safety) stops this phone being '
+          '“Pause notifications” (Settings → Partner) stops this phone '
+              'being '
               'interrupted — for an hour, eight hours, a day, or until you '
               'turn it back on. It does not announce itself: your partner is '
               'not told and nothing on their side shows it. Nothing is '
@@ -264,7 +273,7 @@ List<FaqSection> milesFaq() => [
         ),
         FaqEntry(
           'How do I report a problem or someone’s behaviour?',
-          'Settings → Safety → “Report a problem”. It is also on the menu at '
+          'Settings → Support → “Report a problem”. It is also on the menu at '
               'the top of Chat, on the toolbar when you hold a message, and '
               'on the toolbar when you hold an item in the Gallery. Reports '
               'go to us, not to your partner: nothing in the app can read '

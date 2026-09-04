@@ -13,22 +13,26 @@ un-ring this bell" sense — a lost keystore ends the app's life on Play, and a
 migration to Play wipes every existing user's encryption keys. Do not start at
 phase 4 because it looks like the interesting one.
 
-Verified live on prod `sopictusdonlvuezmfep` (ap-south-1) on **2026-08-17**:
+Verified live on prod `sopictusdonlvuezmfep` (ap-south-1) on **2026-09-04**:
 
 | Fact | Value |
 |---|---|
-| org plan | **free** (org `fpmfuptznczuuksqybnx`) |
-| storage | 8 objects / **4.2 MB** of a 1 GB cap — prod was wiped to zero users on 2026-08-16 (BRAIN §29). Before the wipe, **one couple held 525 MB**. That is the number to plan capacity with, not 4 MB. |
-| `app_release` | `min_build = 39`, `latest_build = 39` — **the gate is armed** |
+| org plan | **still free** (org `fpmfuptznczuuksqybnx`) — phase 1.1 is not done, and it is the first blocker |
+| leaked-password protection | **still off** — phase 1.3 is not done (`get_advisors` security, WARN `auth_leaked_password_protection`) |
+| accounts | 4 users, 4 profiles, 2 live couples, 4 escrowed keys, 0 reports |
+| storage | 143 objects across six buckets (`couple_intimate` 135, `personal_vault` 8); `chat-bg`, `couple_media`, `couple_files`, `capsule-media` all empty |
+| `app_release` | `min_build = 42`, `chat_cipher_only = true` |
+| chat rows | 7 text messages, **7 with ciphertext, 0 with a plaintext body** |
 | `partner_rewrap_requests` | exists |
-| `NOTIFY_SHARED_SECRET` | seeded (1 row) |
-| `cron.job` | 10 jobs |
-| `public.deliver_rituals` | exists |
-| migration ledger | 167 rows against **108** local `.sql` files |
+| `NOTIFY_SHARED_SECRET` | seeded — all six `app_secrets` rows populated |
+| `cron.job` | 14 jobs, all active |
+| edge functions | all 7 ACTIVE |
+| security advisors | **0 ERROR**; 9 `rls_enabled_no_policy` (deny-all by design) |
+| migration ledger | 219 rows against **159** local `.sql` files — see 1.5; the two are numbered differently, so the counts are not a diff |
 
-Repo state: `version: 0.1.0+40`, `ReleaseGate.buildNumber = 40`,
-`mobile/android/key.properties` **does not exist**, and no `.aab` has ever been
-built.
+Repo state: `version: 0.1.0+76`, `targetSdk = 36` (inherited from the Flutter
+3.44.2 pin, `FlutterExtension.kt:34` — this is what satisfies the 31-Aug-2026
+API-36 requirement, so a Flutter downgrade would silently break it).
 
 ---
 
@@ -225,10 +229,19 @@ timestamps that do not match the local filenames:
 | `20260601008700_partner_rewrap.sql` | `20260815065624_partner_rewrap` |
 | `20260601008600_watch_session_persists.sql` | `20260815025758_watch_session_persists` |
 
-**108** local `.sql` files against **167** ledger rows (both counted
-2026-08-17), plus SQL applied on prod with no local file at all
+**159** local `.sql` files against **219** ledger rows (both counted
+2026-09-04; it was 108 against 167 on 2026-08-17, so the gap has widened from 59
+to 60, not closed), plus SQL applied on prod with no local file at all
 (`no_message_push`, the pairing-retirement statements) and one local file that
 is 18 lines of comments and zero SQL (`20260601006000`).
+
+**Do not try to close this with a version-set diff.** The local prefixes are
+mostly the synthetic "next round hour" scheme (`20260817160000`) while the
+ledger records real clock timestamps, so the two vocabularies do not compare: a
+set difference run on 2026-09-04 claimed 164 missing and 104 never-applied, and
+every one of those numbers was an artifact of the naming, not a real gap. The
+only sound method is to diff the live schema against what the local files
+produce.
 
 **Consequence: any environment rebuilt from `supabase/migrations` deploys a
 different — in places more vulnerable — schema than prod.** Before release,
@@ -532,42 +545,53 @@ Every one of these is a form that blocks the release if it is wrong.
 
 ### 5.1 Photo and video permissions
 
-The manifest declares only `READ_MEDIA_VISUAL_USER_SELECTED` and
-`READ_EXTERNAL_STORAGE` (maxSdkVersion 32) — `READ_MEDIA_IMAGES` and
-`READ_MEDIA_VIDEO` were removed because every gallery entry point goes through
-the system photo picker or `ACTION_GET_CONTENT`, both of which hand back a URI
-carrying its own read grant.
+**The manifest declares no media-storage permission at all** as of 2026-09-04.
+`READ_MEDIA_IMAGES` and `READ_MEDIA_VIDEO` were never there;
+`READ_MEDIA_VISUAL_USER_SELECTED` and `READ_EXTERNAL_STORAGE` (maxSdkVersion 32)
+were removed once it was established that nothing requests either at runtime —
+the app's only two runtime requests anywhere are `Permission.camera` and
+`Permission.microphone` — and that no dependency declares them, so `app` was the
+sole declarer and removing them actually shortens the artifact's list.
 
-Answer: the app does **not** require broad photo/video access. **Verify against
-the merged manifest of the actual AAB first** (phase 4) — the declaration is a
-statement about the artifact, not about the source.
+Every gallery entry point goes through the system photo picker or
+`ACTION_GET_CONTENT`, both of which hand back a URI carrying its own read grant.
+
+Answer: the app does **not** require broad photo/video access, and the
+declaration should be the easiest one on the form. **Verify against the merged
+manifest of the actual AAB first** (phase 4) — the declaration is a statement
+about the artifact, not about the source, and this change in particular is only
+real if the AAB agrees.
 
 ### 5.2 USE_FULL_SCREEN_INTENT
 
-Play restricts this to calling and alarm apps. **Known problem, still unfixed as
-of 2026-08-17:** `lib/core/services/reach_notifications.dart:65` and `:157` set
-`category: AndroidNotificationCategory.call`, and `:67` / `:158` set
-`fullScreenIntent`, on **Reach** alerts — a partner nudge, not a call.
+Play restricts this to calling and alarm apps. **Resolved 2026-09-04 — the
+declaration is now truthful and can be filed as it stands.** The defect this
+section used to describe (Reach alerts dressed as calls) is fixed:
 
-Fix it before submitting (the fix is a deletion of those lines plus the dead
-`fullScreen` parameter) or expect the declaration to be rejected. Do not claim
-Reach is a call — it also undermines the declaration you need for real calls.
+- `reach_notifications.dart:53-59` states in its own doc comment that a Reach is
+  deliberately **not** `category: call` and **not** a full-screen intent.
+- The only `category: AndroidNotificationCategory.call` + `fullScreenIntent` pair
+  left is in `showCallNotification` (`:172-179`), which fires only when the FCM
+  payload type is `call` (`:553`).
+- The intent is gated on `fsi_can_use`, mirrored from the live permission by
+  `FsiPermission.refreshCache()`, and degrades to a heads-up notification when
+  the permission is refused.
 
-### 5.3 Foreground service types — resolve `camera` before you fill this in
+Declare it as: **incoming voice and video calls ring on the lock screen.** That
+is the allowed use and it is what the code does.
+
+### 5.3 Foreground service types
 
 Declared in `src/main/AndroidManifest.xml` on the flutter_foreground_task service
-as `microphone|camera|mediaProjection`. But the runtime set is smaller:
-`call_foreground.dart:43-49` requests **microphone**, plus **mediaProjection**
-while screen-sharing, and **never camera**.
-
-So `camera` is a type you must either delete or start using — you cannot film a
-demo video of a code path that does not run.
+as `microphone|mediaProjection` — `camera` was removed and the permission block
+above the service records why. The runtime set matches:
+`call_foreground.dart` requests **microphone**, plus **mediaProjection** while
+screen-sharing, and never camera. Declare these two and no others.
 
 | Type | Use case to declare | Demo video must show |
 |---|---|---|
 | `microphone` | keeping a voice/video call alive while the app is backgrounded | starting a call, backgrounding the app, audio continuing |
 | `mediaProjection` | screen share into an active call | the user starting a share and the system consent dialog |
-| `camera` | **only if you wire `ForegroundServiceTypes.camera` for video calls** — otherwise remove the type and the `FOREGROUND_SERVICE_CAMERA` permission | a video call surviving a home-button press |
 
 Each video must show the in-app path a user takes to trigger it. Host them
 somewhere Google can watch (unlisted YouTube is fine) and paste the links into
@@ -575,27 +599,89 @@ the declaration.
 
 ### 5.4 Data safety form
 
-Answer from the privacy policy — `web/privacy-policy.html` is the source of
-truth and was written from the code, so the two cannot drift if you copy from
-it.
+The form is answered **once per data type**, and each type needs four answers:
+collected and/or shared, the purpose, whether it is processed ephemerally, and
+whether it is required or optional. A flat list of type names cannot be typed
+into it. The table below is the whole declaration.
 
-Collected and linked to the user: email address, name, photo, approximate and
-precise location, messages, photos and videos, voice recordings, files, health
-and fitness (the cycle tracker), sexual-orientation-adjacent / intimate content,
-app diagnostics, crash logs, device identifiers (the FCM token).
+`web/privacy-policy.html` is the prose source, but it is not a substitute for
+this table — the policy is organised by feature and the form is organised by
+Google's fixed taxonomy, so one does not map onto the other line by line.
+
+**Global answers**
 
 - **Encrypted in transit:** yes.
-- **End-to-end encrypted:** answer honestly per data type. Memory Threads,
-  Closer's Private Vault and Wish Jar entry text are E2EE. **Chat, location,
-  cycle data, presence, `desire_temps`, `dice_rolls`, `body_touches`,
-  `intimacy_signals` and the personal vault are not.** Do not tick a blanket
-  E2EE claim — the app's own FAQ (`faq_text.dart:61-68`) states the narrow
-  version, and a blanket claim would contradict it inside the same binary.
-- **Shared with third parties:** no data is sold or shared for advertising.
-  Declare the two real egresses deliberately: **Giphy** receives GIF search
-  terms, **Mapbox** receives viewport / approximate location.
-- **Data deletion:** "users can request that data be deleted", with the URL from
-  phase 6.
+- **Users can request that data be deleted:** yes — in-app (Settings, last row)
+  and on the web at the deletion URL from phase 6.
+- **Data is processed ephemerally:** no, for every type below. Presence is
+  short-lived but it is stored, so it is not ephemeral in Google's sense.
+- **No data is sold, and none is shared for advertising.** There is no ads SDK
+  and no analytics SDK; the merged manifest carries no `AD_ID` permission.
+
+**Collected — every type, with its answers**
+
+| Google type | Collected | Shared | Required? | Purpose |
+|---|---|---|---|---|
+| Personal info → Name | yes, linked | no | required | App functionality |
+| Personal info → Email address | yes, linked | no | required | App functionality, Account management |
+| Personal info → User IDs | yes, linked | no | required | App functionality |
+| Personal info → Other info (date of birth; and if set: gender, status message, wake/sleep times) | yes, linked | no | DOB required, rest optional | App functionality — the DOB is the 18+ gate |
+| Health and fitness → Health info (cycle tracker) | yes, linked | no | optional — the feature is off until switched on | App functionality |
+| Messages → In-app messages | yes, linked | no | optional | App functionality |
+| Photos and videos → Photos | yes, linked | no | optional | App functionality |
+| Photos and videos → Videos | yes, linked | no | optional | App functionality |
+| Audio → Voice or sound recordings | yes, linked | no | optional | App functionality |
+| Files and docs | yes, linked | no | optional | App functionality |
+| Location → Approximate location | yes, linked | **yes** | optional | App functionality |
+| Location → Precise location | yes, linked | **yes** | optional | App functionality |
+| App activity → App interactions | yes, linked | no | required | App functionality — presence writes `current_screen`, `is_typing`, `last_seen` |
+| App activity → Other user-generated content | yes, linked | no | optional | App functionality — capsules, rituals, prompts, reasons, gallery captions, wish-jar entries, memory threads, watch-list notes |
+| Web browsing history | yes, linked | no | optional | App functionality — `shared_reels.url` and `watch_sessions.source_key` store addresses the couple opened in the in-app viewer |
+| App info and performance → Crash logs | yes, linked | no | required | Diagnostics |
+| Device or other IDs | yes, linked | **yes** | required | App functionality — FCM token + Firebase installation id |
+
+**Not collected**, so leave unticked: Financial info; Contacts; Calendar;
+Personal info → Address, Phone number, Race and ethnicity, Political or
+religious beliefs, Sexual orientation; App activity → Installed apps, Other
+actions; Audio → Music files, Other audio files; App info and performance →
+Other app performance data.
+
+One judgement call to make deliberately rather than by accident: **In-app search
+history**. Miles stores none — but the GIF picker sends the search term to
+Giphy. That is a transfer to a third party with no collection, so tick *shared*
+without *collected* if the form allows it; if it does not, declare it collected
+and shared and say so in the policy rather than leaving the Giphy egress
+undeclared.
+
+**Shared with third parties — the three real ones, and why each counts**
+
+- **Approximate/precise location → Mapbox.** Map tile requests reveal the
+  viewport, which both map surfaces centre on the stored coordinate. Mapbox's
+  SDK also emits its own session and telemetry events, which the app does not
+  switch off. Not a service provider acting only on our instructions.
+- **Approximate/precise location → Google.** Every fix is resolved to a place
+  name through Android's `Geocoder`, which on a Play-services handset is
+  answered by Google over the network. This happens in city mode too, from the
+  low-accuracy fix that mode requests.
+- **Device or other IDs → Google (FCM).** The push token and the Firebase
+  installation id, plus the per-notification identifiers listed in policy
+  section 4.
+
+**End-to-end encryption.** Where the form offers the optional claim, it is true
+of **Memory Threads, Wish Jar entry text, message reactions, and the messages
+and notes written during a separation** — and of nothing else.
+
+It is **not** true of chat, and must not be claimed for it. Chat bodies are
+sealed on the device and production currently runs cipher-only, but
+`ReleaseGate.chatCipherOnly` defaults to `false` and falls back to `false` on any
+failure to read the flag — an unreachable gate, an auto-paused project, a fresh
+environment — and the flag is the documented one-statement rollback. A form
+answer that one `update` can turn into a lie is not an answer worth ticking.
+
+It is **not** true of the Personal Vault. `VaultRepository.saveMedia` calls
+`_uploadPlain`; `personal_vault_items.content` and the item label are plain
+`text`. That has been the shipped behaviour since build 60 by the owner's ruling
+of 2026-08-28, and every published document now says so.
 
 ### 5.5 Content rating (IARC) — Mature 17+
 
@@ -606,10 +692,23 @@ is a policy violation with worse consequences than the rating itself.
 
 - **Target audience:** adults only, 18+. No child-directed content.
 - **Ads:** none. **IAP:** none.
-- **News app:** **no.** (The old rationale here — "the play flavor carries no
-  News label" — is wrong: the play manifest does declare a `News` cover alias.
-  It is disabled, it is a launcher cover, and the app publishes no news content.
-  Answer no on the substance, not on the label.)
+- **News app:** **no** — but answer it knowing the full picture, because two
+  earlier rationales for this were both wrong. It is not "the play flavor
+  carries no News label" (the play manifest declares a `News` cover alias), and
+  it is not "the app publishes no news content" — the News cover fetches BBC
+  News, Al Jazeera and NPR RSS directly from the device and renders their
+  headlines and thumbnails (`features/covers/rss_service.dart:30-32`). The
+  correct ground is **primary purpose**: the Console question asks whether the
+  app's primary purpose is news, and Miles is a private couples messenger whose
+  news surface exists only inside an optional, off-by-default launcher cover.
+  Answer no on primary purpose, and expect to explain the cover if asked.
+- **Health apps:** the cycle tracker makes this apply. Play's Health Content
+  and Services policy wants a **not-a-medical-device disclaimer in the store
+  description** — put a line like "Miles is not a medical device and does not
+  diagnose, treat, cure or prevent any medical condition" in the full
+  description (phase 7), and answer the health declaration truthfully: the app
+  records self-reported cycle data for the user and their partner, does nothing
+  clinical with it, and makes no health claims.
 - **Government app / financial:** no.
 - **Location:** foreground only, so the background-location declaration does not
   apply. Confirm the AAB has no `ACCESS_BACKGROUND_LOCATION` — the manifest
@@ -637,31 +736,38 @@ is a policy violation with worse consequences than the rating itself.
 Play requires every app in the Social / dating / UGC category to publish child
 safety standards and self-certify in Console → App content → **Child safety
 standards**. Miles is Social with user-generated content, so this applies. There
-is **no way to publish without it**, and today the repo has nothing: a
-repo-wide grep for `csae|child safety|ncmec` hits only in-app Terms copy at
-`terms_text.dart:115`.
+is **no way to publish without it**.
 
-What Console asks for:
+**The document exists: `web/csae.html`, 19 KB, last updated 2026-09-03.** The
+line that used to stand here ("the repo has nothing") was written before it was
+authored and was stale from that day.
 
-1. **A published standards document at a public HTTPS URL** stating the app
-   prohibits child sexual abuse and exploitation (CSAE), including CSAM and
-   grooming. → does not exist yet; write `web/csae.html` and host it (phase 6).
-2. **In-app reporting** for CSAE content. → **built**
-   (`lib/features/safety/report_service.dart:48`, RPC `submit_report` at :63,
-   three report entry points, mute/unmute, contact pause).
-3. **A commitment to act on reports** — remove violating content and enforce
-   against accounts. Say what you actually do, in the document.
-4. **A named child-safety point of contact** with a role, reachable by Google
-   and by users. Today the only published contact is a bare personal Gmail
-   (`Razaaslam3210@gmail.com`, developer "R&D Dev"), which is thin for this
-   purpose — decide whether that is the published child-safety contact.
-5. **Compliance with applicable CSAE law**, including reporting to the relevant
-   authority (NCMEC in the US, or your jurisdiction's equivalent).
+Google's five requirements, checked against the page on 2026-09-04:
 
-*Unverified:* the precise Console wording and whether the form counts five items
-or four has not been read against a live Console in this session — the audit
-counted five. Read the form before writing the document so the document answers
-it, not the other way round.
+1. **A published standards document at a public HTTPS URL** prohibiting CSAE,
+   including CSAM and grooming. → **done** — `csae.html` section 1 names CSAM,
+   sexualisation of a minor, grooming, sextortion and trafficking.
+2. **An in-app mechanism** users can reach without leaving the app. → **done**
+   (`lib/features/safety/report_service.dart`, RPC `submit_report`, three entry
+   points). The page must name the path correctly — it is
+   **Settings → Support → Report a problem**, not "Settings → Safety", which is
+   a group the app has never had.
+3. **Taking appropriate action after actual knowledge**, per the published
+   standards. → **done** — section 4 states csam reports are handled first and
+   the account closed manually, without notice.
+4. **A named child-safety point of contact.** → **done** — section 6 gives the
+   role, the name (Raza Aslam), the publisher (RD Developers), a postal address,
+   `milesapp.officials@gmail.com`, and the `CHILD SAFETY` subject convention.
+   Use that address in Console. The older note here named
+   `Razaaslam3210@gmail.com` and developer "R&D Dev"; neither appears in any
+   published document and neither should be entered.
+5. **Compliance with applicable CSAE law**, including a process for reporting
+   confirmed CSAM to NCMEC. → **done** — section 5 names the NCMEC CyberTipline
+   and Pakistan's NCCIA.
+
+*Still unverified:* the precise Console wording has not been read against a live
+Console in this session. Read the form before submitting and confirm each of the
+five maps onto a field.
 
 ---
 
@@ -670,30 +776,33 @@ it, not the other way round.
 All of these must be at **stable public HTTPS URLs** before the listing can be
 submitted.
 
-| File | Status 2026-08-17 | Used by |
-|---|---|---|
-| `web/privacy-policy.html` | exists; **hosted copy still renders the "Before publishing" TODO box** (local file line 95) | Play listing "Privacy policy" field **and** the in-app link |
-| `web/delete-account.html` | exists; **404 at the hosted URL** | Play Data Safety "account deletion" URL |
-| `web/faq.html` | exists; **404 at the hosted URL** | support link |
-| `web/csae.html` | **does not exist — write it (5.7)** | Child safety standards URL |
+**Host: `https://miles-legal.vercel.app`** — Vercel project `miles-legal`,
+deployed from `web/`. This replaced the rate-limited `pub-….r2.dev` bucket, and
+the three constants in `terms_text.dart` (`milesPrivacyPolicyUrl`,
+`milesCsaeUrl`, `milesSecurityUrl`) already point at it. They ship inside the
+APK, so if the host ever moves, change them **before** the build, not after.
 
-Terms are **in-app only** (`terms_text.dart`, deliberately not a URL — the gate
-must work offline). No `terms.html` is required for the listing.
+All nine pages exist and every internal link between them resolves (checked
+2026-09-04). Status of the earlier open items on this list: the privacy policy's
+"Before publishing" TODO box is **gone**; the bad `functions/v1/delete-account`
+link is **gone**; `web/csae.html` **exists**.
 
-**Host:** the current `pub-…​.r2.dev` bucket is a rate-limited dev host
-Cloudflare tells you not to depend on. Register a domain or stand up Cloudflare
-Pages before the listing goes in. Every file is single, self-contained, no
-external assets, so any static host works.
+| File | Used by |
+|---|---|
+| `web/privacy-policy.html` | Play listing "Privacy policy" field **and** the in-app link |
+| `web/delete-account.html` | Play Data safety "account deletion" URL, and the listing field |
+| `web/csae.html` | Child safety standards URL (5.7) |
+| `web/terms.html` | the published copy of the in-app agreement |
+| `web/security.html` | vulnerability disclosure; `/.well-known/security.txt` points at it |
+| `web/faq.html`, `web/index.html`, `web/404.html`, `web/auth-callback.html` | support, marketing, sign-in landing |
 
-**Before publishing, fix these in the sources:**
-
-- delete the "Before publishing" block — `web/privacy-policy.html:95`;
-- the privacy policy's own deletion link points at `functions/v1/delete-account`,
-  which 404s — the real slug is `account-delete`, and it should point at the
-  hosted deletion **page** anyway;
-- `milesPrivacyPolicyUrl` (`terms_text.dart:17-18`) currently points at the r2.dev
-  bucket. It moves when the domain does, and it ships inside the APK — so change
-  it **before** the build, not after.
+**The Terms exist in two places and they must not drift.** `terms_text.dart`
+holds the binding copy (a const string, so the gate works offline and a cover
+never has to open a browser); `web/terms.html` publishes the same document and
+says so in its own opening line. They diverged once — v1's section 4 told the
+user the private vault was end-to-end encrypted while the web copy said the
+opposite — so after any edit to either, diff the two section by section and bump
+`milesTermsVersion` when the change is one a user should re-accept.
 
 `web/delete-account.html` already points at
 `https://sopictusdonlvuezmfep.supabase.co/functions/v1/account-delete` with the
@@ -742,6 +851,10 @@ directory, no screenshots, no descriptions):
 - 1024×500 feature graphic.
 - 4–8 phone screenshots, ≤80-char short description, ≤4000-char full
   description.
+- **The health disclaimer belongs in the full description** (5.6): "Miles is not
+  a medical device and does not diagnose, treat, cure or prevent any medical
+  condition." The cycle tracker is what makes Play's health policy apply, and
+  the disclaimer is a description requirement, not a form field.
 - **Keep Touch Trace, Touch Map and the rest of Closer out of every screenshot
   and out of the promo video.** The features are defensible as private UGC; a
   screenshot of them in a public listing is not. The cover picker (7.2) is the

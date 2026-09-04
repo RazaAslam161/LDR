@@ -308,21 +308,28 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 ],
               ),
               SizedBox(height: 10),
-              // "The app's own copies stay encrypted" was not true and had not
-              // been since 2026-08-28: the vault stores its bytes plaintext in
-              // a private bucket (vault_repository.saveMedia) and the shared
-              // gallery always has (gallery_repository, "Deliberately NOT
-              // encrypted"). Only chat is end-to-end encrypted. This is the one
-              // screen whose whole job is telling somebody what is and is not
-              // protected, so it is the last place that may round the answer up.
+              // This is the one screen whose whole job is telling somebody what
+              // is and is not protected, so it is the last place that may round
+              // the answer up — and it did, twice. "The app's own copies stay
+              // encrypted" stopped being true on 2026-08-28 when the vault
+              // moved to plaintext bytes in a private bucket
+              // (vault_repository.saveMedia -> _uploadPlain); the shared
+              // gallery never was (gallery_repository, "Deliberately NOT
+              // encrypted"). Then the replacement said "your messages are
+              // end-to-end encrypted", which over-claims in the other
+              // direction: chat bodies seal on the device, but
+              // ReleaseGate.chatCipherOnly defaults FALSE and falls back to
+              // false on any failure to read the flag, so a plaintext body is
+              // a supported outcome and the published policy lists chat under
+              // "not end-to-end encrypted". Say what the policy says.
               Text(
                 'This creates an unencrypted copy of everything you select, '
                 'in a folder you choose. Anyone with that folder can read '
                 "it. Your phone's gallery app and any cloud backup covering "
-                'that folder can pick these files up. Inside the app, your '
-                'messages are end-to-end encrypted; gallery and vault photos '
-                'are kept in private storage only the two of you can open, '
-                'but they are not encrypted.',
+                'that folder can pick these files up. Inside the app, chat, '
+                'gallery and vault items are kept in private storage that only '
+                'you and your partner can open — but they are not end-to-end '
+                'encrypted. Settings → Help & FAQ lists exactly what is.',
                 style: TextStyle(color: MilesColors.taupe, height: 1.5),
               ),
             ],

@@ -181,8 +181,8 @@ class _CreateRitualSheetState extends State<CreateRitualSheet> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'This is a v1 preview — scheduling lands soon. '
-              'Your message will show in their list at this time.',
+              'They get a notification at this time, and it stays in their '
+              'list.',
               style: TextStyle(fontSize: 11, color: Color(0x80F5EFE6)),
             ),
             if (_error != null) ...[

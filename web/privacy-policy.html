@@ -32,7 +32,7 @@
 <article class="paper">
 
 <h1>Miles — Privacy Policy</h1>
-<p class="updated">Last updated: 3 September 2026</p>
+<p class="updated">Last updated: 4 September 2026</p>
 
 <p class="lede">Miles is a private app for two people in a relationship. This
 policy says what it stores, what it cannot read, who else touches your data, how
@@ -71,6 +71,16 @@ the app. It holds Memory Threads (titles, notes, places and photographs), Wish
 Jar entries and their category tags, Pick&nbsp;For&nbsp;Us dice rolls, warmth
 scores, body-map touches, and intimacy signals. Section 2 says exactly which of
 these the server can read and which it cannot — they are not all the same.</p>
+
+<p><strong>The Touch Map photograph.</strong> Touch Map lets you set a
+photograph of yourself that your partner touches. If you use it, that
+photograph is uploaded and stored in the couple's private media bucket, and its
+location is recorded against your presence row so your partner's phone can fetch
+it. It is a photograph you chose to put there, it is reachable by nobody but the
+two of you, and you can replace it at any time — but it is stored, it is
+<strong>not</strong> end-to-end encrypted, and given what it is likely to be,
+you should decide about it with that in mind. Deleting your account, or the
+couple's 30-day purge, removes it with the rest of the couple's media.</p>
 
 <p><strong>Health data.</strong> The cycle tracker is off until you switch it
 on. Once on, it stores your logged period dates, cycle events, and your average
@@ -161,6 +171,8 @@ Where that applies, the server stores ciphertext it cannot open.</p>
 <table>
   <tr><td>Memory Threads</td><td>titles, notes, partner notes, places and photographs</td></tr>
   <tr><td>Wish Jar</td><td>the text of each entry</td></tr>
+  <tr><td>Message reactions</td><td>the emoji you put on a message</td></tr>
+  <tr><td>Ending a relationship</td><td>the messages written during the 24-hour separation, and the private note each of you can write</td></tr>
 </table>
 </div>
 
@@ -175,7 +187,7 @@ Where that applies, the server stores ciphertext it cannot open.</p>
   the Vault, not even your partner, and it is additionally guarded by its PIN
   and by a block on screenshots — but it is not end-to-end encrypted</td></tr>
   <tr><td>Closer, apart from the two rows above</td><td>dice rolls and their tags,
-  warmth scores, body-map touches and their positions, intimacy signals</td></tr>
+  warmth scores, body-map touches and their positions, intimacy signals, and the Touch Map photograph</td></tr>
   <tr><td>Location</td><td>coordinates and place labels</td></tr>
   <tr><td>Cycle tracker</td><td>logs, events and settings</td></tr>
   <tr><td>Presence</td><td>online state, last seen, current screen, typing, mood, check-in photo</td></tr>
@@ -310,11 +322,10 @@ key derivation instead; those are re-sealed the first time they are opened.</p>
   <tr>
     <td>Google — ML Kit</td>
     <td>no photograph, and no part of one</td>
-    <td>Pose detection and subject cut-out for Touch Map photo reactions, both
-    of which run on your phone. The pose models ship inside the app; the
-    cut-out model does not, so Google Play services fetches it from Google the
-    first time you use that feature. The photograph itself is never
-    uploaded.</td>
+    <td>Subject cut-out for Touch Map photo reactions, which runs on your
+    phone. The model does not ship inside the app, so Google Play services
+    fetches it from Google the first time you use that feature. The photograph
+    itself is never uploaded.</td>
   </tr>
   <tr>
     <td>Giphy</td>
@@ -366,19 +377,22 @@ cannot disclose what we cannot read.</p>
 
 <h2>5. Permissions the app asks for</h2>
 
-<p>Miles asks for each of these at the moment the feature needs it, and every
-one can be refused or withdrawn in Android’s app settings.</p>
+<p>Every one of these can be refused or withdrawn in Android’s app settings.
+Camera, microphone, notifications and full-screen alerts are asked for at the
+moment the feature needs them. The rest are declared by the app so that a
+feature can work, and Android grants them without a prompt or — in the case of
+photos, videos and files — hands the app one item at a time through a system
+picker that does the asking for it.</p>
 <ul>
   <li><strong>Camera</strong> — taking photos and video in chat, capsules and
-  Closer; video calls.</li>
-  <li><strong>Microphone</strong> — voice notes and voice/video calls.</li>
-  <li><strong>Photos and videos</strong> — on Android 13 and later Miles asks
-  only for the specific items you select, through the system photo picker or the
-  document picker, and never for broad access to your gallery. On Android 12 and
-  earlier, which have no per-item grant, Miles declares the old
-  read-external-storage permission; on those versions granting it does give the
-  app read access to shared storage. Nothing in Miles scans or indexes your
-  gallery on any version.</li>
+  Closer; video calls. Asked for when you first use one of them.</li>
+  <li><strong>Microphone</strong> — voice notes and voice/video calls. Asked for
+  when you first use one of them.</li>
+  <li><strong>Photos and videos</strong> — Miles asks for no gallery permission
+  at all, on any Android version. Every picture and video comes in through the
+  system photo picker or the document picker, which hands the app that one item
+  and nothing else. Miles cannot list, scan or index your gallery, and does not
+  have the access that would let it.</li>
   <li><strong>Files</strong> — choosing a document to send in chat, through the
   system file picker.</li>
   <li><strong>Location (approximate and precise)</strong> — only for the sharing
@@ -386,7 +400,14 @@ one can be refused or withdrawn in Android’s app settings.</p>
   <strong>Foreground only.</strong> Miles does not request background
   location.</li>
   <li><strong>Notifications</strong> — messages, calls and reaches.</li>
-  <li><strong>Bluetooth</strong> — choosing a headset for call audio.</li>
+  <li><strong>Full-screen alerts</strong> — so an incoming call can light up a
+  locked screen instead of arriving as a quiet banner. Miles offers this once,
+  and points you at the system page that grants it; refusing costs you the
+  lock-screen ring and nothing else.</li>
+  <li><strong>Bluetooth</strong> — declared so call audio can be routed to a
+  headset. Miles never prompts for it, so on Android 12 and later, where it is a
+  permission the user must grant, headset routing works only if you have granted
+  it to Miles yourself in Android’s settings.</li>
   <li><strong>Biometrics</strong> — the fingerprint or face prompt that opens
   the app lock, the Memory Threads gate and the Personal Vault. The check
   happens on your phone; Miles never receives the biometric itself.</li>
@@ -413,13 +434,18 @@ one can be refused or withdrawn in Android’s app settings.</p>
   <tr><td>Deleted memory threads</td><td>erased 30 days after deletion</td></tr>
   <tr><td>Unanswered joint delete requests</td><td>for a Memory Thread, whoever asked can force it through after 14 days. There is no such route for the shared gallery — an unanswered gallery request simply stands</td></tr>
   <tr><td>Reports you file</td><td>kept with no expiry, so that a pattern of abuse can be acted on. Deleting your account deletes the reports you filed; a report filed <em>about</em> you outlives your account, with your account id removed from it</td></tr>
-  <tr><td>Terms acceptances, call-relay credential requests</td><td>kept with no expiry</td></tr>
+  <tr><td>Call-relay credential requests</td><td>24 hours — each new request clears your own records older than that</td></tr>
+  <tr><td>Terms acceptances</td><td>kept with no expiry</td></tr>
   <tr>
     <td>A relationship either of you ends</td>
-    <td>removing your partner dissolves the couple <strong>for both of you at
-    once</strong> — it does not wait for the second person to act. The couple’s
-    records — messages, gallery items, Closer content — are deleted 30 days
-    after that. Inside those 30 days the deletion can still be cancelled, but
+    <td>ending it takes one of you — <strong>it never waits for the second
+    person to agree</strong> — and you are offered two ways. Ending it outright
+    dissolves the couple immediately. Choosing the 24-hour separation instead
+    opens a last day in which either of you can call it off; if nobody does, the
+    couple dissolves automatically when the day runs out. Either way the
+    couple’s records — messages, gallery items, Closer content — are deleted 30
+    days after the dissolution. Inside those 30 days the deletion can still be
+    cancelled, but
     only by both of you: one asks to reconnect and the other agrees — neither
     can do it alone. Pairing again with a fresh code does not cancel it; that
     is a new couple, and these records are still deleted on schedule. The
@@ -440,8 +466,13 @@ the file rather than passing it to the storage service for deletion. The
 practical effect is that nothing and nobody can reach the file again: no link
 can be issued for it and it appears in no listing. The underlying bytes,
 however, remain in the hosting provider’s storage, unreferenced, rather than
-being erased. If you want the bytes themselves gone, use Settings → Account →
-Delete account, or write to us and ask.</p>
+being erased. If you want the bytes themselves gone, use Settings → Delete
+account (the last row on the Settings screen), or write to us and ask.</p>
+
+<p>A <strong>chat background</strong> you set from your own photos is stored
+under your account rather than the couple's, and deleting your account queues it
+for erasure along with your Vault — the same hourly job, the same expectation
+and the same caveat about it.</p>
 
 <h2>7. Your rights, and how to actually use them</h2>
 
@@ -455,29 +486,49 @@ up, is the most dangerous thing this app could draw. For a copy of any of it,
 including the hidden four, write to
 <a href="mailto:milesapp.officials@gmail.com">milesapp.officials@gmail.com</a>.</p>
 
+<p><strong>Take a copy with you.</strong> Settings → <em>Export your data</em>
+writes your messages, photos, videos, voice notes and the rest to a folder you
+choose on your own phone, in ordinary files any other program can open. That is
+your right to portability, and you do not need to ask us to exercise it. The
+export is <em>unencrypted</em> once it leaves the app — anything with access to
+that folder, including a cloud backup, can read it.</p>
+
+<p><strong>Ask us to pause.</strong> If you think what we hold about you is
+wrong, or you have objected to something and we have not answered yet, you can
+ask us to restrict processing — to keep the data but stop using it — while it is
+sorted out. Write to the address above.</p>
+
+<p><strong>No automated decisions.</strong> Nothing in Miles profiles you or
+makes a decision about you automatically. There is no scoring, no ranking and no
+recommendation engine anywhere in it.</p>
+
 <p><strong>Correct it.</strong> Profile, name, photo, time zone and every
 preference are editable in Settings.</p>
 
-<p><strong>Delete individual things.</strong> Messages, memories, gallery items,
-vault items and cycle entries each delete from their own screen. What that costs
-the other person differs by feature, and it is worth knowing which is which:</p>
+<p><strong>Delete individual things.</strong> Messages, memories, gallery items
+and vault items each delete from their own screen. What that costs the other
+person differs by feature, and it is worth knowing which is which:</p>
 <ul>
   <li><em>Both of you must agree</em> for Memory Threads and the shared gallery.
-  One of you asks, the other confirms, and only then is it destroyed. For a
-  Memory Thread, a request your partner neither confirms nor refuses can be
-  forced through after 14 days; a gallery request has no such route and simply
-  stands until they answer it.</li>
+  One of you asks, the other confirms, and only then is it destroyed. Neither
+  has a route that forces an unanswered request through: a request your partner
+  neither confirms nor refuses simply stands until they answer it.</li>
   <li><em>Either of you can act alone</em> in chat. You can delete your own
   message for both of you, and <strong>either partner can clear the entire
   conversation — every message and every file in it — for both of you, with no
   confirmation from the other.</strong> There is no undo and no copy kept.</li>
-  <li><em>Only you</em> can touch your Personal Vault and your cycle
-  entries.</li>
+  <li><em>Only you</em> can touch your Personal Vault, and only you can reach
+  it at all.</li>
+  <li><em>Cycle entries cannot be deleted one by one.</em> The tracker has no
+  delete control today. Switching the feature off stops new entries but does not
+  erase the ones already logged; deleting your account does, and so will we if
+  you ask.</li>
 </ul>
 
 <p><strong>Delete your account.</strong> Two routes, both real:</p>
 <ul>
-  <li><em>In the app</em>: Settings → Account → Delete account.</li>
+  <li><em>In the app</em>: Settings → Delete account, the last row on that
+  screen.</li>
   <li><em>On the web, without reinstalling</em>:
   <a href="delete-account.html">Delete your Miles account</a>. You enter your
   email, receive a code at that address, and confirm. We never delete an account
@@ -488,11 +539,20 @@ the other person differs by feature, and it is worth knowing which is which:</p>
 and its files are erased, and you are unlinked from your couple. Your crash
 reports, your escrowed key, your Terms acceptances and the reports you filed go
 with the account. If your partner has already left, the couple’s entire history
-and every file the two of you stored are deleted with it. If your partner is
-still there, their copy of the conversation you shared remains theirs — the same
-conversation is their data too. If they later delete their own account it goes
-at once; if they only remove you as a partner, the 30-day rule above applies.
-One thing survives: a report your partner filed about you, kept without your
+and every file the two of you stored are deleted with it.</p>
+
+<p>If your partner is still there, be clear about what happens to the
+conversation, because it is not what most apps do. <strong>The messages you sent
+are removed from their side too.</strong> They keep what they wrote to you, and
+they keep anything already saved to their own phone, but your half of the
+conversation goes when your account does — your messages are records about you,
+and they are erased with the rest. The same is true of time capsules and reasons
+you wrote. Shared gallery items, memories and watch-list entries stay, with your
+name detached from them. If they later delete their own account the remainder
+goes at once; if they only remove you as a partner, the 30-day rule above
+applies.</p>
+
+<p>One thing survives: a report your partner filed about you, kept without your
 account id attached to it.</p>
 
 <p><strong>Withdraw consent.</strong> Turn off location sharing, revoke any
@@ -529,7 +589,62 @@ chat link previews (YouTube, Vimeo, TikTok, or whatever you paste) and the News
 cover (BBC News, Al Jazeera, NPR). Each routes through that provider’s global
 infrastructure, which may be outside your country.</p>
 
-<h2>10. Security, and what it does not cover</h2>
+<p><strong>If you are in the UK or the EEA, that is an international
+transfer.</strong> We are established in Pakistan and the database is in India,
+and neither country has an adequacy decision from the European Commission or
+the UK government. So the transfer rests on the standard contractual clauses —
+the EU SCCs, and for the UK the International Data Transfer Addendum — which we
+have in place with our hosting provider, together with the safeguards described
+in section 10. Where a recipient in the section 4 table is reached because you
+used a feature that needs it, and no clauses cover it, the transfer relies on
+Article 49(1)(b): it is necessary to perform the service you asked for. Write to
+us for a copy of the clauses.</p>
+
+<h2>10. Why we are allowed to do this, and who is responsible</h2>
+
+<p>The <strong>data controller</strong> is RD Developers, Sector C Commercial
+Area, Bahria Town, Lahore, Pakistan —
+<a href="mailto:milesapp.officials@gmail.com">milesapp.officials@gmail.com</a>.
+That is who is accountable for everything in this document. We have not
+appointed an Article 27 representative in the EU or the UK; if you are in either
+and need one, write to us and we will tell you where that stands rather than
+pretend otherwise.</p>
+
+<p>Where the UK or EU GDPR applies to you, this is the basis for each thing we
+do:</p>
+
+<div class="scroll">
+<table>
+  <tr><th>What</th><th>Basis</th></tr>
+  <tr><td>Your account, your pairing, chat, calls, the shared gallery, capsules, rituals and everything else the app is for</td><td><strong>Contract</strong> — we cannot provide Miles without it</td></tr>
+  <tr><td>The date of birth, and the 18+ checks that read it</td><td><strong>Legal obligation</strong> and our legitimate interest in keeping minors off an adult service</td></tr>
+  <tr><td>Push tokens and notification delivery</td><td><strong>Contract</strong></td></tr>
+  <tr><td>Crash reports</td><td><strong>Legitimate interest</strong> — keeping the app working. It carries no message content; section 1 says exactly what it carries</td></tr>
+  <tr><td>Invite codes and failed pairing attempts</td><td><strong>Legitimate interest</strong> — stopping codes being guessed</td></tr>
+  <tr><td>Safety reports, and acting on them</td><td><strong>Legitimate interest</strong> in the safety of users, and <strong>legal obligation</strong> where the report concerns a child</td></tr>
+  <tr><td>Location sharing</td><td><strong>Consent</strong> — off until you turn it on, and withdrawable at any time</td></tr>
+  <tr><td>The cycle tracker, and the Closer area</td><td><strong>Explicit consent</strong> — see below</td></tr>
+</table>
+</div>
+
+<p><strong>Two kinds of data need more than that, and we treat them
+accordingly.</strong> Health data — what you log in the cycle tracker — and
+anything about your sex life, which is what the Closer area is for, are special
+categories under Article 9. We rely on your <em>explicit consent</em> for both.
+That means: they are switched off until you choose them, the app tells you what
+turning them on does before it does it, and you can withdraw at any time by
+turning the feature off or deleting what is in it. Withdrawing is not
+retroactive — it stops further processing, it does not unsend what your partner
+has already seen.</p>
+
+<p>One consequence worth stating rather than burying: <strong>when you turn the
+cycle tracker on, sharing it with your partner starts on.</strong> There is a
+switch on the cycle screen to stop that. We think that is the right default for
+an app two people install together, but it is a default, and this is us telling
+you plainly that it is there so you can change it in the same minute you turn
+the feature on.</p>
+
+<h2>11. Security, and what it does not cover</h2>
 
 <p>Data is encrypted in transit (TLS) and at rest, files live in private buckets
 reachable only through short-lived signed links, access is enforced per-row so
@@ -550,13 +665,13 @@ should weigh:</p>
   See section 3.</li>
 </ul>
 
-<h2>11. Changes</h2>
+<h2>12. Changes</h2>
 
 <p>If this policy changes materially we will update the version at this URL and
 change the date at the top. Continued use after a change means the updated
 policy applies.</p>
 
-<h2>12. Contact</h2>
+<h2>13. Contact</h2>
 
 <p>RD Developers<br>
 Sector C Commercial Area, Bahria Town<br>
