@@ -23167,3 +23167,71 @@ What this does NOT verify, unchanged from §271: the two edge functions
 never deploys, so they are still unexecuted — `deno check` has not been run on
 them anywhere. Migration `20260904130000` remains applied to **no** project.
 No APK was built.
+
+## §272
+
+**2026-09-04 — `20260904130000` applied to STAGING and behaviourally verified. Production
+untouched.**
+
+Staging ledger entry is `20260904024717 the_quota_bit_answers_only_to_its_owner` — the
+version differs from the repo filename, as this file already records about the two
+numbering schemes, and matches how every other staging entry was written.
+
+**Pre-flight said staging IS a faithful rehearsal for this one change**, which is worth
+recording because §65's drift warning is otherwise correct and would have argued the
+opposite. For the objects this migration touches, staging and production matched exactly:
+`storage_quota_ok` body byte-identical, `prosecdef` true on both, EXECUTE granted to
+`authenticated` and revoked from `anon` on both, and the same RESTRICTIVE INSERT policy
+`storage_quota_limit` with check `((owner IS NULL) OR storage_quota_ok(owner))`. The drift
+that does exist on staging (3 permissive storage INSERT policies vs prod's 6, fewer buckets)
+is outside this blast radius.
+
+**A 20-agent adversarial pre-flight ran before applying**: 4 lenses (repo text, live
+catalogs on both projects, the storage-owner invariant, SQL semantics) each proposing
+breakage modes, then independent refuters on every claim. 16 risks adjudicated, 15 dismissed
+from primary sources, 1 surviving.
+
+The decisive mechanism, and the thing worth keeping: **`storage.objects.owner` and
+`auth.uid()` are the same JWT field twice.** storage-api sets `request.owner = payload.sub`
+and scopes the DB connection with `set_config('request.jwt.claim.sub', payload.sub)`. So
+inside the WITH CHECK the two operands cannot diverge on any RLS-evaluated insert, and the
+new CASE always takes the self branch on a real upload. Copy, move and upsert all pass the
+*requester* as owner; signed upload URLs run through `asSuperUser()` and never reach RLS at
+all (and the app uses none of them). That is why this change is behaviour-preserving rather
+than merely believed to be.
+
+**Measured on staging after applying**, with `request.jwt.claim.sub` set to a test uuid:
+
+      auth.uid()                    = the test uuid
+      storage_quota_ok(self)        = true      (own bit still answered)
+      storage_quota_ok(other)       = NULL      (the leak, closed)
+      (false) OR ok(other)          = NULL      (foreign-owner insert denied)
+      (true)  OR ok(other)          = true      (owner IS NULL short-circuit still admits)
+      no JWT: ok(self) / ok(other)  = true/true (cron + service_role path unchanged)
+      authenticated EXECUTE = true, anon = false, prosecdef = true, policy text unchanged
+
+The `(true) OR ok(other) = true` row is the one that mattered most: had the OR not
+short-circuited, every owner-NULL insert would have started failing.
+
+**One surviving risk, pre-existing and NOT caused by this change.** `storage.objects.owner`
+carries Supabase's own catalog comment "Field is deprecated, use owner_id instead". The
+policy and `reconcile_storage_usage()` both depend on it. If a platform upgrade ever stops
+populating it, `(owner IS NULL)` becomes TRUE for every insert, the quota ceiling silently
+stops existing, and the reconciler simultaneously zeroes every counter — failing open twice
+with nothing watching. Not true today (prod: 143 objects, 0 with owner null, 0 where
+`owner::text <> owner_id`). Worth a follow-up: either a monitor on
+`count(*) from storage.objects where owner is null`, or moving the policy and reconciler to
+`coalesce(owner::text, owner_id)`.
+
+**`_quota_probe` on staging is not ours.** Staging carries a RESTRICTIVE INSERT policy
+`_quota_probe` with check `true` that appears in no migration in this repo. It is inert
+(restrictive policies are ANDed, and `true` cannot mask a denial), but it is undocumented
+drift. It was NOT created by this session: across all 20 workflow agents the actual tool
+invocations were 241 `execute_sql`, 152 Bash, 24 ToolSearch, 20 StructuredOutput and some
+read-only GitHub/web calls — **zero** `apply_migration`, `deploy_edge_function`,
+`create_branch`, `Write` or `Edit`, and zero SQL statements beginning with a write verb.
+The agents only ever read it back out of `pg_policies`.
+
+**Not done, deliberately:** production has NOT had this migration. No live upload was
+performed on staging either — the verification above is expression-level against the real
+function and the real policy text, not an end-to-end object insert.
