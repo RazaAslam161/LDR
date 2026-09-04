@@ -23055,3 +23055,85 @@ One imprecision in the commit message, recorded rather than amended: it says it
 "removes four zz_audit_*_test.dart harnesses". They were UNTRACKED, so the
 commit diff contains no deletion for them — they were removed from the working
 tree only, and were never on the remote to begin with.
+
+## §271
+
+**2026-09-04 — Login security audit: five items asked, three already clean, five
+fixes landed on `claude/login-security-audit-urqj48`.**
+
+The brief was a five-point login audit written for a Next.js/Vite app: browser-
+exposed `NEXT_PUBLIC_`/`VITE_` secrets, request-supplied identity in API routes,
+RLS off or policy-less, cookie-only sign-out, and email-existence oracles. Items
+1 and 2 were translated to what this repo actually is (APK-bundled config; edge
+functions and `SECURITY DEFINER` RPCs). Everything was checked against **live
+production `sopictusdonlvuezmfep`** via the Supabase MCP as well as source,
+because 160 additive migrations are not a statement of current state.
+
+**Clean, with evidence, and worth not re-auditing:**
+
+- **Secrets.** No `service_role` key in the tree or in history. The only JWT
+  literal, `web/delete-account.html:131`, decodes to `role: anon`. The app does
+  read `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` (`lib/core/app/config.dart:6-7`)
+  — a dead-Next-prototype leftover, both values genuinely public.
+- **RLS.** Zero tables with RLS off, out of 72 in `public`. The 9 the advisor
+  flags `rls_enabled_no_policy` all have SELECT/INSERT/UPDATE/DELETE revoked
+  from `anon` **and** `authenticated` — service-role-only by design, `app_secrets`
+  included. Not a gap.
+- **Sign-out.** One choke point, `supabase_repository.dart:495-497`, no `scope:`
+  → `SignOutScope.global`. `SignOutScope.local` appears nowhere in `lib/` or
+  `test/`. Account deletion revokes twice (auth.users cascade, then global).
+  Only inherent gap is `offline_screen.dart:75-86` — an offline device cannot
+  revoke. Unfixable, already documented.
+- **Enumeration.** Reset and sign-in were already neutral and already tested
+  (`onboarding_escape_test.dart:93-104`).
+
+**Fixed, one commit each:**
+
+1. `b5f741f` **reach-notify** (`index.ts:355-358`) resolved a profile by `id`
+   alone with the service role, from a body-supplied `recipient`/`callee_id`,
+   with nothing tying it to the body-supplied `couple_id` — arbitrary push, plus
+   a liveness oracle via the silent no-token exit. Now gated on **`couple_members`,
+   not `profiles.couple_id`**, and that distinction is the whole fix:
+   `dissolve_couple()` nulls `profiles.couple_id` and `unlink_ended` is posted
+   *after* it runs (`unlink_expire_due()` in `20260830120000` reads members out
+   first and says why). Constraining on `profiles` would have silently dropped
+   the notification telling both people their shared space had closed. Verified
+   live: 0 paired profiles missing a ledger row, PK `(couple_id, user_id)` so
+   `maybeSingle()` cannot throw.
+2. `f094cff` **turn-credentials** required only "signed in" while `map-token` and
+   `giphy-key` both require couple membership — for a 24h Cloudflare relay
+   credential billed by the gigabyte, on an open-signup project. Mirrored their
+   check, placed before `claim_turn_mint` so an unentitled caller cannot spend a
+   mint slot.
+3. `38ab923` **auth_errors.dart:60-63** still said "An account with this email
+   already exists". Unreachable *only* because email confirmation is on (live:
+   4 users, 0 unconfirmed, 4 confirmation mails) — a dashboard toggle the code
+   does not control. Removed; test added. The `email not confirmed` branch was
+   left alone deliberately: GoTrue returns it only after a *correct* password,
+   so it discloses nothing.
+4. `593b2e2` **`.env` is a Flutter asset** (`pubspec.yaml:142`) and gitignored,
+   so it ships in the APK in plaintext and no review ever sees it. Test pins the
+   allowed key set, derived from `config.dart` rather than written down, and
+   skips when `.env` is absent.
+5. `cfa248a` **`storage_quota_ok(uuid)`** — the last client-supplied id reaching
+   a `SECURITY DEFINER` body unchecked. The grant must stay (`storage_quota_limit`
+   calls it in a RESTRICTIVE WITH CHECK, evaluated as the invoking role), so the
+   guard went in the body.
+
+**Not verified, and this matters:** the session container has **neither `flutter`
+nor `deno`**. Nothing was compiled, no test was run, and migration
+`20260904130000` was **not applied to any project** — not staging, not prod. The
+migration's expression and its `has_function_privilege` assertion were validated
+as read-only `select`s against prod (parses, returns `boolean`, grant intact),
+which is syntax evidence, not execution evidence. No APK was built.
+
+**Left undone on purpose, needs a ruling:** 42 write policies across 23 tables
+authorise on `couple_id` alone with no `auth.uid()` actor pin, so within a couple
+either partner can write a row attributed to the other. No cross-couple exposure.
+This is a *partially completed* sweep — `20260829145343` closed exactly this for
+`cycle_*` and `routine_checks`, `20260818140000` for `consent_state`; the rest
+were never done. Finishing it is a 42-policy migration touching most features.
+Also: `app_release_read` is `for select to anon using (true)`, which is how the
+pre-login version gate works, but it makes `apk_url`/`apk_sha256` publicly
+readable. And leaked-password protection is off (advisor), as
+`sign_up_page.dart:51-53` already notes.
