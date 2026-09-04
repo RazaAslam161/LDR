@@ -271,5 +271,37 @@ void main() {
         contains('internet'),
       );
     });
+
+    test('a duplicate signup never says the address is taken', () {
+      // SignUpPage sends every submission to the same "Check your inbox" state
+      // so the form cannot be fed addresses to learn who has an account on a
+      // private couples app. This map used to undo that in one line, the
+      // moment GoTrue raised instead of answering with a success shape — which
+      // is what it does whenever email confirmation is turned off, a dashboard
+      // setting no code here controls.
+      for (final e in [
+        Exception('User already registered'),
+        const AuthException(
+          'user already registered',
+          code: 'user_already_exists',
+        ),
+        const AuthException(
+          'Email address already in use',
+          code: 'email_exists',
+        ),
+      ]) {
+        final msg = friendlyAuthError(e).toLowerCase();
+        for (final leak in [
+          'already',
+          'exists',
+          'registered',
+          'taken',
+          'in use',
+          'sign in instead',
+        ]) {
+          expect(msg, isNot(contains(leak)), reason: '$e -> $msg');
+        }
+      }
+    });
   });
 }
