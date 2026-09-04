@@ -32,7 +32,7 @@
 <article class="paper">
 
 <h1>Miles — Security &amp; Vulnerability Disclosure</h1>
-<p class="updated">Last updated: 3 September 2026</p>
+<p class="updated">Last updated: 4 September 2026</p>
 
 <p class="lede">If you have found a way to reach data in Miles that should not
 be reachable, we want to hear about it, and this page is the route. It says what
@@ -67,8 +67,7 @@ read first.</p>
   do. This matters more than a severity label: a finding described by its impact
   gets fixed faster than one described by its category;</li>
   <li><strong>Which build</strong> — the version and build number shown in
-  Settings &rarr; About — and whether you installed the app from Google Play or
-  sideloaded it, because the two builds differ;</li>
+  Settings &rarr; About;</li>
   <li>anything that would help us confirm it: a request and response pair, a log
   line, a short recording.</li>
 </ul>
@@ -92,9 +91,10 @@ already written down.</p>
 <table>
   <tr>
     <td>End-to-end encrypted</td>
-    <td>Memory Threads (titles, notes, partner notes, places and photographs)
-    and the text of Wish&nbsp;Jar entries. These are encrypted on the sending
-    phone; the server stores ciphertext it holds no key for.</td>
+    <td>Memory Threads (titles, notes, partner notes, places and photographs),
+    the text of Wish&nbsp;Jar entries, the reactions put on a message, and the
+    messages and notes written during a separation. These are encrypted on the
+    sending phone; the server stores ciphertext it holds no key for.</td>
   </tr>
   <tr>
     <td>Not end-to-end encrypted</td>
@@ -123,8 +123,10 @@ encrypted history, is describing this page's own section 2 back to us.</p>
 <h2>3. What is in scope</h2>
 
 <ul>
-  <li><strong>The Miles Android app</strong> — both the Google Play build and
-  the sideloaded APK, including anything in the shipped package itself.</li>
+  <li><strong>The Miles Android app</strong> — the Google Play build, including
+  anything in the shipped package itself. That is the only build anyone
+  installs; an unshrunk debug build exists for development and is not in
+  scope.</li>
   <li><strong>The backend the app talks to</strong> — the database, its
   row-level access rules, the storage buckets and signed links, the server
   functions the app calls, and the authentication flows behind them.</li>
@@ -143,7 +145,10 @@ encrypted history, is describing this page's own section 2 back to us.</p>
   couple that owns them.</li>
   <li><strong>Breaking the encryption we do claim.</strong> Anything that lets
   the server, the network, or a third party read Memory Threads, Wish&nbsp;Jar
-  entry text or vault files. This includes substituting a partner's published
+  entry text, message reactions, or the messages and notes written during a
+  separation. The Personal Vault is <em>not</em> in this list — section 2 says
+  why, and "the operator can read the vault" is documented design rather than a
+  finding. This includes substituting a partner's published
   key: each phone remembers the key it has been talking to and refuses a change
   until a human confirms it, so a way to make a phone accept a new key
   <em>without</em> that confirmation is exactly the class we want. One limit
@@ -297,7 +302,7 @@ breaks a hosting provider's terms, that is between you and them.</p>
 <p>Two other routes exist and are better suited than this one:</p>
 <ul>
   <li><strong>Abuse, harassment or a person misusing the app</strong> — report
-  it inside the app: Settings &rarr; Safety &rarr; Report a problem, or the
+  it inside the app: Settings &rarr; Support &rarr; Report a problem, or the
   menus in Chat and the Gallery. The <a href="terms.html">Terms of Use</a>
   describe what happens next.</li>
   <li><strong>Child safety</strong> — the

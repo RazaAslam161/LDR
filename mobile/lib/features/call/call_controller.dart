@@ -20,6 +20,7 @@ import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_session.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/main.dart' show MilesApp;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -1582,6 +1583,38 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether this process has already put the bluetooth prompt up. One ask a
+  /// run: a user who said no does not get asked again on the next call.
+  static bool _btAsked = false;
+
+  /// Ask for BLUETOOTH_CONNECT, once, best-effort.
+  ///
+  /// The manifest has declared this permission since the call feature shipped
+  /// and NOTHING ever requested it. On Android 12+ it is a runtime permission,
+  /// so an unrequested one is an ungranted one — audioswitch (via
+  /// flutter_webrtc's Helper) could not enumerate a headset at all, and
+  /// `setSpeakerphoneOnButPreferBluetooth` below quietly had no bluetooth to
+  /// prefer. The control was live, the permission was in the list Play shows
+  /// the user, and the feature could never work. Asking here is what makes the
+  /// declaration honest.
+  ///
+  /// Deliberately non-blocking on the answer: a refusal must leave the call
+  /// routing to speaker/earpiece exactly as it does today, never fail the call.
+  /// permission_handler reports granted on API < 31, where this is install-time.
+  static Future<void> _ensureBluetoothPermission() async {
+    if (_btAsked) return;
+    _btAsked = true;
+    try {
+      final status = await Permission.bluetoothConnect.request();
+      if (!status.isGranted) {
+        debugPrint('[call] bluetooth permission not granted: $status — '
+            'headset routing unavailable, falling back to speaker/earpiece');
+      }
+    } catch (e) {
+      debugPrint('[call] bluetooth permission request failed: $e');
+    }
+  }
+
   /// Route the call audio. Video calls belong on the speaker — the phone is
   /// held away from the face — and a voice call belongs at the ear.
   ///
@@ -1589,6 +1622,7 @@ class CallController extends ChangeNotifier {
   /// devices the audio manager can see at that moment.
   Future<void> _routeAudio() async {
     speakerOn = isVideo;
+    await _ensureBluetoothPermission();
     try {
       if (isVideo) {
         // Prefer a headset if one is connected — a video call on the speaker
@@ -1609,6 +1643,10 @@ class CallController extends ChangeNotifier {
   Future<void> setSpeaker(bool on) async {
     speakerOn = on;
     notifyListeners();
+    // The one deliberate user action about audio routing, so it is the second
+    // and last place worth asking: someone who declined at call start and then
+    // reaches for this control is asking for the headset by name.
+    if (!on) await _ensureBluetoothPermission();
     try {
       await Helper.setSpeakerphoneOn(on);
     } catch (e) {

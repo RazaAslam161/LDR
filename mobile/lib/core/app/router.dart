@@ -51,7 +51,6 @@ import 'package:miles/features/settings/export_screen.dart';
 import 'package:miles/features/settings/settings_screen.dart';
 import 'package:miles/features/shell/app_shell.dart';
 import 'package:miles/features/timeline/timeline_screen.dart';
-import 'package:miles/features/touch_map/touch_map_screen.dart';
 import 'package:miles/features/unlink/unlink_screen.dart';
 import 'package:miles/features/unlink/unlink_state.dart';
 import 'package:miles/features/vault/vault_gate_screen.dart';
@@ -448,10 +447,14 @@ GoRouter buildRouter(Ref ref) {
         path: '/app/breath',
         builder: (context, state) => const BreathSyncScreen(),
       ),
-      GoRoute(
-        path: '/app/touch',
-        builder: (context, state) => const TouchMapScreen(),
-      ),
+      // No '/app/touch' route. TouchMapScreen is reached in production as a tab
+      // body inside AppShell, which is what applies the adult check in front of
+      // it; a top-level GoRoute rendered the same intimate surface with that
+      // check nowhere in the tree. Nothing in lib/ ever pushed it — the only
+      // references were test path fixtures and the presence name lookup, which
+      // is a pure string map and still carries the entry for the tab. If Touch
+      // ever needs a real route, it needs the gate written into the builder in
+      // the same change.
       GoRoute(
         path: '/app/reasons',
         builder: (context, state) => const ReasonsScreen(),

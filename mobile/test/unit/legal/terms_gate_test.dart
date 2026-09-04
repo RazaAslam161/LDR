@@ -18,11 +18,18 @@ void main() {
   });
 
   group('needsAcceptance', () {
-    test('the version constant is 1; these cases are written against it', () {
+    test('the version constant is 2; these cases are written against it', () {
       // If someone raises the version, the numbers below stop meaning what
       // they say and this fails first rather than the assertions fifty lines
       // down failing mysteriously.
-      expect(milesTermsVersion, 1);
+      //
+      // It did exactly that on 2026-09-04, which is why the cases below moved:
+      // v1 told every user that files in the private vault were end-to-end
+      // encrypted, and they never were on any build this gate has seen. A
+      // corrected security guarantee is the "change that matters" the Terms
+      // themselves promise to re-ask for, so the constant went 1 -> 2 and
+      // accepting v1 no longer opens the gate.
+      expect(milesTermsVersion, 2);
     });
 
     test('null — never asked, or the answer was lost — gates', () async {
@@ -38,17 +45,27 @@ void main() {
       expect(TermsGate.needsAcceptance, isTrue);
     });
 
-    test('1 — the current version — opens', () async {
+    test('1 — the superseded version — gates', () async {
+      // The whole point of the bump. Everyone on record as accepting v1
+      // accepted a document that misdescribed the vault, so they are asked
+      // again rather than left holding it.
       TermsGate.fetchAcceptedVersion = () async => 1;
+      await TermsGate.load();
+      expect(TermsGate.needsAcceptance, isTrue);
+      expect(TermsGate.accepted.value, isFalse);
+    });
+
+    test('2 — the current version — opens', () async {
+      TermsGate.fetchAcceptedVersion = () async => 2;
       await TermsGate.load();
       expect(TermsGate.needsAcceptance, isFalse);
       expect(TermsGate.accepted.value, isTrue);
     });
 
-    test('2 — a newer version than this build knows — opens', () async {
-      // A handset that accepted v2 elsewhere must not be re-gated by an older
-      // build. Downgrades are a real event here: the app is sideloaded.
-      TermsGate.fetchAcceptedVersion = () async => 2;
+    test('3 — a newer version than this build knows — opens', () async {
+      // A handset that accepted v3 elsewhere must not be re-gated by an older
+      // build. Downgrades are a real event here.
+      TermsGate.fetchAcceptedVersion = () async => 3;
       await TermsGate.load();
       expect(TermsGate.needsAcceptance, isFalse);
     });

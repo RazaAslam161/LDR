@@ -68,10 +68,20 @@ class _StealthScrim extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onDismiss,
       // Solid near-opaque light surface (NOT a BackdropFilter — it renders
-      // unpredictably over FLAG_SECURE on some devices). Looks like a real
-      // news-app loading screen.
+      // unpredictably over FLAG_SECURE on some devices).
+      //
+      // Deliberately branded as NOTHING. This used to draw a white tile with
+      // `G≡` in #1A73E8 — Google's own brand blue — a spinner in the same blue
+      // and the words "Syncing your news...", which is an imitation of a Google
+      // product and squarely inside Play's Impersonation policy ("imitate the
+      // look and feel of another app or brand"). Reviewed by Google, on a cover
+      // feature Google already looks hard at, that is not a risk worth a
+      // colour. A plain neutral progress screen is just as unremarkable to
+      // anyone glancing at the phone, which is the whole job, and it copies
+      // nobody. Do not put a recognisable mark, wordmark or brand colour back
+      // in here.
       child: ColoredBox(
-        color: const Color(0xFFF5F5F5),
+        color: const Color(0xFFF4F4F5),
         child: SafeArea(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -83,16 +93,13 @@ class _StealthScrim extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border:
-                      Border.all(color: const Color(0xFFE0E0E0), width: 0.5),
+                      Border.all(color: const Color(0xFFE4E4E7), width: 0.5),
                 ),
                 child: const Center(
-                  child: Text(
-                    'G≡',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF1A73E8),
-                    ),
+                  child: Icon(
+                    Icons.sync_rounded,
+                    size: 26,
+                    color: Color(0xFF71717A),
                   ),
                 ),
               ),
@@ -102,15 +109,15 @@ class _StealthScrim extends StatelessWidget {
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Color(0xFF1A73E8)),
+                  valueColor: AlwaysStoppedAnimation(Color(0xFF71717A)),
                 ),
               ),
               const SizedBox(height: 12),
               const Text(
-                'Syncing your news...',
+                'Syncing…',
                 style: TextStyle(
                   fontSize: 14,
-                  color: Color(0xFF70757A),
+                  color: Color(0xFF71717A),
                   fontFamily: 'Inter',
                 ),
               ),

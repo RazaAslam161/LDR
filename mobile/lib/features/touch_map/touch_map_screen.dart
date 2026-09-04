@@ -26,7 +26,6 @@ import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/games/game_chat_panel.dart';
 import 'package:miles/features/shell/app_drawer.dart';
-import 'package:miles/features/touch_map/reaction_gesture_service.dart';
 import 'package:miles/features/touch_map/reaction_segment_service.dart';
 import 'package:miles/features/touch_map/touch_map_repository.dart';
 import 'package:miles/main.dart' show MilesApp;
@@ -34,7 +33,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import 'package:vibration/vibration.dart';
 import 'package:video_player/video_player.dart';
 
 class _PendingCameraIcon {
@@ -52,7 +50,6 @@ class _ActiveReactionGif {
     required this.y,
     required this.id,
     required this.isPhoto,
-    this.gesture = ReactionGesture.unknown,
     this.mirror = false,
   });
   final String mediaUrl;
@@ -66,8 +63,6 @@ class _ActiveReactionGif {
   final double y;
   final String id;
   final bool isPhoto;
-  final ReactionGesture gesture;
-
   /// Mirror the media at display time. True for front-camera VIDEO (which we
   /// can't flip on the file without FFmpeg) so the played-back reaction matches
   /// the mirrored selfie preview. Photos are flipped at capture instead.
@@ -267,11 +262,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     final y = (payload['y'] as num?)?.toDouble();
     final id = payload['id'] as String? ?? const Uuid().v4();
     final isPhoto = payload['is_photo'] as bool? ?? false;
-    final gestureStr = payload['gesture'] as String? ?? 'unknown';
-    final gesture = ReactionGesture.values.firstWhere(
-      (g) => g.name == gestureStr,
-      orElse: () => ReactionGesture.unknown,
-    );
     final mirror = payload['mirror'] as bool? ?? false;
     // Older builds broadcast no owner. They could only react to the partner's
     // body, so on this device that target is me.
@@ -284,7 +274,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         y: y,
         id: id,
         isPhoto: isPhoto,
-        gesture: gesture,
         mirror: mirror,
       );
     }
@@ -317,7 +306,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     );
   }
 
-  /// The full reaction pipeline: compress → gesture detect → background removal
+  /// The full reaction pipeline: compress → background removal
   /// → upload → local add + broadcast to partner. Behaviour is unchanged from
   /// the previous reaction prompts; it now lives in one method so both the
   /// camera and gallery paths feed it.
@@ -362,12 +351,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       }
     }
 
-    // Gesture detection — photos only (video needs frame extraction).
-    var gesture = ReactionGesture.unknown;
-    if (isPhoto) {
-      gesture = await ReactionGestureService.detectGesture(sourceFile.path);
-    }
-
     // Background removal — photos only; too slow per-frame for video.
     var processedFile = sourceFile;
     if (isPhoto) {
@@ -408,7 +391,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       y: y,
       id: reactionId,
       isPhoto: isPhoto,
-      gesture: gesture,
       mirror: mirror,
     );
 
@@ -422,7 +404,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
         'y': y,
         'id': reactionId,
         'is_photo': isPhoto,
-        'gesture': gesture.name,
         'mirror': mirror,
       },
     ),);
@@ -617,7 +598,6 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
     required double y,
     required String id,
     required bool isPhoto,
-    ReactionGesture gesture = ReactionGesture.unknown,
     bool mirror = false,
   }) {
     final r = _ActiveReactionGif(
@@ -627,41 +607,13 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
       y: y,
       id: id,
       isPhoto: isPhoto,
-      gesture: gesture,
       mirror: mirror,
     );
     if (mounted) setState(() => _reactions.add(r));
-    _playGestureHaptic(gesture);
+    HapticFeedback.mediumImpact();
     Timer(const Duration(seconds: 8), () {
       if (mounted) setState(() => _reactions.remove(r));
     });
-  }
-
-  void _playGestureHaptic(ReactionGesture gesture) {
-    switch (gesture) {
-      case ReactionGesture.palmFlat:
-        Vibration.vibrate(
-          pattern: [0, 80, 200, 60, 200, 80, 200, 60],
-          intensities: [0, 60, 0, 50, 0, 55, 0, 50],
-        );
-      case ReactionGesture.pinch:
-        Vibration.vibrate(
-          pattern: [0, 40, 30, 40],
-          intensities: [0, 255, 0, 255],
-        );
-      case ReactionGesture.squeeze:
-        Vibration.vibrate(
-          pattern: [0, 300],
-          intensities: [0, 200],
-        );
-      case ReactionGesture.point:
-        Vibration.vibrate(
-          pattern: [0, 60],
-          intensities: [0, 180],
-        );
-      case ReactionGesture.unknown:
-        HapticFeedback.mediumImpact();
-    }
   }
 
   double _reactionSize(double x, double y) {

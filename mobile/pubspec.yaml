@@ -109,7 +109,6 @@ dependencies:
   flutter_cache_manager: ^3.4.1
   screen_brightness: ^2.1.11
   google_mlkit_subject_segmentation: ^0.0.3
-  google_mlkit_pose_detection: ^0.14.1
   file_picker: ^11.0.3
   flutter_image_compress: ^2.5.1
   mapbox_maps_flutter: ^2.28.1

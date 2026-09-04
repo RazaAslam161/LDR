@@ -23055,3 +23055,584 @@ One imprecision in the commit message, recorded rather than amended: it says it
 "removes four zz_audit_*_test.dart harnesses". They were UNTRACKED, so the
 commit diff contains no deletion for them — they were removed from the working
 tree only, and were never on the remote to begin with.
+
+## §271 — 2026-09-04 — Play-readiness audit: the app vs its disclosure surface (build 76, no code changed yet)
+
+Owner asked for the whole picture before the store: every feature, every legal page, every
+Play declaration, both directions of the diff, then fixes. This section records the AUDIT.
+Nothing was changed in the tree. A 9-dimension subagent fleet was still running when this
+was written; its remaining findings and all fixes go in the next section.
+
+### The headline: the Personal Vault is NOT end-to-end encrypted, and six places say it is
+
+Ground truth, verified three ways:
+- `personal_vault_items.content` / `media_url` are `text` (`20260601001100_private_vault.sql:24-31`).
+- `VaultRepository.saveMedia` calls `_uploadPlain` — its own comment: "PLAINTEXT in the
+  PRIVATE bucket ... Owner's decision (2026-08-28)" (`vault_repository.dart:186-199`).
+- `THREAT-MODEL.md:72-73` already says so: "**Plaintext since build 60**".
+
+Six places contradict that:
+1. `mobile/lib/features/legal/terms_text.dart:113` — the accepted contract. `TermsGate`
+   fails closed and gates every screen via the router redirect, so every user agrees to
+   this. Worst of the six.
+2. `mobile/lib/features/closer/closer_screen.dart:472-475` — also wrong twice: says the
+   Vault is "readable by nobody but the two of you"; it is owner-only, the partner cannot
+   read it at all.
+3. `web/csae.html:209` — the child-safety document Google reads. Self-contradicts its own
+   section 5, which tells law enforcement "Personal Vault contents we can produce".
+4. `web/security.html:146` — self-contradicts its own section 2.
+5. `web/index.html:243-246` — public marketing, names the cipher: "sealed with
+   XChaCha20-Poly1305 ... the server stores ciphertext it cannot open".
+6. `docs/guides/PLAY-RELEASE-RUNBOOK.md:588-591` — the Data safety answer plan, which
+   calls the vault E2EE and not-E2EE in one bullet. This is what gets typed into Console.
+
+Consequences: `web/terms.html:39-41` claims "This is the same document the app shows you" —
+false, and section 4 is the only substantive divergence. `THREAT-MODEL.md:73` claims the
+terms and CSAE page "were corrected to match on 2026-08-30" — two of the five named were not.
+
+### The second blocker nobody would find in the code: the Settings paths do not exist
+
+Settings has seven groups: Appearance, Privacy & security, Support, Your data, Partner,
+Sound & vibrate, Channels — plus one UNLABELLED trailing group. There is no "Safety" group
+and no "Account" group. Every published document routes through both:
+- "Settings > Safety > Report a problem" — this is the in-app reporting mechanism Play's
+  Child Safety Standards requires and a reviewer will follow. Real path:
+  **Settings > Support > Report a problem** (`settings_screen.dart:1033,1045`).
+- "Settings > Safety > Pause notifications". Real: **Settings > Partner** (`:1189,1278`).
+- "Settings > Account > Delete account" — the route Play checks for the deletion
+  requirement. Real: **Settings > Delete account**, last row of the unlabelled final group
+  (`:1362-1379`) — there is no group name to cite.
+Cited in `web/csae.html:157,325,333`, `web/terms.html:123,148`, `web/privacy-policy.html:480`,
+`web/faq.html`, and the in-app `terms_text.dart` sections 5/6/8 and `faq_text.dart`.
+
+### Two live infrastructure blockers, checked against production today
+
+- **The Supabase org is on the `free` plan** (`get_organization` returns `"plan":"free"`).
+  Free projects auto-pause when idle; a paused project is a dead app for every user and an
+  instant review rejection. Runbook Phase 1.1 says this must be done first; it is not done.
+  It compounds: `ReleaseGate.chatCipherOnly` defaults false and **falls back to false on any
+  read failure including an auto-paused project** (`release_gate.dart:87-91,249-253`), so a
+  pause silently reverts chat to plaintext writes.
+- **Leaked-password protection is OFF** (`get_advisors` security, WARN
+  `auth_leaked_password_protection`). Runbook Phase 1.3, not done. It matters more here than
+  in a normal app: privacy policy section 3 says the account password is the whole of the
+  escrow protection, so a breached password decrypts the user's entire encrypted history.
+
+### Chat encryption is stated three different ways
+
+`export_screen.dart:319-325` tells the user "your messages are end-to-end encrypted" and its
+comment asserts "Only chat is end-to-end encrypted". `web/privacy-policy.html` section 2,
+`web/security.html` section 2 and `web/index.html` all say chat text is NOT end-to-end
+encrypted. Production has `chat_cipher_only = true` and 7/7 text rows ciphertext, 0 plaintext.
+
+Resolution, and this is the important part: the legal documents must NOT be flipped to claim
+chat is E2EE. `chatCipherOnly` defaults false and fails to false on an unreachable gate, and
+the flag is the documented one-statement rollback. Promoting chat to the E2EE list would
+create a new trap where one UPDATE turns the policy into a lie. `export_screen.dart` is the
+one place that is wrong; the conservative wording elsewhere is correct.
+
+### Undisclosed E2EE surfaces (under-claiming, safe direction, still inaccurate)
+
+Verified written by the current client, disclosed nowhere:
+- chat message reactions — `message_reactions.emoji_cipher`, cipher-only upsert with no
+  plaintext column (`chat_reactions.dart:295`).
+- the unlink conversation — `couple_unlink.note_cipher` (`unlink_state.dart:98`) and
+  `unlink_messages.cipher` (`unlink_repository.dart:53`).
+
+Nearly reported two more and they were wrong: `memory_photos.caption_cipher` and
+`body_map_pins.note_cipher` are columns with NO Dart consumer. The policy's current
+treatment of body-map data is correct.
+
+### Legal documents: missing content (independently reached by me and by the fleet)
+
+Terms (`web/terms.html` + `terms_text.dart`) contain zero occurrences of: liability,
+governing law, jurisdiction, dispute resolution, severability, entire agreement, assignment,
+indemnity, licence, intellectual property, force majeure. Section 9 "No warranty" is three
+sentences and disclaims no implied warranty. The document never names the contracting party
+— "the agreement between you and whoever runs it".
+
+Privacy policy: no lawful basis per purpose (Art 13(1)(c)); no Article 9 condition for
+health (cycle tracker) or sex-life (Closer) data, and cycle data is shared with the partner
+by DEFAULT (`share_with_partner boolean not null default true`); no international-transfer
+mechanism though the controller is in Pakistan and the data in Mumbai and neither is
+adequacy-listed; no controller designation and no Art 27 EU/UK representative; section 7
+omits portability and restriction, and tells users to email for a copy the app already
+produces in one tap (`/app/settings/export`, `ExportScreen`, reachable from Settings and
+Unlink).
+
+### Smaller, verified
+
+- `web/csae.html:37` asserts the app "is rated 18+". It is unpublished, so no IARC rating
+  exists, and the runbook plans Mature 17+.
+- `delete_my_account()` queues couple_media, couple_intimate, capsule-media, couple_files
+  and personal_vault for reap. The `chat-bg` bucket is NOT in the list, so a chat background
+  survives account deletion; `delete-account.html` promises "everything else recorded
+  against your account alone". 0 objects in that bucket today, so nothing live is affected.
+- `RECEIVE_BOOT_COMPLETED` is declared with no consumer — no `zonedSchedule` anywhere.
+- Runbook staleness that would put wrong answers in Console: 5.2 calls the Reach
+  full-screen-intent defect "still unfixed" (it IS fixed — `reach_notifications.dart:53-59`
+  is explicitly not `category: call`, and FSI is used only by `showCallNotification` gated
+  on `fsi_can_use`); 5.3 says the service declares `microphone|camera|mediaProjection`
+  (the manifest says `microphone|mediaProjection`); 5.7 says `web/csae.html` does not exist
+  (it does) and names `Razaaslam3210@gmail.com` where every published document uses
+  `milesapp.officials@gmail.com`.
+- Runbook 1.5 is still open and the gap has WIDENED: it recorded 108 local files vs 167
+  ledger rows on 2026-08-17; today it is 159 vs 219. Note the two ledgers use different
+  numbering schemes by design, so a version-set diff proves nothing — I ran one, it claimed
+  164 missing, and it was meaningless. Whether the repo fully describes the live schema is
+  UNVERIFIED by any mechanical check available here.
+
+### Verified clean — stated so a later session does not re-audit them
+
+Retention table: all 11 windows in privacy policy section 6 match production cron exactly
+(`prune_ephemera`, `prune_client_errors` 14d+20k cap, `prune_diag_events` 2d+200k,
+`purge_deleted_memories` 30d, `prune_pairing_attempts` 1d, `dissolution_window()` = 30 days).
+Deletion cascades match section 7 exactly including the nuance that
+`content_reports.reporter_id` is CASCADE while `reported_user_id` is SET NULL.
+`targetSdkVersion = 36` (`FlutterExtension.kt:34`, Flutter 3.44.2) meets the 31-Aug-2026
+API-36 rule that took effect four days ago. Zero ERROR-level Supabase advisors; no table with
+RLS disabled; the nine `rls_enabled_no_policy` tables are deny-all by design, which is what
+the CSAE page claims about reports. Merged manifest of the real build 76 artifact has no
+ACCESS_BACKGROUND_LOCATION, no AD_ID, no QUERY_ALL_PACKAGES, no REQUEST_INSTALL_PACKAGES;
+WRITE_EXTERNAL_STORAGE arrives from camera_android_camerax capped at `maxSdkVersion="28"`
+and is never requested at runtime. All three reporting entry points exist. Giphy sends
+`rating=pg-13`. News feeds are exactly BBC/Al Jazeera/NPR. All six app_secrets seeded, all
+seven edge functions ACTIVE. `account-delete` (verify_jwt off) authorises via
+`auth.verifyOtp`, so the "we never delete on an unverified request" claim holds. Zero
+TODO/FIXME/placeholder in user-facing strings. No secret in the tree; the leaked Maps key is
+gone from HEAD (truncated prefix only, in docs). Truth-or-Dare "Deep" tier carries no
+app-authored sexual copy. All internal web links resolve. Only `cupertino_icons` has no
+Dart import. CSAE page satisfies all five of Google's current Child Safety Standards
+requirements except the section 4 encryption misstatement above.
+
+One fleet finding was checked and DROPPED: that city mode hands exact coordinates to
+Google's geocoder. `location_service.dart:92` requests `LocationAccuracy.low` in city mode,
+so the coordinates geocoded are a coarse fix — exactly what privacy policy section 4 already
+says.
+
+### Next step
+
+Fix, in one pass so the wording stays consistent: the six vault statements, the Settings
+paths in five documents plus two in-app const strings, `export_screen.dart`'s chat claim,
+the two undisclosed E2EE surfaces, the CSAE rating sentence, the runbook staleness, and the
+missing Terms/GDPR content. `milesTermsVersion` must go 1 to 2 so the corrected contract is
+re-accepted (Terms section 10 requires it; 4 accounts on prod, all at version 1, so the
+blast radius is 4). Owner must separately: upgrade Supabase to Pro, turn on leaked-password
+protection, and produce the listing assets — none exist (no 512 icon, no feature graphic,
+no screenshots, no descriptions; `tool/generate_icon.dart` has no play spec).
+
+## §272 — 2026-09-04 — the §271 defects, fixed (build 76 tree, nothing committed)
+
+Owner's ruling on the headline: **the Vault stays unencrypted; the documents change.**
+Then "fix all others too". This section records what was changed and what was deliberately
+not. Gates: `flutter analyze` 179 issues, all `info`, 0 error / 0 warning;
+`flutter test` **1578 passed, 3 skipped, 0 failed**.
+
+### The Vault claim — seven places, not six
+
+§271 found six. Fixing them turned up a seventh, in the in-app FAQ's break-up answer:
+"Your private vault … is sealed with a key derived from your own account". There is no
+such key. All seven now say the same thing:
+
+1. `mobile/lib/features/legal/terms_text.dart` §4 — the accepted contract
+2. `mobile/lib/features/closer/closer_screen.dart:472-476` — also fixed the second error
+   in the same string: it said the Vault is "readable by nobody but the two of you"; it is
+   owner-only and the partner cannot read it at all
+3. `web/csae.html` §4 — rewritten, and it no longer contradicts its own §5
+4. `web/security.html` §3 — the bug-bounty scope now excludes the Vault and says why
+5. `web/index.html` — the marketing block no longer names XChaCha20-Poly1305 over the Vault
+6. `docs/guides/PLAY-RELEASE-RUNBOOK.md` §5.4 — rewritten whole (below)
+7. `mobile/lib/features/legal/faq_text.dart` — the "sealed with a key" sentence
+
+`web/terms.html` and `terms_text.dart` were then diffed word-by-word: **98.3% similarity,
+and every remaining difference is the web page's own header or a link-vs-prose phrasing.**
+The page's opening claim ("This is the same document the app shows you") is true again.
+
+### Terms version 1 -> 2, and the test that caught it
+
+Correcting a security guarantee the user relied on is the "change that matters" Terms §10
+promises to re-ask for, so `milesTermsVersion` moved and every account re-accepts. Prod has
+4 accounts, all on v1, so the blast radius is 4.
+
+`test/unit/legal/terms_gate_test.dart` failed exactly as designed — its first case exists to
+fire when the constant moves. Updated, not weakened: v1 now GATES, v2 opens, and a new v3
+case keeps the downgrade guarantee. All 110 legal+disguise tests pass.
+
+### The Settings paths — the defect no code audit finds
+
+Settings has seven labelled groups (Appearance, Privacy & security, Support, Your data,
+Partner, Sound & vibrate, Channels) plus **two unlabelled ones**. Every published document
+routed through groups that have never existed. Corrected everywhere:
+
+| Cited as | Actually |
+| --- | --- |
+| Settings > Safety > Report a problem | **Settings > Support** (`settings_screen.dart:1033,1045`) |
+| Settings > Safety > Pause notifications | **Settings > Partner** (`:1189,1278`) |
+| Settings > Account > Delete account | **Settings > Delete account**, last row, unlabelled group (`:1362-1379`) |
+| Settings > Security (app lock) | **Settings > Privacy & security** (`:988,991`) |
+| Settings > Disguise (cover picker) | **Settings > Appearance** (`:950,955`) |
+| "Settings > Your data > Export" (my first draft) | **Settings > Export your data**, unlabelled group (`:1340,1352`) — caught before it shipped |
+
+Fixed in `privacy-policy.html`, `terms.html`, `csae.html`, `faq.html`, `delete-account.html`,
+`security.html`, `terms_text.dart`, `faq_text.dart`.
+
+### Claims that were false about deletion
+
+- **The partner-copy promise was backwards.** `messages.sender_id -> profiles ON DELETE
+  CASCADE` (also `capsule_items.author_id`, `capsules.created_by`, `love_reasons.author`),
+  so deleting your account removes every message you sent from your partner's side too.
+  Three documents promised the opposite. All three now say what actually happens, and name
+  what survives (`gallery_items.uploaded_by`, `memory_threads.proposer`,
+  `shared_reels.added_by` are SET NULL). **§271 said §7 was "precisely accurate" — that was
+  wrong, and this is the correction.**
+- **`chat-bg` is reaped by nothing.** `delete_my_account()` queues couple_media,
+  couple_intimate, capsule-media, couple_files, personal_vault — not chat-bg. Disclosed in
+  the policy and on the deletion page; the prod fix is proposed, not applied.
+- **Cycle entries cannot be deleted.** `CycleRepository` has zero delete operations. The
+  policy claimed they "each delete from their own screen".
+- **`memory_force_delete` has no Dart caller**, so the promised 14-day force-through does
+  not exist. Removed from the policy.
+- **`claim_turn_mint` deletes rows older than 24 hours**; the retention table said
+  call-relay credential requests were "kept with no expiry". Split into its own row.
+
+### Claims that were false about the app's behaviour
+
+- **Removing a partner is not always immediate.** `unlink_start` writes a `couple_unlink`
+  row with `cooling_ends_at = now() + 24 hours` and `unlink_expire_due` dissolves it on the
+  cron. Both paths exist — `SeveranceOutcome.ended` -> `leave_couple()` is immediate,
+  `unlinkStarted` is the ceremony. Both now described.
+- **The panic gesture does nothing on a default install.** `DisguiseCover.none` returns
+  `SizedBox.shrink()` and `disguise_cover_host.dart:158` re-authenticates immediately, so
+  with no cover set there is nothing to drop to. Both FAQs now say so and point at the app
+  lock instead.
+- **"The app ships no gesture of its own" was false** — the 10-second cover-recovery hold
+  exists. The owner's 2026-09-03 ruling is that users are not told, and
+  `disguise_test.dart` fails the build if any user-facing surface teaches it. So the
+  **denial was removed rather than a disclosure added**; that test still passes.
+- **The Touch Map body photograph was undisclosed.** `uploadBodyPhoto` puts a user's body
+  photo in `couple_intimate` and writes the path to `presence.body_photo_path`; the policy
+  named "body-map touches" and never the photograph. Now disclosed in §1 and §2. Edited by
+  exact string, not line number — the verifier's own proposed line numbers pointed at the
+  Vault and Location rows.
+
+### The Google-imitation blocker
+
+`_StealthScrim` drew `G≡` in `#1A73E8` — Google's brand blue — with a matching spinner and
+"Syncing your news...", raised by an always-mounted invisible long-press target
+(`main.dart:1117`). That is Play's Impersonation policy, reviewed by the brand being
+imitated. De-branded to a neutral `Icons.sync_rounded` in `#71717A` and "Syncing…", with a
+comment saying not to put a mark back.
+
+### Legal content that did not exist
+
+Terms gained, in both copies: a warranty disclaimer and a liability cap with the
+consumer-rights and death/personal-injury carve-outs; a user-content licence (non-exclusive,
+operational only, ends on deletion, explicitly no publishing/selling/training); a service
+discontinuation clause with notice and an export window; the contracting party named
+(RD Developers, with address); governing law (Pakistan, Lahore courts) with a local-courts
+carve-out; severability, no-waiver, no-assignment, entire agreement.
+
+Privacy policy gained a new §10 ("Why we are allowed to do this, and who is responsible"):
+controller designation, the Art 27 position stated honestly rather than implied, a
+lawful-basis table per purpose, explicit consent for Art 9 health and sex-life data, and
+the cycle-sharing default called out where the user meets it. §9 gained the transfer
+mechanism (SCCs + UK IDTA, Art 49(1)(b) for user-initiated egress) — Pakistan and India are
+both non-adequate. §7 gained portability (pointing at the in-app export), restriction, and
+a no-automated-decisions statement. Sections 10-12 renumbered to 11-13; every external
+cross-reference points at §1-4 only, so nothing broke.
+
+### Runbook
+
+§5.4 rewritten as a real per-type declaration — Google's form wants four answers per type
+and the old section supplied none. 17 collected types with collected/shared/required/purpose,
+an explicit not-collected list, the three real third-party shares, and a paragraph on why
+chat must NOT be ticked as E2EE (`chatCipherOnly` defaults false and fails to false, and the
+flag is the documented one-statement rollback — an answer one UPDATE can turn into a lie).
+§5.2 de-staled (the full-screen-intent defect it called "still unfixed" is fixed).
+§5.3 de-staled (`microphone|mediaProjection`, not `microphone|camera|mediaProjection`).
+§5.6 gained the Health-apps declaration and corrected the News-app rationale — the old
+ground ("the app publishes no news content") is false, the correct ground is primary purpose.
+§5.7 de-staled (csae.html exists; the contact is `milesapp.officials@gmail.com`, not the
+`Razaaslam3210@` address that appeared nowhere else). §1.5 and the front-matter fact table
+refreshed against prod. Phase 6 rewritten — every "404 at the hosted URL" and "does not
+exist" line was stale.
+
+`THREAT-MODEL.md:73` claimed the 2026-08-30 pass corrected five documents. It missed five.
+The line now says which, and says not to write "corrected everywhere" again without grepping.
+
+### Deliberately NOT changed
+
+- **`RECEIVE_BOOT_COMPLETED`** — no consumer in `lib/`, but `flutter_foreground_task`
+  declares it in its own manifest, so deleting our line changes the merged artifact not at
+  all. Left with a comment saying exactly that, so the next session does not "fix" it twice.
+- **Chat was not promoted to the E2EE list.** Production is cipher-only today (7/7 rows),
+  but the flag fails to false. Promoting it would build the next false claim.
+- **`chat-bg` reaping** — a production function change; proposed, not applied.
+
+### Still open
+
+The three that are the owner's, and none is code: **Supabase is still on the free plan**
+(auto-pause = dead app + rejection), **leaked-password protection is still off**, and **no
+listing asset exists** (512 icon, feature graphic, screenshots, descriptions).
+The 9-dimension fleet returned 107 findings, 35 refuted; a large share of the refusals were
+verifiers finding the fix already applied in the working tree. The survivors not addressed
+here are code-quality rather than disclosure: ML Kit pose detection is 22 MB of a 100 MB APK
+for one haptic; `READ_MEDIA_VISUAL_USER_SELECTED`, `READ_EXTERNAL_STORAGE` and
+`BLUETOOTH_CONNECT` are declared and never requested at runtime; `resolveWatchLink` falls
+back to an unrestricted in-app WebView with third-party cookies; `ReactionSegmentService`
+indexes a PNG byte stream as a raw alpha mask. Full list in the workflow journal at
+`subagents/workflows/wf_55ad7ff7-e58/journal.jsonl`.
+
+## §273 — 2026-09-04 — the three proposals, closed (build 76 tree; ONE production change applied)
+
+Owner authorized all three §272 proposals by name. Gates: `flutter analyze` 179 issues, all
+`info`, 0 error / 0 warning — the same count as before, so none introduced.
+`flutter test test/unit` 1333 passed; `test/widget` 245 passed, 3 skipped; hygiene+legal+
+disguise re-run after the last doc edits, 173 passed.
+
+### 1. `chat-bg` is now erased with the account — APPLIED TO PRODUCTION
+
+`supabase/migrations/20260904120000_deleting_your_account_takes_your_chat_background.sql`,
+applied live to `sopictusdonlvuezmfep`. The whole change is one bucket id:
+
+    where o.bucket_id in ('personal_vault', 'chat-bg')
+
+It goes in the OWN-OBJECTS block — outside the couple branch and outside `v_others = 0` —
+because a chat background is keyed by uid (`<uid>/bg_<millis>.jpg`,
+`chat_theme_picker.dart:34-38`), so it is the user's whether or not they ever paired.
+
+Read the LIVE definition first: md5 `20c4fef5d6135f575951ed1fc04235dd`, 2893 chars, no
+`chat-bg` — unchanged since §271 read it, so no concurrent session was overwritten.
+After: 2965 chars, one overload, and the couple block, the `leave_couple` branch and the
+final `delete from auth.users` all still present.
+
+**The matcher was proven before its zero could mean anything**, on the real path shape:
+own `chat-bg` object → queued; **another user's** `chat-bg` → NOT queued; own `couple_media`
+→ not queued by this block; own `personal_vault` → still queued. Positive and negative.
+
+**The rest of the chain was verified rather than assumed.** `reap_storage_objects()` (cron
+`23 * * * *`) posts to the `reap-storage` edge function, and that function groups the queue
+by `bucket_id` and calls `admin.storage.from(bucket).remove(...)` with **no allowlist**
+(`supabase/functions/reap-storage/index.ts:99-131`) — so a `chat-bg` row drains like any
+other. Queue → drain → delete, end to end.
+
+ROLLBACK: replay the migration with the bucket list back to a single `'personal_vault'`.
+Nothing is destroyed by rolling back; rows already queued stay queued and still drain.
+
+The two documents that conceded this gap on 2026-09-04 were retracted the same day —
+`privacy-policy.html` §6 and `delete-account.html` now say the background is erased with
+the account rather than apologising for it.
+
+### 2. ML Kit pose detection removed — 22.6% of the APK for four vibration patterns
+
+Measured on the shipped `Miles.apk`, not estimated: **22,592,712 bytes of 100,029,134** —
+`lib/arm64-v8a/libxeno_native.so` (10.26 MB, mediapipe-internal) plus `assets/mlkit_pose/`
+(12.3 MB of tflite models and benchmark data).
+
+What it bought: `ReactionGestureService.detectGesture` returned a five-value enum whose
+**only** consumer was `_playGestureHaptic` — a `switch` choosing between four
+`Vibration.vibrate` patterns. The `gesture` field was never read for anything visual
+(`grep` found only the constructor default).
+
+Removed: the dependency, `reaction_gesture_service.dart`, the enum, the model field, the
+wire parse and the broadcast key, the `_addReaction` parameter, and the haptic switch. The
+now-unused `vibration` import went with it (the package stays — `touch_haptics.dart` and
+`reach_overlay_screen.dart` still use it). `flutter pub get` confirms:
+`These packages are no longer being depended on: - google_mlkit_pose_detection 0.14.1`.
+
+**What is lost, stated plainly:** the receiving partner's buzz was matched to the sender's
+hand shape (flat palm / pinch / fist / point). It is now one `HapticFeedback.mediumImpact()`
+for every photo reaction — the branch the code already took whenever detection failed.
+
+Wire compatibility is safe in both directions: an older build sending `'gesture': 'pinch'`
+has the key ignored, and a new build sending nothing leaves the old reader's
+`payload['gesture'] ?? 'unknown'` on its existing fallback.
+
+`privacy-policy.html` §4's ML Kit row was corrected the same edit — it claimed "Pose
+detection and subject cut-out … the pose models ship inside the app", and only the cut-out
+remains.
+
+**Caveat: the size saving is measured on the OLD apk, not a new one.** The `.so` is
+mediapipe-internal, pulled by pose; subject segmentation fetches its model from Play
+services at runtime and ships thin. The real number lands on the next build.
+
+### 3. Two permissions removed, one made to actually work
+
+Not one blanket answer — each was decided on what it does:
+
+- **`READ_MEDIA_VISUAL_USER_SELECTED` and `READ_EXTERNAL_STORAGE` — REMOVED.** Both are
+  runtime permissions; the app's only two runtime requests anywhere are
+  `Permission.camera` and `Permission.microphone`, so neither was ever granted, and an
+  ungranted dangerous permission grants nothing. Checked that removal is not cosmetic
+  before doing it: no plugin manifest in the pub cache declares either
+  (image_picker_android, image_cropper, file_picker, video_thumbnail, just_audio all
+  declare none), and across every merged manifest under `build/` the sole declarer was
+  `app`. So the artifact's list genuinely shortens. This is the opposite of
+  `RECEIVE_BOOT_COMPLETED` in §272, which was left precisely because a plugin contributes
+  it and deleting ours would have changed nothing.
+- **`BLUETOOTH_CONNECT` — KEPT, and now requested.** Removing it was the wrong fix: there
+  is a real user-visible control (the call screen's speaker toggle, which
+  `call_controller.dart` documents as "re-scans and falls back to bluetooth"), and
+  `Helper.setSpeakerphoneOnButPreferBluetooth()` needs the permission to see a headset at
+  all. Declared-but-never-requested meant that on Android 12+ it could never be granted, so
+  the control was dead and the permission was decoration in the list Play shows the user.
+  `_ensureBluetoothPermission()` now asks once per process from `_routeAudio()`, and again
+  from `setSpeaker(false)` — the one deliberate user action about audio routing. A refusal
+  is logged with the status and falls back to speaker/earpiece; it never fails the call.
+
+`privacy-policy.html` §5 and runbook 5.1 were rewritten to match: the app now asks for no
+gallery permission on any version, and the Photo/Video declaration is the easiest on the
+form.
+
+**Unverified, and it is the one that matters here:** the permission removal is proven in
+source and against the previous build's merged manifests, **not against a new AAB**. Nothing
+was built this session. Phase 4 must confirm the artifact agrees before 5.1 is answered —
+runbook 5.1 now says so in those words.
+
+### Next step
+
+Unchanged and still the owner's: Supabase off the free plan, leaked-password protection on,
+listing assets produced. Then build, and check the new APK's size and merged permission list
+against this section.
+
+### §273 addendum — a second session was editing this tree while §273 ran
+
+`mobile/third_party/camera_android_camerax/` appeared at 06:09-06:10 and
+`mobile/pubspec.yaml` gained a `camera_android_camerax` dependency_override plus a
+rewritten "TWO vendored forks" comment block. **None of that is mine** and none of it was
+touched.
+
+Checked for a clobber in both directions, because my own pubspec edit landed in the same
+file in the same window: my removal of `google_mlkit_pose_detection` survives (`grep -c`
+returns 0) and their override and comment block are both present. The two edits are in
+different regions, so `git diff mobile/pubspec.yaml` shows one deletion of mine and their
+insertions side by side.
+
+**Consequence for the gates in §273, said rather than glossed:** `flutter pub get`,
+`flutter analyze` and every test run above executed BEFORE their vendored fork landed, so
+they are a point-in-time reading of a tree that has since moved. They prove my changes
+compile and pass; they prove nothing about the camerax fork. Whoever owns that change runs
+their own `pub get` and re-runs the gates — I deliberately did not, because resolving a
+vendored fork that was one minute old could have caught it half-written.
+
+Left for that session: `mobile/pubspec.yaml`, `mobile/pubspec.lock`,
+`mobile/third_party/camera_android_camerax/`.
+
+## §274 — 2026-09-04 — the Touch Map cut-out bug and four leftovers (build 76 tree; one more production migration)
+
+Gates: `flutter analyze` 180 issues, all `info`, 0 error / 0 warning — 179 of them the
+same pre-existing set, the 180th belonging to another session (below).
+`flutter test test/unit` 1333 passed, `test/widget` 245 passed / 3 skipped.
+
+### 1. Every Touch Map photo reaction has been shipping nearly invisible
+
+`ReactionSegmentService.removeBackground` treated `result.foregroundBitmap` as a flat
+per-pixel alpha mask — `mask[py * w + px]` — and composited it over the original by hand.
+
+It is not a mask. It is a **PNG file's bytes**, confirmed in the plugin's own source:
+`google_mlkit_subject_segmentation-0.0.3/android/.../SubjectSegmenter.java:125`
+does `bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)` and
+`:126` returns `outputStream.toByteArray()`; the Dart side types it `Uint8List?`.
+
+So the alpha came from PNG structure — the first eight bytes are the signature
+`89 50 4E 47 0D 0A 1A 0A`, then IHDR, then deflate output. Worse than noise: a compressed
+PNG is far shorter than `width * height`, so `maskIndex < mask.length` failed for most
+pixels, `maskValue` fell to `0`, `0` mapped to alpha `0`, and what got uploaded was very
+nearly a fully transparent image. It never threw, so the caller's fallback never fired and
+the reaction was sent.
+
+The fix is a deletion, not an algorithm: **`foregroundBitmap` IS the finished cut-out** —
+ML Kit returns a bitmap the size of the input with the background already transparent —
+so the whole composite loop was reconstructing, badly, something the plugin had already
+handed over. `removeBackground` now checks the eight-byte PNG signature and writes the
+bytes to the temp file. A non-PNG result returns null and logs, so a future plugin change
+that switched to raw pixels would look like failure and fall back to the original, rather
+than uploading a file nothing can open.
+
+`package:image` left the file with the loop; `flutter/foundation` came in for `debugPrint`.
+
+**Not verified: nobody has looked at a corrected cut-out on a device.** The bug is proven
+from the plugin source and the arithmetic; the fix compiles and the guard is exercised by
+its own bounds check, but the visual result needs a handset. This is the riskiest thing in
+this section.
+
+### 2. The ritual screen stopped calling the shipped scheduler a preview
+
+`create_ritual_screen.dart:183` told every user "This is a v1 preview — scheduling lands
+soon" while `public.deliver_rituals()` has been claiming due rituals, advancing recurrence
+and pushing through reach-notify every minute on production (cron job 13, `* * * * *`).
+Replaced with what the feature actually does.
+
+### 3. `/app/touch` removed from the router
+
+A registered `GoRoute` rendering `TouchMapScreen` with no navigator anywhere in `lib/`, and
+— the part that mattered — rendering the intimate Touch surface outside `AppShell`, which is
+where the adult check lives. In production Touch is reached only as a tab body, so the route
+was an ungated second door that nothing opened.
+
+Checked the blast radius before deleting rather than after: all sixteen references outside
+`router.dart` are test **path fixtures**. `presence_route_observer_test` calls
+`screenNameForPath('/app/touch')`, a pure string map; `unlink_gate_test` calls
+`unlinkAllows('/app/touch')`, a pure string predicate; `presence_publishes_in_tree_test` and
+`partner_bust_test` each build their **own** `GoRouter` with their own stub routes and never
+touch the app's. Nothing reads `buildRouter`. All 1578 tests pass unchanged.
+
+The `TouchMapScreen` import went with it. The presence name lookup keeps its entry — the tab
+still reports "Touch".
+
+### 4-6. Three leftovers, one production migration
+
+`supabase/migrations/20260904140000_the_leftovers_the_audit_named.sql`, applied live.
+
+- **Seven dead tables left the realtime publication** — afterglow_entries, body_map_pins,
+  fantasy_jar_reveals, memory_revisits, mood_lamp, consent_state, vault_items. Re-proved
+  zero consumers myself before touching production: `grep -rn "'<table>'" mobile/lib`
+  returns **0 references for all seven**, and no subscription names any of them. All hold
+  zero rows. `vault_items` is the dead Closer vault, superseded by `personal_vault_items` at
+  build 60. After: `dead_tables_still_published 0`, `live_tables_still_published 35` — the
+  real tables untouched. Safe for installed clients: a subscriber to a table outside the
+  publication gets no events rather than an error, and there were no events.
+- **`app_release` stopped publishing a download URL.** `apk_url` was still populated with a
+  public R2 object holding build 46's APK, thirty builds stale, with no client reading it.
+  Values nulled; **columns kept**. Dropping them is a contract change and belongs in its own
+  later migration after telemetry shows no reader — additive-only, so a `select *` from any
+  older build still works. After: `rows_still_publishing_an_apk 0`,
+  `columns_still_present 3`.
+- **`dissolution_window` got `set search_path = public`.** The last
+  `function_search_path_mutable` warning; it is called from `prune_dissolved_couples`, which
+  runs SECURITY DEFINER on a cron. Verified after: `proconfig ["search_path=public"]` and it
+  still returns `30 days`, which is the window the privacy policy's retention table promises.
+  The advisor now reports `function_search_path_mutable: CLEARED`.
+
+Each block states its own rollback in the migration file.
+
+### Deliberately NOT done: pg_net
+
+`extension_in_public` (pg_net in the public schema) is the one advisor warning left that is
+actionable in principle and was refused. Moving the extension puts every `net.http_post`
+call site at risk at once — reach-notify, care-notify, the unlink notifications and the
+hourly storage-reap drain all go through it — and the payoff is a lint. A change that can
+silently stop every notification in the app is not worth clearing a warning. If it is ever
+done, it needs its own session and a live test of each call site.
+
+### Advisor state now
+
+`0 ERROR`. Remaining: `auth_leaked_password_protection` (the owner's toggle, still off),
+`authenticated_security_definer_function_executable` x60 (by design — the app's own RPCs,
+each deriving identity from `auth.uid()`), `extension_in_public` x1 (above),
+`rls_enabled_no_policy` x9 (deny-all by design, which is what the CSAE page claims about
+reports).
+
+### The other session
+
+`mobile/pubspec.yaml:137` now trips `sort_pub_dependencies` — `camera_android_camerax` sorts
+before `flutter_webrtc` in the `dependency_overrides` block that session added at 06:09.
+**Found, not fixed:** it is their in-flight work, one `info`, and editing their block while
+they are in it is how two sessions clobber each other. It is the 180th analyze issue and the
+only difference from the 179 in §273.
+
+### Still open
+
+Unchanged and all the owner's: Supabase off the free plan, leaked-password protection on,
+listing assets produced. Then a build — which is also what finally proves §273's permission
+removal and APK size, and §274's cut-out.
