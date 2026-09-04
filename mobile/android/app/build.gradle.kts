@@ -341,6 +341,33 @@ flutter {
 dependencies {
     // Backport of java.time / java.util APIs for flutter_local_notifications 22.x.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // CameraX, for the retouch CameraEffect in com.miles.miles.beauty.
+    //
+    // compileOnly, and pinned to the SAME version the vendored plugin declares
+    // (third_party/camera_android_camerax/android/build.gradle.kts:79). The plugin already
+    // packages these classes into the APK, so :app needs them only to compile against —
+    // compileOnly therefore adds nothing to the artifact and leaves the ABI set and the size
+    // assertions in tool/release.sh untouched.
+    //
+    // It has to be declared here at all because Flutter adds plugin projects to :app as an `api`
+    // dependency (PluginHandler.kt:116), but the plugin declares CameraX as `implementation`,
+    // which Gradle does not expose transitively. Without this line every androidx.camera.core
+    // reference in :app fails to resolve — measured, not assumed.
+    //
+    // Two versions must not drift apart: a :app compiled against a different CameraX than the one
+    // that ships is a NoSuchMethodError on a device, not a build error here.
+    compileOnly("androidx.camera:camera-core:1.6.1")
+
+    // JVM unit tests for the beauty pipeline's pure maths (One-Euro smoothing, prediction
+    // clamping). Every failure mode there is silent on a device: a zero timestamp delta divides
+    // by zero, and a NaN in a shader uniform makes the face vanish rather than look wrong.
+    //
+    // NOTE: no gate runs these yet. `tool/release.sh` gates on `flutter analyze` and
+    // `flutter test` only, and .github/workflows/gates.yml the same, so they are run by hand:
+    //     cd android && ./gradlew :app:testSideloadDebugUnitTest
+    // Wiring that into release.sh is a gate change and belongs to the owner, not to this diff.
+    testImplementation("junit:junit:4.13.2")
 }
 
 // (No version pins needed — AGP 8.13 + Kotlin 2.2.20 supports the latest
