@@ -23867,3 +23867,23 @@ still what everything after it depends on:
 Left untouched for whoever else is in this tree: everything outside the beauty files,
 `MainActivity.kt`, `app/build.gradle.kts`, `pubspec.yaml`, `main.dart` (one line + one import),
 and the three new tests.
+
+### §277 addendum — 6785973 pushed, CI green on run 33831577569
+
+144 files, 30,780 insertions. `gates` completed / success.
+
+That run is worth more than the local ones: `mobile/pubspec.lock` is gitignored
+(`mobile/.gitignore:12`), so CI resolved `camera_android_camerax` from the
+`dependency_overrides` path on a CLEAN checkout with a fresh `pub get` — the one
+thing no local run could prove, because locally the lock already pointed at the
+vendored copy.
+
+Staged surgically, not wholesale: `BRAIN.md` in the working tree also carries
+another session's §276 and its postal-address redaction across historical
+sections. Only §275 and §277 were committed, by building the blob with
+`git hash-object -w` + `git update-index --cacheinfo` and leaving the working
+file untouched. Their §276, their redaction and their eleven other modified
+files are all still uncommitted and intact.
+
+Still true, and unchanged by a green CI: **nothing has rendered.** The effect is
+never armed. `adb devices` is empty. The device gate in §277 is the next step.
