@@ -23636,3 +23636,38 @@ only difference from the 179 in §273.
 Unchanged and all the owner's: Supabase off the free plan, leaked-password protection on,
 listing assets produced. Then a build — which is also what finally proves §273's permission
 removal and APK size, and §274's cut-out.
+
+### §274 addendum — committed and pushed as 79084d0
+
+`456fb4f..79084d0` on `fix-sprint`, 26 files, 1622 insertions / 499 deletions. Local HEAD
+and `origin/fix-sprint` both at `79084d07f3ba8890a8b28b919cab77291d11da83`. Direct to
+`fix-sprint` because that is this repo's only branch and every prior commit went that way.
+
+**The staging was surgical, because a second session is mid-change in the same file.**
+`mobile/pubspec.yaml` held my one-line removal of `google_mlkit_pose_detection` AND their
+vendored-fork comment rewrite plus the `camera_android_camerax` override — in ONE contiguous
+diff hunk, so `git add <file>` would have committed their in-flight work. Instead a
+three-line patch was applied to the INDEX only (`git apply --cached`), which never touches
+the working file, so there was no window in which their edit could be lost. Verified both
+ways afterwards: staged diff = my line and nothing else; unstaged diff = their block and
+nothing else; and after the commit their override is still in the working file while
+`git show HEAD:mobile/pubspec.yaml | grep -c google_mlkit_pose_detection` returns 0.
+
+`mobile/pubspec.lock` never entered it — it is gitignored (`mobile/.gitignore:12`).
+
+Audited the staged diff before committing rather than after: no `camerax|UseCaseGroup|
+CameraEffect|bindToLifecycle` outside BRAIN prose describing their work, and no
+`AIzaSy…|eyJ…|service_role` anywhere.
+
+**Left unstaged and untouched for that session:** `mobile/pubspec.yaml`'s comment block and
+override, and `mobile/third_party/camera_android_camerax/`. Their override also trips
+`sort_pub_dependencies` at `pubspec.yaml:137` — the 180th analyze issue, and theirs.
+
+Gate before the commit: `flutter test test/unit/hygiene/` re-run after the BRAIN append,
+63 passed — because appending to the handoff doc after a gate invalidates that gate, and
+repo_hygiene reads repo files.
+
+Still open, all the owner's and none of them code: Supabase off the free plan,
+leaked-password protection on, listing assets produced. Then a build, which is the only
+thing that can confirm the corrected cut-out, the shortened permission list and the ~22.6%
+size saving — none of which any commit can prove.
