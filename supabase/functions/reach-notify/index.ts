@@ -16,8 +16,16 @@
 //   FCM_PROJECT_ID       = Firebase project id
 // Auto-injected by the platform: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
-// Recipient lookup uses public.profiles.couple_id (this app links couples via
-// profiles.couple_id — there is NO couple_members table).
+// Recipient lookup: the OTHER-member path reads public.profiles.couple_id; the
+// explicit-recipient path proves membership against public.couple_members.
+//
+// This block used to end "there is NO couple_members table", which was true
+// when it was written and stopped being true at 20260826160000. The two tables
+// are not interchangeable and the difference is load-bearing here:
+// dissolve_couple() nulls profiles.couple_id, and 'unlink_ended' is posted
+// AFTER it runs, so profiles can no longer answer "were these two a couple" by
+// the time the last notification goes out. couple_members outlives the
+// ceremony because the 30-day restore reads it.
 //
 // ── kind 'msg_sync' — the silent delivery wake ───────────────────────────────
 // Every other kind here exists to INTERRUPT someone. 'msg_sync' exists to

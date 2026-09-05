@@ -23851,3 +23851,84 @@ The agents only ever read it back out of `pg_policies`.
 **Not done, deliberately:** production has NOT had this migration. No live upload was
 performed on staging either — the verification above is expression-level against the real
 function and the real policy text, not an end-to-end object insert.
+
+## §277
+
+**2026-09-04 — production finished: migration applied, both edge functions
+deployed, and `deno check` actually run for the first time.**
+
+### The migration is on production now, verified against a real user
+
+`20260904130000` applied to `sopictusdonlvuezmfep`; the fail-closed assertion
+passed. Verified by setting `request.jwt.claim.sub` to the uuid that owns all
+135 `couple_intimate` objects, not a synthetic one:
+
+      auth.uid()                    = decd9b0f… (that real owner)
+      storage_quota_ok(self)        = true      (their uploads still pass)
+      storage_quota_ok(other)       = NULL      (the leak, closed)
+      (false) OR ok(other)          = NULL      (foreign-owner insert denied)
+      (true)  OR ok(other)          = true      (owner IS NULL short-circuit intact)
+      no JWT: ok(other)             = true      (cron + service_role unchanged)
+      authenticated EXECUTE = true, anon = false, prosecdef = true,
+      policy text unchanged, storage.objects rows with owner null = 0
+
+### `deno check` — it had never been run on these functions anywhere
+
+`deno.land` is policy-denied by this environment's proxy, but `registry.npmjs.org`
+is allowed, so Deno 2.9.6 installs via `npm i deno`. `jsr.io` answers 403 even
+though it is in the proxy's noProxy list, so the two supabase-js specifiers were
+redirected to `npm:@supabase/supabase-js@2` through a `--config` import map. Same
+library, fetched from a reachable registry.
+
+- **turn-credentials: clean.** No diagnostics at all.
+- **reach-notify: one diagnostic, and it is a tooling artifact, not a defect.**
+  TS2769 at the `crypto.subtle.importKey("pkcs8", pemToDer(...), …)` call in
+  `mintAccessToken()`. **Proved** it is the TypeScript 5.7+ generic-`Uint8Array`
+  narrowing by reducing it: a three-line file calling
+  `crypto.subtle.importKey("pkcs8", new Uint8Array([1,2,3]), …)` raises the
+  identical TS2769 under this Deno's bundled TypeScript 6.0.3. `Uint8Array` is a
+  valid `BufferSource` at runtime, the code has been signing FCM tokens in
+  production since v16, and edge deploys transpile rather than type-check. The
+  signing path was NOT touched — changing working production crypto to satisfy a
+  type-checker newer than the runtime would be the wrong trade.
+
+### Deployed, with verify_jwt preserved on both
+
+Checked the live setting BEFORE deploying, because the MCP tool defaults
+`verify_jwt` to true and that default would have been wrong for one of them:
+
+      reach-notify      v16 -> v17   verify_jwt FALSE  (kept)
+      turn-credentials  v6  -> v7    verify_jwt TRUE   (kept)
+
+`reach-notify` **must** stay false: every caller is a Postgres trigger building
+`headers := jsonb_build_object('Content-Type', ..., 'x-notify-secret', ...)` with
+**no Authorization header**. Deploying it with the tool's default would have
+killed every push notification in the app.
+
+**No production drift**, checked before overwriting rather than assumed —
+CLAUDE.md warns production may be ahead of this repo. Both deployed sources were
+byte-identical to this branch's pre-fix versions (turn-credentials 154 lines vs
+178 after; reach-notify's `notifySecret` already carried the `{ data, error }`
+fix and its recipient block was the pre-fix shape).
+
+**Both deploys verified by round-trip**: fetched each function back and compared
+to the local file. Identical, including the regex escapes, the template
+literals, the ttl ladder and the em dashes.
+
+### One correction the fix forced
+
+`reach-notify`'s header said *"there is NO couple_members table"*. True when
+written, false since 20260826160000, and now the exact opposite of what the code
+does — the new gate reads `couple_members` precisely because `dissolve_couple()`
+nulls `profiles.couple_id` before `unlink_ended` goes out. Rewritten to say which
+path uses which table and why. Deploying a file whose header contradicts its own
+code was not acceptable.
+
+### Still not done
+
+The edge functions have **no test harness in this repo and CI never deploys**, so
+"deployed and type-checked" is not "exercised". I could not reach the function
+URLs to smoke-test them: this environment's proxy denies `supabase.co`, so the
+403/401 probes returned `CONNECT tunnel failed`. What IS established is that both
+bundles built (a syntax error fails the build) and both sources round-trip
+byte-identically. No APK was built.
