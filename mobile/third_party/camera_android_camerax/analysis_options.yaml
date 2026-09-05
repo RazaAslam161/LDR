@@ -1,0 +1,20 @@
+# Vendored fork (see mobile/pubspec.yaml dependency_overrides): upstream's
+# include pointed at ../../../analysis_options.yaml, the flutter/packages
+# monorepo root, which does not exist here and produced a dangling-include
+# WARNING — and this repo's CI gate fails on any warning, so an unmodified
+# copy of upstream's file reddens the tree on arrival.
+# Third-party code is not held to this repo's lint law. The patch this fork
+# exists for lands in ProcessCameraProviderProxyApi.java (Java, which the Dart
+# analyzer never reads anyway) and is pinned by a source-read law test, the
+# way test/unit/call/screen_share_law_test.dart pins the flutter_webrtc patch.
+analyzer:
+  errors:
+    include_file_not_found: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**

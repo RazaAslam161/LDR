@@ -112,8 +112,21 @@ dependencies:
   file_picker: ^11.0.3
   flutter_image_compress: ^2.5.1
   mapbox_maps_flutter: ^2.28.1
-# The ONE vendored fork, and why: flutter_webrtc leaves MediaProjection's
-# onStop empty (the system "Stop sharing" press dies there) and never plumbs
+# TWO vendored forks. Each is here because an upstream file has no seam, and
+# each is pinned to the version pub had already resolved, so vendoring on its
+# own changes nothing.
+#
+# camera_android_camerax @ 0.7.4+6 binds the camera through the varargs
+# bindToLifecycle(owner, selector, UseCase...) and never builds a UseCaseGroup,
+# so there is nowhere to hang an androidx.camera.core.CameraEffect. The retouch
+# pipeline needs ONE effect targeting PREVIEW | IMAGE_CAPTURE | VIDEO_CAPTURE
+# together, because that is what makes a saved photo match the live preview by
+# construction instead of by two code paths agreeing to. The seam is one
+# method: third_party/camera_android_camerax/android/src/main/java/io/flutter/
+# plugins/camerax/ProcessCameraProviderProxyApi.java, bindToLifecycle.
+#
+# flutter_webrtc @ 1.6.0 leaves MediaProjection's onStop empty (the system
+# "Stop sharing" press dies there) and never plumbs
 # Android 14's onCapturedContentResize (the only signal a share is app-scoped,
 # which gates the safe live self-preview). Both are ~20 lines in ONE file —
 # third_party/flutter_webrtc/.../GetUserMediaImpl.java, marked "Miles patch".
@@ -121,6 +134,8 @@ dependencies:
 dependency_overrides:
   flutter_webrtc:
     path: third_party/flutter_webrtc
+  camera_android_camerax:
+    path: third_party/camera_android_camerax
 
 dev_dependencies:
   flutter_test:

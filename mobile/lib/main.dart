@@ -39,6 +39,7 @@ import 'package:miles/features/call/call_pip.dart';
 import 'package:miles/features/call/call_route_bridge.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_banner.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_prefs.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/legal/terms_gate.dart';
@@ -141,6 +142,7 @@ Future<void> main() async {
   // gate chain reads — handed down as functions because everything imports
   // the facade and the facade must not import main.
   unawaited(MilesSound.loadPref());
+  unawaited(BeautyPrefs.load());
   MilesSound.wireProbes(
     coverVisible: () => !MilesApp.showRealApp.value,
     // BOTH call shapes: PiP (a cue over the minimised conversation) and the

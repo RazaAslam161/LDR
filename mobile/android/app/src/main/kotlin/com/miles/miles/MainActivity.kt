@@ -25,9 +25,11 @@ import android.provider.Settings
 import android.util.Rational
 import android.view.KeyEvent
 import android.view.WindowManager
+import com.miles.miles.beauty.BeautyEffect
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.camerax.MilesCameraEffectHook
 import java.io.OutputStream
 import java.util.concurrent.Executors
 
@@ -38,6 +40,13 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterFragmentActivity() {
 
     private var secureFlagSet = false
+
+    /**
+     * The armed camera effect, if any. Held so it can be released when the activity dies — the GL
+     * thread and EGL context outlive any single camera open, deliberately, so a flip or a
+     * background/resume does not pay ~100ms of shader compilation again.
+     */
+    private var beautyEffect: BeautyEffect? = null
 
     // Text shared into the app from another app's share sheet, held until Dart
     // asks for it.
@@ -109,8 +118,26 @@ class MainActivity : FlutterFragmentActivity() {
         captureSharedText(intent)
     }
 
+    /**
+     * Whether this device can run the retouch effect.
+     *
+     * Builds the effect to find out, because the only honest answer comes from actually bringing
+     * EGL up — a capability string cannot tell you whether eglCreateContext will succeed here. The
+     * instance is kept if it works, so arming afterwards costs nothing.
+     */
+    private fun beautySupported(): Boolean {
+        if (beautyEffect == null) {
+            beautyEffect = BeautyEffect.createOrNull()
+        }
+        return beautyEffect != null
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        // The GL context is deliberately process-lived, so this is the only place it goes.
+        MilesCameraEffectHook.disarm()
+        beautyEffect?.release()
+        beautyEffect = null
         // Streams die with the activity. A recreation mid-export (rotation, a
         // kill in the background) invalidates every handle Dart holds; each
         // later writeChunk then fails and the Dart run counts that file as a
@@ -242,6 +269,33 @@ class MainActivity : FlutterFragmentActivity() {
             }
         volumeChannel =
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/volume_keys")
+        // The camera retouch effect. Armed per-screen, never globally: the heartbeat PPG
+        // reader drives the camera with startImageStream over a torch-lit fingertip, and an
+        // effect on that stream would corrupt the measurement it exists to take.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/beauty")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // Must be called BEFORE the camera binds; CameraX captures the effect list at
+                    // bind time, so arming afterwards does nothing until the next bind.
+                    "arm" -> {
+                        if (beautyEffect == null) {
+                            beautyEffect = BeautyEffect.createOrNull()
+                        }
+                        val effect = beautyEffect
+                        MilesCameraEffectHook.arm(effect)
+                        // false is an honest answer the UI must act on, not a silent no-op: on a
+                        // device where GL would not come up, the control has to say so rather
+                        // than sit there doing nothing.
+                        result.success(effect != null)
+                    }
+                    "disarm" -> {
+                        MilesCameraEffectHook.disarm()
+                        result.success(null)
+                    }
+                    "isSupported" -> result.success(beautySupported())
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "miles/secure_screen")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
