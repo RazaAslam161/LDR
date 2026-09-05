@@ -23999,6 +23999,39 @@ tests, which pass). `test/unit/legal|hygiene|disguise`: 173 passed.
 Unchanged: Supabase off the free plan, leaked-password protection on, listing assets. Plus
 the two address exposures above, and a push/deploy to put this turn's fixes on the live site.
 
+### §279 addendum — e6fddea pushed, CI green on run 33950337267, and the site is actually clean
+
+`129132e..e6fddea`, 12 files, 165 insertions / 45 deletions. Local HEAD and
+`origin/fix-sprint` both `e6fddeac2301896c5a620d4c181f497068f6ff1b`.
+
+**The live site cleared on the push, and that was checked rather than assumed.** All seven
+pages return 0 for the street line, and `index.html` returns 0 for the vault claim that had
+been public. Vercel redeploys `web/` from the git push — confirmed twice now, so a repo edit
+alone is never the fix; the push is.
+
+**A silent clobber was caught in staging.** The other session committed `6785973` and
+`129132e` while this work was mid-stage, which moved HEAD. The BRAIN blob had been built
+from the OLD HEAD, so committing it would have discarded their §277 addendum. Rebuilt on the
+new HEAD with an assertion that the addendum is present before writing. Both builds happened
+to produce the same sha — their commit had already landed before the first one — but the
+assertion is what proves it, not the coincidence.
+
+Staging method, again: `git hash-object -w` + `git update-index --cacheinfo` to stage a
+constructed blob without touching the working file, so their §276 and §278 stay uncommitted
+and intact. Guards in the builder refused to write if my section still contained the address
+or had swallowed one of their headings — the address guard fired once and caught a mention
+inside my own section.
+
+My section was renumbered **§275 -> §279**: theirs already held 275, and I had created the
+eighth duplicate in a file whose own project rules warn that concurrent appends have
+duplicated seven section numbers already. Check `grep -oE '^## §[0-9]+' | sort | uniq -d`
+before choosing a number.
+
+Still open and unchanged: Supabase off the free plan, leaked-password protection on, listing
+assets. Plus the two address exposures a repo edit cannot reach — Play Console's own
+developer address field, and six commits of git history (earliest `cb015d8`), contained only
+because the repo is private.
+
 ## §280
 
 **2026-09-04 — Login security audit: five items asked, three already clean, five
