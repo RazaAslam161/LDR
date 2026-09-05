@@ -24292,3 +24292,71 @@ URLs to smoke-test them: this environment's proxy denies `supabase.co`, so the
 403/401 probes returned `CONNECT tunnel failed`. What IS established is that both
 bundles built (a syntax error fails the build) and both sources round-trip
 byte-identically. No APK was built.
+
+## §283 — 2026-09-05 — beauty filters, phases 5-9: the whole pipeline exists, compiles, and is still off
+
+Continues §277. Every phase that a gate can prove is now in the tree. **Still never armed for
+anyone who has not opted in — `BeautyPrefs.enabled` ships false — so the camera is
+byte-identical for every existing user.** Nothing has rendered; `adb devices` is still empty.
+
+### What landed (all under `mobile/android/app/src/main/kotlin/com/miles/miles/beauty/` unless said)
+
+- **Phase 5, tracker.** `FaceTracker.kt`: ML Kit face mesh (`face-mesh-detection:16.0.0-beta3`,
+  resolved by Gradle — it exists) on an `ImageAnalysis` at VGA, KEEP_ONLY_LATEST plus a `busy`
+  gate so inference never queues. 468 points → `OneEuroPoint` each → one immutable `FaceFrame`
+  behind a volatile. Largest face wins; a second face is left honest on purpose.
+- **The coordinate space, stated once** (`FaceGeometry.kt`): every intermediate texture is in
+  the SurfaceTexture's own sampling space — sensor-oriented, y-UP. ML Kit answers upright and
+  y-down, so `uprightToTexture` undoes rotation then flips t, and that is the ONLY orientation
+  maths in the pipeline. Points are stored aspect-corrected so radii are isotropic. CameraX's
+  per-output crop/rotate/mirror is obtained alone by passing identity into
+  `updateTransformMatrix`, and applied once, in the composite. **Mirror is never mentioned.**
+- **The bind carries the analyzer** (`ProcessCameraProviderProxyApi.java`): `milesGroup()` adds
+  the `ImageAnalysis` beside preview + capture + video; an `IllegalArgumentException` (LIMITED
+  camera) rebinds WITHOUT it, logs, and sets `MilesCameraEffectHook.analysisRefused` so Dart can
+  read it via `status`. Colour-only retouch survives; reshape/makeup go dark, visibly.
+- **Phases 6-8, GL** (`BeautyShaders.kt`, `BeautyGlRenderer.kt`): resolve → half → Gaussian ×2
+  → skin mask (YCbCr box × face ellipse − eyes − lips, blurred) → composite per output. The
+  composite does the RBF reshape warp on the SAMPLE coordinate (5 translation controls + 2 eye
+  scalers), frequency-separated smoothing with a detail counterweight, chroma-only tone, a
+  masked lift for brighten, then procedural makeup: lips by a 20-point signed-distance polygon
+  (outer minus inner, so teeth stay), blush as oriented Gaussians on the cheek landmarks, brows
+  by a 10-point SDF, eyeshadow as a Gaussian above the lid along the face's own up vector.
+  ES 3 first for its 224-vec4 minimum; ES 2 fallback compiles the same source without
+  `MILES_FULL`, which drops every landmark array and leaves retouch only.
+- **Phase 9, Dart.** `beauty_engine.dart` (arm/update/disarm/status, every failure → false,
+  never throws into `_boot`), `beauty_sheet.dart` (one control, shared), the camera screen arms
+  BEFORE `_initController` and disarms in `dispose`, a retouch button beside flash/flip, a
+  Settings row. Turning the effect on/off rebinds (the same re-init a flip does); a slider
+  drag is a live `update`. Persisted once on sheet close, not per tick.
+
+### Verified
+
+    ./gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest   BUILD SUCCESSFUL
+      test-results XML: 3 suites, 28 tests, 0 failures, 0 errors   (11 One-Euro + 17 geometry)
+    flutter test                                                    1627 passed, 3 skipped, exit 0
+      new: 8 engine tests, 3 law groups (arm-before-bind, heartbeat never arms,
+           Dart↔Kotlin channel-key parity, analyzer fallback pinned)
+
+### NOT done, and why each is a decision rather than an omission
+
+- **"Use in video calls" is not in Settings.** Phase 10 (the flutter_webrtc `VideoProcessor`
+  seam) is not built, and a switch that changes nothing is the dead control the rulebook names.
+  `BeautyPrefs.useInCalls` exists (default true) and waits for it.
+- **Prediction is tested but not wired.** `OneEuroPoint.predict` stays proven; using it would
+  mean the GL thread reading filter velocities owned by the tracker thread. v1 takes the
+  immutable snapshot and the fade instead.
+- **The 11 colour presets are not folded into the shader.** Deliberately: today's Dart overlay
+  + CPU bake composes correctly with the GPU retouch with no double-apply. Folding them in is
+  one uniform, after the device pass says the pipeline is right.
+
+### Open — unchanged headline, now with more riding on it
+
+**Nothing has rendered.** Two assumptions in the coordinate maths are each one wrong guess
+from a face-shaped effect landing beside the face: that `updateTransformMatrix(out, identity)`
+yields CameraX's transform alone (composition order), and that the y-flip belongs in
+`uprightToTexture`. Both are single-line fixes and both are obvious on a viewfinder — and
+neither can be settled here. Device pass, in order: pass-through armed (preview upright both
+lenses, `takePicture()` valid JPEG, hold-to-record playable MP4, flip, background/resume);
+then Natural preset with a face (mask lands on skin, smoothing visible, no shimmer); then
+Defined (jaw/nose move the right way); then Polished (lips on lips). Then phase 10.

@@ -359,6 +359,12 @@ dependencies {
     // that ships is a NoSuchMethodError on a device, not a build error here.
     compileOnly("androidx.camera:camera-core:1.6.1")
 
+    // ML Kit face mesh — 468 landmarks, on-device, bundled model (no Play Services download,
+    // which matters for an app whose whole point is that nothing leaves the phone). Proguard
+    // already keeps com.google.mlkit.** from the retired pose detector. Pinned to the newest
+    // published build; the docs still print beta1, which lacks the resolution fixes.
+    implementation("com.google.mlkit:face-mesh-detection:16.0.0-beta3")
+
     // JVM unit tests for the beauty pipeline's pure maths (One-Euro smoothing, prediction
     // clamping). Every failure mode there is silent on a device: a zero timestamp delta divides
     // by zero, and a NaN in a shader uniform makes the face vanish rather than look wrong.

@@ -14,6 +14,10 @@ import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/glow_button.dart';
 import 'package:miles/core/widgets/surface_panel.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_engine.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_prefs.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_settings.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_sheet.dart';
 import 'package:miles/features/chat/camera/camera_bake.dart';
 import 'package:miles/features/chat/camera/camera_filter_painter.dart';
 import 'package:miles/features/chat/camera/camera_filters.dart';
@@ -105,6 +109,12 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   bool _micGranted = false; // gates enableAudio so a denied mic can't fail init
   static const _maxRecord = Duration(seconds: 60);
 
+  // The retouch look this screen opened with. Off by default, so for anyone who
+  // has not opted in the engine is never armed and the camera is byte-identical
+  // to before it existed.
+  BeautySettings _beauty = const BeautySettings();
+  bool _beautyArmed = false;
+
   @override
   void initState() {
     super.initState();
@@ -148,6 +158,10 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       _cameraIndex = _cameras
           .indexWhere((c) => c.lensDirection == CameraLensDirection.front);
       if (_cameraIndex < 0) _cameraIndex = 0;
+      // BEFORE the controller binds: CameraX captures the effect list at bind
+      // time, so arming afterwards would do nothing until the next flip.
+      _beauty = BeautyPrefs.forCamera();
+      _beautyArmed = await BeautyEngine.arm(_beauty);
       await _initController(_cameras[_cameraIndex]);
     } catch (e) {
       debugPrint('[camera] boot failed: $e');
@@ -258,6 +272,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     _restoreBrightness(); // never leave the screen stuck at max brightness
     _zoom.dispose();
     _videoPreview?.dispose();
+    if (_beautyArmed) unawaited(BeautyEngine.disarm());
     _controller?.dispose();
     super.dispose();
   }
@@ -269,6 +284,29 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       _cameras[_cameraIndex].lensDirection == CameraLensDirection.front;
 
   // ── camera controls ───────────────────────────────────────────────────────
+  Future<void> _openBeauty() async {
+    await showBeautySheet(context, current: _beauty, onChanged: _applyBeauty);
+    // Persist once, on close — not per slider tick.
+    BeautyPrefs.enabled = _beauty.enabled;
+    if (_beauty.enabled) BeautyPrefs.settings = _beauty;
+    unawaited(BeautyPrefs.save());
+  }
+
+  Future<void> _applyBeauty(BeautySettings s) async {
+    final wasOn = _beauty.enabled && _beautyArmed;
+    _beauty = s;
+    if (s.enabled && wasOn) {
+      // Same graph, new numbers: takes effect on the next frame.
+      await BeautyEngine.update(s);
+      return;
+    }
+    // Turning the effect on or off changes the use-case graph, which needs a
+    // rebind — the same re-init a flip does, with the same brief hand-off.
+    _beautyArmed = await BeautyEngine.arm(s);
+    if (!mounted || _cameras.isEmpty) return;
+    await _initController(_cameras[_cameraIndex]);
+  }
+
   Future<void> _flipCamera() async {
     if (_cameras.length < 2) return;
     setState(() => _ready = false);
@@ -680,6 +718,11 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
                   ),
                   Row(
                     children: [
+                      _RoundIcon(
+                        icon: Icons.face_retouching_natural,
+                        onTap: _openBeauty,
+                      ),
+                      const SizedBox(width: 8),
                       _RoundIcon(icon: _flashIcon, onTap: _toggleFlash),
                       const SizedBox(width: 8),
                       _RoundIcon(

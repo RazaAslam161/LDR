@@ -31,6 +31,8 @@ import 'package:miles/core/widgets/safety_code_prompt.dart';
 import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/core/widgets/wordmark.dart';
 import 'package:miles/features/auth/auth_errors.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_prefs.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_sheet.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
@@ -95,6 +97,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   bool _changingAvatar = false;
   String? _localAvatarUrl;
 
+  /// Full-screen-alert support, asked once per visit to the notifications
+  /// page rather than once per rebuild: it cannot change while the app is in
+  /// front, and it is re-asked on resume, which is when it can.
+  Future<bool>? _fsiCanUse;
+
   Future<void> _changeAvatar() async {
     final file = await PhotoPickerService.pickFromSheet(context,
         shape: PhotoShape.square,);
@@ -152,6 +159,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (state == AppLifecycleState.resumed) {
       _loadLocationMode();
       _loadNotificationState();
+      if (_fsiCanUse != null) {
+        setState(() => _fsiCanUse = FsiPermission.canUse());
+      }
       // The other half of the consent is repaired on the OTHER phone, and
       // nothing tells this one when it happens. Coming back to Settings after
       // the partner has answered is the moment the row would otherwise still
@@ -293,6 +303,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _fixEscrow() async {
     await EscrowPrompt.show(context);
     await _loadEscrow();
+  }
+
+  Future<void> _toggleBeauty(bool v) async {
+    setState(() => BeautyPrefs.enabled = v);
+    await BeautyPrefs.save();
+  }
+
+  Future<void> _openBeautyLook() async {
+    await showBeautySheet(
+      context,
+      current: BeautyPrefs.forCamera(),
+      onChanged: (s) {
+        BeautyPrefs.enabled = s.enabled;
+        if (s.enabled) BeautyPrefs.settings = s;
+      },
+    );
+    if (mounted) setState(() {});
+    await BeautyPrefs.save();
   }
 
   Future<void> _toggleSounds(bool v) async {
@@ -1253,7 +1281,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ],),
         _SettingsGroup(children: [
           FutureBuilder<bool>(
-            future: FsiPermission.canUse(),
+            future: _fsiCanUse ??= FsiPermission.canUse(),
             builder: (context, snap) {
               // Only ONE of the three states offers a tap. A row that opens a
               // settings page this phone does not have is worse than a row
@@ -1283,6 +1311,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             ),
           ),
         ],),
+        _SettingsGroup(
+          label: 'Camera',
+          children: [
+            _SettingsRow(
+              icon: Icons.face_retouching_natural,
+              title: 'Retouch',
+              subtitle: BeautyPrefs.enabled
+                  ? 'On. Tap to choose a look.'
+                  : 'Off. Skin, shape and colour on your face, in the '
+                      'preview, the photo and the video alike.',
+              trailing: Switch(
+                value: BeautyPrefs.enabled,
+                onChanged: _toggleBeauty,
+                activeThumbColor: MilesColors.ember,
+              ),
+              onTap: _openBeautyLook,
+            ),
+          ],
+        ),
         _SettingsGroup(
           label: 'Sound & vibrate',
           children: [

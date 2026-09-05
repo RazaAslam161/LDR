@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_settings.dart';
 
 /// The camera-effect seam's laws, pinned as structure.
 ///
@@ -124,6 +125,56 @@ void main() {
       expect(pubspec.contains('path: third_party/flutter_webrtc'), isTrue,
           reason: 'flutter_webrtc is vendored for the screen-share patches '
               '(BRAIN §180); adding a second override must not displace it',);
+    });
+  });
+
+  group('the Dart side arms in the right order and nowhere else', () {
+    final screen =
+        File('lib/features/chat/camera/rapid_camera_screen.dart').readAsStringSync();
+
+    test('arm happens BEFORE the first bind, disarm in dispose', () {
+      final boot = screen.indexOf('Future<void> _boot() async {');
+      final arm = screen.indexOf('BeautyEngine.arm(', boot);
+      final init = screen.indexOf('await _initController(', boot);
+      expect(arm, greaterThan(boot), reason: '_boot must arm');
+      expect(arm, lessThan(init),
+          reason: 'CameraX captures the effect list at bind time; arming after '
+              '_initController does nothing until the next flip',);
+      final dispose = screen.indexOf('void dispose() {');
+      expect(screen.indexOf('BeautyEngine.disarm(', dispose), greaterThan(dispose),
+          reason: 'dispose must disarm, or the next camera screen inherits '
+              'the effect',);
+    });
+
+    test('the heartbeat reader never arms the effect', () {
+      final hb = File('lib/features/heartbeat/heartbeat_screen.dart').readAsStringSync();
+      expect(hb.contains('BeautyEngine'), isFalse,
+          reason: 'PPG reads a torch-lit fingertip; a retouch on that stream '
+              'corrupts the measurement it exists to take',);
+    });
+  });
+
+  group('the channel keys are the same on both sides', () {
+    test('every key Dart emits is read by BeautyParams.kt', () {
+      final kt = File(
+        'android/app/src/main/kotlin/com/miles/miles/beauty/BeautyParams.kt',
+      ).readAsStringSync();
+      for (final key in kBeautyPresets[1].settings.toChannelMap().keys) {
+        expect(kt.contains('"$key"'), isTrue,
+            reason: 'Kotlin never reads "$key" — a renamed key is a slider that '
+                'silently does nothing on a handset',);
+      }
+    });
+  });
+
+  group('the bind degrades without the analyzer', () {
+    test('a refused ImageAnalysis rebinds without it and is flagged', () {
+      final source = _code(bind.readAsStringSync());
+      expect(source.contains('milesGroup(useCases, effect, null)'), isTrue,
+          reason: 'the fallback rebind is the designed degrade for cameras that '
+              'cannot run analysis beside preview + capture + video',);
+      expect(source.contains('MilesCameraEffectHook.onAnalysisRefused()'), isTrue,
+          reason: 'a silent degrade is a dead control; it must be flagged',);
     });
   });
 }

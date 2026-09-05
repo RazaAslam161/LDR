@@ -26,6 +26,7 @@ import android.util.Rational
 import android.view.KeyEvent
 import android.view.WindowManager
 import com.miles.miles.beauty.BeautyEffect
+import com.miles.miles.beauty.BeautyParams
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -282,7 +283,8 @@ class MainActivity : FlutterFragmentActivity() {
                             beautyEffect = BeautyEffect.createOrNull()
                         }
                         val effect = beautyEffect
-                        MilesCameraEffectHook.arm(effect)
+                        effect?.setParams(BeautyParams.fromMap(call.arguments as? Map<*, *>))
+                        MilesCameraEffectHook.arm(effect, effect?.analysis)
                         // false is an honest answer the UI must act on, not a silent no-op: on a
                         // device where GL would not come up, the control has to say so rather
                         // than sit there doing nothing.
@@ -292,6 +294,18 @@ class MainActivity : FlutterFragmentActivity() {
                         MilesCameraEffectHook.disarm()
                         result.success(null)
                     }
+                    // Live edits: takes effect on the next frame, no rebind.
+                    "update" -> {
+                        beautyEffect?.setParams(BeautyParams.fromMap(call.arguments as? Map<*, *>))
+                        result.success(null)
+                    }
+                    // Only knowable AFTER the camera has bound, which is why arm cannot answer it.
+                    "status" -> result.success(
+                        mapOf(
+                            "armed" to MilesCameraEffectHook.isArmed(),
+                            "faceTracking" to !MilesCameraEffectHook.analysisRefused(),
+                        ),
+                    )
                     "isSupported" -> result.success(beautySupported())
                     else -> result.notImplemented()
                 }

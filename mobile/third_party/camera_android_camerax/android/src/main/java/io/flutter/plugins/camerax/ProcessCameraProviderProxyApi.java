@@ -4,11 +4,14 @@
 
 package io.flutter.plugins.camerax;
 
+import android.util.Log;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraEffect;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.UseCase;
 import androidx.camera.core.UseCaseGroup;
 import androidx.camera.lifecycle.ProcessCameraProvider;
@@ -61,6 +64,25 @@ class ProcessCameraProviderProxyApi extends PigeonApiProcessCameraProvider {
     return pigeonInstance.getAvailableCameraInfos();
   }
 
+  // Miles patch — see bindToLifecycle.
+  private static final String TAG = "MilesCameraEffect";
+
+  @NonNull
+  private static UseCaseGroup milesGroup(
+      @NonNull List<? extends UseCase> useCases,
+      @NonNull CameraEffect effect,
+      @Nullable ImageAnalysis analysis) {
+    final UseCaseGroup.Builder group = new UseCaseGroup.Builder();
+    for (UseCase useCase : useCases) {
+      group.addUseCase(useCase);
+    }
+    if (analysis != null) {
+      group.addUseCase(analysis);
+    }
+    group.addEffect(effect);
+    return group.build();
+  }
+
   @NonNull
   @Override
   public Camera bindToLifecycle(
@@ -87,12 +109,23 @@ class ProcessCameraProviderProxyApi extends PigeonApiProcessCameraProvider {
       // stream by DefaultSurfaceProcessor, which does implement snapshot().
       final CameraEffect effect = MilesCameraEffectHook.effect();
       if (effect != null) {
-        final UseCaseGroup.Builder group = new UseCaseGroup.Builder();
-        for (UseCase useCase : useCases) {
-          group.addUseCase(useCase);
+        final ImageAnalysis analysis = MilesCameraEffectHook.analysis();
+        if (analysis != null) {
+          try {
+            return pigeonInstance.bindToLifecycle(
+                lifecycleOwner, cameraSelector, milesGroup(useCases, effect, analysis));
+          } catch (IllegalArgumentException e) {
+            // This camera cannot run ImageAnalysis beside preview + capture + video (a LIMITED
+            // hardware level, or a StreamSharing combination it does not support). CameraX
+            // validates the combination before attaching anything, so nothing is bound yet.
+            // Rebind without the analyzer: the retouch keeps working on colour alone and only
+            // the face-aware passes are lost. Logged and flagged, never swallowed.
+            Log.w(TAG, "face analysis refused by this camera, rebinding without it: " + e);
+            MilesCameraEffectHook.onAnalysisRefused();
+          }
         }
-        group.addEffect(effect);
-        return pigeonInstance.bindToLifecycle(lifecycleOwner, cameraSelector, group.build());
+        return pigeonInstance.bindToLifecycle(
+            lifecycleOwner, cameraSelector, milesGroup(useCases, effect, null));
       }
       return pigeonInstance.bindToLifecycle(
           lifecycleOwner, cameraSelector, useCases.toArray(new UseCase[0]));

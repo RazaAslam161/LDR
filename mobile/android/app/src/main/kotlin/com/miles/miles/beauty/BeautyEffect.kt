@@ -2,11 +2,13 @@ package com.miles.miles.beauty
 
 import android.graphics.SurfaceTexture
 import android.opengl.EGLSurface
+import android.opengl.Matrix
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
 import androidx.camera.core.CameraEffect
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.SurfaceOutput
 import androidx.camera.core.SurfaceProcessor
 import androidx.camera.core.SurfaceRequest
@@ -18,40 +20,44 @@ import java.util.concurrent.Executor
  *
  * Targets [CameraEffect.PREVIEW] | [CameraEffect.VIDEO_CAPTURE] | [CameraEffect.IMAGE_CAPTURE]
  * together, so the viewfinder, the saved JPEG and the recorded MP4 are one processor's output.
- * That is what makes "what you see is what you get" a property of the graph instead of a promise
- * two implementations have to keep — which is the state today, where the still is re-processed on
+ * That makes "what you see is what you get" a property of the graph rather than a promise two
+ * implementations have to keep — which is the state today, where the still is re-processed on
  * the CPU in camera_bake.dart and video is not processed at all.
  *
- * DO NOT switch this to `OUTPUT_OPTION_ONE_FOR_EACH_TARGET`. The 4-argument constructor used here
- * keeps CameraEffect's default `ONE_FOR_ALL_TARGETS`, which routes the still through
+ * DO NOT switch this to `OUTPUT_OPTION_ONE_FOR_EACH_TARGET`. The 4-argument constructor keeps
+ * CameraEffect's default `ONE_FOR_ALL_TARGETS`, which routes the still through
  * `DefaultSurfaceProcessor` — the only implementation whose `snapshot()` works. Under
- * ONE_FOR_EACH_TARGET the still goes through `SurfaceProcessorWithExecutor`, whose `snapshot()` is
- * an unconditional failed future, and `takePicture()` breaks on every device. A law test
+ * ONE_FOR_EACH_TARGET the still goes through `SurfaceProcessorWithExecutor`, whose `snapshot()`
+ * is an unconditional failed future, and `takePicture()` breaks on every device. A law test
  * (test/unit/camera/beauty_effect_law_test.dart) pins this.
  */
 class BeautyEffect private constructor(
     executor: Executor,
-    processor: BeautySurfaceProcessor,
+    private val processor: BeautySurfaceProcessor,
 ) : CameraEffect(
     PREVIEW or VIDEO_CAPTURE or IMAGE_CAPTURE,
     executor,
     processor,
     Consumer { t -> processor.onEffectError(t) },
 ) {
+    /** The analyzer the vendored bind attaches beside the other use cases, for face tracking. */
+    val analysis: ImageAnalysis get() = processor.tracker.analysis
 
-    private val processor: BeautySurfaceProcessor = processor
+    /** Takes effect on the next frame; no rebind needed. */
+    internal fun setParams(p: BeautyParams) {
+        processor.params = p
+    }
 
-    /** Releases the GL thread and context. Safe to call twice. */
+    /** Releases the GL thread, the context and the detector. Safe to call twice. */
     fun release() = processor.release()
 
     companion object {
         /**
          * Builds an effect, or returns null when this device cannot run it.
          *
-         * A null return is not an error path to apologise for — it is the designed fallback. The
-         * caller leaves [io.flutter.plugins.camerax.MilesCameraEffectHook] disarmed, CameraX binds
-         * through the original varargs call, and the camera behaves exactly as it did before this
-         * feature existed.
+         * Null is not an error to apologise for — it is the designed fallback. The caller leaves
+         * [io.flutter.plugins.camerax.MilesCameraEffectHook] disarmed, CameraX binds through the
+         * original varargs call, and the camera behaves exactly as it did before this feature.
          */
         @JvmStatic
         fun createOrNull(): BeautyEffect? {
@@ -66,20 +72,29 @@ class BeautyEffect private constructor(
 }
 
 /**
- * Drives the GL thread: takes the camera's input surface, and paints it into each output surface
- * CameraX asks for.
+ * Drives the GL thread: takes the camera's input surface, paints it into each output surface
+ * CameraX asks for, and pulls the newest face from [tracker] for every frame.
  *
  * Every method that touches GL is posted to [glHandler]; nothing here is synchronised because
- * exactly one thread ever runs it.
+ * exactly one thread ever runs it. [params] is the one exception — written from the platform
+ * thread, read once per frame — and it is a volatile reference to an immutable value.
  */
 internal class BeautySurfaceProcessor : SurfaceProcessor {
 
     private val glThread = HandlerThread("miles-beauty-gl")
     private lateinit var glHandler: Handler
     private val renderer = BeautyGlRenderer()
+    val tracker = FaceTracker()
 
-    /** Outputs currently attached, keyed by the SurfaceOutput CameraX gave us. */
-    private val outputs = mutableMapOf<SurfaceOutput, EGLSurface>()
+    @Volatile
+    var params: BeautyParams = BeautyParams.OFF
+
+    private class OutputState(val egl: EGLSurface, val width: Int, val height: Int) {
+        val glOnly = FloatArray(16)
+        val full = FloatArray(16)
+    }
+
+    private val outputs = LinkedHashMap<SurfaceOutput, OutputState>()
 
     private var inputTexture: SurfaceTexture? = null
     private var inputSurface: Surface? = null
@@ -87,17 +102,18 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     private var inputHeight = 0
     private var released = false
 
-    private val texMatrix = FloatArray(16)
-    private val outMatrix = FloatArray(16)
+    private val stMatrix = FloatArray(16)
+    private val identity = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private val renderOutputs = ArrayList<BeautyGlRenderer.Output>(2)
+
+    // Face presence, faded so a lost track dims the effect instead of popping it off.
+    private var lastFace: FaceFrame? = null
+    private var faceAlpha = 0f
+    private var lastFrameNs = 0L
 
     /** Executor CameraX uses for the effect's callbacks — the GL thread itself. */
     val glExecutor: Executor = Executor { r -> glHandler.post(r) }
 
-    /**
-     * Starts the GL thread and builds the context.
-     *
-     * @return false if GL is unusable on this device, in which case the effect must not be armed.
-     */
     fun start(): Boolean {
         glThread.start()
         glHandler = Handler(glThread.looper)
@@ -110,18 +126,20 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
                 request.willNotProvideSurface()
                 return@post
             }
-            val size = request.resolution
-            inputWidth = size.width
-            inputHeight = size.height
+            inputWidth = request.resolution.width
+            inputHeight = request.resolution.height
+            // A new input surface is a new bind — a flip, a resume — and therefore a different
+            // face in a different space. Smoothing history from the old one must not bleed in.
+            tracker.reset()
+            lastFace = null
+            faceAlpha = 0f
 
             val texture = renderer.newInputSurfaceTexture(inputWidth, inputHeight)
             texture.setOnFrameAvailableListener({ onFrameAvailable(it) }, glHandler)
             val surface = Surface(texture)
             inputTexture = texture
             inputSurface = surface
-
             request.provideSurface(surface, glExecutor) { _ ->
-                // CameraX is done with this surface (camera closed, flipped, or reconfigured).
                 texture.setOnFrameAvailableListener(null)
                 surface.release()
                 texture.release()
@@ -144,14 +162,12 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
                     glHandler.post { detach(output) }
                 }
             }
-            val eglSurface = renderer.createWindowSurface(surface)
-            if (eglSurface == null) {
-                // Nothing to draw into. Close it rather than holding a dead entry; CameraX will
-                // request a new one if the stream reconfigures.
+            val egl = renderer.createWindowSurface(surface)
+            if (egl == null) {
                 output.close()
                 return@post
             }
-            outputs[output] = eglSurface
+            outputs[output] = OutputState(egl, output.size.width, output.size.height)
         }
     }
 
@@ -164,23 +180,50 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
             return
         }
         if (outputs.isEmpty()) return
-        texture.getTransformMatrix(texMatrix)
-        val timestamp = texture.timestamp
+        texture.getTransformMatrix(stMatrix)
+        val ts = texture.timestamp
+        val p = params
 
-        for ((output, eglSurface) in outputs) {
-            // CameraX folds each target's own crop, rotation and mirroring into this matrix, which
-            // is why the renderer never does orientation maths itself.
-            output.updateTransformMatrix(outMatrix, texMatrix)
-            renderer.drawFrame(eglSurface, inputWidth, inputHeight, outMatrix, timestamp)
+        if (!p.enabled) {
+            for ((output, state) in outputs) {
+                output.updateTransformMatrix(state.full, stMatrix)
+                renderer.drawPassThrough(
+                    BeautyGlRenderer.Output(state.egl, state.width, state.height, state.full),
+                    state.full,
+                    ts,
+                )
+            }
+            lastFrameNs = ts
+            return
         }
+
+        // Presence: the tracker's newest face, or "gone" once it has been silent long enough
+        // that its last answer is stale. Both clocks are the camera's own timestamp.
+        val fresh = tracker.latest
+        val present = fresh != null && ts - tracker.lastSeenNs < STALE_NS
+        if (fresh != null) lastFace = fresh
+        val dt = if (lastFrameNs == 0L) 0f else ((ts - lastFrameNs) / 1e9f).coerceIn(0f, 0.1f)
+        val target = if (present) 1f else 0f
+        val rate = if (present) 1f / FADE_IN_S else 1f / FADE_OUT_S
+        faceAlpha = if (faceAlpha < target) minOf(target, faceAlpha + dt * rate)
+        else maxOf(target, faceAlpha - dt * rate)
+        lastFrameNs = ts
+
+        renderOutputs.clear()
+        for ((output, state) in outputs) {
+            // Passing identity yields CameraX's own crop/rotate/mirror alone; the SurfaceTexture
+            // half of the transform was already applied by the resolve pass.
+            output.updateTransformMatrix(state.glOnly, identity)
+            renderOutputs.add(BeautyGlRenderer.Output(state.egl, state.width, state.height, state.glOnly))
+        }
+        renderer.render(inputWidth, inputHeight, stMatrix, lastFace, faceAlpha, p, renderOutputs, ts)
     }
 
     private fun detach(output: SurfaceOutput) {
-        outputs.remove(output)?.let { renderer.destroyWindowSurface(it) }
+        outputs.remove(output)?.let { renderer.destroyWindowSurface(it.egl) }
         output.close()
     }
 
-    /** CameraX reports an effect-level failure here. */
     fun onEffectError(t: Throwable) {
         Log.e(TAG, "CameraEffect error", t)
     }
@@ -188,10 +231,11 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     fun release() {
         if (released) return
         released = true
+        tracker.release()
         if (!glThread.isAlive) return
         runOnGlBlocking {
-            for ((output, eglSurface) in outputs) {
-                renderer.destroyWindowSurface(eglSurface)
+            for ((output, state) in outputs) {
+                renderer.destroyWindowSurface(state.egl)
                 output.close()
             }
             outputs.clear()
@@ -203,11 +247,8 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     }
 
     /**
-     * Runs [block] on the GL thread and waits for it.
-     *
-     * Blocking is correct here and only here: setup and teardown must complete before the caller
-     * decides whether to arm the effect, and before the thread dies. The per-frame path never
-     * blocks.
+     * Runs [block] on the GL thread and waits. Correct here and only here: setup and teardown
+     * must complete before the caller decides anything. The per-frame path never blocks.
      */
     private fun runOnGlBlocking(block: () -> Boolean): Boolean {
         var result = false
@@ -247,5 +288,8 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     private companion object {
         const val TAG = "MilesBeautyGl"
         const val GL_TIMEOUT_MS = 4000L
+        const val STALE_NS = 400_000_000L
+        const val FADE_IN_S = 0.12f
+        const val FADE_OUT_S = 0.20f
     }
 }

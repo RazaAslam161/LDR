@@ -37,6 +37,7 @@ package io.flutter.plugins.camerax;
 
 import androidx.annotation.Nullable;
 import androidx.camera.core.CameraEffect;
+import androidx.camera.core.ImageAnalysis;
 
 /**
  * Process-wide holder for the one {@link CameraEffect} Miles may attach to the CameraX use-case
@@ -49,20 +50,27 @@ public final class MilesCameraEffectHook {
   private MilesCameraEffectHook() {}
 
   @Nullable private static volatile CameraEffect effect;
+  @Nullable private static volatile ImageAnalysis analysis;
+  private static volatile boolean analysisRefused;
 
   /**
-   * Arms {@code e} so the next bind attaches it. Passing null is the same as {@link #disarm()}.
+   * Arms {@code e} so the next bind attaches it, with {@code a} bound beside the app's own use
+   * cases for face tracking. Either may be null; a null {@code e} is the same as {@link #disarm()}.
    *
    * <p>Arming after the camera has bound does nothing until the next bind — a flip or a
-   * background/resume — because the effect list is captured at bind time.
+   * background/resume — because the use-case list is captured at bind time.
    */
-  public static void arm(@Nullable CameraEffect e) {
+  public static void arm(@Nullable CameraEffect e, @Nullable ImageAnalysis a) {
     effect = e;
+    analysis = e == null ? null : a;
+    analysisRefused = false;
   }
 
-  /** Removes the effect. The next bind takes the original, un-patched code path exactly. */
+  /** Removes everything. The next bind takes the original, un-patched code path exactly. */
   public static void disarm() {
     effect = null;
+    analysis = null;
+    analysisRefused = false;
   }
 
   /** The armed effect, or null. Read once per bind. */
@@ -71,8 +79,26 @@ public final class MilesCameraEffectHook {
     return effect;
   }
 
+  /** The analyzer to bind beside the effect, or null. Read once per bind. */
+  @Nullable
+  public static ImageAnalysis analysis() {
+    return analysis;
+  }
+
   /** Whether a bind would attach an effect. */
   public static boolean isArmed() {
     return effect != null;
+  }
+
+  /**
+   * Recorded by the bind when this camera refused the analyzer beside the other use cases, so
+   * the app can say the face-aware passes are off rather than leave a control that does nothing.
+   */
+  public static void onAnalysisRefused() {
+    analysisRefused = true;
+  }
+
+  public static boolean analysisRefused() {
+    return analysisRefused;
   }
 }
