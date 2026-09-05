@@ -24360,3 +24360,24 @@ neither can be settled here. Device pass, in order: pass-through armed (preview 
 lenses, `takePicture()` valid JPEG, hold-to-record playable MP4, flip, background/resume);
 then Natural preset with a face (mask lands on skin, smoothing visible, no shimmer); then
 Defined (jaw/nose move the right way); then Polished (lips on lips). Then phase 10.
+
+### §283 addendum — 4f6c5ce pushed, CI green on run 33953042542
+
+18 files, +1994/−254. `gates` completed / success on a clean runner.
+
+Built on top of the merged login audit (86ce6ac) in a detached worktree at origin — no rebase,
+no stash, the other session's dirty tree untouched. Only `BRAIN.md` overlapped the 14 incoming
+commits; it is append-only here. **§281/§282 were already taken by that merge, so this section
+is §283 — the fourth numbering collision this file records.**
+
+Local branch moved to 4f6c5ce afterwards the way a clean `git pull` would have: the audit's
+five files (which nobody had edited locally — asserted equal to the old base before touching)
+restored from HEAD; `repo_hygiene_test.dart` 3-way merged cleanly; `BRAIN.md` 3-way conflicted
+at the old EOF (both sides appended there) and was resolved by keeping BOTH sides, ours then
+theirs, so the working copy now holds origin's §279–§282, this §283, AND the other session's
+uncommitted §276 / §278 addendum / §280 / §282 — zero deletions. Two things for them:
+their §280 and §282 share numbers with origin's, and one historical footer line (the postal
+address redaction) now appears in both variants back to back. Duplicates are visible;
+deletions are not — that is the whole trade.
+
+Still true: nothing has rendered. The device pass in §283 is the next step.
