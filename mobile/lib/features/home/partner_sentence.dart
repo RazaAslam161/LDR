@@ -31,8 +31,8 @@ class PartnerSentence {
 
 /// Build the line for [partner] as seen by a viewer in [myTimezone].
 ///
-/// [now] is injectable so the rules can be tested at 3am in Lahore without
-/// waiting until 3am in Lahore.
+/// [now] is injectable so the rules can be tested at 3am in the partner's zone
+/// without waiting until 3am in the partner's zone.
 PartnerSentence partnerSentence({
   required Presence? presence,
   required Profile? partner,

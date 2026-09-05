@@ -262,10 +262,10 @@ right to export your data does not depend on the service continuing.
 
 12. WHO YOU ARE AGREEING WITH, AND THE LAW THAT APPLIES
 
-This agreement is between you and RD Developers, Sector C Commercial Area,
-Bahria Town, Lahore, Pakistan, the publisher of Miles.
+This agreement is between you and RD Developers, of Pakistan, the publisher of
+Miles.
 
-It is governed by the law of Pakistan, and the courts of Lahore, Pakistan have
+It is governed by the law of Pakistan, and the courts of Pakistan have
 jurisdiction over any dispute. If you live somewhere whose law gives you the
 right to bring a claim in your own local courts, or gives you protections that
 cannot be contracted away, this clause does not take that from you.
@@ -288,7 +288,6 @@ long any of it survives.
 
 15. CONTACT
 
-RD Developers
-Sector C Commercial Area, Bahria Town, Lahore, Pakistan
+RD Developers, Pakistan
 milesapp.officials@gmail.com
 ''';

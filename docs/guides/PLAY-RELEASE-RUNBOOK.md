@@ -394,8 +394,15 @@ Play-delivered build still has a different certificate from anything installed
 by cable, and Android still refuses to update over it. Users
 must **uninstall** — and uninstall wipes `flutter_secure_storage`, which is
 where the X25519 private key lives. Everything end-to-end encrypted (Memory
-Threads, Private Vault, Wish Jar entry text) becomes unreadable on the new
-install unless recovery works.
+Threads, Wish Jar entry text, message reactions, and the messages and notes
+written during a separation) becomes unreadable on the new install unless
+recovery works.
+
+The Private Vault was named in that list until 2026-09-04 and does **not**
+belong in it — it is stored plaintext and survives a lost key perfectly well.
+Do not let that reduce the urgency of the ceremony below: the list above is
+still a couple's entire encrypted history, and it is still gone if both
+recovery paths fail.
 
 Two recovery paths exist. Both must be **proven on real hardware**, not
 reasoned about:

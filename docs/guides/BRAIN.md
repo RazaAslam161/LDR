@@ -3758,7 +3758,7 @@ obligations the user accepted, so re-consent is not required and
 `terms_gate_test.dart:25` stays green.
 
 **Owner details now filled:** child-safety contact named (Raza Aslam), postal
-address (Sector C Commercial Area, Bahria Town, Lahore, Pakistan) in the privacy
+address ([postal address redacted 2026-09-04 — see §279]) in the privacy
 policy ×2 and the CSAE contact table. **One placeholder remains and Play needs
 it:** `web/csae.html` §5 — the Pakistani national law-enforcement unit and its
 reporting channel. Not guessed, deliberately.
@@ -8694,8 +8694,8 @@ the §85 redesign, so that regression was ours.
 - Footer v2 across all seven shell pages: brand row, three columns (Product /
   Legal & safety / Developer), base row. The developer block is new content
   from the owner, verbatim except one cleanup flagged to them (the doubled
-  "Sector C"): RZ Dev · Razaaslam3210@gmail.com · Sector C Commercial Area,
-  Bahria Town, Lahore. security.txt keeps its RFC 9116 link but is labelled
+  doubled street line): RZ Dev · Razaaslam3210@gmail.com · [postal address
+  redacted 2026-09-04 — see §279]. security.txt keeps its RFC 9116 link but is labelled
   "(for researchers)" — the raw filename no longer appears as link text.
 - Depth pass, all inside the brand's laws (3D TRANSFORMS are compositor-only
   and legal; blur stays banned): cards tilt on hover (perspective(900px)
@@ -23887,3 +23887,114 @@ files are all still uncommitted and intact.
 
 Still true, and unchanged by a green CI: **nothing has rendered.** The effect is
 never armed. `adb devices` is empty. The device gate in §277 is the next step.
+
+## §279 — 2026-09-04 — the postal address removed, and two more vault claims my own sweep missed
+
+Owner: remove the street address from the whole project and the website. Done — and the
+sweep for it turned up two live instances of the §272 vault error that I had already
+declared clean. Lead with that, because it is the more important half.
+
+### The sweep that was wrong, and why
+
+§272 reported "no surviving claim" after this:
+
+    grep -rn -i 'vault' web/*.html mobile/lib | grep -iE 'end-to-end|...' | grep -viE '...'
+
+**That is line-based, and it cannot see a claim that spans a line break.** `index.html`
+had exactly that:
+
+    <p>Your Memory Threads, Wish Jar entries and Personal Vault files are
+      end-to-end encrypted — those we cannot open.
+
+"Vault files are" on one line, "end-to-end encrypted" on the next. The line with `vault`
+had no encryption word; the line with the encryption word had no `vault`. It fell through
+both halves of the filter and **was live on the public site** in the landing page's FAQ
+accordion the whole time.
+
+Second miss, different cause: `PLAY-RELEASE-RUNBOOK.md:396`, in the Phase 3 key-recovery
+ceremony — "Everything end-to-end encrypted (Memory Threads, **Private Vault**, Wish Jar
+entry text) becomes unreadable on the new install". Not user-facing, but it is a step the
+owner executes, and it overstates what a lost key costs. Corrected, with a line saying the
+Vault does not belong there and a warning not to let that deflate the ceremony's urgency —
+the real list is still a couple's whole encrypted history.
+
+Third, previously flagged and never actually fixed: `safety_sheets.dart:131`, the code
+comment asserting "What IS end-to-end encrypted: ... the FILES in the Private Vault" while
+claiming to agree with THREAT-MODEL §1. §271 named it; §272 fixed seven places and left it.
+Fixed now, with a note that being a comment made it the vector that taught the next person
+to repeat the error.
+
+**So the count is nine, not seven, and two of them were found only after I told the owner
+the class was clean.** The replacement sweep is multiline and negation-aware; it is the one
+to re-run, not the grep above:
+
+    vault[^.]{0,200}?(end-to-end|ciphertext|sealed with|hold no key) — and the reverse —
+    with a `not|never|unencrypted|is not` filter, re.S, over web/*.html and lib/**/*.dart
+
+After the fixes it returns 25 raw hits and **zero unqualified claims**: `security.html:100`
+is the "Not end-to-end encrypted" row label matching across a `</td>`; the rest are past
+tense (`gallery_viewer.dart:118` "the old encrypted vault", `gallery_repository.dart:89`),
+byte-layout comments (`chat_repository.dart:604`), my own changelog note
+(`terms_text.dart:8`), the genuinely-encrypted dead `vault_items` table, or BRAIN history.
+
+### The address
+
+29 occurrences -> **0 across every tracked file**. Removed from:
+
+- the shared footer on all seven web pages (the street `<span>` -> `<span>Pakistan</span>`)
+- `privacy-policy.html` x3 — the publisher line, the §10 controller designation, the §13 contact block
+- `terms.html` x3 and `terms_text.dart` x2 — §12 contracting party and §15 contact
+- `csae.html` — the "Postal address" row deleted from the child-safety contact table
+- `BRAIN.md` x2 — historical sessions' sections, redacted in place rather than rewritten,
+  each marked `[postal address redacted 2026-09-04 — see §279]`. Append-only is the rule;
+  an owner's instruction to remove a personal address outranks it, and marking beats a
+  silent edit.
+- `partner_sentence.dart:34` — not the address, but "tested at 3am in Lahore" named the
+  same city in a timezone example. Now "the partner's zone".
+
+**Governing law was softened, deliberately:** "the courts of Lahore, Pakistan" ->
+"the courts of Pakistan", in both Terms copies. Naming the city was the last pinpoint; a
+country-level jurisdiction clause is just as enforceable.
+
+**What was kept, and why removing it would have been wrong:** `RD Developers` and
+`milesapp.officials@gmail.com`. GDPR Art 13(1)(a) wants the controller's identity and
+contact details — an email satisfies contact details, a street address is not mandated.
+Google's Child Safety Standards requirement 4 wants a point of contact reachable by Google;
+§6 still gives role, name, publisher and email. Stripping those would have broken the
+controller identity §272 had just added.
+
+### Two exposures this does NOT close
+
+1. **Play Console has its own developer address field**, which Google displays publicly on
+   the store listing. Nothing in this repo controls it. Removing the address here does not
+   remove it from the listing.
+2. **Git history.** `git log --all -S'<the street line>'` returns **6 commits**, earliest
+   `cb015d8`, latest `79084d0`. The repo is **PRIVATE** (`gh repo view` -> `PRIVATE`), so
+   the exposure is contained and this is not urgent. Same standard as the leaked Maps key
+   in the runbook: deal with it before the repo goes public or a collaborator is added.
+
+### The live site was stale, and it auto-deploys
+
+Checked the deployed site rather than assuming the repo is the truth, which is how the
+`index.html` miss surfaced. Terms v2, the CSAE correction and the new privacy §10 were all
+**already live** — so `miles-legal.vercel.app` redeploys from the git push. The address and
+the two new fixes are therefore live-until-pushed.
+
+Vercel MCP cannot reach this project (`get_project` -> 404; different account), and there is
+no `vercel` CLI on PATH, so **the deploy is the owner's** — or it happens on the next push.
+
+### Gates
+
+`flutter analyze`: **199 issues, all `info`, 0 error / 0 warning**. That is +19 on §274's
+180, and none of them are mine — all nineteen are in `lib/features/chat/camera/beauty/` and
+`test/unit/camera/`, which are **untracked** files belonging to the concurrent session's
+retouch feature. Checked per-file rather than assumed: `grep` for my four edited files in
+the analyze output returns nothing.
+
+`flutter test test/unit`: **1368 passed**, exit 0 (+35 on §274, again their new camera
+tests, which pass). `test/unit/legal|hygiene|disguise`: 173 passed.
+
+### Still open
+
+Unchanged: Supabase off the free plan, leaked-password protection on, listing assets. Plus
+the two address exposures above, and a push/deploy to put this turn's fixes on the live site.
