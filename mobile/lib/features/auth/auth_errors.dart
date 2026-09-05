@@ -57,10 +57,22 @@ String friendlyAuthError(Object e) {
   if (s.contains('email not confirmed') || s.contains('not confirmed')) {
     return 'Please confirm your email first, then sign in.';
   }
-  if (s.contains('user already registered') ||
-      s.contains('already registered')) {
-    return 'An account with this email already exists. Try signing in.';
-  }
+  // Deliberately absent: a branch for `user already registered`.
+  //
+  // It used to answer "An account with this email already exists", which is
+  // the one fact the sign-up form must not say out loud. SignUpPage goes to
+  // considerable trouble to keep it unsaid — it routes every submission to the
+  // same "Check your inbox" state and explains there why — and this map
+  // undid that in a single line the moment GoTrue chose to raise instead of
+  // answering with a success shape.
+  //
+  // It is unreachable while email confirmation is on, because GoTrue then
+  // returns an obfuscated success for an address that already exists. That is
+  // a dashboard setting, not a property of this code: turning it off would
+  // have turned the sign-up form into an oracle anyone could feed addresses to
+  // in order to learn who has an account on a private couples app — the
+  // question the disguise, the panic gesture and the contact pause all exist
+  // to keep unanswerable. The generic ending below says nothing either way.
   // Eight, matching what both password fields ask for and what
   // NewPasswordPage enforces. It said six for as long as the screens said
   // eight, so the one message a user saw after being refused told them to do

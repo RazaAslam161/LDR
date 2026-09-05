@@ -94,6 +94,56 @@ void main() {
         reason: 'read by config.dart, absent from .env.example: $undocumented',);
   });
 
+  test('the .env that ships in the APK holds nothing the app does not read',
+      () {
+    // The other direction of the test above, and the one a reviewer cannot
+    // perform. pubspec.yaml lists `.env` as an asset, so it is packed into
+    // assets/flutter_assets/.env in plaintext and a sideloaded APK is a zip
+    // anyone can open — while .gitignore keeps the file out of the tree, so
+    // nothing in code review ever sees what it contains.
+    //
+    // That combination has already published credentials once: METERED_TURN_*
+    // and GIPHY_API_KEY both sat in here after their consumers were removed.
+    // The allowed set is derived from config.dart rather than written down, so
+    // a genuinely new public key needs no edit here — but a name the app never
+    // reads cannot ride along to every handset unnoticed.
+    final env = File('.env');
+    if (!env.existsSync()) {
+      // Absent on a clean checkout by design, and CI writes its placeholder
+      // only just before `flutter analyze`. Nothing to assert.
+      return;
+    }
+    final config = File('lib/core/app/config.dart').readAsStringSync();
+    final declared = RegExp(r"static const \w*Key\w* = '([A-Z0-9_]+)'")
+        .allMatches(config)
+        .map((m) => m[1]!)
+        .toSet();
+    // Plus the names gates.yml writes when no .env is present: the same two
+    // public values, unprefixed, from before the NEXT_PUBLIC_ names.
+    final allowed = {...declared, 'SUPABASE_URL', 'SUPABASE_ANON_KEY'};
+
+    final present = env
+        .readAsLinesSync()
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty && !l.startsWith('#') && l.contains('='))
+        .map((l) => l.split('=').first.trim())
+        .toSet();
+
+    final unexpected = present.difference(allowed).toList()..sort();
+    expect(unexpected, isEmpty,
+        reason: 'these ship in the APK in plaintext and nothing reads them; '
+            'a value that must stay revocable belongs in app_secrets behind '
+            'an edge function: $unexpected',);
+  });
+
+  test('.env is never tracked', () {
+    // The whole argument above rests on it staying out of git. If it is ever
+    // committed the secret is already published, and the test that reads the
+    // working copy would start passing on everyone's machine at once.
+    expect(tracked().where((f) => f == 'mobile/.env' || f == '.env'), isEmpty,
+        reason: '.env is bundled into the APK and must stay untracked',);
+  });
+
   test('documentation is filed, not loose', () {
     // Six Markdown files at the root, two of them roadmaps, none of them
     // dated. Current work belongs in docs/, superseded work in docs/archive/,

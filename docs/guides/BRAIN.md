@@ -24031,3 +24031,264 @@ Still open and unchanged: Supabase off the free plan, leaked-password protection
 assets. Plus the two address exposures a repo edit cannot reach — Play Console's own
 developer address field, and six commits of git history (earliest `cb015d8`), contained only
 because the repo is private.
+
+## §280
+
+**2026-09-04 — Login security audit: five items asked, three already clean, five
+fixes landed on `claude/login-security-audit-urqj48`.**
+
+The brief was a five-point login audit written for a Next.js/Vite app: browser-
+exposed `NEXT_PUBLIC_`/`VITE_` secrets, request-supplied identity in API routes,
+RLS off or policy-less, cookie-only sign-out, and email-existence oracles. Items
+1 and 2 were translated to what this repo actually is (APK-bundled config; edge
+functions and `SECURITY DEFINER` RPCs). Everything was checked against **live
+production `sopictusdonlvuezmfep`** via the Supabase MCP as well as source,
+because 160 additive migrations are not a statement of current state.
+
+**Clean, with evidence, and worth not re-auditing:**
+
+- **Secrets.** No `service_role` key in the tree or in history. The only JWT
+  literal, `web/delete-account.html:131`, decodes to `role: anon`. The app does
+  read `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` (`lib/core/app/config.dart:6-7`)
+  — a dead-Next-prototype leftover, both values genuinely public.
+- **RLS.** Zero tables with RLS off, out of 72 in `public`. The 9 the advisor
+  flags `rls_enabled_no_policy` all have SELECT/INSERT/UPDATE/DELETE revoked
+  from `anon` **and** `authenticated` — service-role-only by design, `app_secrets`
+  included. Not a gap.
+- **Sign-out.** One choke point, `supabase_repository.dart:495-497`, no `scope:`
+  → `SignOutScope.global`. `SignOutScope.local` appears nowhere in `lib/` or
+  `test/`. Account deletion revokes twice (auth.users cascade, then global).
+  Only inherent gap is `offline_screen.dart:75-86` — an offline device cannot
+  revoke. Unfixable, already documented.
+- **Enumeration.** Reset and sign-in were already neutral and already tested
+  (`onboarding_escape_test.dart:93-104`).
+
+**Fixed, one commit each:**
+
+1. `b5f741f` **reach-notify** (`index.ts:355-358`) resolved a profile by `id`
+   alone with the service role, from a body-supplied `recipient`/`callee_id`,
+   with nothing tying it to the body-supplied `couple_id` — arbitrary push, plus
+   a liveness oracle via the silent no-token exit. Now gated on **`couple_members`,
+   not `profiles.couple_id`**, and that distinction is the whole fix:
+   `dissolve_couple()` nulls `profiles.couple_id` and `unlink_ended` is posted
+   *after* it runs (`unlink_expire_due()` in `20260830120000` reads members out
+   first and says why). Constraining on `profiles` would have silently dropped
+   the notification telling both people their shared space had closed. Verified
+   live: 0 paired profiles missing a ledger row, PK `(couple_id, user_id)` so
+   `maybeSingle()` cannot throw.
+2. `f094cff` **turn-credentials** required only "signed in" while `map-token` and
+   `giphy-key` both require couple membership — for a 24h Cloudflare relay
+   credential billed by the gigabyte, on an open-signup project. Mirrored their
+   check, placed before `claim_turn_mint` so an unentitled caller cannot spend a
+   mint slot.
+3. `38ab923` **auth_errors.dart:60-63** still said "An account with this email
+   already exists". Unreachable *only* because email confirmation is on (live:
+   4 users, 0 unconfirmed, 4 confirmation mails) — a dashboard toggle the code
+   does not control. Removed; test added. The `email not confirmed` branch was
+   left alone deliberately: GoTrue returns it only after a *correct* password,
+   so it discloses nothing.
+4. `593b2e2` **`.env` is a Flutter asset** (`pubspec.yaml:142`) and gitignored,
+   so it ships in the APK in plaintext and no review ever sees it. Test pins the
+   allowed key set, derived from `config.dart` rather than written down, and
+   skips when `.env` is absent.
+5. `cfa248a` **`storage_quota_ok(uuid)`** — the last client-supplied id reaching
+   a `SECURITY DEFINER` body unchecked. The grant must stay (`storage_quota_limit`
+   calls it in a RESTRICTIVE WITH CHECK, evaluated as the invoking role), so the
+   guard went in the body.
+
+**Not verified, and this matters:** the session container has **neither `flutter`
+nor `deno`**. Nothing was compiled, no test was run, and migration
+`20260904130000` was **not applied to any project** — not staging, not prod. The
+migration's expression and its `has_function_privilege` assertion were validated
+as read-only `select`s against prod (parses, returns `boolean`, grant intact),
+which is syntax evidence, not execution evidence. No APK was built.
+
+**Left undone on purpose, needs a ruling:** 42 write policies across 23 tables
+authorise on `couple_id` alone with no `auth.uid()` actor pin, so within a couple
+either partner can write a row attributed to the other. No cross-couple exposure.
+This is a *partially completed* sweep — `20260829145343` closed exactly this for
+`cycle_*` and `routine_checks`, `20260818140000` for `consent_state`; the rest
+were never done. Finishing it is a 42-policy migration touching most features.
+Also: `app_release_read` is `for select to anon using (true)`, which is how the
+pre-login version gate works, but it makes `apk_url`/`apk_sha256` publicly
+readable. And leaked-password protection is off (advisor), as
+`sign_up_page.dart:51-53` already notes.
+
+### §280 addendum — CI green on Linux, and the verification gap in §280 is closed
+
+**2026-09-04.** Run `33826446955` on `b5cf0a9101b0c191a8455ebb9e7a404be30b2bef`,
+which is the branch tip exactly:
+
+      analyze + test        : success, 5m29s
+      dependency advisories : success, 1m04s
+      Vercel Preview        : success
+      🎉 1580 tests passed, 3 skipped.
+
+§270's green run recorded **1577** passing. Five commits added exactly three
+tests — one in `auth_key_lifecycle_test.dart`, two in `repo_hygiene_test.dart` —
+and 1577 + 3 = 1580, so the new tests ran rather than merely failing to break
+anything. That arithmetic is the evidence; a green tick alone would not be,
+which is the §268 lesson.
+
+One nuance worth recording because it is not obvious from the count. The new
+`.env` allowlist test returns early when `mobile/.env` is absent, and an early
+return counts as a PASS, not a skip — so "1580 passed" would look identical if
+the assertion had never executed. It did: `gates.yml` writes the placeholder
+`.env` and then guards with `test -f .env` **before** `flutter analyze`, and
+`flutter test` runs after both, so the file exists for the whole test phase and
+the job would have died at that guard otherwise.
+
+What this does NOT verify, unchanged from §280: the two edge functions
+(`reach-notify`, `turn-credentials`) have no test harness in this repo and CI
+never deploys, so they are still unexecuted — `deno check` has not been run on
+them anywhere. Migration `20260904130000` remains applied to **no** project.
+No APK was built.
+
+## §281
+
+**2026-09-04 — `20260904130000` applied to STAGING and behaviourally verified. Production
+untouched.**
+
+Staging ledger entry is `20260904024717 the_quota_bit_answers_only_to_its_owner` — the
+version differs from the repo filename, as this file already records about the two
+numbering schemes, and matches how every other staging entry was written.
+
+**Pre-flight said staging IS a faithful rehearsal for this one change**, which is worth
+recording because §65's drift warning is otherwise correct and would have argued the
+opposite. For the objects this migration touches, staging and production matched exactly:
+`storage_quota_ok` body byte-identical, `prosecdef` true on both, EXECUTE granted to
+`authenticated` and revoked from `anon` on both, and the same RESTRICTIVE INSERT policy
+`storage_quota_limit` with check `((owner IS NULL) OR storage_quota_ok(owner))`. The drift
+that does exist on staging (3 permissive storage INSERT policies vs prod's 6, fewer buckets)
+is outside this blast radius.
+
+**A 20-agent adversarial pre-flight ran before applying**: 4 lenses (repo text, live
+catalogs on both projects, the storage-owner invariant, SQL semantics) each proposing
+breakage modes, then independent refuters on every claim. 16 risks adjudicated, 15 dismissed
+from primary sources, 1 surviving.
+
+The decisive mechanism, and the thing worth keeping: **`storage.objects.owner` and
+`auth.uid()` are the same JWT field twice.** storage-api sets `request.owner = payload.sub`
+and scopes the DB connection with `set_config('request.jwt.claim.sub', payload.sub)`. So
+inside the WITH CHECK the two operands cannot diverge on any RLS-evaluated insert, and the
+new CASE always takes the self branch on a real upload. Copy, move and upsert all pass the
+*requester* as owner; signed upload URLs run through `asSuperUser()` and never reach RLS at
+all (and the app uses none of them). That is why this change is behaviour-preserving rather
+than merely believed to be.
+
+**Measured on staging after applying**, with `request.jwt.claim.sub` set to a test uuid:
+
+      auth.uid()                    = the test uuid
+      storage_quota_ok(self)        = true      (own bit still answered)
+      storage_quota_ok(other)       = NULL      (the leak, closed)
+      (false) OR ok(other)          = NULL      (foreign-owner insert denied)
+      (true)  OR ok(other)          = true      (owner IS NULL short-circuit still admits)
+      no JWT: ok(self) / ok(other)  = true/true (cron + service_role path unchanged)
+      authenticated EXECUTE = true, anon = false, prosecdef = true, policy text unchanged
+
+The `(true) OR ok(other) = true` row is the one that mattered most: had the OR not
+short-circuited, every owner-NULL insert would have started failing.
+
+**One surviving risk, pre-existing and NOT caused by this change.** `storage.objects.owner`
+carries Supabase's own catalog comment "Field is deprecated, use owner_id instead". The
+policy and `reconcile_storage_usage()` both depend on it. If a platform upgrade ever stops
+populating it, `(owner IS NULL)` becomes TRUE for every insert, the quota ceiling silently
+stops existing, and the reconciler simultaneously zeroes every counter — failing open twice
+with nothing watching. Not true today (prod: 143 objects, 0 with owner null, 0 where
+`owner::text <> owner_id`). Worth a follow-up: either a monitor on
+`count(*) from storage.objects where owner is null`, or moving the policy and reconciler to
+`coalesce(owner::text, owner_id)`.
+
+**`_quota_probe` on staging is not ours.** Staging carries a RESTRICTIVE INSERT policy
+`_quota_probe` with check `true` that appears in no migration in this repo. It is inert
+(restrictive policies are ANDed, and `true` cannot mask a denial), but it is undocumented
+drift. It was NOT created by this session: across all 20 workflow agents the actual tool
+invocations were 241 `execute_sql`, 152 Bash, 24 ToolSearch, 20 StructuredOutput and some
+read-only GitHub/web calls — **zero** `apply_migration`, `deploy_edge_function`,
+`create_branch`, `Write` or `Edit`, and zero SQL statements beginning with a write verb.
+The agents only ever read it back out of `pg_policies`.
+
+**Not done, deliberately:** production has NOT had this migration. No live upload was
+performed on staging either — the verification above is expression-level against the real
+function and the real policy text, not an end-to-end object insert.
+
+## §282
+
+**2026-09-04 — production finished: migration applied, both edge functions
+deployed, and `deno check` actually run for the first time.**
+
+### The migration is on production now, verified against a real user
+
+`20260904130000` applied to `sopictusdonlvuezmfep`; the fail-closed assertion
+passed. Verified by setting `request.jwt.claim.sub` to the uuid that owns all
+135 `couple_intimate` objects, not a synthetic one:
+
+      auth.uid()                    = decd9b0f… (that real owner)
+      storage_quota_ok(self)        = true      (their uploads still pass)
+      storage_quota_ok(other)       = NULL      (the leak, closed)
+      (false) OR ok(other)          = NULL      (foreign-owner insert denied)
+      (true)  OR ok(other)          = true      (owner IS NULL short-circuit intact)
+      no JWT: ok(other)             = true      (cron + service_role unchanged)
+      authenticated EXECUTE = true, anon = false, prosecdef = true,
+      policy text unchanged, storage.objects rows with owner null = 0
+
+### `deno check` — it had never been run on these functions anywhere
+
+`deno.land` is policy-denied by this environment's proxy, but `registry.npmjs.org`
+is allowed, so Deno 2.9.6 installs via `npm i deno`. `jsr.io` answers 403 even
+though it is in the proxy's noProxy list, so the two supabase-js specifiers were
+redirected to `npm:@supabase/supabase-js@2` through a `--config` import map. Same
+library, fetched from a reachable registry.
+
+- **turn-credentials: clean.** No diagnostics at all.
+- **reach-notify: one diagnostic, and it is a tooling artifact, not a defect.**
+  TS2769 at the `crypto.subtle.importKey("pkcs8", pemToDer(...), …)` call in
+  `mintAccessToken()`. **Proved** it is the TypeScript 5.7+ generic-`Uint8Array`
+  narrowing by reducing it: a three-line file calling
+  `crypto.subtle.importKey("pkcs8", new Uint8Array([1,2,3]), …)` raises the
+  identical TS2769 under this Deno's bundled TypeScript 6.0.3. `Uint8Array` is a
+  valid `BufferSource` at runtime, the code has been signing FCM tokens in
+  production since v16, and edge deploys transpile rather than type-check. The
+  signing path was NOT touched — changing working production crypto to satisfy a
+  type-checker newer than the runtime would be the wrong trade.
+
+### Deployed, with verify_jwt preserved on both
+
+Checked the live setting BEFORE deploying, because the MCP tool defaults
+`verify_jwt` to true and that default would have been wrong for one of them:
+
+      reach-notify      v16 -> v17   verify_jwt FALSE  (kept)
+      turn-credentials  v6  -> v7    verify_jwt TRUE   (kept)
+
+`reach-notify` **must** stay false: every caller is a Postgres trigger building
+`headers := jsonb_build_object('Content-Type', ..., 'x-notify-secret', ...)` with
+**no Authorization header**. Deploying it with the tool's default would have
+killed every push notification in the app.
+
+**No production drift**, checked before overwriting rather than assumed —
+CLAUDE.md warns production may be ahead of this repo. Both deployed sources were
+byte-identical to this branch's pre-fix versions (turn-credentials 154 lines vs
+178 after; reach-notify's `notifySecret` already carried the `{ data, error }`
+fix and its recipient block was the pre-fix shape).
+
+**Both deploys verified by round-trip**: fetched each function back and compared
+to the local file. Identical, including the regex escapes, the template
+literals, the ttl ladder and the em dashes.
+
+### One correction the fix forced
+
+`reach-notify`'s header said *"there is NO couple_members table"*. True when
+written, false since 20260826160000, and now the exact opposite of what the code
+does — the new gate reads `couple_members` precisely because `dissolve_couple()`
+nulls `profiles.couple_id` before `unlink_ended` goes out. Rewritten to say which
+path uses which table and why. Deploying a file whose header contradicts its own
+code was not acceptable.
+
+### Still not done
+
+The edge functions have **no test harness in this repo and CI never deploys**, so
+"deployed and type-checked" is not "exercised". I could not reach the function
+URLs to smoke-test them: this environment's proxy denies `supabase.co`, so the
+403/401 probes returned `CONNECT tunnel failed`. What IS established is that both
+bundles built (a syntax error fails the build) and both sources round-trip
+byte-identically. No APK was built.

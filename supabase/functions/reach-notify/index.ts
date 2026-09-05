@@ -16,8 +16,16 @@
 //   FCM_PROJECT_ID       = Firebase project id
 // Auto-injected by the platform: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
-// Recipient lookup uses public.profiles.couple_id (this app links couples via
-// profiles.couple_id — there is NO couple_members table).
+// Recipient lookup: the OTHER-member path reads public.profiles.couple_id; the
+// explicit-recipient path proves membership against public.couple_members.
+//
+// This block used to end "there is NO couple_members table", which was true
+// when it was written and stopped being true at 20260826160000. The two tables
+// are not interchangeable and the difference is load-bearing here:
+// dissolve_couple() nulls profiles.couple_id, and 'unlink_ended' is posted
+// AFTER it runs, so profiles can no longer answer "were these two a couple" by
+// the time the last notification goes out. couple_members outlives the
+// ceremony because the 30-day restore reads it.
 //
 // ── kind 'msg_sync' — the silent delivery wake ───────────────────────────────
 // Every other kind here exists to INTERRUPT someone. 'msg_sync' exists to
@@ -346,6 +354,49 @@ Deno.serve(async (req) => {
       if (ceremonyErr) {
         console.error("ceremony mute check failed", ceremonyErr.message);
       } else if (ceremony) {
+        return OK();
+      }
+    }
+
+    // An explicitly named recipient has to prove it belongs to the couple the
+    // same body claims.
+    //
+    // Every id on this path is body-supplied — the header at the top of this
+    // handler says so — and the client below holds the service role. So the
+    // explicit branch, which looked a profile up by `id` alone, resolved ANY
+    // row in the table: a body naming a stranger reached that handset, and the
+    // silent no-token exit further down answered whether the id existed at
+    // all. The shared secret kept that off the open internet. It was never
+    // what kept it inside the couple.
+    //
+    // Checked against couple_members, NOT profiles.couple_id, and the
+    // difference is load-bearing. dissolve_couple() nulls profiles.couple_id,
+    // and unlink_ended is posted AFTER it has run — unlink_expire_due() in
+    // 20260830120000 reads the members out BEFORE dissolving for exactly that
+    // reason, and says so. couple_members is the ledger that outlives the
+    // ceremony (it is what the 30-day restore reads), so it is the only table
+    // that still answers "were these two a couple" once the dissolution is
+    // done. Constraining on profiles here would have silently dropped the one
+    // notification telling both people their shared space had closed.
+    if (explicitRecipient) {
+      const { data: member, error: memberErr } = await admin
+        .from("couple_members")
+        .select("user_id")
+        .eq("couple_id", coupleId)
+        .eq("user_id", explicitRecipient)
+        .maybeSingle();
+      // Fails CLOSED, unlike the ritual mute check above. That one must not
+      // swallow a ritual the couple asked for; this one is the membership
+      // proof itself, and a lookup that did not answer has not proved it.
+      if (memberErr || !member) {
+        // Deliberately not written to push_failures: user_id there is FK'd to
+        // auth.users, so recording an id the body invented would throw. The
+        // log is service-role-only and is enough.
+        console.error(
+          "explicit recipient rejected",
+          kind,
+          memberErr ? `lookup failed: ${memberErr.message}` : "not a member",
+        );
         return OK();
       }
     }

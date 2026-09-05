@@ -44,6 +44,30 @@ Deno.serve(async (req: Request) => {
     const { data: { user } } = await caller.auth.getUser();
     if (!user) return json({ error: "unauthenticated" }, 401);
 
+    // Holding an account is not entitlement — the same rule map-token and
+    // giphy-key were both given, and this endpoint has the stronger case for
+    // it. Signup is open, so "any authenticated user" means everyone the day
+    // the listing goes public, and what is handed out here is a 24-hour
+    // Cloudflare relay credential billed by the gigabyte. Twenty-five a day
+    // per account is a cap on one account, not on how many accounts there are.
+    //
+    // Nothing legitimate is refused: the only caller is call_controller.dart,
+    // and a call needs a partner to place it to.
+    //
+    // Checked BEFORE claim_turn_mint on purpose, so a caller with no
+    // entitlement cannot spend a mint slot to find that out.
+    const { data: prof, error: profErr } = await caller
+      .from("profiles")
+      .select("couple_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profErr) {
+      // A failed check is not a verdict — same rule as the secret read below.
+      console.error("membership read failed for turn-credentials", profErr.message);
+      return json({ error: "membership_check_failed" }, 500);
+    }
+    if (!prof?.couple_id) return json({ error: "not_in_a_couple" }, 403);
+
     // Ten mints an hour per account. Deliberately on `caller`, not `admin`: the
     // RPC reads auth.uid(), so the identity being counted is the one the JWT
     // proved, and nothing here can be pointed at somebody else's quota.
