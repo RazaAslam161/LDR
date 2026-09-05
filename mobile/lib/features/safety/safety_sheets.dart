@@ -126,15 +126,21 @@ class _ReportSheetState extends State<_ReportSheet> {
                 ),
               ),
               // The honest version. Saying "we can't read your messages" would
-              // be false — chat text is dual-written (a plaintext body beside
-              // the ciphertext) until the cipher-only flip, and chat media is
-              // not encrypted at all. What IS end-to-end encrypted: Memory
-              // Threads, the text of Wish Jar entries, and the FILES in the
-              // Private Vault — not "the Closer vault", which is the dead
-              // vault_items table nothing has written to since the vault moved
-              // to personal_vault_items. THREAT-MODEL.md §1 is the list this
-              // comment must agree with, and the privacy policy says the same
-              // two taps away.
+              // be false — chat bodies only seal when the server flag is on and
+              // the seal succeeds, and chat media is not encrypted at all.
+              //
+              // What IS end-to-end encrypted: Memory Threads, the text of Wish
+              // Jar entries, message reactions, and the messages and notes
+              // written during a separation.
+              //
+              // The Private Vault is NOT, and this comment claimed it was until
+              // 2026-09-04 — `VaultRepository.saveMedia` calls `_uploadPlain`
+              // and `personal_vault_items.content` is `text`. It has been
+              // plaintext since build 60 by the owner's 2026-08-28 ruling. This
+              // comment was one of eight places carrying that error, and being
+              // a comment it was the one that taught the next person to repeat
+              // it. THREAT-MODEL.md §1 is the list this must agree with; check
+              // it against that table rather than against another comment.
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 0, 20, 14),
                 child: Text(
