@@ -24381,3 +24381,118 @@ address redaction) now appears in both variants back to back. Duplicates are vis
 deletions are not — that is the whole trade.
 
 Still true: nothing has rendered. The device pass in §283 is the next step.
+
+## §286 — Covers: why App info still says "Miles", and the share sheet that said it too (2026-09-06)
+
+Owner report: cover set to Calculator, Settings › Apps › App info still shows "Miles".
+
+**Root cause, one sentence.** App info reads `<application android:label="Miles">`
+(`src/play/AndroidManifest.xml:26`, `src/sideload/AndroidManifest.xml:10`); a cover only
+enables a different `<activity-alias>`, and Android reads an alias's label for the launcher
+entry (and recents, for a task the alias rooted) — nothing else. No public API changes the
+application label or icon after install (checked against the SDK 36 API index). The only apps
+whose App info says "Calculator" are apps *named* Calculator on Play; the 2026-08-16 ruling
+(§32/§34) keeps Miles under its own name, so App info says Miles by design.
+
+**Verified against AOSP source this session (23 read-only agents, every claim adversarially
+re-checked), version-scoped:**
+- App info header = `ApplicationInfo.loadLabel` (Settings `AppHeaderViewPreferenceController`
+  → `ApplicationsState.AppEntry.label`). Alias never consulted.
+- Notification header = application label. `EXTRA_SUBSTITUTE_APP_NAME` needs
+  `SUBSTITUTE_NOTIFICATION_APP_NAME` (signature|privileged); on 7–12 the check is client-side
+  in `Notification.Builder.loadHeaderAppName`, on 13+ system_server strips the extra. Same
+  outcome everywhere. The repo already knew this for messages
+  (`reach_notifications.dart:280-301` silences them under any cover); Reach, incoming-call,
+  call-service and the Timer cover's countdown still post under covers, headed "Miles".
+- **Share sheet (new finding).** Android 10+ headlines every target with the APPLICATION
+  label and icon (`TargetPresentationGetter.getLabel` → `mAppInfo.loadLabel`;
+  `SUBSTITUTE_SHARE_TARGET_APP_NAME_AND_ICON` is signature|privileged); the activity label is
+  only a second line. On 7–9 the activity label/icon headline. A disabled alias never
+  resolves (no `MATCH_DISABLED_COMPONENTS` in `ResolverListController`). So the comment at
+  `src/main/AndroidManifest.xml` ("Inheriting means it appears as whatever cover is active")
+  was false: the ACTION_SEND filter sat on unlabeled MainActivity and every share sheet on
+  the phone listed "Miles" + the Miles icon under every cover.
+- **Recents.** Launcher3 quickstep titles a task from `activityInfo.loadLabel` of the
+  base-intent component (`origActivity` for an alias) and ignores `TaskDescription`'s label
+  for the visible title; a resource-type `TaskDescription` icon is ignored too (`TODO
+  b/143363444`). Flutter's `Title` pushes `TaskDescription("", icon 0, color)` on initState
+  and on title/colour change (`title.dart:38-62`, `PlatformPlugin.java:234-245`);
+  `main.dart:1026` already passes `title: ''`. So a `setTaskDescription` override would NOT
+  fix anything on Pixel-class launchers — **not built.** Alias-rooted tasks already show the
+  cover; only a task rooted cold by a `tethered://` link shows "Miles" (see Open).
+- Private Space (Android 15): no public `Settings.ACTION_PRIVATE_SPACE_SETTINGS`; hiding is a
+  launcher-cooperative contract, not a guarantee. Not referenced in copy.
+
+**Changed (owner chose "leave the share sheet while covered"):**
+- `src/main/AndroidManifest.xml` — ACTION_SEND filter removed from MainActivity; false
+  comment replaced with the verified reason.
+- `src/play/AndroidManifest.xml`, `src/sideload/AndroidManifest.xml` — the same filter added
+  to `.AliasMiles` only. Cover on ⇒ app absent from share sheets; cover off ⇒ "Miles",
+  honestly. `captureSharedText` and `share_intake.dart` are component-agnostic; unchanged.
+  Side effect, improvement: a share into the running app now matches the alias-rooted task's
+  singleTop instance instead of stacking a second MainActivity.
+- `disguise_picker_screen.dart` — confirm dialog no longer says "Miles will not be findable
+  by its own name" (Settings search finds it); footer no longer says Settings calls the app
+  "News" (stale since both manifests went `label="Miles"`). Both now say: home screen shows
+  the cover, the app leaves the share menu, Settings › Apps / permission pop-ups / the top
+  line of any alert still say Miles.
+- `reel_queue_screen.dart` — empty state names "Add link" (the paste path, lines 148-207)
+  instead of telling a covered user to use a share sheet the app is no longer in.
+- `disguise_manifest_test.dart` — new test: no SEND on MainActivity in main; exactly one
+  alias carries it on each channel, it is `.AliasMiles`, with DEFAULT + text/plain pinned.
+- `docs/guides/disguises.md` ("News" → "Miles"; share-sheet bullet),
+  `PLAY-RELEASE-RUNBOOK.md` row 2 wording, `.claude/CLAUDE.md` one line.
+
+**Gates, after the last edit (two adversarial review rounds; round 1 found the reels copy and
+a "recents" over-claim, both fixed):**
+
+    flutter analyze --no-pub | grep -c "error -\|warning -"   → 0   (matcher proven: 2 on synthetic error+warning lines)
+    flutter test test/unit/disguise test/unit/hygiene           → 00:45 +159: All tests passed!
+
+**Open:**
+- **No handset attached** (`adb devices` empty, twice). The device checks that would settle
+  this: `cmd package query-activities --brief -a android.intent.action.SEND -t text/plain |
+  grep miles` → empty under a cover, `.AliasMiles` without; a share-sheet screenshot from
+  Chrome under a cover; Settings › Apps still "Miles" (expected, by design).
+- Cold `tethered://` deep link with no Miles task in recents roots the task at MainActivity →
+  recents "Miles" + icon until swiped away. Narrow (cover on + task swiped + reset/pairing
+  link). Fix would be an 8-line re-root through the enabled alias in `MainActivity.onCreate`;
+  not built unasked.
+- Reach / incoming-call / call-service / Timer-cover notifications post under covers with
+  the "Miles" header. Owner decision whether they go silent like messages did (§46 → §254-era
+  change at `reach_notifications.dart:301`).
+- found, not fixed: `src/main/AndroidManifest.xml` MAIN/LAUNCHER comment says "the play
+  channel, which has no aliases" — play has ten; `disguise_service.dart:50-54` and
+  `disguise_profile.dart:175-176` still say sideload has no `.AliasMiles` — it does.
+- No build made (owner rule). Build 76 in the tree is unchanged.
+
+**Exact next step:** owner builds/installs when ready; run the three device checks above on
+the OnePlus 8 and record the share-sheet screenshot here.
+
+### §286 addendum — round 2 of the adversarial pass, and a red gate that is not mine (2026-09-06)
+
+Round 2 read the round-1 fixes and found: `disguises.md` contradicting itself two bullets
+apart (channels "listed under whatever the launcher calls this app" — no, under "Miles");
+the CLAUDE.md line saying covers change "only" launcher/recents/cover screens (the
+notification small icon and wording change too); the film-shoot picker mock
+(`scripts/film-shoot/inserts/index.html`) still carrying the deleted "not findable"
+sentence — the store screenshots are shot from it; stale doc-comments in
+`disguise_profile.dart:175` and `disguise_service.dart:50,110` saying sideload has no
+`.AliasMiles`; and "the top line of any alert", read inside an AlertDialog, which now says
+"notification". All fixed. Still `found, not fixed`: `disguises.md:39` marks News as the
+default (both channels ship Miles); `src/main/AndroidManifest.xml` MAIN/LAUNCHER comment
+says play has no aliases.
+
+**Gates after the last edit:**
+
+    flutter test test/unit/disguise                              00:08 +92: All tests passed!
+    flutter analyze --no-pub | grep "error -\|warning -"         3 warnings, ALL in
+        lib/features/closer/touch_trace/touch_trace_canvas.dart:119,123,124
+        (unnecessary_cast, strict_raw_type x2)
+
+That file is another session's in-flight work, proven rather than assumed: my diff never
+touches it (`git diff --stat` on it lists only their 98/31 rewrite), the three warned lines
+sit inside their uncommitted hunk `@@ -103,2 +106,21 @@` (`as List` / `as Map` casts), and
+its mtime (01:50) precedes my last edit (01:54) while my earlier analyze run was 0/0. So
+`repo_hygiene_test` "the analyzer reports no errors and no warnings" is red in this tree
+(`+158 -1`) for their reason, not this change's. Left red, reported, not touched.

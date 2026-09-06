@@ -63,7 +63,7 @@ Console form:**
 | # | Requirement | Where | Status |
 |---|---|---|---|
 | 1 | No unprompted cover offer on first run | `app_shell.dart` | **done** — `_offerCoverAtFirstOpen()` removed; grep for it returns nothing |
-| 2 | Confirmation naming the consequence *and* the way back, before any cover applies | `disguise_picker_screen.dart` | **done** — a PIN is set, the owner records their own move on the cover, then the dialog names the new label, says Miles will not be findable by name, and states the backup hold |
+| 2 | Confirmation naming the consequence *and* the way back, before any cover applies | `disguise_picker_screen.dart` | **done** — a PIN is set, the owner records their own move on the cover, then the dialog names the new label, says the app leaves the share menu and that Settings, permission pop-ups and notification headers still say Miles, and states the backup hold |
 | 3 | A way back the owner can find on every cover screen | `cover_gate.dart`, `entry_trigger_layer.dart` | **done** — the backup hold: two still fingers on the opening screen for ten seconds, landing on the PIN. Undisclosed to users since 2026-09-03; the Console App access note is the only place it is written. No About sheet any more — the app ships no door it could describe. **Not a policy requirement** — items 4-5 carry the disclosure. See `disguises.md`. |
 | 4 | The listing describes the feature, with the picker in ≥1 screenshot | store listing | **OPEN — phase 7** |
 | 5 | The unlock gesture + a working test account in Console → App access | Console | **OPEN — phase 5.6** |

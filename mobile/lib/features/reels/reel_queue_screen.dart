@@ -219,8 +219,10 @@ class _ReelQueueScreenState extends ConsumerState<ReelQueueScreen>
             final reels = snap.data!;
             if (reels.isEmpty) {
               return const _Note(
-                'Nothing here yet.\n\nShare a reel from Instagram — or anything '
-                'else — and pick this app. It lands here for both of you.',
+                'Nothing here yet.\n\nTap "Add link" and paste a reel from '
+                'Instagram — or anything else. With no cover on you can also '
+                'share from the other app and pick this one. It lands here '
+                'for both of you.',
               );
             }
             return ListView.separated(

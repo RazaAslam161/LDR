@@ -183,20 +183,15 @@
                 <data android:scheme="tethered" android:host="auth-callback" />
             </intent-filter>
 
-            <!-- Share target: a link shared from Instagram, TikTok, YouTube or
-                 a browser lands in the couple's queue.
-
-                 Deliberately NO android:label. The share sheet shows the
-                 activity's label, and this app wears a disguise — a chooser
-                 entry reading "Miles" beside the others would announce the
-                 product to anyone glancing at the phone while its launcher icon
-                 says something else entirely. Inheriting means it appears as
-                 whatever cover is active. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
+            <!-- No ACTION_SEND here. The share target lives on .AliasMiles in
+                 each flavour manifest, so the app is offered in the share
+                 sheet only while it wears its own name. Android 10+ headlines
+                 every share-sheet entry with the APPLICATION name and icon and
+                 shows the activity's label only as a second line
+                 (SUBSTITUTE_SHARE_TARGET_APP_NAME_AND_ICON is signature-only),
+                 so a filter on this activity read "Miles" beside the Miles
+                 icon under every cover. A wrong name in the sheet is louder
+                 than a missing entry. -->
         </activity>
 
         <meta-data

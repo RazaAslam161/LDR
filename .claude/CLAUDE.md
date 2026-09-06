@@ -25,6 +25,11 @@ this machine.
 - E2EE stays; no plaintext at rest.
 - Auth and pairing are built — don't rebuild. When "nothing works" it has always been
   backend config, not the code.
+- Covers change the launcher entry, recents (alias-rooted tasks), the cover screens and
+  the notification small icon and wording. `<application android:label>` is what App
+  info, permission dialogs, the
+  notification header and the Android 10+ share sheet show, and no app can change it
+  (verified against AOSP 2026-09-06, BRAIN §286). Never promise more than that in copy.
 
 ## Build and release
 

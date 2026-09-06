@@ -18,7 +18,7 @@
          Transparency ("hidden, dormant, or undocumented features"); shipping
          the aliases silently would be the violation, not the aliases.
 
-         MainActivity carries no intent-filter of its own on purpose. Exactly
+         MainActivity carries no launcher filter of its own on purpose. Exactly
          one alias may be enabled at a time, and the switch enables the new one
          before disabling the old — a launcher filter on the activity itself
          would be a tenth identity nothing can turn off. -->
@@ -28,7 +28,10 @@
 
         <activity android:name=".MainActivity" />
 
-        <!-- The honest identity, and the one the app installs with. -->
+        <!-- The honest identity, and the one the app installs with. Also the
+             only share target: the share sheet names the APPLICATION, not the
+             alias, so the filter may live only on the identity whose name is
+             the app's own. Under a cover the app is absent from the sheet. -->
         <activity-alias
             android:name=".AliasMiles"
             android:targetActivity=".MainActivity"
@@ -39,6 +42,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- A link shared from Instagram, TikTok, YouTube or a browser
+                 lands in the couple's queue. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity-alias>
 

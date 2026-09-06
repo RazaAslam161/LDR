@@ -219,15 +219,21 @@ Rules the generator enforces or encodes:
 
 Worth knowing before trusting this too far.
 
-- **Settings › Apps still says "News".** That name comes from
+- **Settings › Apps still says "Miles".** That name comes from
   `<application android:label>`, which is fixed when the app is installed;
-  no app can change it at runtime. The launcher name and icon change; the
-  system app list does not. The picker says so on screen.
+  no app can change it at runtime. The same label heads permission dialogs
+  and the top line of every notification. The launcher name and icon change;
+  the system app list does not. The picker says so on screen.
+- **The share sheet.** Android 10+ headlines every share target with the
+  application name and icon, so the app is a share target only on the plain
+  Miles identity (`.AliasMiles`); under a cover it is absent from the sheet
+  and links are pasted in via "Add link". Guarded by
+  `test/unit/disguise/disguise_manifest_test.dart`.
 - **The lock screen.** The backup hold shows a nameless lock; the owner's own
   move, with App Lock on, shows the app's own lock. Both are visible — that is
   the accepted cost of having a way in at all.
-- **Notification channels.** Listed under whatever the launcher calls this app,
-  so every channel name is deliberately generic ("Alerts", "Voice", "Timers").
+- **Notification channels.** Listed under the app's own name, "Miles", so
+  every channel name is deliberately generic ("Alerts", "Voice", "Timers").
   Guarded by `test/unit/disguise/disguise_notification_test.dart`.
 - **Launcher shortcuts.** There are none, on purpose — a long-press popup
   offering "New note" would name a feature the cover cannot explain. Guarded by

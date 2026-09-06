@@ -47,11 +47,9 @@ class DisguiseService {
 
   /// Whether this build installs as itself.
   ///
-  /// The Play channel declares `.AliasMiles` alongside the nine covers, all of
-  /// them disabled, and starts on Miles — so a cover is something the owner
-  /// switches ON from Settings, never the state they were handed. The sideload
-  /// channel has no such component and starts on News, which is the point of
-  /// that channel.
+  /// Both channels declare `.AliasMiles` alongside the nine covers, all of
+  /// them disabled, and start on Miles — so a cover is something the owner
+  /// switches ON from Settings, never the state they were handed.
   ///
   /// Two things follow: the plain identity has to be in the `all` list so
   /// switching away from it disables it, and nothing may prompt for a cover
@@ -107,9 +105,9 @@ class DisguiseService {
           .timeout(const Duration(seconds: 2));
       final stored = prefs.getString(_prefsKey);
       // Nothing stored means nothing was ever chosen, and what the launcher is
-      // showing then is whichever alias the manifest enabled — News on
-      // sideload, Miles on Play. Answering kDefaultDisguise for both would tell
-      // a Play install it is wearing a cover it is not.
+      // showing then is whichever alias the manifest enabled — Miles on both
+      // channels. Answering kDefaultDisguise would tell the install it is
+      // wearing a cover it is not.
       if (stored == null) return _installedIdentity;
       return disguiseForAlias(stored);
     } catch (_) {

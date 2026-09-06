@@ -139,8 +139,10 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Change how this app looks?'),
           content: Text(
-            'Your launcher icon and name become "${choice.label}". Miles will '
-            'not be findable by its own name until you change this back.\n\n'
+            'Your home screen shows "${choice.label}", and this app leaves '
+            "the share menu. Android's Settings › Apps, permission "
+            'pop-ups and the top line of any notification still say Miles — '
+            'no app can change those.\n\n'
             'Way back in — ${keptExisting ? 'the move already recorded for '
                 'this cover' : 'the move you just recorded'}. Nothing else '
             'opens the cover, so practise it once before you put the phone '
@@ -286,9 +288,11 @@ class _DisguisePickerScreenState extends ConsumerState<DisguisePickerScreen> {
                 'Your home screen may take a moment to refresh, and the app can '
                 'close as the icon changes. That is Android doing the swap — '
                 'open it again from the new icon.\n\n'
-                "Android's own Settings › Apps list keeps calling this app "
-                '"News" whichever disguise you pick. That name is fixed when '
-                'the app is installed and no app can change it afterwards.',
+                "Android's own Settings › Apps list, permission pop-ups and "
+                'the top line of any notification keep the name '
+                '"${kPlainProfile.label}" whichever disguise you pick. That '
+                'name is fixed when the app is installed and no app can '
+                'change it afterwards.',
                 textAlign: TextAlign.center,
                 style: MilesType.inter(
                   fontSize: 11.5,

@@ -243,6 +243,35 @@ void main() {
             'intent-filter, that is a launcher entry no alias can turn off',);
   });
 
+  test('the share target follows the plain identity, on both channels', () {
+    // The share sheet labels every entry with the APPLICATION name and icon
+    // (Android 10+), so a filter on MainActivity read "Miles" beside the Miles
+    // icon under every cover. On .AliasMiles it resolves only while the app
+    // wears its own name; under a cover the app is absent from the sheet.
+    const send = '<action android:name="android.intent.action.SEND" />';
+    expect(mainManifest.contains(send), isFalse,
+        reason: 'a share target on MainActivity is on under every cover',);
+    for (final entry in {'sideload': manifest, 'play': playManifest}.entries) {
+      final targets = RegExp(
+        '<activity-alias.*?</activity-alias>',
+        dotAll: true,
+      )
+          .allMatches(entry.value)
+          .map((m) => m.group(0)!)
+          .where((a) => a.contains(send))
+          .toList();
+      expect(targets.length, 1,
+          reason: '${entry.key}: ${targets.length} share targets',);
+      expect(targets.single, contains('android:name=".AliasMiles"'),
+          reason: '${entry.key}: the share target is not the plain identity',);
+      // Without DEFAULT or the mime type the filter matches no implicit SEND.
+      expect(targets.single, contains('android.intent.category.DEFAULT'),
+          reason: '${entry.key}: share filter has no DEFAULT category',);
+      expect(targets.single, contains('android:mimeType="text/plain"'),
+          reason: '${entry.key}: share filter has no text/plain type',);
+    }
+  });
+
   test('the Miles launcher icon exists and survives pre-API-26', () {
     final name = RegExp('android:icon="@mipmap/([a-z0-9_]+)"')
         .firstMatch(playManifest)

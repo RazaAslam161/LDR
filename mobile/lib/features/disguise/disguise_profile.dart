@@ -172,8 +172,8 @@ const List<DisguiseProfile> kDisguises = [
 /// every test and picker that walks that list is asking "which covers exist",
 /// which this is not an answer to. It has an alias of its own all the same,
 /// because a launcher identity you cannot switch back TO is a one-way door.
-/// Only the Play channel declares `.AliasMiles`; the sideload manifest has no
-/// such component, which is why [DisguiseService.plainDefault] gates it.
+/// Both channels declare `.AliasMiles` and ship it enabled. It also carries the
+/// share target, so under a cover the app is absent from the share sheet.
 const DisguiseProfile kPlainProfile = DisguiseProfile(
   aliasId: 'Miles',
   label: 'Miles',

@@ -32,6 +32,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The only share target, for the reason given on the play
+                 manifest's copy of this block: the share sheet names the
+                 APPLICATION, so under a cover the app must be absent from it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity-alias>
 
         <activity-alias
