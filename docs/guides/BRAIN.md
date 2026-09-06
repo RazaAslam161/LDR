@@ -24946,3 +24946,25 @@ Not in the log: what the PARTNER saw. Ask. And the two-handset symmetry (both re
 still untested.
 
 Everything from §287 to here is uncommitted.
+
+### §294 addendum — 957890b pushed, CI green on run 34040035782
+
+42 files, +2754/−291. `gates` completed / success on a clean checkout — the run that matters
+most here: it resolves `camera_android_camerax` and `flutter_webrtc` from `dependency_overrides`
+with a fresh `pub get`, which no local run this session ever exercised (the local lockfile
+already pointed at the vendored copies).
+
+Staged file by file beside a concurrent session's uncommitted audit work. Two shared files
+(`settings_screen.dart`, `call_controller.dart`) were rebuilt as HEAD + my anchored edits and
+diffed against HEAD before staging — zero lines from the other session's in-progress work
+crossed into the commit. BRAIN's own §287–§294 were likewise staged as a blob (HEAD + my
+sections only); the other session's uncommitted local numbering was left untouched in the
+working tree, to be reconciled by its own author.
+
+Local temp worktrees used to gate the exact staged combination before committing
+(`gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest` → 52/52; `flutter test`
+→ 1666 passed, 3 skipped; `flutter analyze` → 0/0) have been removed.
+
+Still open, unchanged by a green CI: the partner-side visual on the call, both handsets
+retouched in the same call, and the Gradle stale-`libapp.so` packaging cause (§291/§293) —
+worked around by a verified clean before every device build, not yet isolated.
