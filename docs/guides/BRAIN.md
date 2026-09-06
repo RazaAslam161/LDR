@@ -24496,3 +24496,7 @@ sit inside their uncommitted hunk `@@ -103,2 +106,21 @@` (`as List` / `as Map` c
 its mtime (01:50) precedes my last edit (01:54) while my earlier analyze run was 0/0. So
 `repo_hygiene_test` "the analyzer reports no errors and no warnings" is red in this tree
 (`+158 -1`) for their reason, not this change's. Left red, reported, not touched.
+
+### §286 addendum 2 — b844663 pushed, CI green on run 34001594395 (2026-09-06)
+
+`git push origin fix-sprint` -> `18dc45d..b844663`; `gh run view 34001594395`: analyze + test success, dependency advisories success. Only the 13 files of this change were staged; BRAIN was staged as HEAD + the §286 tail so the other session's §284–285 appends stay uncommitted with the rest of their tree (67 modified files).
