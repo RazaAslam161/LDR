@@ -77,9 +77,18 @@ void main() {
       // born; ads were cancelled and their generation removed, so the pin
       // names the head and the shape, not a specific neighbour.)
       final source = File('lib/core/app/release_gate.dart').readAsStringSync();
-      expect(source, contains('const columnSets = [withSoundKill, '),
-          reason: 'withSoundKill must be its own generation at the head of '
-              'columnSets');
+      // beauty_kill (BRAIN §287) took the head; withSoundKill is the
+      // generation directly below it and must stay exactly as shipped.
+      expect(source, contains('const columnSets = [withBeautyKill, withSoundKill, '),
+          reason: 'withSoundKill must be its own generation, directly below '
+              'the beauty generation at the head of columnSets');
+      final soundBody = RegExp(
+        "const withSoundKill = '([^;]+)';",
+        dotAll: true,
+      ).firstMatch(source)![1]!;
+      expect(soundBody, isNot(contains('beauty_kill')),
+          reason: 'the sound generation must stay exactly as shipped clients '
+              'know it');
       final cipherBody = RegExp(
         "const withCipher = '([^;]+)';",
         dotAll: true,

@@ -124,52 +124,32 @@ class OneEuroFilterTest {
     }
 }
 
-/** The prediction clamp, which is what stops a stalled tracker sliding the mesh off the face. */
+/** The velocity a point exposes, which [FaceFrame.predicted] extrapolates with. */
 class OneEuroPointTest {
 
     @Test
-    fun `prediction is bounded by the horizon`() {
+    fun `a still point reports zero velocity`() {
+        val p = OneEuroPoint()
+        for (i in 0 until 20) p.filter(42f, 7f, i * 33_333_333L)
+        assertEquals(0.0, p.vx.toDouble(), 1e-6)
+        assertEquals(0.0, p.vy.toDouble(), 1e-6)
+    }
+
+    @Test
+    fun `a steady drift reports its direction and roughly its speed`() {
         val p = OneEuroPoint(minCutoff = 1.0, beta = 0.0)
-        // Feed a steady rightward drift so velocity is non-zero.
-        for (i in 0 until 20) {
-            p.filter(i * 10f, 0f, i * 33_333_333L)
-        }
-        val lastNs = 19 * 33_333_333L
-        val (nearX, _) = p.predict(lastNs + 33_000_000L, lastNs)
-        // Ten seconds stale: the clamp must stop this, or the mesh ends up in the background.
-        val (farX, _) = p.predict(lastNs + 10_000_000_000L, lastNs)
-        val (horizonX, _) = p.predict(lastNs + OneEuroPoint.MAX_PREDICT_NS, lastNs)
-
-        assertEquals(
-            "prediction past the horizon must equal prediction AT the horizon",
-            horizonX.toDouble(),
-            farX.toDouble(),
-            1e-3,
-        )
-        assertTrue("a nearer prediction should be closer than the horizon one", nearX <= horizonX)
+        // 10 units per 33ms frame = 300 units per second, along x only.
+        for (i in 0 until 30) p.filter(i * 10f, 0f, i * 33_333_333L)
+        assertTrue("vx should be positive, got ${p.vx}", p.vx > 0f)
+        assertTrue("vx should approach 300/s, got ${p.vx}", p.vx > 150f && p.vx < 350f)
+        assertEquals(0.0, p.vy.toDouble(), 1e-6)
     }
 
     @Test
-    fun `prediction never runs backwards in time`() {
+    fun `reset zeroes velocity so a flip does not carry the old lens's motion`() {
         val p = OneEuroPoint()
-        for (i in 0 until 10) {
-            p.filter(i * 5f, i * 5f, i * 33_333_333L)
-        }
-        val lastNs = 9 * 33_333_333L
-        // A render timestamp older than the sample must not extrapolate backwards.
-        val (x, _) = p.predict(lastNs - 1_000_000_000L, lastNs)
-        assertEquals(p.x.toDouble(), x.toDouble(), 1e-6)
-    }
-
-    @Test
-    fun `a still point predicts itself`() {
-        val p = OneEuroPoint()
-        for (i in 0 until 20) {
-            p.filter(42f, 7f, i * 33_333_333L)
-        }
-        val lastNs = 19 * 33_333_333L
-        val (x, y) = p.predict(lastNs + OneEuroPoint.MAX_PREDICT_NS, lastNs)
-        assertEquals(42.0, x.toDouble(), 1e-3)
-        assertEquals(7.0, y.toDouble(), 1e-3)
+        for (i in 0 until 10) p.filter(i * 10f, 0f, i * 33_333_333L)
+        p.reset()
+        assertEquals(0.0, p.vx.toDouble(), 1e-6)
     }
 }

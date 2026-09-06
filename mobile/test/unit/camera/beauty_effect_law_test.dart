@@ -110,6 +110,90 @@ void main() {
     });
   });
 
+  group('the one screen that must never arm it', () {
+    test('the heartbeat reader drives the camera with no retouch in the path',
+        () {
+      // It measures a pulse from a torch-lit fingertip through startImageStream.
+      // A GPU pass in that stream would corrupt the measurement it exists to
+      // take, and CameraX would refuse a second ImageAnalysis beside its own.
+      final heartbeat =
+          File('lib/features/heartbeat/heartbeat_screen.dart').readAsStringSync();
+      expect(heartbeat.contains('BeautyEngine'), isFalse);
+      expect(heartbeat.contains('miles/beauty'), isFalse);
+    });
+  });
+
+  group('the seven review findings stay fixed', () {
+    const cx = 'third_party/camera_android_camerax';
+    test('the face tracker rides the plugin analyzer and maps through the sensor', () {
+      final bindSrc = File('$cx/android/src/main/java/io/flutter/plugins/camerax/ProcessCameraProviderProxyApi.java').readAsStringSync();
+      expect(bindSrc, contains('setAnalyzer(executor, analyzer)'),
+          reason: 'a second ImageAnalysis is a second YUV stream most cameras refuse',);
+      expect(bindSrc, contains('MilesCameraEffectHook.onBound(camera)'));
+      final tracker = File('android/app/src/main/kotlin/com/miles/miles/beauty/FaceTracker.kt').readAsStringSync();
+      expect(tracker, contains('sensorToBufferTransformMatrix'));
+      final effect = File('android/app/src/main/kotlin/com/miles/miles/beauty/BeautyEffect.kt').readAsStringSync();
+      expect(effect, contains('setTransformationInfoListener'),
+          reason: 'analysis and effect streams are different crops of the sensor',);
+    });
+    test('the preview is not rotated twice when armed', () {
+      final prev = File('$cx/android/src/main/java/io/flutter/plugins/camerax/PreviewProxyApi.java').readAsStringSync();
+      expect(prev, contains('|| MilesCameraEffectHook.isArmed()'));
+      expect(prev, contains('MilesCameraEffectHook.boundCamera()'));
+    });
+    test('the use-case graph stays stable across a recording when armed', () {
+      final dart = File('$cx/lib/src/android_camera_camerax.dart').readAsStringSync();
+      expect(dart, contains('if (keepGraphStableForEffect) videoCapture!,'));
+      expect(dart, contains('streamCallback == null && !keepGraphStableForEffect'));
+      expect(dart, contains('if (!keepGraphStableForEffect) {\n      await _unbindUseCaseFromLifecycle(videoCapture!);'));
+      final screen = File('lib/features/chat/camera/rapid_camera_screen.dart').readAsStringSync();
+      expect('keepGraphStableForEffect = _beautyArmed'.allMatches(screen).length, 2,
+          reason: 'set at boot and on every rebind',);
+    });
+    test('a toggle disposes the old controller and rebinds serially', () {
+      final screen = File('lib/features/chat/camera/rapid_camera_screen.dart').readAsStringSync();
+      final i = screen.indexOf('Future<void> _applyBeauty(');
+      final body = screen.substring(i, screen.indexOf('\n  }\n', i));
+      expect(body, contains('await _controller?.dispose();'));
+      expect(body, contains('_rebind = _rebind.then('));
+    });
+  });
+
+  group('the call has its own look control and no silent link', () {
+    test('the video call carries the Look control and the shared sheet', () {
+      final screen = File('lib/features/call/call_screen.dart').readAsStringSync();
+      expect(screen, contains('Icons.face_retouching_natural'));
+      expect(screen, contains('showBeautySheet('));
+      expect(screen, contains('BeautyEngine.applyCall(s)'));
+      expect(screen, contains('BeautyPrefs.useInCalls = true'),
+          reason: 'enabling it mid-call must stick for the next call',);
+    });
+    test('every link from arm to first frame logs what it did', () {
+      final ctl = File('lib/features/call/call_controller.dart').readAsStringSync();
+      expect(ctl, contains("shareLog('retouch: armCalls -> "));
+      expect(ctl, contains('retouch: not armed for this call'));
+      final main = File('android/app/src/main/kotlin/com/miles/miles/MainActivity.kt').readAsStringSync();
+      expect(main, contains('"armCalls: enabled='));
+      final hook = File('third_party/flutter_webrtc/android/src/main/java/com/cloudwebrtc/webrtc/MilesVideoProcessorHook.java').readAsStringSync();
+      expect(hook, contains('hook onCameraTrack: armed='));
+      final proc = File('android/app/src/main/kotlin/com/miles/miles/beauty/CallBeautyProcessor.kt').readAsStringSync();
+      expect(proc, contains('first frame after arm: enabled='));
+    });
+    test('the sheet shows colours only when the caller has no strip', () {
+      final sheet = File('lib/features/chat/camera/beauty/beauty_sheet.dart').readAsStringSync();
+      expect(sheet, contains('if (onColour != null && colours.isNotEmpty)'));
+      final camera = File('lib/features/chat/camera/rapid_camera_screen.dart').readAsStringSync();
+      expect(camera, isNot(contains('onColour:')),
+          reason: 'the camera has its own strip; two owners of one choice drift',);
+    });
+    test('the Settings row for calls flips only from its switch', () {
+      final settings = File('lib/features/settings/settings_screen.dart').readAsStringSync();
+      final i = settings.indexOf("title: 'In video calls'");
+      final block = settings.substring(i, settings.indexOf('),', settings.indexOf('onTap:', i)));
+      expect(block, contains('onTap: null'));
+    });
+  });
+
   group('the override that makes the fork load at all', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
 
@@ -170,7 +254,8 @@ void main() {
   group('the bind degrades without the analyzer', () {
     test('a refused ImageAnalysis rebinds without it and is flagged', () {
       final source = _code(bind.readAsStringSync());
-      expect(source.contains('milesGroup(useCases, effect, null)'), isTrue,
+      // The second argument is now a flag: false = no analyzer of any kind.
+      expect(source.contains('milesGroup(useCases, effect, false)'), isTrue,
           reason: 'the fallback rebind is the designed degrade for cameras that '
               'cannot run analysis beside preview + capture + video',);
       expect(source.contains('MilesCameraEffectHook.onAnalysisRefused()'), isTrue,

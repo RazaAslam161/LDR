@@ -7,11 +7,13 @@ package io.flutter.plugins.camerax;
 import android.hardware.camera2.CaptureRequest;
 import android.util.Range;
 import android.view.Surface;
+import android.util.Size;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.camera.camera2.interop.Camera2Interop;
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
+import androidx.camera.core.Camera;
 import androidx.camera.core.Preview;
 import androidx.camera.core.ResolutionInfo;
 import androidx.camera.core.SurfaceRequest;
@@ -96,7 +98,10 @@ class PreviewProxyApi extends PigeonApiPreview {
   public boolean surfaceProducerHandlesCropAndRotation(@NonNull Preview pigeonInstance) {
     final TextureRegistry.SurfaceProducer surfaceProducer = surfaceProducers.get(pigeonInstance);
     if (surfaceProducer != null) {
-      return surfaceProducer.handlesCropAndRotation();
+      // Miles patch: armed, this Preview is a StreamSharing child, and its frames arrive already
+      // rotated to the target rotation and mirrored for the front lens (TransformationInfo
+      // rotation 0, hasCameraTransform false). The Dart side must not rotate them a second time.
+      return surfaceProducer.handlesCropAndRotation() || MilesCameraEffectHook.isArmed();
     }
     throw new IllegalStateException(
         "surfaceProducerHandlesCropAndRotation() cannot be called if the flutterSurfaceProducer for"
@@ -106,7 +111,20 @@ class PreviewProxyApi extends PigeonApiPreview {
   @Nullable
   @Override
   public ResolutionInfo getResolutionInfo(Preview pigeonInstance) {
-    return pigeonInstance.getResolutionInfo();
+    final ResolutionInfo info = pigeonInstance.getResolutionInfo();
+    // Miles patch: armed, the StreamSharing child reports its size in the rotated orientation.
+    // The Dart side keeps the sensor-oriented (landscape) contract for previewSize, so hand the
+    // size back that way when the sensor is mounted at 90/270.
+    final Camera camera = MilesCameraEffectHook.boundCamera();
+    if (info == null || camera == null || !MilesCameraEffectHook.isArmed()) {
+      return info;
+    }
+    if (camera.getCameraInfo().getSensorRotationDegrees() % 180 == 0) {
+      return info;
+    }
+    final Size r = info.getResolution();
+    return new ResolutionInfo(
+        new Size(r.getHeight(), r.getWidth()), info.getCropRect(), info.getRotationDegrees());
   }
 
   @Override

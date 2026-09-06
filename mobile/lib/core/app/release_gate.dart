@@ -105,6 +105,16 @@ class ReleaseGate {
   /// installs.
   static bool uiSoundKilled = false;
 
+  /// `beauty_kill` — remote off switch for the camera retouch. Same shape and
+  /// same polarity as [uiSoundKilled]: absent reads false, false means the
+  /// feature follows the local toggle.
+  ///
+  /// It exists because the retouch is a native GL pipeline compiled into every
+  /// install, and a GPU driver that mishandles it — a black viewfinder, a
+  /// stuck capturer — is a device-population bug found in the field, where the
+  /// way back has to be one UPDATE, not a release waiting on installs.
+  static bool beautyKilled = false;
+
   /// Which channel this install is — 'sideload' or 'play', as the Android
   /// side's BuildConfig reports it. The two fleets need separate floors:
   /// raising min_build tells sideload clients to install the published APK
@@ -187,12 +197,14 @@ class ReleaseGate {
     // an environment that lacks the newest column. So the column list degrades
     // in steps, newest column first, and each step gives up only what the
     // environment below it cannot answer.
+    const withBeautyKill = 'min_build, min_build_play, latest_build, message, '
+        'chat_cipher_only, ui_sound_kill, beauty_kill';
     const withSoundKill = 'min_build, min_build_play, latest_build, message, '
         'chat_cipher_only, ui_sound_kill';
     const withCipher = 'min_build, min_build_play, latest_build, message, '
         'chat_cipher_only';
     const legacy = 'min_build, latest_build, message';
-    const columnSets = [withSoundKill, withCipher, legacy];
+    const columnSets = [withBeautyKill, withSoundKill, withCipher, legacy];
     try {
       await _readRow(columnSets).timeout(budget);
     } on TimeoutException {
@@ -256,9 +268,12 @@ class ReleaseGate {
     // means sound stays ON (following the local toggle). The safe failure for
     // this flag is a working feature, which is why the column is a kill.
     uiSoundKilled = row['ui_sound_kill'] == true;
+    final wasBeautyKilled = beautyKilled;
+    beautyKilled = row['beauty_kill'] == true;
     if (_blocked != wasBlocked ||
         latestBuild != wasLatest ||
-        uiSoundKilled != wasSoundKilled) {
+        uiSoundKilled != wasSoundKilled ||
+        beautyKilled != wasBeautyKilled) {
       revision.value++;
     }
     // Unconditional, and it is not only a trace: reading buildStamp is what

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
+import 'package:camera_android_camerax/camera_android_camerax.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -115,6 +116,18 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   BeautySettings _beauty = const BeautySettings();
   bool _beautyArmed = false;
 
+  /// Whether the GPU pipeline is applying the selected colour preset in the
+  /// stream. When it is, the viewfinder overlay and the CPU bake must both
+  /// stand down, or the colour applies twice. Armed AND foldable: the blur and
+  /// grain presets stay on the CPU, where they already match the overlay.
+  bool get _gpuOwnsColour => _beautyArmed && _selectedFilter.gpuFoldable;
+
+  /// Hands the selected preset to the GPU, or takes it back. Safe while
+  /// disarmed: the engine ignores it.
+  void _applyColour() {
+    unawaited(BeautyEngine.setColour(_gpuOwnsColour ? _selectedFilter : null));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -162,6 +175,8 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       // time, so arming afterwards would do nothing until the next flip.
       _beauty = BeautyPrefs.forCamera();
       _beautyArmed = await BeautyEngine.arm(_beauty);
+      AndroidCameraCameraX.keepGraphStableForEffect = _beautyArmed;
+      _applyColour();
       await _initController(_cameras[_cameraIndex]);
     } catch (e) {
       debugPrint('[camera] boot failed: $e');
@@ -292,6 +307,10 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     unawaited(BeautyPrefs.save());
   }
 
+  /// Rebinds are serialised: a fast double toggle must not run two re-inits
+  /// at once, or the second disposes a controller the first is still binding.
+  Future<void> _rebind = Future<void>.value();
+
   Future<void> _applyBeauty(BeautySettings s) async {
     final wasOn = _beauty.enabled && _beautyArmed;
     _beauty = s;
@@ -301,10 +320,19 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       return;
     }
     // Turning the effect on or off changes the use-case graph, which needs a
-    // rebind — the same re-init a flip does, with the same brief hand-off.
-    _beautyArmed = await BeautyEngine.arm(s);
-    if (!mounted || _cameras.isEmpty) return;
-    await _initController(_cameras[_cameraIndex]);
+    // rebind — the same re-init a flip does, disposing the old controller the
+    // same way, or every toggle leaks a SurfaceProducer.
+    _rebind = _rebind.then((_) async {
+      _beautyArmed = await BeautyEngine.arm(s);
+      AndroidCameraCameraX.keepGraphStableForEffect = _beautyArmed;
+      _applyColour();
+      if (!mounted || _cameras.isEmpty) return;
+      setState(() => _ready = false);
+      await _controller?.dispose();
+      _controller = null;
+      await _initController(_cameras[_cameraIndex]);
+    });
+    await _rebind;
   }
 
   Future<void> _flipCamera() async {
@@ -375,17 +403,21 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
       // PEAK QUALITY: an unfiltered, un-mirrored shot is sent EXACTLY as the
       // camera produced it — no decode/re-encode, zero generation loss. Only
       // filtered/mirrored shots are re-processed, behind the review screen.
-      final needsBake = _selectedFilter.id != 'none' || mirror;
+      // With the GPU owning colour the JPEG already carries the preset, so the
+      // bake keeps only the mirror and the review overlay shows it unfiltered.
+      final bakeFilter = _gpuOwnsColour ? kCameraFilters[0] : _selectedFilter;
+      final needsBake =
+          (!_gpuOwnsColour && _selectedFilter.id != 'none') || mirror;
       setState(() {
         _capturedFile = raw;
         _capturedIsVideo = false;
         _state = _CamState.captured;
-        _bakedPreview = needsBake ? _selectedFilter : null;
+        _bakedPreview = needsBake ? bakeFilter : null;
         _bakeMirror = mirror;
       });
       if (!needsBake) return;
 
-      final f = _selectedFilter;
+      final f = bakeFilter;
       // Kept as a field so _send can await a bake that is still running instead
       // of shipping the unbaked frame the user is looking at.
       final bake = _bake = _runBake(xfile.path, f, mirror);
@@ -643,7 +675,7 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     //    camera orientation) — the mirror is applied only to the SAVED photo
     //    (bakeSnap flipHorizontal), per the requested behaviour.
     final viewfinder = FilterPreviewLayer(
-      filter: _selectedFilter,
+      filter: _gpuOwnsColour ? kCameraFilters[0] : _selectedFilter,
       child: SizedBox.expand(
         child: FittedBox(
           fit: BoxFit.cover,
@@ -828,7 +860,10 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
         return _FilterChip(
           filter: f,
           selected: selected,
-          onTap: () => setState(() => _selectedFilter = f),
+          onTap: () {
+            setState(() => _selectedFilter = f);
+            _applyColour();
+          },
         );
       },
     );

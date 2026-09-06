@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleOwner;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutionException;
 import kotlin.Result;
 import kotlin.Unit;
@@ -71,13 +72,25 @@ class ProcessCameraProviderProxyApi extends PigeonApiProcessCameraProvider {
   private static UseCaseGroup milesGroup(
       @NonNull List<? extends UseCase> useCases,
       @NonNull CameraEffect effect,
-      @Nullable ImageAnalysis analysis) {
+      boolean withAnalysis) {
     final UseCaseGroup.Builder group = new UseCaseGroup.Builder();
+    final ImageAnalysis.Analyzer analyzer = MilesCameraEffectHook.analyzer();
+    final Executor executor = MilesCameraEffectHook.analyzerExecutor();
+    boolean riding = false;
     for (UseCase useCase : useCases) {
+      // The plugin binds its own ImageAnalysis at open. A second one is a second YUV stream,
+      // which most cameras refuse beside the shared PRIV and the JPEG — so the face tracker
+      // rides the plugin's, and adds its own only when there is none to ride.
+      if (withAnalysis && !riding && useCase instanceof ImageAnalysis
+          && analyzer != null && executor != null) {
+        ((ImageAnalysis) useCase).setAnalyzer(executor, analyzer);
+        riding = true;
+      }
       group.addUseCase(useCase);
     }
-    if (analysis != null) {
-      group.addUseCase(analysis);
+    final ImageAnalysis own = MilesCameraEffectHook.analysis();
+    if (withAnalysis && !riding && own != null) {
+      group.addUseCase(own);
     }
     group.addEffect(effect);
     return group.build();
@@ -109,11 +122,14 @@ class ProcessCameraProviderProxyApi extends PigeonApiProcessCameraProvider {
       // stream by DefaultSurfaceProcessor, which does implement snapshot().
       final CameraEffect effect = MilesCameraEffectHook.effect();
       if (effect != null) {
-        final ImageAnalysis analysis = MilesCameraEffectHook.analysis();
-        if (analysis != null) {
+        final boolean wantsFaces =
+            MilesCameraEffectHook.analyzer() != null || MilesCameraEffectHook.analysis() != null;
+        if (wantsFaces) {
           try {
-            return pigeonInstance.bindToLifecycle(
-                lifecycleOwner, cameraSelector, milesGroup(useCases, effect, analysis));
+            final Camera camera = pigeonInstance.bindToLifecycle(
+                lifecycleOwner, cameraSelector, milesGroup(useCases, effect, true));
+            MilesCameraEffectHook.onBound(camera);
+            return camera;
           } catch (IllegalArgumentException e) {
             // This camera cannot run ImageAnalysis beside preview + capture + video (a LIMITED
             // hardware level, or a StreamSharing combination it does not support). CameraX
@@ -124,8 +140,10 @@ class ProcessCameraProviderProxyApi extends PigeonApiProcessCameraProvider {
             MilesCameraEffectHook.onAnalysisRefused();
           }
         }
-        return pigeonInstance.bindToLifecycle(
-            lifecycleOwner, cameraSelector, milesGroup(useCases, effect, null));
+        final Camera camera = pigeonInstance.bindToLifecycle(
+            lifecycleOwner, cameraSelector, milesGroup(useCases, effect, false));
+        MilesCameraEffectHook.onBound(camera);
+        return camera;
       }
       return pigeonInstance.bindToLifecycle(
           lifecycleOwner, cameraSelector, useCases.toArray(new UseCase[0]));

@@ -18,6 +18,10 @@ import 'package:miles/features/call/call_foreground.dart';
 import 'package:miles/features/call/call_stats.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_session.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_engine.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_prefs.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_settings.dart';
+import 'package:miles/features/chat/camera/camera_filters.dart';
 import 'package:miles/features/safety/contact_pause.dart';
 import 'package:miles/main.dart' show MilesApp;
 import 'package:permission_handler/permission_handler.dart';
@@ -1572,6 +1576,12 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The look chosen from the in-call control, per call; null until touched.
+  /// The colour preset likewise. Both cleared at teardown, so the next call
+  /// starts from the saved preference again.
+  BeautySettings? callLook;
+  CameraFilter? callColour;
+
   Future<void> switchCamera() async {
     final track = _localStream?.getVideoTracks().firstOrNull;
     if (track == null) return;
@@ -1669,6 +1679,17 @@ class CallController extends ChangeNotifier {
   // ── Internals ───────────────────────────────────────────────────────────────
   Future<void> _openMedia({bool video = true}) async {
     final attempt = _attempt;
+    // Retouch on the outgoing video, armed BEFORE the track exists so the very
+    // first frame the far side sees is already processed. Off unless both
+    // switches in BeautyPrefs are on; every failure inside is "call exactly as
+    // before", and nothing here can throw into the open.
+    if (video && BeautyPrefs.forCall().enabled) {
+      final armed = await BeautyEngine.armCalls(BeautyPrefs.forCall());
+      shareLog('retouch: armCalls -> $armed');
+    } else if (video) {
+      shareLog('retouch: not armed for this call (enabled=${BeautyPrefs.enabled}, '
+          'inCalls=${BeautyPrefs.useInCalls})');
+    }
     final capture = navigator.mediaDevices.getUserMedia({
       // Left as a bare `true` deliberately, and it has to stay one: the plugin
       // only reads audio constraints nested under `mandatory`/`optional`, so a
@@ -2528,6 +2549,9 @@ class CallController extends ChangeNotifier {
         if (_admMuted) shareLog('adm unmute at teardown FAILED — mic stuck');
       }
       try {
+        await BeautyEngine.disarmCalls();
+        callLook = null;
+        callColour = null;
         await _localStream?.dispose();
       } catch (_) {}
       try {

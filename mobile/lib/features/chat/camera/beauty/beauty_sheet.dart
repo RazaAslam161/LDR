@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/camera/beauty/beauty_settings.dart';
+import 'package:miles/features/chat/camera/camera_filters.dart';
 
 /// The one retouch control, shared by the camera and Settings.
 ///
@@ -12,8 +13,12 @@ Future<void> showBeautySheet(
   BuildContext context, {
   required BeautySettings current,
   required ValueChanged<BeautySettings> onChanged,
+  List<CameraFilter> colours = const [],
+  CameraFilter? colour,
+  ValueChanged<CameraFilter>? onColour,
 }) {
   var s = current;
+  var chosen = colour;
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -63,6 +68,32 @@ Future<void> showBeautySheet(
                       ],
                     ),
                   ),
+                  // The colour presets, where the caller has no strip of its own
+                  // (a call). The camera keeps its strip and passes nothing here.
+                  if (onColour != null && colours.isNotEmpty)
+                    SizedBox(
+                      height: 48,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        children: [
+                          for (final f in colours)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text('${f.icon} ${f.label}'),
+                                selected: (chosen?.id ?? 'none') == f.id,
+                                selectedColor: MilesColors.ember.withValues(alpha: 0.25),
+                                onSelected: (_) {
+                                  chosen = f;
+                                  setSheet(() {});
+                                  onColour(f);
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(

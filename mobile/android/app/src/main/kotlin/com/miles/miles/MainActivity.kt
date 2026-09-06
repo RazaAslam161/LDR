@@ -22,11 +22,15 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.Settings
+import android.util.Log
 import android.util.Rational
 import android.view.KeyEvent
 import android.view.WindowManager
+import com.cloudwebrtc.webrtc.MilesVideoProcessorHook
+import com.miles.miles.beauty.BeautyColour
 import com.miles.miles.beauty.BeautyEffect
 import com.miles.miles.beauty.BeautyParams
+import com.miles.miles.beauty.CallBeautyProcessor
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -48,6 +52,9 @@ class MainActivity : FlutterFragmentActivity() {
      * background/resume does not pay ~100ms of shader compilation again.
      */
     private var beautyEffect: BeautyEffect? = null
+
+    /** The call-side twin: attached to WebRTC camera tracks through the vendored plugin's hook. */
+    private var callBeauty: CallBeautyProcessor? = null
 
     // Text shared into the app from another app's share sheet, held until Dart
     // asks for it.
@@ -139,6 +146,9 @@ class MainActivity : FlutterFragmentActivity() {
         MilesCameraEffectHook.disarm()
         beautyEffect?.release()
         beautyEffect = null
+        MilesVideoProcessorHook.disarm()
+        callBeauty?.release()
+        callBeauty = null
         // Streams die with the activity. A recreation mid-export (rotation, a
         // kill in the background) invalidates every handle Dart holds; each
         // later writeChunk then fails and the Dart run counts that file as a
@@ -284,7 +294,9 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                         val effect = beautyEffect
                         effect?.setParams(BeautyParams.fromMap(call.arguments as? Map<*, *>))
-                        MilesCameraEffectHook.arm(effect, effect?.analysis)
+                        MilesCameraEffectHook.arm(
+                            effect, effect?.analysis, effect?.analyzer, effect?.analyzerExecutor,
+                        )
                         // false is an honest answer the UI must act on, not a silent no-op: on a
                         // device where GL would not come up, the control has to say so rather
                         // than sit there doing nothing.
@@ -294,9 +306,35 @@ class MainActivity : FlutterFragmentActivity() {
                         MilesCameraEffectHook.disarm()
                         result.success(null)
                     }
-                    // Live edits: takes effect on the next frame, no rebind.
+                    // Calls: attaches to every live camera track and every one created later, so
+                    // it can be armed before getUserMedia OR toggled mid-call — no renegotiation.
+                    "armCalls" -> {
+                        val proc = callBeauty ?: CallBeautyProcessor().also { callBeauty = it }
+                        proc.params = BeautyParams.fromMap(call.arguments as? Map<*, *>)
+                        MilesVideoProcessorHook.arm(proc)
+                        Log.i("MilesBeautyCall", "armCalls: enabled=${proc.params.enabled} needsFace=${proc.params.needsFace}")
+                        result.success(true)
+                    }
+                    "disarmCalls" -> {
+                        Log.i("MilesBeautyCall", "disarmCalls")
+                        MilesVideoProcessorHook.disarm()
+                        result.success(null)
+                    }
+                    // Live edits: takes effect on the next frame, no rebind. Both engines take the
+                    // same numbers, so one look is one look everywhere.
                     "update" -> {
-                        beautyEffect?.setParams(BeautyParams.fromMap(call.arguments as? Map<*, *>))
+                        val p = BeautyParams.fromMap(call.arguments as? Map<*, *>)
+                        beautyEffect?.setParams(p)
+                        callBeauty?.params = p
+                        result.success(null)
+                    }
+                    // The camera's colour preset, applied by the GPU as the composite's last
+                    // step so the recording carries it too. Camera path only: a call has no
+                    // colour strip. `on: false` clears it.
+                    "colour" -> {
+                        val c = BeautyColour.fromMap(call.arguments as? Map<*, *>)
+                        beautyEffect?.setColour(c)
+                        callBeauty?.colour = c
                         result.success(null)
                     }
                     // Only knowable AFTER the camera has bound, which is why arm cannot answer it.
@@ -304,6 +342,7 @@ class MainActivity : FlutterFragmentActivity() {
                         mapOf(
                             "armed" to MilesCameraEffectHook.isArmed(),
                             "faceTracking" to !MilesCameraEffectHook.analysisRefused(),
+                            "callsArmed" to MilesVideoProcessorHook.isArmed(),
                         ),
                     )
                     "isSupported" -> result.success(beautySupported())

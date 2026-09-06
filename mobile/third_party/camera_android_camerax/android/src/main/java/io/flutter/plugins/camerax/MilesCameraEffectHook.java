@@ -6,94 +6,114 @@
 // nowhere to attach an androidx.camera.core.CameraEffect. The retouch pipeline
 // needs ONE effect targeting PREVIEW | VIDEO_CAPTURE | IMAGE_CAPTURE together,
 // because that is what makes a captured photo and a recorded video carry the
-// same pixels the viewfinder showed — by construction, rather than by two
-// implementations agreeing to stay in sync. (Today they do NOT: the still is
-// re-processed on the CPU in camera_bake.dart and video is not processed at
-// all, so a filtered recording has never actually been filtered.)
+// same pixels the viewfinder showed — by construction.
 //
 // WHY A STATIC HOLDER AND NOT A PIGEON API
-// The Dart<->Java surface here is generated: camerax_library.g.dart is 8,324
-// lines and CameraXLibrary.g.kt is 7,771. Exposing an effect through Pigeon
-// means regenerating both, and a fork that carries regenerated codegen is a
-// fork nobody can rebase. This holder keeps the patch to one new file plus a
-// ~15-line hunk in a 93-line file, and keeps every line that will actually
-// change during development in :app, outside the fork entirely.
+// The Dart<->Java surface here is generated (camerax_library.g.dart, 8k lines;
+// CameraXLibrary.g.kt, 7k). Exposing this through Pigeon means regenerating both,
+// and a fork that carries regenerated codegen is a fork nobody can rebase.
 //
 // WHY io.flutter.plugins.camerax AND NOT com.miles.miles
-// mobile/android/app/proguard-rules.pro keeps io.flutter.plugins.** { *; }.
-// Nothing keeps com.miles.miles.**. R8 runs on the play flavour only, which is
-// the build real users install and the one no local test exercises, so a class
-// reached across the module boundary lives where it is already kept.
+// mobile/android/app/proguard-rules.pro keeps io.flutter.plugins.** { *; } and
+// keeps nothing under com.miles.miles.**. R8 runs on the play flavour only.
 //
 // LIFECYCLE CONTRACT
-// arm() must be called BEFORE the camera binds; the effect is read once per
-// bindToLifecycle. disarm() must be called when the screen that armed it goes
-// away. The effect is opt-in per screen and never global on purpose: the
-// heartbeat PPG reader (lib/features/heartbeat/heartbeat_screen.dart) drives
-// the camera with startImageStream over a torch-lit fingertip, and beautifying
-// that stream would corrupt the measurement it exists to take.
+// arm() BEFORE the camera binds; the fields are read once per bindToLifecycle.
+// disarm() when the screen that armed it goes away. Opt-in per screen, never
+// global: the heartbeat PPG reader drives the camera with startImageStream over
+// a torch-lit fingertip, and an effect on that stream would corrupt the
+// measurement it exists to take.
 
 package io.flutter.plugins.camerax;
 
 import androidx.annotation.Nullable;
+import androidx.camera.core.Camera;
 import androidx.camera.core.CameraEffect;
 import androidx.camera.core.ImageAnalysis;
+import java.util.concurrent.Executor;
 
 /**
  * Process-wide holder for the one {@link CameraEffect} Miles may attach to the CameraX use-case
- * graph, plus the {@code ImageAnalysis} hand-off the effect's face tracker needs.
+ * graph, the face analyzer that rides beside it, and the camera the patched bind produced.
  *
- * <p>Both fields are {@code volatile} and read on the camera binding thread while being written
- * from the platform thread. Neither is ever mutated in place.
+ * <p>Every field is {@code volatile}, written from the platform thread and read on the camera
+ * binding thread. None is ever mutated in place.
  */
 public final class MilesCameraEffectHook {
   private MilesCameraEffectHook() {}
 
   @Nullable private static volatile CameraEffect effect;
   @Nullable private static volatile ImageAnalysis analysis;
+  @Nullable private static volatile ImageAnalysis.Analyzer analyzer;
+  @Nullable private static volatile Executor analyzerExecutor;
+  @Nullable private static volatile Camera boundCamera;
   private static volatile boolean analysisRefused;
 
   /**
-   * Arms {@code e} so the next bind attaches it, with {@code a} bound beside the app's own use
-   * cases for face tracking. Either may be null; a null {@code e} is the same as {@link #disarm()}.
+   * Arms {@code e} so the next bind attaches it.
    *
-   * <p>Arming after the camera has bound does nothing until the next bind — a flip or a
-   * background/resume — because the use-case list is captured at bind time.
+   * @param a a use case of the effect's own, for a bind that carries no ImageAnalysis to ride
+   * @param an the analyzer, attached to the PLUGIN's own ImageAnalysis when the bind has one —
+   *     two ImageAnalysis use cases are two YUV streams, which most cameras refuse beside the
+   *     shared PRIV and the JPEG
    */
-  public static void arm(@Nullable CameraEffect e, @Nullable ImageAnalysis a) {
+  public static void arm(
+      @Nullable CameraEffect e,
+      @Nullable ImageAnalysis a,
+      @Nullable ImageAnalysis.Analyzer an,
+      @Nullable Executor ex) {
     effect = e;
     analysis = e == null ? null : a;
+    analyzer = e == null ? null : an;
+    analyzerExecutor = e == null ? null : ex;
     analysisRefused = false;
   }
 
-  /** Removes everything. The next bind takes the original, un-patched code path exactly. */
+  /** Removes the effect. The next bind takes the original, un-patched code path exactly. */
   public static void disarm() {
     effect = null;
     analysis = null;
+    analyzer = null;
+    analyzerExecutor = null;
+    boundCamera = null;
     analysisRefused = false;
   }
 
-  /** The armed effect, or null. Read once per bind. */
   @Nullable
   public static CameraEffect effect() {
     return effect;
   }
 
-  /** The analyzer to bind beside the effect, or null. Read once per bind. */
   @Nullable
   public static ImageAnalysis analysis() {
     return analysis;
   }
 
-  /** Whether a bind would attach an effect. */
+  @Nullable
+  public static ImageAnalysis.Analyzer analyzer() {
+    return analyzer;
+  }
+
+  @Nullable
+  public static Executor analyzerExecutor() {
+    return analyzerExecutor;
+  }
+
   public static boolean isArmed() {
     return effect != null;
   }
 
-  /**
-   * Recorded by the bind when this camera refused the analyzer beside the other use cases, so
-   * the app can say the face-aware passes are off rather than leave a control that does nothing.
-   */
+  /** The camera the patched bind produced, for the preview's rotation contract. */
+  static void onBound(@Nullable Camera camera) {
+    boundCamera = camera;
+  }
+
+  @Nullable
+  public static Camera boundCamera() {
+    return boundCamera;
+  }
+
+  /** The bind refused the analyzer beside the other use cases; retouch is colour-only. */
   public static void onAnalysisRefused() {
     analysisRefused = true;
   }

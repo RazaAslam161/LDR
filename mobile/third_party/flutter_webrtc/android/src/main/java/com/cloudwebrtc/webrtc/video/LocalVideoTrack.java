@@ -56,12 +56,27 @@ public class LocalVideoTrack extends LocalTrack implements VideoProcessor {
     @Override
     public void onFrameCaptured(VideoFrame videoFrame) {
         if (sink != null) {
+            // Miles patch — reference counting for processors that return a NEW frame.
+            //
+            // The frame that arrives here belongs to the capturer, which releases it
+            // after this returns. A processor that returns a different frame hands
+            // over the one reference it created, and upstream never released it, so
+            // every replaced frame leaked its buffer — for a texture-backed frame,
+            // that is a GPU texture per frame, forever. The sink retains whatever it
+            // still needs during onFrame (that is the VideoSink contract), so the
+            // right moment to drop our reference is right after it returns. Each
+            // intermediate in a chain is released the same way.
+            final VideoFrame original = videoFrame;
+            VideoFrame current = videoFrame;
             synchronized (processors) {
                 for (ExternalVideoFrameProcessing processor : processors) {
-                    videoFrame = processor.onFrame(videoFrame);
+                    VideoFrame out = processor.onFrame(current);
+                    if (out != current && current != original) current.release();
+                    current = out;
                 }
             }
-            sink.onFrame(videoFrame);
+            sink.onFrame(current);
+            if (current != original) current.release();
         }
     }
 }

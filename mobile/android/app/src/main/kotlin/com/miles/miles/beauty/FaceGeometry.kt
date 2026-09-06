@@ -45,8 +45,29 @@ internal object FaceGeometry {
         }
 
     /**
+     * The exact mapping for the camera path: an upright ML Kit point from the ANALYSIS buffer to
+     * the EFFECT input texture, through CameraX's own sensor-to-buffer transforms.
+     *
+     * The two streams are different crops of the same sensor — the 4:3 analysis stream sees rows
+     * the 16:9 effect stream does not — so normalised coordinates do not carry across. This does:
+     * upright → analysis buffer pixels → (inverse analysis transform) sensor → (effect transform)
+     * effect buffer pixels → normalised, flipped to y-up, aspect-corrected in the EFFECT aspect.
+     *
+     * @param toTarget the composed affine, analysis-buffer px → effect-buffer px
+     */
+    fun uprightToTarget(
+        u: Float, v: Float, rotationDegrees: Int,
+        srcW: Int, srcH: Int, toTarget: FloatArray, dstW: Int, dstH: Int,
+    ): Pair<Float, Float> {
+        val (s, t) = uprightToSensor(u, v, rotationDegrees)
+        val (ex, ey) = Affine.map(toTarget, s * srcW, t * srcH)
+        val aspect = dstW.toFloat() / dstH.toFloat()
+        return Pair(ex / dstW * aspect, 1f - ey / dstH)
+    }
+
+    /**
      * [uprightToSensor], then the flip into the texture's y-up space, then aspect correction.
-     * This is the function the tracker actually calls.
+     * The call path's mapping, where the analysed buffer IS the rendered buffer.
      */
     fun uprightToTexture(u: Float, v: Float, rotationDegrees: Int, aspect: Float): Pair<Float, Float> {
         val (s, t) = uprightToSensor(u, v, rotationDegrees)
@@ -93,9 +114,30 @@ internal class FaceFrame(
     val points: FloatArray,
     val aspect: Float,
     val timestampNs: Long,
+    /** Same layout, units per second, from the smoothing filters. Null for a synthetic frame. */
+    val velocities: FloatArray? = null,
 ) {
     init {
         require(points.size == 2 * FaceGeometry.POINT_COUNT) { "expected 936 floats, got ${points.size}" }
+        require(velocities == null || velocities.size == points.size) { "velocities must match points" }
+    }
+
+    /**
+     * Where this face is expected to be at [atNs], from the filters' own smoothed velocities.
+     *
+     * Inference runs slower than rendering, so without this the mesh trails the face by up to a
+     * whole inference period on every turn of the head. The clamp is NOT optional: with a stalled
+     * tracker, unbounded extrapolation slides the mesh off the face and into the background
+     * within a few hundred milliseconds, which is the ugliest failure this pipeline can produce.
+     * Past the horizon the mesh simply holds, which reads as "paused" rather than "broken".
+     */
+    fun predicted(atNs: Long, horizonNs: Long = MAX_PREDICT_NS): FaceFrame {
+        val vel = velocities ?: return this
+        if (atNs <= timestampNs) return this
+        val ahead = minOf(atNs - timestampNs, horizonNs) / 1e9f
+        val out = FloatArray(points.size)
+        for (i in points.indices) out[i] = points[i] + vel[i] * ahead
+        return FaceFrame(out, aspect, atNs, vel)
     }
 
     fun x(i: Int) = points[2 * i]
@@ -243,5 +285,40 @@ internal class FaceFrame(
     companion object {
         const val CONTROLS = 5
         const val EYES = 2
+
+        /** Two frames at 30fps: the most a mesh may be extrapolated before it holds. */
+        const val MAX_PREDICT_NS = 66_000_000L
     }
+}
+
+/**
+ * 2D affine maths on `android.graphics.Matrix.getValues` layout — [a, b, c, d, e, f, 0, 0, 1],
+ * x' = a·x + b·y + c, y' = d·x + e·y + f. Kept as plain floats so it is unit-testable on the JVM,
+ * where the framework Matrix is a stub.
+ */
+internal object Affine {
+    fun map(m: FloatArray, x: Float, y: Float): Pair<Float, Float> =
+        Pair(m[0] * x + m[1] * y + m[2], m[3] * x + m[4] * y + m[5])
+
+    /** Null for a singular matrix — a degenerate transform is refused, never guessed through. */
+    fun invert(m: FloatArray): FloatArray? {
+        val det = m[0] * m[4] - m[1] * m[3]
+        if (det == 0f || det.isNaN()) return null
+        return floatArrayOf(
+            m[4] / det, -m[1] / det, (m[1] * m[5] - m[2] * m[4]) / det,
+            -m[3] / det, m[0] / det, (m[2] * m[3] - m[0] * m[5]) / det,
+            0f, 0f, 1f,
+        )
+    }
+
+    /** `second ∘ first`: applies [first], then [second]. */
+    fun concat(second: FloatArray, first: FloatArray): FloatArray = floatArrayOf(
+        second[0] * first[0] + second[1] * first[3],
+        second[0] * first[1] + second[1] * first[4],
+        second[0] * first[2] + second[1] * first[5] + second[2],
+        second[3] * first[0] + second[4] * first[3],
+        second[3] * first[1] + second[4] * first[4],
+        second[3] * first[2] + second[4] * first[5] + second[5],
+        0f, 0f, 1f,
+    )
 }

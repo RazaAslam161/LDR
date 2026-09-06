@@ -179,4 +179,77 @@ class FaceGeometryTest {
         val f = face(aspect = 1.5f)
         assertEquals(0.4, f.faceWidth.toDouble(), 1e-6)
     }
+
+    // ── prediction ────────────────────────────────────────────────────────────────────────
+
+    private fun moving(vxPerSec: Float): FaceFrame {
+        val pts = FloatArray(2 * FaceGeometry.POINT_COUNT) { 0.5f }
+        val vel = FloatArray(2 * FaceGeometry.POINT_COUNT) { if (it % 2 == 0) vxPerSec else 0f }
+        return FaceFrame(pts, 1f, 1_000_000_000L, vel)
+    }
+
+    @Test
+    fun `prediction moves every point by velocity times the lead`() {
+        val f = moving(0.2f)
+        val p = f.predicted(f.timestampNs + 33_000_000L)
+        assertEquals(0.5 + 0.2 * 0.033, p.x(10).toDouble(), 1e-5)
+        assertEquals(0.5, p.y(10).toDouble(), 1e-6)
+        assertEquals(f.timestampNs + 33_000_000L, p.timestampNs)
+    }
+
+    @Test
+    fun `prediction is bounded by the horizon so a stalled tracker holds instead of sliding`() {
+        val f = moving(1.0f)
+        val atHorizon = f.predicted(f.timestampNs + FaceFrame.MAX_PREDICT_NS)
+        val farPast = f.predicted(f.timestampNs + 10_000_000_000L)
+        assertEquals(atHorizon.x(0).toDouble(), farPast.x(0).toDouble(), 1e-6)
+        assertTrue(atHorizon.x(0) < 0.6f)
+    }
+
+    @Test
+    fun `a render older than the sample, or a frame without velocities, is the frame itself`() {
+        val f = moving(1.0f)
+        assertTrue(f.predicted(f.timestampNs - 1L) === f)
+        assertTrue(f.predicted(f.timestampNs) === f)
+        val still = FaceFrame(FloatArray(2 * FaceGeometry.POINT_COUNT), 1f, 0L)
+        assertTrue(still.predicted(5_000_000_000L) === still)
+    }
+
+    // ── the exact analysis-to-effect mapping ─────────────────────────────────────────────
+
+    @Test
+    fun `affine invert and concat round-trip`() {
+        val m = floatArrayOf(0.5f, 0f, 10f, 0f, 2f, -4f, 0f, 0f, 1f)
+        val inv = Affine.invert(m)!!
+        val (x, y) = Affine.map(Affine.concat(inv, m), 123f, 45f)
+        assertEquals(123.0, x.toDouble(), 1e-3)
+        assertEquals(45.0, y.toDouble(), 1e-3)
+        assertTrue(Affine.invert(floatArrayOf(1f, 2f, 0f, 2f, 4f, 0f, 0f, 0f, 1f)) == null)
+    }
+
+    @Test
+    fun `a 4-3 analysis stream and a 16-9 effect stream meet on the sensor`() {
+        // Sensor 4000x3000. Analysis: the full sensor scaled to 640x480 (×0.16). Effect: the
+        // centred 16:9 band (rows 375..2625) scaled to 1920x1080 (×0.48). A point at the centre
+        // of the analysis frame must land at the centre of the effect frame; a point 1/8 of the
+        // analysis height from the top must land ON the effect's top edge.
+        val analysis = floatArrayOf(0.16f, 0f, 0f, 0f, 0.16f, 0f, 0f, 0f, 1f)
+        val effect = floatArrayOf(0.48f, 0f, 0f, 0f, 0.48f, -375f * 0.48f, 0f, 0f, 1f)
+        val toTarget = Affine.concat(effect, Affine.invert(analysis)!!)
+        val (cx, cy) = FaceGeometry.uprightToTarget(0.5f, 0.5f, 0, 640, 480, toTarget, 1920, 1080)
+        assertEquals(0.5 * (1920.0 / 1080.0), cx.toDouble(), 1e-4)
+        assertEquals(0.5, cy.toDouble(), 1e-4)
+        val (_, ty) = FaceGeometry.uprightToTarget(0.5f, 0.125f, 0, 640, 480, toTarget, 1920, 1080)
+        // y-down 0 at the effect's top edge becomes y-up 1.
+        assertEquals(1.0, ty.toDouble(), 1e-4)
+    }
+
+    @Test
+    fun `identity transforms reduce the target mapping to the plain one`() {
+        val id = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+        val a = FaceGeometry.uprightToTarget(0.3f, 0.7f, 90, 640, 480, id, 640, 480)
+        val b = FaceGeometry.uprightToTexture(0.3f, 0.7f, 90, 640f / 480f)
+        assertEquals(b.first.toDouble(), a.first.toDouble(), 1e-5)
+        assertEquals(b.second.toDouble(), a.second.toDouble(), 1e-5)
+    }
 }

@@ -16,6 +16,16 @@ import 'rotated_preview_delegate.dart';
 
 /// The Android implementation of [CameraPlatform] that uses the CameraX library.
 class AndroidCameraCameraX extends CameraPlatform {
+  /// Miles patch: with the camera effect armed, the use-case graph must not
+  /// change for the life of the camera. Every bind or unbind rebuilds the
+  /// StreamSharing pipeline — the viewfinder stalls and the retouch fades out
+  /// and back in at the head of every clip — and unbinding ImageAnalysis for a
+  /// recording would stop face tracking exactly while it is being recorded.
+  /// Armed, preview + capture + video share one stream, so binding video at
+  /// open costs nothing on LIMITED hardware either. Disarmed, upstream's
+  /// bind-at-first-use stays, because four separate streams do not fit there.
+  static bool keepGraphStableForEffect = false;
+
   /// Constructs an [AndroidCameraCameraX].
   AndroidCameraCameraX();
 
@@ -478,6 +488,7 @@ class AndroidCameraCameraX extends CameraPlatform {
       preview!,
       imageCapture!,
       imageAnalysis!,
+      if (keepGraphStableForEffect) videoCapture!,
     ]);
     await _updateCameraInfoAndLiveCameraState(_flutterSurfaceTextureId);
     previewInitiallyBound = true;
@@ -1144,7 +1155,7 @@ class AndroidCameraCameraX extends CameraPlatform {
       return;
     }
     final dynamic Function(CameraImageData)? streamCallback = options.streamCallback;
-    if (streamCallback == null) {
+    if (streamCallback == null && !keepGraphStableForEffect) {
       // For potential performance improvements, unbind imageAnalysis if not in use.
       // See https://developer.android.com/media/camera/camerax/architecture#combine-use-cases
       // for details.
@@ -1224,7 +1235,9 @@ class AndroidCameraCameraX extends CameraPlatform {
       );
     }
 
-    await _unbindUseCaseFromLifecycle(videoCapture!);
+    if (!keepGraphStableForEffect) {
+      await _unbindUseCaseFromLifecycle(videoCapture!);
+    }
     final videoFile = XFile(videoOutputPath!);
     cameraEventStreamController.add(VideoRecordedEvent(cameraId, videoFile, /* duration */ null));
     return videoFile;

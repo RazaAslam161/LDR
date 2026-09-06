@@ -969,6 +969,8 @@ public class GetUserMediaImpl {
 
         LocalVideoTrack localVideoTrack = new LocalVideoTrack(track);
         videoSource.setVideoProcessor(localVideoTrack);
+        // Miles patch — the retouch seam for calls; camera tracks only, never screen capture.
+        MilesVideoProcessorHook.onCameraTrack(localVideoTrack);
 
         stateProvider.putLocalTrack(track.id(),localVideoTrack);
 

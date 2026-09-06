@@ -134,7 +134,8 @@ void main() {
         float excl = 1.0;
         for (int i = 0; i < 2; i++) {
             vec2 ed = pa - uEyes[i].xy;
-            vec2 en = vec2(ed.x / uEyes[i].z, ed.y / uEyes[i].w);
+            vec2 er = vec2(ed.x * cs + ed.y * sn, -ed.x * sn + ed.y * cs);
+            vec2 en = vec2(er.x / uEyes[i].z, er.y / uEyes[i].w);
             excl *= smoothstep(0.8, 1.3, length(en));
         }
         float e = 0.02 * uFaceW;
@@ -167,6 +168,13 @@ uniform float uTone;
 uniform float uBrighten;
 uniform float uDetail;
 uniform float uFaceAlpha;
+uniform float uColorOn;
+uniform vec3 uColorR;
+uniform vec3 uColorG;
+uniform vec3 uColorB;
+uniform vec3 uColorV;
+uniform vec4 uOverlay;
+uniform float uOverlayScreen;
 #ifdef MILES_FULL
 uniform float uFaceW;
 uniform vec2 uFaceCenter;
@@ -272,6 +280,16 @@ void main() {
         }
     }
 #endif
+    // The camera's colour preset, last, so it grades the retouched face exactly as it grades
+    // the background — one grade for the preview, the still and the recording alike.
+    if (uColorOn > 0.5) {
+        c = clamp(vec3(dot(uColorR, c), dot(uColorG, c), dot(uColorB, c)) + uColorV, 0.0, 1.0);
+        if (uOverlay.a > 0.001) {
+            vec3 o = uOverlay.rgb;
+            vec3 screened = vec3(1.0) - (vec3(1.0) - c) * (vec3(1.0) - o);
+            c = mix(c, mix(o, screened, uOverlayScreen), uOverlay.a);
+        }
+    }
     gl_FragColor = vec4(c, 1.0);
 }
 """

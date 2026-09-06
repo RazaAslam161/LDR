@@ -31,6 +31,13 @@ class CameraFilter {
   final BlendMode overlayBlendMode;
   final bool hasGrain; // film grain overlay
   final double grainIntensity; // 0.0 .. 1.0
+
+  /// Whether the GPU retouch pipeline may apply this preset itself, in the
+  /// stream, so the preview, the still AND the recording carry it. Only the
+  /// deterministic presets qualify: a matrix and an overlay reproduce exactly
+  /// on the GPU, while blur and grain stay on the CPU bake and the Dart
+  /// overlay, which already agree with each other.
+  bool get gpuFoldable => blurSigma == 0.0 && !hasGrain;
 }
 
 /// The ordered filter strip. Index 0 (Original) is the default.

@@ -40,12 +40,21 @@ class BeautyEffect private constructor(
     processor,
     Consumer { t -> processor.onEffectError(t) },
 ) {
-    /** The analyzer the vendored bind attaches beside the other use cases, for face tracking. */
+    /** A use case of our own, for a bind that carries no ImageAnalysis to ride. */
     val analysis: ImageAnalysis get() = processor.tracker.analysis
+
+    /** The analyzer itself, so the vendored bind can attach it to the plugin's own ImageAnalysis. */
+    val analyzer: ImageAnalysis.Analyzer get() = processor.tracker.analyzer
+    val analyzerExecutor: Executor get() = processor.tracker.analyzerExecutor
 
     /** Takes effect on the next frame; no rebind needed. */
     internal fun setParams(p: BeautyParams) {
         processor.params = p
+    }
+
+    /** The camera's colour preset for the composite's last step, or null for none. Next frame. */
+    internal fun setColour(c: BeautyColour?) {
+        processor.colour = c
     }
 
     /** Releases the GL thread, the context and the detector. Safe to call twice. */
@@ -89,6 +98,9 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     @Volatile
     var params: BeautyParams = BeautyParams.OFF
 
+    @Volatile
+    var colour: BeautyColour? = null
+
     private class OutputState(val egl: EGLSurface, val width: Int, val height: Int) {
         val glOnly = FloatArray(16)
         val full = FloatArray(16)
@@ -106,10 +118,7 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     private val identity = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     private val renderOutputs = ArrayList<BeautyGlRenderer.Output>(2)
 
-    // Face presence, faded so a lost track dims the effect instead of popping it off.
-    private var lastFace: FaceFrame? = null
-    private var faceAlpha = 0f
-    private var lastFrameNs = 0L
+    private val presence = FacePresence()
 
     /** Executor CameraX uses for the effect's callbacks — the GL thread itself. */
     val glExecutor: Executor = Executor { r -> glHandler.post(r) }
@@ -128,11 +137,16 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
             }
             inputWidth = request.resolution.width
             inputHeight = request.resolution.height
+            // Where this input sits on the sensor. The analysis stream is a different crop of the
+            // same sensor, and composing the two transforms is the only exact way to put its
+            // landmarks on this texture. CameraX re-sends it when the crop changes (zoom).
+            request.setTransformationInfoListener(glExecutor) { info ->
+                tracker.setTarget(info.sensorToBufferTransform, inputWidth, inputHeight)
+            }
             // A new input surface is a new bind — a flip, a resume — and therefore a different
             // face in a different space. Smoothing history from the old one must not bleed in.
             tracker.reset()
-            lastFace = null
-            faceAlpha = 0f
+            presence.reset()
 
             val texture = renderer.newInputSurfaceTexture(inputWidth, inputHeight)
             texture.setOnFrameAvailableListener({ onFrameAvailable(it) }, glHandler)
@@ -193,21 +207,11 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
                     ts,
                 )
             }
-            lastFrameNs = ts
+            presence.idle(ts)
             return
         }
 
-        // Presence: the tracker's newest face, or "gone" once it has been silent long enough
-        // that its last answer is stale. Both clocks are the camera's own timestamp.
-        val fresh = tracker.latest
-        val present = fresh != null && ts - tracker.lastSeenNs < STALE_NS
-        if (fresh != null) lastFace = fresh
-        val dt = if (lastFrameNs == 0L) 0f else ((ts - lastFrameNs) / 1e9f).coerceIn(0f, 0.1f)
-        val target = if (present) 1f else 0f
-        val rate = if (present) 1f / FADE_IN_S else 1f / FADE_OUT_S
-        faceAlpha = if (faceAlpha < target) minOf(target, faceAlpha + dt * rate)
-        else maxOf(target, faceAlpha - dt * rate)
-        lastFrameNs = ts
+        val fa = presence.update(tracker.latest, tracker.lastSeenNs, ts)
 
         renderOutputs.clear()
         for ((output, state) in outputs) {
@@ -216,7 +220,7 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
             output.updateTransformMatrix(state.glOnly, identity)
             renderOutputs.add(BeautyGlRenderer.Output(state.egl, state.width, state.height, state.glOnly))
         }
-        renderer.render(inputWidth, inputHeight, stMatrix, lastFace, faceAlpha, p, renderOutputs, ts)
+        renderer.render(inputWidth, inputHeight, stMatrix, presence.lastFace?.predicted(ts), fa, p, renderOutputs, ts, colour)
     }
 
     private fun detach(output: SurfaceOutput) {
@@ -288,8 +292,5 @@ internal class BeautySurfaceProcessor : SurfaceProcessor {
     private companion object {
         const val TAG = "MilesBeautyGl"
         const val GL_TIMEOUT_MS = 4000L
-        const val STALE_NS = 400_000_000L
-        const val FADE_IN_S = 0.12f
-        const val FADE_OUT_S = 0.20f
     }
 }

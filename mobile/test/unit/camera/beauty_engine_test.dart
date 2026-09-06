@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/chat/camera/beauty/beauty_engine.dart';
 import 'package:miles/features/chat/camera/beauty/beauty_settings.dart';
+import 'package:miles/features/chat/camera/camera_filters.dart';
 
 /// The channel contract, with the native side replaced by a recorder.
 ///
@@ -99,5 +100,45 @@ void main() {
   test('faceTracking reads the status map', () async {
     expect(await BeautyEngine.faceTracking(), isFalse);
     expect(calls.single.method, 'status');
+  });
+
+  group('applyCall — the in-call switch and sliders', () {
+    final calls = <MethodCall>[];
+    setUp(() {
+      calls.clear();
+      BeautyEngine.debugReset();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(BeautyEngine.channel, (call) async {
+        calls.add(call);
+        return call.method == 'armCalls' ? true : null;
+      });
+    });
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(BeautyEngine.channel, null);
+    });
+
+    test('enabled while not armed arms; enabled while armed updates', () async {
+      expect(await BeautyEngine.applyCall(const BeautySettings(enabled: true)), isTrue);
+      expect(calls.map((c) => c.method), ['armCalls']);
+      await BeautyEngine.applyCall(const BeautySettings(enabled: true, amount: 0.9));
+      expect(calls.map((c) => c.method), ['armCalls', 'update']);
+    });
+
+    test('disabled disarms, and only if armed', () async {
+      expect(await BeautyEngine.applyCall(const BeautySettings()), isFalse);
+      expect(calls, isEmpty, reason: 'never armed: nothing to detach');
+      await BeautyEngine.applyCall(const BeautySettings(enabled: true));
+      calls.clear();
+      await BeautyEngine.applyCall(const BeautySettings());
+      expect(calls.map((c) => c.method), ['disarmCalls']);
+    });
+
+    test('a colour preset reaches the engine while only calls are armed', () async {
+      await BeautyEngine.applyCall(const BeautySettings(enabled: true));
+      calls.clear();
+      await BeautyEngine.setColour(kCameraFilters.firstWhere((f) => f.id == 'noir'));
+      expect(calls.single.method, 'colour');
+    });
   });
 }

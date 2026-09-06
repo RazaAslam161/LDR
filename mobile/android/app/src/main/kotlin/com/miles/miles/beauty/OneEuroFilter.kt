@@ -115,32 +115,14 @@ internal class OneEuroPoint(
         y = fy.filter(py.toDouble(), timestampNs).toFloat()
     }
 
-    /**
-     * Where the point is expected to be at [atNs], from the filter's own smoothed velocity.
-     *
-     * Inference runs slower than rendering, so without this the mesh lags the face by up to a
-     * whole inference period. The clamp is NOT optional: with a stalled tracker, unbounded
-     * extrapolation slides the mesh off the face and into the background within a few hundred
-     * milliseconds, which is the ugliest failure this pipeline can produce. Past the horizon the
-     * mesh simply freezes, which reads as "the effect paused" rather than "the effect broke".
-     */
-    fun predict(atNs: Long, lastSampleNs: Long, horizonNs: Long = MAX_PREDICT_NS): Pair<Float, Float> {
-        val ahead = (atNs - lastSampleNs).coerceIn(0L, horizonNs) / 1e9
-        return Pair(
-            (x + fx.velocity() * ahead).toFloat(),
-            (y + fy.velocity() * ahead).toFloat(),
-        )
-    }
+    /** Smoothed velocity, units per second. Free, and what [FaceFrame.predicted] extrapolates with. */
+    val vx: Float get() = fx.velocity().toFloat()
+    val vy: Float get() = fy.velocity().toFloat()
 
     fun reset() {
         fx.reset()
         fy.reset()
         x = 0f
         y = 0f
-    }
-
-    companion object {
-        /** Two frames at 30fps. */
-        const val MAX_PREDICT_NS = 66_000_000L
     }
 }

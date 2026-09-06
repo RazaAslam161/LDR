@@ -359,6 +359,13 @@ dependencies {
     // that ships is a NoSuchMethodError on a device, not a build error here.
     compileOnly("androidx.camera:camera-core:1.6.1")
 
+    // WebRTC, for the call-side retouch processor in com.miles.miles.beauty. Same trap and
+    // same answer as CameraX above: the vendored flutter_webrtc declares it `implementation`
+    // (third_party/flutter_webrtc/android/build.gradle:78), so :app cannot see org.webrtc
+    // through the plugin. compileOnly, pinned to the plugin's exact version — a mismatch is a
+    // NoSuchMethodError on a device, not a build error here.
+    compileOnly("io.github.webrtc-sdk:android:144.7559.09")
+
     // ML Kit face mesh — 468 landmarks, on-device, bundled model (no Play Services download,
     // which matters for an app whose whole point is that nothing leaves the phone). Proguard
     // already keeps com.google.mlkit.** from the retired pose detector. Pinned to the newest

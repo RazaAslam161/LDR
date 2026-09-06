@@ -310,6 +310,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     await BeautyPrefs.save();
   }
 
+  Future<void> _toggleBeautyCalls(bool v) async {
+    setState(() => BeautyPrefs.useInCalls = v);
+    await BeautyPrefs.save();
+  }
+
   Future<void> _openBeautyLook() async {
     await showBeautySheet(
       context,
@@ -1314,20 +1319,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         _SettingsGroup(
           label: 'Camera',
           children: [
-            _SettingsRow(
-              icon: Icons.face_retouching_natural,
-              title: 'Retouch',
-              subtitle: BeautyPrefs.enabled
-                  ? 'On. Tap to choose a look.'
-                  : 'Off. Skin, shape and colour on your face, in the '
-                      'preview, the photo and the video alike.',
-              trailing: Switch(
-                value: BeautyPrefs.enabled,
-                onChanged: _toggleBeauty,
-                activeThumbColor: MilesColors.ember,
-              ),
-              onTap: _openBeautyLook,
+            ValueListenableBuilder<int>(
+              valueListenable: ReleaseGate.revision,
+              builder: (context, _, __) {
+                final killed = ReleaseGate.beautyKilled;
+                return _SettingsRow(
+                  icon: Icons.face_retouching_natural,
+                  title: 'Retouch',
+                  subtitle: killed
+                      ? 'Turned off remotely for this release.'
+                      : BeautyPrefs.enabled
+                          ? 'On. Tap to choose a look.'
+                          : 'Off. Skin, shape and colour on your face, in the '
+                              'preview, the photo and the video alike.',
+                  trailing: Switch(
+                    value: !killed && BeautyPrefs.enabled,
+                    onChanged: killed ? null : _toggleBeauty,
+                    activeThumbColor: MilesColors.ember,
+                  ),
+                  onTap: killed ? null : _openBeautyLook,
+                );
+              },
             ),
+            if (BeautyPrefs.enabled)
+              _SettingsRow(
+                icon: Icons.videocam_outlined,
+                title: 'In video calls',
+                subtitle: BeautyPrefs.useInCalls
+                    ? 'On. Your partner sees the same look.'
+                    : 'Off. Calls show you exactly as the camera does.',
+                trailing: Switch(
+                  value: BeautyPrefs.useInCalls,
+                  onChanged: _toggleBeautyCalls,
+                  activeThumbColor: MilesColors.ember,
+                ),
+                // Only the switch flips this: a tap on the row while exploring
+                // Settings must not silently take the look out of calls.
+                onTap: null,
+              ),
           ],
         ),
         _SettingsGroup(

@@ -24500,3 +24500,449 @@ its mtime (01:50) precedes my last edit (01:54) while my earlier analyze run was
 ### §286 addendum 2 — b844663 pushed, CI green on run 34001594395 (2026-09-06)
 
 `git push origin fix-sprint` -> `18dc45d..b844663`; `gh run view 34001594395`: analyze + test success, dependency advisories success. Only the 13 files of this change were staged; BRAIN was staged as HEAD + the §286 tail so the other session's §284–285 appends stay uncommitted with the rest of their tree (67 modified files).
+
+## §287 — 2026-09-05 — beauty filters, phase 10: calls get the same retouch — armed only by two switches, still off
+
+Continues §283 (phases 1-9, `4f6c5ce`). Numbered §287 because origin's last is §283 and this
+working tree already holds another session's uncommitted §284 and §285 — the number is chosen
+to collide with neither. **Nothing changes for anyone who has not opted in.** `useInCalls`
+sits behind `enabled`, and both ship off.
+
+### The seam, and the one protocol bug under it
+
+`LocalVideoTrack` already implemented `VideoProcessor` with `addProcessor` nobody called. Three
+fork patches (`third_party/flutter_webrtc`, all marked `// Miles patch`):
+
+- `MilesVideoProcessorHook.java` (new, `com.cloudwebrtc.webrtc` — the module's own consumer
+  proguard keeps that package): a static holder that attaches the processor to every CAMERA
+  track at creation AND to live ones on arm, detaches on disarm. So a mid-call toggle is the
+  next frame, with no renegotiation and no camera reopen. Screen capture is never reported.
+- `GetUserMediaImpl.java:~973`: one line after the camera track's own `setVideoProcessor`.
+- `LocalVideoTrack.onFrameCaptured`: **upstream never released a processor's returned frame.**
+  For a texture-backed frame that is one GPU texture leaked per frame, forever; the output pool
+  here would exhaust in three frames. The fork now releases each replaced frame after the sink
+  has taken it (the `VideoSink` contract: it retains what it keeps). A law test pins the order.
+
+### The processor (`CallBeautyProcessor.kt`)
+
+Runs on WebRTC's capturer thread, which already has an EGL context current and owns the
+frame's OES texture — so instead of share-group plumbing, `BeautyGlRenderer` gained
+`attachToCurrentContext()`: same programs, same passes, composite into a pooled texture
+(`renderToTexture`), no surface switching, caller's FBO/viewport restored. The output is a new
+`TextureBufferImpl(RGB, identity matrix)` with the input's rotation — the pixels stay in sensor
+orientation, as every pass expects. A flip creates a new capturer thread and context; the
+renderer notices (`isCurrentContext()`) and re-attaches. Face tracking feeds ML Kit from a
+~VGA `cropAndScale().toI420()` packed to NV21, and only when the tracker is free — a 720p
+readback per frame is the difference between a warm phone and a hot one.
+
+Every failure is "the original frame, untouched": non-OES buffer, GL attach failure, exhausted
+pool. Warnings are rate-limited to one a second.
+
+### Two defects the JVM tests caught before any device could
+
+- `CallBeautyProcessor` declared `fun setParams` beside `@Volatile var params` — the same JVM
+  signature. Compile error, not a runtime one; still, it was the first compile that found it.
+- `FacePresence` used `lastFrameNs == 0L` as "first frame". A first timestamp of 0 is legal and
+  froze the fade at zero for the whole second frame. Explicit `started` flag now — the same bug
+  class fixed in `OneEuroFilter` in §277, in a new place.
+
+### Verified
+
+    ./gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest
+        BUILD SUCCESSFUL; test-results XML: 5 classes, 40 tests, 0 failures
+        (compiles the fork's Java too: :app depends on it)
+    flutter analyze --no-pub                     0 errors, 0 warnings
+    flutter test test/unit/camera/               68 passed (incl. the new call laws)
+
+**The full suite is red in this working tree, and not from this work.** 4 failures, all in
+`test/unit/call/`, all extracting `accept()`'s body and finding only its signature line: a
+concurrent session has an uncommitted `_accepting` re-entrancy guard in `call_controller.dart`
+that splits `accept()` into a wrapper plus `_accept()`, and the laws it breaks are its own to
+move. Proven, not asserted: a detached worktree at HEAD with ONLY my three hunks applied
+(`_openMedia` arm, `_teardown` disarm, two imports) —
+
+    analyze 0 errors 0 warnings; test/unit/call/ + test/unit/camera/  203 passed
+
+### What this turn deliberately did not do
+
+- Prediction (`OneEuroPoint.predict`) stays tested and unwired.
+- The 11 colour presets stay in the Dart overlay + CPU bake; they compose with the GPU retouch
+  with no double-apply, and folding them into the shader is a device-tuned change.
+
+### Open — the same headline, now with two consumers behind it
+
+`adb devices` is still empty. Nothing has rendered on either path. Three single-line
+assumptions each put the effect beside the face if wrong, and only a viewfinder settles them:
+CameraX's matrix composition order (§283), the y-flip's location (§283), and now that
+`SurfaceTextureHelper`'s listener runs with its EGL context current — true in upstream WebRTC,
+unverified in this fork's build. Next step, in order: the §283 device pass on the camera; then
+a two-handset call with `useInCalls` on, watching `MilesBeautyCall` in logcat for the attach
+line and the pool-exhausted warning, which would mean a consumer is not releasing.
+
+## §288 — 2026-09-06 — beauty filters: every code item is finished; only the device pass remains
+
+Continues §287. Numbered past origin (§283) AND the other session's local §284/§285 — the rule
+from §283's postscript, applied.
+
+### What closed this turn — the four deferrals, each with the reason it was deferred now gone
+
+- **Mesh prediction.** The tracker runs at ~15-20fps, the render at 30, so the mesh trailed the
+  face by up to one inference period on every head turn. `FaceFrame` now carries per-point
+  velocities from the One-Euro filters and `predicted(atNs)` extrapolates to the RENDER
+  timestamp, clamped to 66ms — past that it holds, so a stalled tracker parks the mesh instead
+  of sliding it into the background. Both render paths use it. `OneEuroPoint.predict` deleted
+  (replaced, not duplicated).
+- **The colour presets, folded into the shader.** The composite's last step is now the camera's
+  `ColorFilter.matrix` + overlay, so the RECORDED VIDEO finally carries the preset (it never
+  did). One owner per path, pinned by test: `_gpuOwnsColour = _beautyArmed &&
+  filter.gpuFoldable`; when true the viewfinder overlay shows Original and the CPU bake keeps
+  only the mirror. Only the 8 deterministic presets fold; `freesia`/`retro` (grain) and `soft`
+  (blur) stay on the CPU + overlay, which already agree with each other — so nothing is ever
+  applied twice and nothing regresses when the effect is off. `BeautyColour.fromMap` converts
+  the 0..255 4×5 form to 0..1 rows once, tested (offset ÷255, alpha column folded in).
+- **A remote kill switch.** `app_release.beauty_kill`, its own column generation at the head of
+  `ReleaseGate.columnSets` (the sound-kill law's pin moved down one, as that test's own comment
+  said it would), same polarity as `ui_sound_kill`: absent = false = local toggle rules.
+  `BeautyPrefs.forCamera()` folds it in, so the camera and (through `forCall`) the call both
+  stop on one UPDATE. Settings shows "Turned off remotely". **The migration is written, not
+  applied** — `supabase/migrations/20260906120000_beauty_kill_switch.sql`, additive,
+  IF NOT EXISTS, rollback documented in the file; applying it is the owner's step, and until
+  then clients fall back to `withSoundKill` by design.
+- **The heartbeat law.** `heartbeat_screen.dart` must never reference the engine — its PPG
+  reader would be corrupted, and CameraX would refuse a second ImageAnalysis. Pinned.
+
+### Verified
+
+    ./gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest
+        BUILD SUCCESSFUL; XML: 6 classes, 49 tests, 0 failures
+    flutter analyze --no-pub                         0 errors, 0 warnings
+    flutter test                                     1657 passed, 3 skipped, exit 0
+
+The full suite is green in the main tree again — the concurrent `_accepting` refactor that
+redded four call laws in §287 has since been reconciled by its author.
+
+### What "finished" means here, precisely
+
+Every item in the plan's ten phases exists, compiles, and is pinned by a test that runs. The
+one thing no gate on this machine can produce is a rendered frame: `adb devices` has been
+empty for the entire feature. Three single-line assumptions in the coordinate maths (§283,
+§287) each put the effect beside the face if wrong, and each is a one-line fix once a
+viewfinder shows it. **The next step is unchanged and is the only step: attach the OnePlus 8,
+arm the pass-through, and look.** Then the sequence in §283, then a two-handset call.
+
+### Uncommitted
+
+Everything from §287 and §288 is in the working tree, unstaged, alongside the other session's
+files. My files: the beauty package (Kotlin + tests), the two Java forks' three patches +
+hook, `MainActivity.kt`, `build.gradle.kts`, `release_gate.dart`, `beauty_*.dart`,
+`camera_filters.dart`, `rapid_camera_screen.dart`, `call_controller.dart` (3 hunks),
+`settings_screen.dart`, the migration, and the tests named above.
+
+## §289 — 2026-09-06 — the device gate, opened and then stalled on a locked phone
+
+Continues §288. The phone arrived; the pass has not happened yet. What DID happen:
+
+### Facts that decide how the pass must run — measured, not assumed
+
+- **The installed build 76 is signed with the upload key** (`CN=Miles, O=R&D Dev, C=PK`,
+  `apksigner --print-certs` on the pulled base.apk). So the sideload flavour — debug-signed on
+  purpose — would be refused with UPDATE_INCOMPATIBLE, and the only way past that is the
+  uninstall that takes the device's X25519 seed. **Never uninstall; the pass runs on the play
+  flavour**, built exactly as `release.sh` builds the tester APK
+  (`flutter build apk --release --flavor play -PmilesPlayApkArm64`): R8 on, arm64 only, the
+  upload key. That is also the most honest artifact — it is what real users get. 13 min a build.
+- `adb install -r` over the same versionCode 76 succeeds in place; done twice (05:28, then again
+  with the fixes below). `Miles.apk` at the repo root was NOT touched.
+- **The phone locks itself within minutes and the keyguard is secure** (password / fingerprint;
+  `deviceLocked=1`). Nobody but the owner can lift it, and `am start` on a locked phone creates a
+  STOPPED window — every screencap is pure black, which is not FLAG_SECURE (checked: the window's
+  flags carry no SECURE) but simply nothing drawn. Two screenshots were misread as "black
+  viewfinder" before this was understood.
+- `uiautomator dump` works on Flutter regardless of what is drawn, but Git Bash rewrites
+  `/sdcard` into `C:/Program Files/Git/sdcard`; `MSYS_NO_PATHCONV=1` fixes it. **It dumps whatever
+  window is in front** — one dump caught the owner's Snapchat conversation. Those captures were
+  deleted and nothing from them is recorded; the helper now prints Miles's package only.
+
+### Fixed while waiting — four call-path defects from the GL review lens, each confirmed by reading
+
+The review workflow lost 7 of 8 agents to the usage limit; its one surviving finder (GL) named
+four call-path defects, all real on inspection:
+
+1. **No flush before the hand-off.** The composited texture is sampled by the encoder and the
+   self-view from OTHER contexts in WebRTC's share group; the spec guarantees visibility only
+   after the producer finishes. `glFinish()` after the composite in `renderToTexture`. Without it:
+   black or torn frames after every toggle, most on the deepest-pipelining GPUs.
+2. **Per-call leak of the adopted context's GL objects — and the YuvConverter's.** Objects belong
+   to the share GROUP, which outlives every capturer; `release()` only deleted them if that exact
+   context was current, so a flip or a new call leaked programs, six textures and the pool
+   (~11MB) each time. Now: delete when ANY share-group context is current (the replacing capturer
+   thread is), and `yuv?.release()` too. Residual: at process shutdown with no context current,
+   dropped by reference once — bounded, accepted.
+3. **Texture pool was a growable ArrayList** filled on the capturer thread while consumer threads
+   iterated it to free slots — a ConcurrentModificationException in the first second of the first
+   call. Now a fixed `arrayOfNulls(POOL_SIZE)`; the only shared state is each slot's AtomicBoolean.
+4. **Pool of three exhausts under encoder lag** and the raw frame passes through — a flicker at
+   the far end. Six now (~22MB GPU at 720p), the cheaper failure.
+
+A harness defect of my own on the way: a `&&` chain trusted `grep`'s exit code over Gradle's, so
+a failed compile fell through to a JVM count read from the PREVIOUS run's XML (49/0, looking
+green) and then an APK build on broken code. Fixed the harness: results directory wiped first,
+Gradle's own exit honoured, counts only from a fresh directory. That is the rule about exit codes
+and counting gates, met in the wild again.
+
+    ./gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest   BUILD SUCCESSFUL
+    JVM (fresh dir): files=6 tests=49 failures=0
+    flutter build apk --release --flavor play -PmilesPlayApkArm64            √ 86.0MB
+    apksigner: CN=Miles, O=R&D Dev, C=PK
+
+### Open — the same headline, one step closer
+
+**Nothing has rendered.** The final APK is installed on the OnePlus 8. The pass needs the owner
+AT the phone, unlocked, doing: Settings → Camera → Retouch on → Natural; open the chat camera
+(front lens); hold at the face ~20s; take a photo; hold to record ~5s; flip and back; leave the
+camera open. A full `adb logcat` capture is running into the scratchpad the whole time; the
+lines that prove it are `MilesBeautyGl: GL up ...` (renderer), the vendored bind's `UseCaseGroup`
+path (no `bind with face analysis refused` warning), and no `AndroidRuntime` from the app. Then
+viewfinder screenshots from here. A two-handset call is still after that.
+
+## §290 — 2026-09-06 — device pass, part 1: the seam is on the handset, seven review findings fixed first
+
+Continues §288. The OnePlus 8 (IN2015, Android 13, Adreno 650) was attached. Everything below
+is what a phone changes, and it changed a lot before a single frame was retouched.
+
+### What the handset forced
+
+- **It carries the upload key** (`CN=Miles, O=R&D Dev, C=PK`, `apksigner` on the pulled
+  base.apk), so a debug-signed `flutter run` would be refused and the only way past would be
+  an uninstall that takes the X25519 seed. The pass therefore runs on the PLAY flavour, release,
+  arm64 — `flutter build apk --release --flavor play -PmilesPlayApkArm64`, the exact tester
+  artifact, R8 on. Installed in place with `adb install -r`, never `uninstall`.
+- `mobile/.env` and `Miles.apk` untouched; the build lives in `build/app/outputs/flutter-apk/`.
+
+### The adversarial review that ran while the first build compiled — 19 agents, 7 confirmed
+
+Verifiers read the fixed code for the four GL findings from §287 and refuted all four
+(consistent: they were already fixed). Seven others survived, every one real, two of them
+things the pass would have shown as "broken" with no hint why:
+
+1. **Landmarks in the wrong aspect** — the tracker stored points in the 4:3 ANALYSIS buffer's
+   aspect, the shader divided by the 16:9 EFFECT buffer's: the mesh 25% too small, offset.
+2. **Two different crops of the sensor** — the analysis and effect streams are not the same
+   window, so normalised coordinates do not carry across at all. Fixed together with 1 by
+   composing CameraX's own matrices: `ImageInfo.sensorToBufferTransformMatrix` (analysis) and
+   `SurfaceRequest.TransformationInfo.sensorToBufferTransform` (effect), analysis px → sensor →
+   effect px, then normalised in the EFFECT aspect. `Affine` (pure, tested) + `uprightToTarget`.
+   Zoom keeps landmarks on the face for free: CameraX re-sends the transform when the crop moves.
+3. **Mask eye boxes were axis-aligned** to the sensor texture — rotated by roll now.
+4. **`toI420` could hang the encoder forever** after the capturer looper died (hang-up, flip),
+   ANRing `pc.dispose()` — `GuardedTexture`: bounded hop, null on timeout, wraps `cropAndScale`.
+5. **Preview rotated twice when armed** — a StreamSharing child arrives already rotated
+   (`hasCameraTransform=false`) and the plugin's Dart rotated it again. `PreviewProxyApi`
+   reports `handlesCropAndRotation` true when armed and hands `ResolutionInfo` back in sensor
+   orientation via the bound `Camera` the hook now records.
+6. **Every hold-to-record start/stop rebuilt the StreamSharing pipeline** (viewfinder stall,
+   retouch fade at each clip head; ImageAnalysis unbound DURING recording = no faces on video).
+   Vendored Dart `AndroidCameraCameraX.keepGraphStableForEffect`: video bound at open, nothing
+   unbound around a recording, set from the camera screen after every arm.
+7. **`_applyBeauty` leaked a SurfaceProducer per toggle** and raced on a double toggle —
+   disposes the old controller like `_flipCamera`, rebinds through a serialised future.
+
+And one the review pointed at sideways: **the plugin binds its own ImageAnalysis at open**, so
+mine made two YUV streams beside the shared PRIV + JPEG — a combination most cameras refuse,
+which would have silently dropped face tracking on every device. The vendored bind now attaches
+the tracker to the PLUGIN's analyzer (`setAnalyzer`) and adds its own only when none is there.
+
+### Verified
+
+    ./gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest
+        BUILD SUCCESSFUL; XML: 6 classes, 52 tests, 0 failures (3 new: affine + 4:3→16:9 mapping)
+    flutter analyze --no-pub                     0 errors, 0 warnings
+    flutter test test/unit/camera/beauty_effect_law_test.dart   17 passed (a phase-5 pin moved
+        to the bind's new shape: milesGroup(useCases, effect, false))
+    build: app-play-release.apk 86.0MB, CN=Miles,O=R&D Dev,C=PK — installed 14:45:01, versionCode 76
+
+    ON THE HANDSET, disarmed: the camera screen opened, viewfinder upright, no beauty lines in
+    logcat — the untouched original path, exactly as designed.
+
+### NOT done — and why it stopped here
+
+The owner was in live use of the phone (a chat with their partner in progress); driving it by
+adb was landing taps in that conversation, so I stopped. **Retouch has not been switched on
+yet, so no frame has been retouched.** The remaining pass is four taps for the owner:
+Settings → Camera → Retouch ON → Camera tab; then look, tap the shutter, hold to record, flip.
+Evidence comes from `adb logcat -s MilesBeautyGl MilesBeautyFace MilesCameraEffect` (GL up /
+variant / bind path / face frames) and a screenshot. If StreamSharing's snapshot path fails on
+this hardware, `takePicture()` is the thing that says so.
+
+Uncommitted, as before: everything from §287–§290.
+
+## §291 — 2026-09-06 — the APK on the phone had the new native code and the OLD Dart
+
+The owner reported no Retouch row in Settings. Correct: it was not there. Diagnosis from the
+artifact, not the source:
+
+    installed APK  lib/arm64-v8a/libapp.so   Retouch=0  miles/beauty=0  beauty_kill=0   md5 71ac…
+    fresh AOT      .dart_tool/flutter_build/73ed…/arm64-v8a/app.so (06:39)   Retouch=4
+    Gradle copy    build/app/intermediates/flutter/playRelease/jniLibs/arm64-v8a/libapp.so  Retouch=4  md5 25c5…
+    dex            MilesCameraEffectHook=2, MilesBeautyGl=1 — the Kotlin side WAS packaged
+
+Flutter compiled the current Dart; Gradle packaged a different, older `libapp.so` (neither the
+fresh copy nor the 00:53 merged one — a third, stale stripped lib). `flutter build` printed
+`√ Built … (86.0MB)` and exit 0 both times. **The rulebook's class exactly: exit 0 is not the
+effect, and a rebuild that produces the same bytes is a finding.** Both builds today (05:59 and
+06:48) had this, so nothing on the handset ever ran the Dart side — no arm, no bind, no effect.
+The native pipeline is therefore untested, not disproven.
+
+Fix in progress: `gradlew clean` + `flutter clean`, each with its directory asserted GONE
+afterwards (a clean that cannot remove a held file still exits 0), then rebuild, then the
+packaged `libapp.so` is grepped for `Retouch`, `miles/beauty`, `beauty_kill` and
+`keepGraphStableForEffect` BEFORE any install. That assertion belongs in `tool/release.sh`
+too — proposed, not applied (gate change).
+
+found, not fixed: `build.gradle.kts` `-PmilesPlayApkArm64` path + incremental
+`merge*JniLibFolders`/strip can package a stale `libapp.so`; root cause not yet isolated.
+
+### §291 addendum — clean rebuild verified end to end, not yet installed
+
+    gradlew clean + flutter clean   build/app and .dart_tool/flutter_build asserted GONE
+    flutter build apk --release --flavor play -PmilesPlayApkArm64   90,250,335 bytes, 15:29
+    packaged libapp.so   Retouch=2  miles/beauty=1  beauty_kill=2  "In video calls"=1
+                         md5 f8e31e0e… == stripped copy of the fresh AOT 9f680682…
+    dex                  MilesCameraEffectHook=2
+    signer               CN=Miles, O=R&D Dev, C=PK
+
+The phone was unplugged before `adb install -r` could run. Next: reconnect → install in
+place → Settings → Camera → Retouch on → Camera tab → look, shutter, hold-to-record, flip.
+
+## §292 — 2026-09-06 — the armed pass: it renders, the still comes off the processed stream, the recording encodes
+
+Continues §291. Build 15:29 (snapshot verified), installed 15:34:17 in place. The owner opened
+Miles from the Timer cover, switched Retouch on in Settings → Camera, opened the camera, took a
+photo, held for a video, flipped, and reported: "it's working finely". The log, captured from
+before the unlock (scratchpad `armed_pass.log`, 61,587 lines):
+
+    15:37:19.386  tflite   Initialized TensorFlow Lite runtime / XNNPACK delegate
+    15:37:19.405  native   Successfully loaded: mlkit_facemesh/data/geometry_pipeline…
+    15:37:19.437  MilesBeautyGl  GL up: ES3, Adreno (TM) 650, uniform budget 256, variant full, own context
+    15:37:19.506  StreamSharing  primaryStreamSpec 1920x1080; SurfaceProcessorNode
+                  Processor=SurfaceProcessorWithExecutor(…) inputEdge targets=3 rotationDegrees=270
+    15:37:19.519  SurfaceProcessorNode  second node: outputs targets=4 format=256 (JPEG), targets=2 (video)
+    15:37:35.740  ImageCapture  takePictureInternal
+    15:37:36.079  CaptureNode   OnImageAvailableListener: image.isNull = false        ← the still, 339 ms
+    15:41:29.219  Recorder      IDLING --> PENDING_RECORDING … video/avc encoder … released cleanly 15:41:52
+    MilesCameraEffect warnings ("face analysis refused"): 0
+    app-process errors attributable to the pipeline: 0
+
+What that proves, precisely:
+- The CameraEffect binds through the vendored UseCaseGroup path; StreamSharing carries
+  PREVIEW|VIDEO through the effect and hands IMAGE_CAPTURE the processed edge. The
+  ONE_FOR_ALL_TARGETS decision (§275) was right: `takePicture()` works with the effect on.
+- The full shader variant compiled and linked on Adreno 650 (uniform budget 256 ≥ 128).
+- The face-mesh model loaded on the camera path and the analyzer rode the plugin's own
+  ImageAnalysis (no refusal) — §290's "two YUV streams" fix held.
+- Video bound at open (§290 #6): the Recorder configured at bind and recorded on demand.
+- Preview orientation: the owner saw it correct — §290 #5 (no double rotation) held. Not
+  screenshot-proven: the owner was driving and the screen had returned to the cover by the
+  time I captured.
+
+Seen, not ours: `EncoderProfilesProviderAdapter: Failed to create EncoderProfilesProxy … Use
+CamcorderProfile instead` (NPE on a null VideoProfile) — CameraX on this OEM's EncoderProfiles;
+it falls back and the recording worked. It now fires at bind instead of at first record because
+video is bound at open.
+
+Still open:
+- **The call path** (§287): two handsets. Nothing on it has run on hardware.
+- Visual quality is the owner's word, not a frame in this repo. A saved retouched JPEG next to
+  its unretouched twin would be the durable evidence; the app's own send path is the way.
+- `found, not fixed` (§291): the stale-`libapp.so` packaging hazard; the release script should
+  assert a feature string in the packaged snapshot.
+
+## §293 — 2026-09-06 — the call: retouch never reached the track, and the call had no controls
+
+The owner's video call after §292: no retouch, and no filters offered anywhere in the call.
+
+### What the log could and could not say
+
+`getUserMedia(video)` ran at 15:49:17 with `facingMode=user 1280x720`; the call-path code was in
+the APK (dex: `MilesVideoProcessorHook`, `MilesBeautyCall`); and the processor logged NOTHING —
+not its GL-up line, not a warning. Every link between the Dart arm and the first frame was
+silent on its "did nothing" path: `armCalls`'s result unlogged, the Kotlin handler silent, the
+hook silent, the processor's disabled branch a bare `return frame`. So the log cannot name the
+link. The most likely one, from the code: the Settings row "In video calls" toggled on a ROW
+tap, and the owner had been exploring Settings — one stray tap and `forCall()` is off with no
+visible sign. Fixed regardless of which link it was:
+
+- **Every link now logs.** `shareLog('retouch: armCalls -> …')` / `'retouch: not armed for this
+  call (enabled=…, inCalls=…)'` in the controller; `MilesBeautyCall: armCalls: enabled=…` in
+  MainActivity; `hook arm: … attached to N live track(s)` and `hook onCameraTrack: armed=…` in
+  the fork; `first frame after arm: enabled=… buffer=… WxH rot=…` once per arm in the processor.
+- **The call has its own Look control** beside Flip: the same sheet as the camera, applied live
+  through `BeautyEngine.applyCall` — arms if not armed, updates if armed, disarms if switched
+  off — no rebind, no renegotiation, because the hook attaches to LIVE tracks. On close it saves
+  and switches "in calls" ON, so enabling mid-call sticks. Per-call state (`callLook`,
+  `callColour`) lives on the controller and clears at teardown.
+- **Colour presets in the call.** The sheet gained an optional colour row (shown only when the
+  caller has no strip — the camera keeps its own), the call processor applies `BeautyColour` in
+  its composite, `setColour` is accepted while only calls are armed, MainActivity fans `colour`
+  out to both engines. Only the 8 GPU-foldable presets are offered.
+- The Settings row for calls flips only from its switch (`onTap: null`).
+
+### Verified
+
+    ./gradlew :app:compileSideloadDebugKotlin :app:testSideloadDebugUnitTest   52 tests, 0 failures
+    flutter analyze --no-pub                     0 errors, 0 warnings (one unused import removed)
+    flutter test                                 1704 passed, 3 skipped, exit 0  (+43: applyCall, laws)
+
+### The stale-snapshot hazard hit a SECOND time (§291 was the first)
+
+Build 16:16 packaged `libapp.so` md5 `f8e31e0ea9c4` — byte-identical to the 15:29 build —
+while `.dart_tool/flutter_build/73ed…/app.so` (16:12) already carried the new Dart. So Flutter
+recompiled; Gradle's `merge…JniLibFolders` → `strip…DebugSymbols` chain reused the previous
+input. Two occurrences is a pattern, not luck: **a Flutter-only change followed by
+`flutter build apk` can ship the previous snapshot on this machine.** Until the Gradle cause is
+isolated (`--info` on the merge/strip tasks with a Flutter-only edit), every device build here is
+`gradlew clean` + `flutter clean` (both asserted gone) + build + the packaged-snapshot assertion
+(md5 must change; feature strings present). A first clean rebuild died on a Windows file lock in
+`:file_picker:lintVitalAnalyzeRelease` — environmental, retried.
+
+### §293 addendum — verified build for the call pass, not yet installed
+
+    gradlew --stop (a stale daemon held the lint jar) → build 16:34, 90,250,324 bytes
+    packaged libapp.so  md5 841a64b5806a  (≠ f8e31e0ea9c4 of 15:29 — the Dart is new)
+                        Retouch=2  miles/beauty=1  "In video calls"=1
+    dex                 first-frame log present
+    signer              CN=Miles, O=R&D Dev, C=PK
+
+Phone unplugged before install. Next: reconnect → `adb install -r` → owner places a video call →
+tap Look → switch on / pick a preset / pick a colour → the partner should see it; the log now
+names every link (`retouch: armCalls`, `hook onCameraTrack`, `first frame after arm`).
+
+## §294 — 2026-09-06 — the call pass: every link fired, frames processed in the capturer's context
+
+Build 16:34 (snapshot md5 841a64b5806a), installed 16:36:22. The owner placed a video call, used
+the new Look control, and hung up. The log (scratchpad `call_pass.log`, 75,381 lines):
+
+    16:38:49.056  MilesBeautyCall  hook arm: processor=true, attached to 0 live track(s)   ← before getUserMedia
+    16:38:49.057  MilesBeautyCall  armCalls: enabled=true needsFace=false                  ← saved look: Natural
+    16:38:49.057  flutter          MilesShare retouch: armCalls -> true                    ← shareLog survives release
+    16:38:49.124  FlutterWebRTC    getUserMedia(video): facingMode=user 1280x720
+    16:38:49.608  MilesBeautyCall  hook onCameraTrack: armed=true, live=1                  ← attached
+    16:38:49.727  MilesBeautyCall  first frame after arm: enabled=true buffer=TextureBufferImpl 1280x720 rot=270
+    16:38:49.801  MilesBeautyGl    GL up: ES3, Adreno (TM) 650, uniform budget 256, variant full, adopted context
+    16:39:03 … 16:40:22           six more "first frame after arm" lines — each a Look change (update → params
+                                   setter re-arms the log); needsFace=true from 16:39:03 (a preset with
+                                   reshape/makeup); buffers 640x360 / 960x540 = WebRTC's own adaptation
+    16:40:48.523  MilesBeautyCall  disarmCalls                                             ← hang-up
+    warnings from the pipeline (pool exhausted / toI420 / GL): 0
+
+What that proves: the WebRTC seam works on this hardware — the processor adopts the
+SurfaceTextureHelper's EGL context, renders the full variant into pooled textures, and hands
+them to the encoder for the length of a call, through live look changes, with no leak warning
+and no hang at teardown (the GuardedTexture path never had to time out). The first call's
+failure (§293) is moot: the same prefs now arm, and if a stray "in calls" tap was the cause, that
+row no longer flips on a tap.
+
+Not in the log: what the PARTNER saw. Ask. And the two-handset symmetry (both retouched) is
+still untested.
+
+Everything from §287 to here is uncommitted.

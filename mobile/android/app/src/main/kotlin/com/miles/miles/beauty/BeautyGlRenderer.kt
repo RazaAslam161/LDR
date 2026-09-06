@@ -15,22 +15,28 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The GL half of the camera effect: one EGL context, one FBO, five intermediate textures, and
- * the passes that turn the camera's external texture into every output surface CameraX hands us.
+ * The GL half of the retouch: one FBO, five intermediate textures, and the passes that turn a
+ * camera's external texture into every consumer's pixels.
  *
  * Per frame, when the effect is enabled:
  *   resolve   OES ──(SurfaceTexture matrix)──▶ texA        full res, the space every pass shares
  *   half      texA ──▶ texH0                                half res
  *   blur ×2   texH0 ⇄ texH1                                 separable Gaussian, twice
  *   mask      texH0 ──▶ texM0, then blur ⇄ texM1            skin × face geometry
- *   composite texA + texH0 + texM0 ──(CameraX matrix)──▶ each output
+ *   composite texA + texH0 + texM0 ──(consumer matrix)──▶ output
  *
- * When it is disabled, one pass: OES ──(full matrix)──▶ output, byte-for-byte the pre-fork path.
+ * Two owners, one code path:
+ *  - The camera effect calls [setUp]: this renderer creates its own EGL context on its own
+ *    thread and composites into CameraX's output surfaces ([render]).
+ *  - The call processor calls [attachToCurrentContext]: WebRTC's capturer thread already has a
+ *    context current and the frame's OES texture lives in it, so the passes run there and the
+ *    composite lands in a pooled texture ([renderToTexture]) that becomes the outgoing frame.
  *
- * Threading: everything here runs on the GL thread owned by [BeautySurfaceProcessor]. No locks,
- * because there is exactly one thread.
+ * Threading: every method except [releaseOutputTexture] runs on the owning GL thread. No locks,
+ * because there is exactly one such thread per instance.
  */
 internal class BeautyGlRenderer {
 
@@ -38,6 +44,7 @@ internal class BeautyGlRenderer {
     private var context: EGLContext = EGL14.EGL_NO_CONTEXT
     private var config: EGLConfig? = null
     private var pbuffer: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var ownsContext = false
 
     /** 2 or 3. ES 3 is asked for first, for its guaranteed fragment-uniform budget. */
     var glVersion = 0
@@ -72,6 +79,20 @@ internal class BeautyGlRenderer {
     private var texM1 = 0
     private var bufW = 0
     private var bufH = 0
+    private var aspect = 1f
+
+    /**
+     * Output textures for the call path; the frame that wraps one frees it on any thread.
+     *
+     * A fixed array, never a growable list: slots are filled on the capturer thread while
+     * [releaseOutputTexture] walks the same collection from whichever thread drops a frame, and a
+     * growing ArrayList under a foreign iterator is a ConcurrentModificationException in the
+     * first second of the first call. Each slot's [Pooled.busy] is the only shared state.
+     */
+    private class Pooled(var tex: Int, var w: Int, var h: Int) {
+        val busy = AtomicBoolean(false)
+    }
+    private val pool = arrayOfNulls<Pooled>(POOL_SIZE)
 
     private val identity = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
 
@@ -86,6 +107,8 @@ internal class BeautyGlRenderer {
     private val ctl = FloatArray(4 * FaceFrame.CONTROLS)
     private val ctlR = FloatArray(FaceFrame.CONTROLS)
     private val eyeCtl = FloatArray(4 * FaceFrame.EYES)
+    private val savedFbo = IntArray(1)
+    private val savedViewport = IntArray(4)
 
     private val quad: FloatBuffer = floatBuffer(
         floatArrayOf(
@@ -98,8 +121,10 @@ internal class BeautyGlRenderer {
 
     class Output(val surface: EGLSurface, val width: Int, val height: Int, val matrix: FloatArray)
 
+    // ── setup ───────────────────────────────────────────────────────────────────────────
+
     /**
-     * Brings EGL up and compiles every program.
+     * Creates an EGL context of this renderer's own and compiles every program.
      *
      * @return false when this device cannot run the effect. The caller must then leave the hook
      *   disarmed, and the camera binds exactly as it did before this feature existed.
@@ -110,47 +135,81 @@ internal class BeautyGlRenderer {
             if (display == EGL14.EGL_NO_DISPLAY) return fail("no EGL display")
             val version = IntArray(2)
             if (!EGL14.eglInitialize(display, version, 0, version, 1)) return fail("eglInitialize")
-
             if (!createContext(3) && !createContext(2)) return fail("no ES 3 or ES 2 context")
-
+            ownsContext = true
             pbuffer = EGL14.eglCreatePbufferSurface(
                 display, config,
                 intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0,
             )
             if (!EGL14.eglMakeCurrent(display, pbuffer, pbuffer, context)) return fail("eglMakeCurrent(pbuffer)")
-
-            oes = build(BeautyShaders.OES) ?: return false
-            copy = build(BeautyShaders.COPY) ?: return false
-            blur = build(BeautyShaders.BLUR) ?: return false
-            mask = build(BeautyShaders.MASK) ?: return fail("mask shader; this GPU cannot hold the polygon uniforms")
-
-            val budget = IntArray(1)
-            GLES20.glGetIntegerv(GLES20.GL_MAX_FRAGMENT_UNIFORM_VECTORS, budget, 0)
-            // The FULL composite declares ~95 vec4 of uniforms. Below that budget the compile
-            // may succeed on one driver and fail on another, so the choice is made on the number
-            // rather than on luck.
-            composite = if (budget[0] >= 128) build(BeautyShaders.FULL_DEFINE + BeautyShaders.COMPOSITE) else null
-            fullVariant = composite != null
-            if (composite == null) {
-                composite = build(BeautyShaders.COMPOSITE) ?: return fail("composite shader (lite)")
-            }
-            for (p in listOf(composite!!)) {
-                GLES20.glUseProgram(p.id)
-                GLES20.glUniform1i(p.loc("uTexture"), 0)
-                GLES20.glUniform1i(p.loc("uBlur"), 1)
-                GLES20.glUniform1i(p.loc("uMask"), 2)
-            }
-
-            val ids = IntArray(1)
-            GLES20.glGenFramebuffers(1, ids, 0)
-            fbo = ids[0]
-            inputTextureId = createTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
-            Log.i(TAG, "GL up: ES$glVersion, ${GLES20.glGetString(GLES20.GL_RENDERER)}, " +
-                "uniform budget ${budget[0]}, variant ${if (fullVariant) "full" else "lite"}")
-            return true
+            return buildResources()
         } catch (t: Throwable) {
             return fail("setUp threw: $t")
         }
+    }
+
+    /**
+     * Adopts the EGL context current on THIS thread instead of creating one. For the call path:
+     * the capturer thread owns a context, the frame's texture lives in it, and a second context
+     * could not sample that texture without share-group plumbing nobody needs.
+     *
+     * Everything built here dies with that context. [isCurrentContext] tells the owner when the
+     * thread has moved to a new one — a camera flip re-creates the capturer — and a fresh
+     * renderer must be attached.
+     */
+    fun attachToCurrentContext(): Boolean {
+        try {
+            display = EGL14.eglGetCurrentDisplay()
+            context = EGL14.eglGetCurrentContext()
+            if (display == EGL14.EGL_NO_DISPLAY || context == EGL14.EGL_NO_CONTEXT) {
+                return fail("no EGL context is current on ${Thread.currentThread().name}")
+            }
+            ownsContext = false
+            // ES 2 has no GL_MAJOR_VERSION; the version string is the portable answer.
+            val v = GLES20.glGetString(GLES20.GL_VERSION) ?: ""
+            glVersion = if (v.contains("OpenGL ES 3")) 3 else 2
+            return buildResources()
+        } catch (t: Throwable) {
+            return fail("attach threw: $t")
+        }
+    }
+
+    /** Whether the context this renderer's objects live in is the one current on this thread. */
+    fun isCurrentContext(): Boolean =
+        context != EGL14.EGL_NO_CONTEXT && context == EGL14.eglGetCurrentContext()
+
+    private fun buildResources(): Boolean {
+        oes = build(BeautyShaders.OES) ?: return false
+        copy = build(BeautyShaders.COPY) ?: return false
+        blur = build(BeautyShaders.BLUR) ?: return false
+        mask = build(BeautyShaders.MASK) ?: return fail("mask shader; this GPU cannot hold the polygon uniforms")
+
+        val budget = IntArray(1)
+        GLES20.glGetIntegerv(GLES20.GL_MAX_FRAGMENT_UNIFORM_VECTORS, budget, 0)
+        // The FULL composite declares ~95 vec4 of uniforms. Below that budget the compile may
+        // succeed on one driver and fail on another, so the choice is made on the number rather
+        // than on luck.
+        composite = if (budget[0] >= 128) build(BeautyShaders.FULL_DEFINE + BeautyShaders.COMPOSITE) else null
+        fullVariant = composite != null
+        if (composite == null) {
+            composite = build(BeautyShaders.COMPOSITE) ?: return fail("composite shader (lite)")
+        }
+        composite!!.let { p ->
+            GLES20.glUseProgram(p.id)
+            GLES20.glUniform1i(p.loc("uTexture"), 0)
+            GLES20.glUniform1i(p.loc("uBlur"), 1)
+            GLES20.glUniform1i(p.loc("uMask"), 2)
+        }
+        val ids = IntArray(1)
+        GLES20.glGenFramebuffers(1, ids, 0)
+        fbo = ids[0]
+        inputTextureId = createTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+        Log.i(
+            TAG,
+            "GL up: ES$glVersion, ${GLES20.glGetString(GLES20.GL_RENDERER)}, uniform budget ${budget[0]}, " +
+                "variant ${if (fullVariant) "full" else "lite"}, ${if (ownsContext) "own" else "adopted"} context",
+        )
+        return true
     }
 
     private fun createContext(es: Int): Boolean {
@@ -175,6 +234,8 @@ internal class BeautyGlRenderer {
         glVersion = es
         return true
     }
+
+    // ── camera path ─────────────────────────────────────────────────────────────────────
 
     fun createWindowSurface(surface: Surface): EGLSurface? {
         return try {
@@ -214,7 +275,7 @@ internal class BeautyGlRenderer {
     }
 
     /**
-     * The whole pipeline for one frame.
+     * The whole pipeline for one camera frame, composited into every CameraX output.
      *
      * @param stMatrix the raw SurfaceTexture matrix — resolves the OES texture into texA's space.
      * @param face the geometry to use, which is the LAST face seen even while fading out.
@@ -229,31 +290,121 @@ internal class BeautyGlRenderer {
         p: BeautyParams,
         outputs: List<Output>,
         presentationTimeNs: Long,
+        colour: BeautyColour? = null,
     ): Boolean {
         if (!EGL14.eglMakeCurrent(display, pbuffer, pbuffer, context)) {
             Log.e(TAG, "eglMakeCurrent(pbuffer) failed: ${EGL14.eglGetError()}")
             return false
         }
+        val fa = runPasses(inputTextureId, inputW, inputH, stMatrix, face, faceAlpha)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        var ok = true
+        for (o in outputs) {
+            if (!EGL14.eglMakeCurrent(display, o.surface, o.surface, context)) {
+                Log.e(TAG, "eglMakeCurrent(output) failed: ${EGL14.eglGetError()}")
+                ok = false
+                continue
+            }
+            GLES20.glViewport(0, 0, o.width, o.height)
+            drawComposite(o.matrix, face, fa, p, colour)
+            EGLExt.eglPresentationTimeANDROID(display, o.surface, presentationTimeNs)
+            if (!EGL14.eglSwapBuffers(display, o.surface)) ok = false
+        }
+        return ok
+    }
+
+    // ── call path ───────────────────────────────────────────────────────────────────────
+
+    /**
+     * The whole pipeline for one WebRTC frame, composited into a pooled texture in the caller's
+     * own context. No surface is made current and none is swapped; the caller's framebuffer
+     * binding and viewport are put back afterwards.
+     *
+     * @param inputOes the frame's OES texture id
+     * @return the output texture id, or null when every pooled texture is still held by a frame
+     *   downstream — the caller passes the original frame through, unprocessed, rather than
+     *   stalling the capturer.
+     */
+    fun renderToTexture(
+        inputOes: Int,
+        w: Int,
+        h: Int,
+        stMatrix: FloatArray,
+        face: FaceFrame?,
+        faceAlpha: Float,
+        p: BeautyParams,
+        colour: BeautyColour? = null,
+    ): Int? {
+        val out = acquireOutput(w, h) ?: return null
+        GLES20.glGetIntegerv(GLES20.GL_FRAMEBUFFER_BINDING, savedFbo, 0)
+        GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0)
+        val fa = runPasses(inputOes, w, h, stMatrix, face, faceAlpha)
+        attach(out.tex)
+        GLES20.glViewport(0, 0, w, h)
+        drawComposite(identity, face, fa, p, colour)
+        // The encoder and the self-view sample this texture from OTHER contexts in WebRTC's share
+        // group, and the GL spec guarantees they see a complete image only after the producer
+        // finishes. glFinish, not glFlush: the consumers use no sync objects, so completion is the
+        // only guarantee that holds. Without it the first frames after each toggle are black or
+        // torn, on exactly the hardware that pipelines deepest.
+        GLES20.glFinish()
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, savedFbo[0])
+        GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3])
+        return out.tex
+    }
+
+    /** Frees a texture from [renderToTexture]. Called from whatever thread releases the frame. */
+    fun releaseOutputTexture(tex: Int) {
+        for (e in pool) if (e != null && e.tex == tex) e.busy.set(false)
+    }
+
+    private fun acquireOutput(w: Int, h: Int): Pooled? {
+        for (i in pool.indices) {
+            val e = pool[i]
+            if (e == null) {
+                val fresh = Pooled(createTexture(GLES20.GL_TEXTURE_2D, w, h), w, h)
+                fresh.busy.set(true)
+                pool[i] = fresh
+                return fresh
+            }
+            if (e.busy.compareAndSet(false, true)) {
+                if (e.w != w || e.h != h) {
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, e.tex)
+                    GLES20.glTexImage2D(
+                        GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+                        GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+                    )
+                    e.w = w
+                    e.h = h
+                }
+                return e
+            }
+        }
+        return null
+    }
+
+    // ── the passes ──────────────────────────────────────────────────────────────────────
+
+    /** resolve → half → blur → mask → mask blur. Leaves the FBO bound. Returns the alpha used. */
+    private fun runPasses(inputOes: Int, inputW: Int, inputH: Int, stMatrix: FloatArray, face: FaceFrame?, faceAlpha: Float): Float {
         ensureBuffers(inputW, inputH)
         val hw = maxOf(1, inputW / 2)
         val hh = maxOf(1, inputH / 2)
+        aspect = inputW.toFloat() / inputH.toFloat()
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
 
-        // resolve
         attach(texA)
         GLES20.glViewport(0, 0, inputW, inputH)
         GLES20.glUseProgram(oes!!.id)
-        bind(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTextureId, 0)
+        bind(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputOes, 0)
         drawQuad(oes!!, stMatrix)
 
-        // half
         attach(texH0)
         GLES20.glViewport(0, 0, hw, hh)
         GLES20.glUseProgram(copy!!.id)
         bind(GLES20.GL_TEXTURE_2D, texA, 0)
         drawQuad(copy!!, identity)
 
-        // blur, twice
         val b = blur!!
         GLES20.glUseProgram(b.id)
         repeat(2) {
@@ -267,12 +418,10 @@ internal class BeautyGlRenderer {
             drawQuad(b, identity)
         }
 
-        // mask
         val m = mask!!
         attach(texM0)
         GLES20.glUseProgram(m.id)
         bind(GLES20.GL_TEXTURE_2D, texH0, 0)
-        val aspect = inputW.toFloat() / inputH.toFloat()
         GLES20.glUniform1f(m.loc("uAspect"), aspect)
         val fa = if (face == null) 0f else faceAlpha
         GLES20.glUniform1f(m.loc("uFaceAlpha"), fa)
@@ -296,35 +445,34 @@ internal class BeautyGlRenderer {
         bind(GLES20.GL_TEXTURE_2D, texM1, 0)
         GLES20.glUniform2f(b.loc("uStep"), 0f, 1f / hh)
         drawQuad(b, identity)
+        return fa
+    }
 
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-
-        // composite, once per output
+    private fun drawComposite(matrix: FloatArray, face: FaceFrame?, fa: Float, p: BeautyParams, colour: BeautyColour?) {
         val c = composite!!
-        var ok = true
-        for (o in outputs) {
-            if (!EGL14.eglMakeCurrent(display, o.surface, o.surface, context)) {
-                Log.e(TAG, "eglMakeCurrent(output) failed: ${EGL14.eglGetError()}")
-                ok = false
-                continue
-            }
-            GLES20.glViewport(0, 0, o.width, o.height)
-            GLES20.glUseProgram(c.id)
-            bind(GLES20.GL_TEXTURE_2D, texA, 0)
-            bind(GLES20.GL_TEXTURE_2D, texH0, 1)
-            bind(GLES20.GL_TEXTURE_2D, texM0, 2)
-            GLES20.glUniform1f(c.loc("uAspect"), aspect)
-            GLES20.glUniform1f(c.loc("uSmooth"), p.smooth)
-            GLES20.glUniform1f(c.loc("uTone"), p.tone)
-            GLES20.glUniform1f(c.loc("uBrighten"), p.brighten)
-            GLES20.glUniform1f(c.loc("uDetail"), p.detail)
-            GLES20.glUniform1f(c.loc("uFaceAlpha"), fa)
-            if (fullVariant && face != null) uploadFace(c, face, p)
-            drawQuad(c, o.matrix)
-            EGLExt.eglPresentationTimeANDROID(display, o.surface, presentationTimeNs)
-            if (!EGL14.eglSwapBuffers(display, o.surface)) ok = false
+        GLES20.glUseProgram(c.id)
+        bind(GLES20.GL_TEXTURE_2D, texA, 0)
+        bind(GLES20.GL_TEXTURE_2D, texH0, 1)
+        bind(GLES20.GL_TEXTURE_2D, texM0, 2)
+        GLES20.glUniform1f(c.loc("uAspect"), aspect)
+        GLES20.glUniform1f(c.loc("uSmooth"), p.smooth)
+        GLES20.glUniform1f(c.loc("uTone"), p.tone)
+        GLES20.glUniform1f(c.loc("uBrighten"), p.brighten)
+        GLES20.glUniform1f(c.loc("uDetail"), p.detail)
+        GLES20.glUniform1f(c.loc("uFaceAlpha"), fa)
+        if (fullVariant && face != null) uploadFace(c, face, p)
+        if (colour == null) {
+            GLES20.glUniform1f(c.loc("uColorOn"), 0f)
+        } else {
+            GLES20.glUniform1f(c.loc("uColorOn"), 1f)
+            GLES20.glUniform3fv(c.loc("uColorR"), 1, colour.rows, 0)
+            GLES20.glUniform3fv(c.loc("uColorG"), 1, colour.rows, 3)
+            GLES20.glUniform3fv(c.loc("uColorB"), 1, colour.rows, 6)
+            GLES20.glUniform3fv(c.loc("uColorV"), 1, colour.constant, 0)
+            GLES20.glUniform4fv(c.loc("uOverlay"), 1, colour.overlay, 0)
+            GLES20.glUniform1f(c.loc("uOverlayScreen"), if (colour.overlayScreen) 1f else 0f)
         }
-        return ok
+        drawQuad(c, matrix)
     }
 
     private fun uploadFace(c: Program, face: FaceFrame, p: BeautyParams) {
@@ -362,23 +510,45 @@ internal class BeautyGlRenderer {
         GLES20.glUniform3f(c.loc(name), rgb[0], rgb[1], rgb[2])
     }
 
+    // ── teardown ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Frees everything. For an owned context, tears EGL down too.
+     *
+     * For an adopted one the objects belong to WebRTC's SHARE GROUP, not to the context they
+     * were made in: a capturer's context dies with its SurfaceTextureHelper, but the root context
+     * outlives every call, and so do these until deleted. Any context of the group can delete
+     * them, so the requirement is that SOME context is current on this thread — which is the
+     * case on the capturer thread that replaces this renderer after a flip or a new call. With
+     * no context current (the platform thread at shutdown) they are dropped by reference only,
+     * once per process, which is the bounded leak this design accepts.
+     */
     fun release() {
-        if (display == EGL14.EGL_NO_DISPLAY) return
-        EGL14.eglMakeCurrent(display, pbuffer, pbuffer, context)
-        for (p in listOf(oes, copy, blur, mask, composite)) p?.let { GLES20.glDeleteProgram(it.id) }
-        val tex = intArrayOf(inputTextureId, texA, texH0, texH1, texM0, texM1)
-        GLES20.glDeleteTextures(tex.size, tex, 0)
-        if (fbo != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
-        EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-        if (pbuffer != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, pbuffer)
-        if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
-        EGL14.eglTerminate(display)
+        val live = if (ownsContext) {
+            display != EGL14.EGL_NO_DISPLAY && EGL14.eglMakeCurrent(display, pbuffer, pbuffer, context)
+        } else {
+            EGL14.eglGetCurrentContext() != EGL14.EGL_NO_CONTEXT
+        }
+        if (live) {
+            for (p in listOf(oes, copy, blur, mask, composite)) p?.let { GLES20.glDeleteProgram(it.id) }
+            val tex = intArrayOf(inputTextureId, texA, texH0, texH1, texM0, texM1) + pool.filterNotNull().map { it.tex }.toIntArray()
+            GLES20.glDeleteTextures(tex.size, tex, 0)
+            if (fbo != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
+        }
+        if (ownsContext && display != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+            if (pbuffer != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, pbuffer)
+            if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
+            EGL14.eglTerminate(display)
+        }
         display = EGL14.EGL_NO_DISPLAY
         context = EGL14.EGL_NO_CONTEXT
         pbuffer = EGL14.EGL_NO_SURFACE
+        ownsContext = false
         oes = null; copy = null; blur = null; mask = null; composite = null
         inputTextureId = 0; texA = 0; texH0 = 0; texH1 = 0; texM0 = 0; texM1 = 0; fbo = 0
         bufW = 0; bufH = 0
+        pool.fill(null)
     }
 
     // ── internals ────────────────────────────────────────────────────────────────────────
@@ -399,7 +569,6 @@ internal class BeautyGlRenderer {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
         attach(texA)
         val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
             Log.e(TAG, "FBO incomplete for ${w}x$h: 0x${Integer.toHexString(status)}")
         }
@@ -495,5 +664,17 @@ internal class BeautyGlRenderer {
 
         /** Not in EGL14; the value is fixed by the Android EGL extension. */
         private const val EGL_RECORDABLE_ANDROID = 0x3142
+
+        /**
+         * Three output textures for the call path: one being drawn, one held by the encoder, one
+         * held by the local preview. A fourth would only hide a consumer that stopped releasing.
+         */
+        /**
+         * How many outgoing frames may be in flight at once. The encoder queue plus the self-view
+         * plus the adaptation stage can hold four or five between them when the encoder lags, and
+         * an exhausted pool passes the RAW frame through — a visible flicker to the far end. Six
+         * 720p RGBA textures is ~22MB of GPU memory, which is the cheaper failure.
+         */
+        private const val POOL_SIZE = 6
     }
 }

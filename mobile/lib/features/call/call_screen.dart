@@ -10,6 +10,10 @@ import 'package:miles/core/widgets/signed_image.dart';
 import 'package:miles/features/call/call_controller.dart';
 import 'package:miles/features/call/call_face_strip.dart';
 import 'package:miles/features/call/call_video.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_engine.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_prefs.dart';
+import 'package:miles/features/chat/camera/beauty/beauty_sheet.dart';
+import 'package:miles/features/chat/camera/camera_filters.dart';
 
 /// Whether the diagnostic readout is showing. Outside the widget so it survives
 /// the call screen being minimised to the pill and reopened.
@@ -428,6 +432,14 @@ class CallScreen extends ConsumerWidget {
                                 bg: MilesColors.surface2,
                                 label: 'Flip',
                                 onTap: call.switchCamera,),
+                            // The same look control the camera has: retouch
+                            // presets, amount, and the colour presets. Applies
+                            // to the outgoing video live — the partner sees it.
+                            _RoundBtn(
+                                icon: Icons.face_retouching_natural,
+                                bg: MilesColors.surface2,
+                                label: 'Look',
+                                onTap: () => _openLook(context, call),),
                             // Connected-only: the share opens its own peer
                             // connection, and there is no one to answer it
                             // until the call itself is up.
@@ -747,4 +759,34 @@ class _SharingCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Opens the shared look sheet for this call. Changes apply live through the
+/// engine — arm, update or disarm as the switch and sliders demand — and the
+/// last state is saved once on close, with "in calls" switched on whenever the
+/// look was enabled here: enabling it mid-call and then finding it gone next
+/// time would be the surprising half.
+Future<void> _openLook(BuildContext context, CallController call) async {
+  var last = call.callLook ?? BeautyPrefs.forCall();
+  await showBeautySheet(
+    context,
+    current: last,
+    colours: kCameraFilters.where((f) => f.gpuFoldable).toList(),
+    colour: call.callColour,
+    onColour: (f) {
+      call.callColour = f;
+      BeautyEngine.setColour(f.id == 'none' ? null : f);
+    },
+    onChanged: (s) {
+      last = s;
+      call.callLook = s;
+      BeautyEngine.applyCall(s);
+    },
+  );
+  BeautyPrefs.enabled = last.enabled;
+  if (last.enabled) {
+    BeautyPrefs.settings = last;
+    BeautyPrefs.useInCalls = true;
+  }
+  await BeautyPrefs.save();
 }

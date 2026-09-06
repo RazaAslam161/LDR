@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:miles/core/app/release_gate.dart';
 import 'package:miles/features/chat/camera/beauty/beauty_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -55,10 +56,11 @@ class BeautyPrefs {
   static BeautySettings get settings => _settings;
   static set settings(BeautySettings v) => _settings = v;
 
-  /// What the camera should open with — [enabled] folded in, so no call site
-  /// has to remember to check it.
-  static BeautySettings forCamera() =>
-      _enabled ? _settings.copyWith(enabled: true) : const BeautySettings();
+  /// What the camera should open with — [enabled] and the remote kill folded
+  /// in, so no call site has to remember to check either.
+  static BeautySettings forCamera() => (_enabled && !ReleaseGate.beautyKilled)
+      ? _settings.copyWith(enabled: true)
+      : const BeautySettings();
 
   /// What a call should use. Both switches fold in here.
   static BeautySettings forCall() =>
