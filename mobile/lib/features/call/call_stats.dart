@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:miles/core/app/logging.dart';
 
 /// What a live call is actually doing, read from the peer connection.
 ///
@@ -211,10 +212,21 @@ class CallStatsMonitor {
       _lastRecvBytes = recvBytes;
       _lastAt = now;
 
-      debugPrint('[callstats] ${s.line}');
+      // shareLog, NOT debugPrint: silenceLogsInRelease nulls debugPrint on
+      // every release build, which is every build a real call happens on. This
+      // class exists so a call that goes wrong in the field is not silent, and
+      // riding the nulled logger made it silent in exactly the field. The
+      // screen-share instrumentation learned this the same way (BRAIN
+      // §205/§220, five builds of blind field tests) and logging.dart already
+      // carries the documented exception for it.
+      //
+      // The privacy contract holds: [CallStats.line] is resolutions, rates,
+      // counts and libwebrtc state words. No display name, no id, nothing a
+      // person wrote.
+      shareLog('callstats ${s.line}');
       _onUpdate(s);
     } catch (e) {
-      debugPrint('[callstats] failed: $e');
+      shareLog('callstats failed: $e');
     }
   }
 

@@ -269,6 +269,28 @@ void main() {
           reason: 'the dead channel must not come back',);
     });
 
+    test('call stats survive a release build too', () {
+      // The same blindness, in the other file that measures a live call.
+      // CallStatsMonitor's own doc says it is "deliberately always on" so that
+      // "a call that goes wrong in the field is otherwise completely silent" —
+      // and it rode debugPrint, so it WAS silent in the field, on every release
+      // build, for the whole of its life. The retouch made this matter twice
+      // over: fps and qualityLimitationReason are how "the call got worse"
+      // separates a GPU cost from a bandwidth cap.
+      //
+      // Comment-stripped, because the fix's own comment names the dead channel
+      // to explain itself — a matcher that cannot tell code from prose reports
+      // whatever the last person wrote.
+      final stats = _code(
+        File('lib/features/call/call_stats.dart').readAsStringSync(),
+      );
+      expect(stats.contains(r"shareLog('callstats ${s.line}')"), isTrue,
+          reason: 'the sample line must reach a release handset',);
+      expect(stats.contains('debugPrint('), isFalse,
+          reason: 'debugPrint is nulled in release; a call diagnostic on it is '
+              'born dead, the §220 defect exactly',);
+    });
+
     test('the rung retry runs BEFORE the stats read', () {
       // The retry sat below getStats, where the stats-error early return
       // skipped it: a connection with flaky stats ran its whole life
@@ -522,3 +544,10 @@ void main() {
     });
   });
 }
+
+/// Dart source with comments removed, so a law about CODE is never satisfied or
+/// broken by PROSE. The call-stats law needs it: the fix it pins carries a
+/// comment that names the very channel the law forbids.
+String _code(String dart) => dart
+    .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), ' ')
+    .replaceAll(RegExp(r'//.*'), ' ');

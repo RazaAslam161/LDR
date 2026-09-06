@@ -24968,3 +24968,142 @@ Local temp worktrees used to gate the exact staged combination before committing
 Still open, unchanged by a green CI: the partner-side visual on the call, both handsets
 retouched in the same call, and the Gradle stale-`libapp.so` packaging cause (§291/§293) —
 worked around by a verified clean before every device build, not yet isolated.
+
+## §295 — 2026-09-06 — the call measures its own quality and threw it away; and §294's open item was never open
+
+Two corrections and one fix, all from reading rather than guessing.
+
+### The stale-`libapp.so` item was NOT unisolated — §291/§293/§294 were wrong to say so
+
+`tool/release.sh:236-312` already carries the full root cause, found across builds 39-44 and
+written down at the time:
+
+- `flutter test` (the gate) seeds `.dart_tool` with a kernel from the PRE-bump source; the AOT
+  build reuses it and Gradle stamps the NEW versionCode onto the OLD Dart.
+- Dropping only `.dart_tool/flutter_build` is not enough — the stale copy sits one layer on, in
+  Gradle: `intermediates/flutter/.../jniLibs` had `miles-build-44` while
+  `intermediates/merged_jni_libs/...` still had 43, and the APK shipped 43.
+- Adding `flutter clean` is not enough either, and this is the load-bearing part: **the Gradle
+  daemon holds handles under `build\`, so the delete fails and `flutter clean` EXITS 0.**
+  `mergeJniLibFolders` then finds itself up to date against output eleven hours old.
+
+So release.sh stops the daemon, cleans with five retries, and PROVES `build/` is gone before
+building; three separate `miles-build-<N>` greps over the packaged snapshot back it up. The
+project shipped the wrong Dart six times before that block existed.
+
+**What actually happened on 2026-09-06 is that I called `flutter build apk` directly and
+bypassed every one of those defences.** The hazard is not an open engineering question; it is a
+rule: device builds go through `tool/release.sh`, or they carry no guarantee at all.
+
+### The defect: `call_stats.dart` was blind on every build that matters
+
+`CallStatsMonitor` reads `framesPerSecond`, `frameWidth`, `qualityLimitationReason`,
+`freezeCount` and the bandwidth estimate every two seconds. Its own doc says it is "deliberately
+always on" because "a call that goes wrong in the field is otherwise completely silent".
+
+It reported through `debugPrint`, and `logging.dart:22` nulls `debugPrint` in every release
+build. So the app measured its own call quality on every release call and discarded it —
+including the whole retouched call in §294, which is why that section could report that frames
+flowed but not what they cost.
+
+**This is the §205/§220 defect, verbatim, in the other file.** `logging.dart:26-38` documents
+that exact history for the screen-share telemetry — "five builds of field tests ran blind" —
+and `call_stats.dart` was never converted with it.
+
+Fixed: the sample line and the failure line now go through `shareLog`, whose release branch
+uses `print`, which the override cannot touch. The privacy contract holds without an
+exception — `CallStats.line` is resolutions, rates, counts and libwebrtc state words; no name,
+no id, nothing a person wrote. Pinned in `screen_share_law_test.dart` beside the §220 law,
+comment-stripped because the fix's own comment names the dead channel to explain itself.
+
+### Why this matters for the retouch specifically
+
+"The call got worse" has two causes that feel identical: the GPU pass costing frames, or the
+network capping the bitrate. `sendFps` and `qualityLimitationReason` are exactly what separates
+them, and until now neither reached a release handset. The next retouched call answers the
+performance question that §294 had to leave open, with no new instrumentation.
+
+### Verified
+
+    flutter test test/unit/call/screen_share_law_test.dart    33 passed
+    flutter analyze --no-pub                                  0 errors, 0 warnings
+
+Still open: the partner's handset runs an older build, so no call has had the retouch on both
+sides; and the look's visual quality is the owner's word, not a frame in this repo.
+
+### §295 addendum — the suite's one red test is not this change
+
+`flutter test` on the shared working tree is 1 red: `delivery_ack_test.dart` — "the delivery
+wake acks BEFORE it draws anything". It is the concurrent session's in-flight work
+(`chat_receipts.dart`, `chat_repository.dart` and that test are all theirs, all uncommitted).
+
+Checked rather than asserted, because "that change isn't mine" is exactly the claim this
+rulebook says to test by flipping one variable: a worktree at HEAD carrying ONLY the two files
+this section changed runs
+
+    flutter test test/unit/chat/delivery_ack_test.dart      15 passed
+    flutter test test/unit/call/screen_share_law_test.dart  33 passed
+
+so the red comes from their edits, not from routing call stats through shareLog. Left for them;
+not touched, not worked around.
+
+### §295 addendum 2 — the kill switch is not armed, and every launch pays for it
+
+Checked against production (`sopictusdonlvuezmfep`), not assumed:
+
+    information_schema.columns on public.app_release
+      … chat_cipher_only, ui_sound_kill        ← present
+      beauty_kill                              ← ABSENT
+
+`20260906120000_beauty_kill_switch.sql` is written and committed but has never been applied;
+the migration ledger's tail is the concurrent session's `20260906121601`.
+
+Two consequences of shipping `957890b` against a column that does not exist:
+
+1. **The safety net is not armed.** `beauty_kill` was built precisely because the retouch is a
+   native GL pipeline on GPUs nobody here can see, and the way back had to be one UPDATE. Today
+   there is no way back but a release.
+2. **Every launch pays a failed round trip.** `withBeautyKill` is the HEAD of
+   `ReleaseGate.columnSets`, and PostgREST 400s a whole select when one column is missing, so
+   the first generation always fails and the client falls back to `withSoundKill`. The gate
+   still answers correctly — the degrade was designed for exactly this — but it is a wasted
+   request on every cold start until the migration lands.
+
+Not a design fault of the generation ladder: it is doing what it was built to do. It is the
+ordering that was wrong — the column set shipped before the column.
+
+Next step, and it is the owner's call because it is schema: apply to staging
+(`zqltaobarpcuantrqxha`), verify, then production. The file is additive, `IF NOT EXISTS`, and
+its rollback is one `drop column`.
+
+### §295 addendum 3 — `beauty_kill` applied to staging and production, verified on both
+
+Staging (`zqltaobarpcuantrqxha`) first, then production (`sopictusdonlvuezmfep`), per the project
+rule. `success: true` is not the effect, so each hop was checked by running the CLIENT's own
+column list rather than by trusting the return:
+
+    select min_build, min_build_play, latest_build, message,
+           chat_cipher_only, ui_sound_kill, beauty_kill
+    from public.app_release;          -- release_gate.dart's withBeautyKill, verbatim
+
+    staging     → beauty_kill=false, boolean, default false, NOT NULL (identical to ui_sound_kill)
+    production  → min_build=42 latest_build=46 chat_cipher_only=true
+                  ui_sound_kill=false beauty_kill=false
+
+So the head generation now resolves on the first attempt, and the wasted 400-then-fallback on
+every cold start (addendum 2) is gone. The switch reads `false`: the feature follows the local
+toggle, which is the polarity that keeps a working feature working.
+
+Negative check, because a kill switch a user could flip would take the feature from BOTH of
+them:
+
+    role_table_grants on public.app_release for anon/authenticated/public
+      → anon: SELECT ; authenticated: SELECT ; nothing else
+
+No INSERT, UPDATE or DELETE to any client role — only the service role can arm it. Nothing about
+the grants changed; the new column inherits the table's existing read-only posture.
+
+**To use it:** `update public.app_release set beauty_kill = true;` — every client picks it up on
+its next launch, Settings shows "Turned off remotely for this release", and `BeautyPrefs
+.forCamera()` returns disabled so neither the camera nor calls arm the effect. Set back to
+`false` to restore; the user's own preference was never overwritten.
