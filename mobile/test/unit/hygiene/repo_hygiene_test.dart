@@ -959,4 +959,268 @@ void main() {
               'honest one; every cover is opt-in: $enabled',);
     }
   });
+
+  // ── the Personal Vault is not encrypted, and nothing may say it is ──────
+  //
+  // `personal_vault_items.content` is `text` and `VaultRepository.saveMedia`
+  // calls `_uploadPlain`. The vault has been plaintext since build 60, by the
+  // owner's ruling of 2026-08-28; what guards it is the PIN, FLAG_SECURE and
+  // owner-only RLS. THREAT-MODEL.md §1 is the table of record.
+  //
+  // This law exists because prose kept saying otherwise. NINE places carried
+  // the claim, including the Terms every account must accept before the app
+  // opens. Two passes declared the class clean and were wrong, and the second
+  // of those was wrong because the sweep was line-based: index.html split the
+  // claim over a newline —
+  //
+  //     Your Memory Threads, Wish Jar entries and Personal Vault files are
+  //       end-to-end encrypted
+  //
+  // — so the line holding `vault` had no encryption word and the line holding
+  // the encryption word had no `vault`. It fell through both halves of the
+  // filter and stayed live on the public site. The detector below works on the
+  // whole file rather than a line at a time, which is the entire point of it.
+
+  /// Every place [src] asserts that a vault is encrypted, as `path:line`.
+  ///
+  /// Tags are blanked rather than removed so offsets and newlines still line up
+  /// with the original file, which is what keeps the reported line honest.
+  List<String> vaultClaimsIn(String src, String path, {required bool html}) {
+    // Bare "ciphertext" is deliberately NOT a term. It appears in byte-layout
+    // comments (`mac(16)||ciphertext`) that assert nothing about the vault, and
+    // including it made the detector cry wolf until nobody would read it.
+    // The verb shapes are here because they shipped: a spinner that said
+    // "Encrypting and saving…" over a plaintext upload, a comment about the
+    // vault keeping "its OWN encrypted copy", a README saying the app's copies
+    // "stay encrypted", a prompt about "everything encrypted". Bare
+    // "encrypt"/"encrypted"/"encryption" are still NOT terms — "used to
+    // encrypt", "existing encrypted items" and "encryption backup" are
+    // narration, and flagging them made the detector cry wolf.
+    final term = RegExp(
+        'end-to-end encrypted|end-to-end encryption|encrypted on your phone|'
+        'encrypted on the sending phone|holds? no key|sealed with|'
+        'server stores ciphertext|reach our database as ciphertext|'
+        r'\bencrypts\b|\bencrypting\b|stays?\s+encrypted|'
+        r'keeps?\b[^.\n]{0,24}\bencrypted|encrypted\s+cop(?:y|ies)|'
+        r'everything\s+encrypted',
+        caseSensitive: false,);
+    final vault = RegExp(r'\bvaults?\b', caseSensitive: false);
+    // A file under the vault feature IS about the vault: a claim there needs
+    // no noun within reach. This is how the spinner escaped — the screen never
+    // says "vault" near its own busy label.
+    final inVaultDir = path.contains('/vault/');
+    // `\bnot\b` and not a bare "not", because "cannot" is everywhere in these
+    // documents and would suppress every real claim. `stored` and `old` catch
+    // the past-tense history — "the vault stored ciphertext", "the old
+    // encrypted vault" — which is narration, not a promise.
+    final deny = RegExp(
+        r'\bnot\b|\bnever\b|\bno longer\b|unencrypted|\bstored\b|\bold\b|'
+        r'\bstopped\b|\bused to\b|\buntil build\b',
+        caseSensitive: false,);
+
+    final text = html
+        ? src.replaceAllMapped(RegExp('<[^>]*>'),
+            (m) => m.group(0)!.replaceAll(RegExp('[^\n]'), ' '),)
+        : src;
+
+    final out = <String>[];
+    for (final m in term.allMatches(text)) {
+      // The nearest vault mention on either side. Out of range means the claim
+      // is about something else entirely.
+      final lo = m.start - 200 < 0 ? 0 : m.start - 200;
+      final hi = m.end + 200 > text.length ? text.length : m.end + 200;
+      RegExpMatch? near;
+      for (final v in vault.allMatches(text.substring(lo, hi))) {
+        final at = lo + v.start;
+        if (near == null ||
+            (at - m.start).abs() < (lo + near.start - m.start).abs()) {
+          near = v;
+        }
+      }
+      if (near == null && !inVaultDir) continue;
+      final vAt = near == null ? m.start : lo + near.start;
+      final vEnd = near == null ? m.end : vAt + near.end - near.start;
+      final spanLo = vAt < m.start ? vAt : m.start;
+      final spanHi = vEnd > m.end ? vEnd : m.end;
+      // The span between the two anchors plus a short collar, so that a denial
+      // attached to either one counts — "Not end-to-end encrypted" before the
+      // term, "the Vault is not in that set" after the noun — while a denial
+      // about some other subject two sentences away does not.
+      final wLo = spanLo - 14 < 0 ? 0 : spanLo - 14;
+      final wHi = spanHi + 26 > text.length ? text.length : spanHi + 26;
+      if (deny.hasMatch(text.substring(wLo, wHi))) continue;
+      out.add('$path:${'\n'.allMatches(text.substring(0, m.start)).length + 1}');
+    }
+    return out;
+  }
+
+  test('nothing tells anyone the Personal Vault is encrypted', () {
+    final offenders = <String>[];
+    for (final p in tracked()) {
+      final isHtml = p.startsWith('web/') && p.endsWith('.html');
+      final isDart = p.startsWith('mobile/lib/') && p.endsWith('.dart');
+      if (!isHtml && !isDart) continue;
+      offenders
+          .addAll(vaultClaimsIn(File('../$p').readAsStringSync(), p, html: isHtml));
+    }
+    expect(offenders, isEmpty,
+        reason: 'these say, or read as saying, that the Personal Vault is '
+            'encrypted. It is not — VaultRepository.saveMedia calls '
+            '_uploadPlain and personal_vault_items.content is text. Say what '
+            'actually guards it (its PIN, the block on screenshots, owner-only '
+            'access) and check the wording against THREAT-MODEL.md §1, not '
+            'against another document: $offenders',);
+  });
+
+  test('the vault-claim detector can tell a claim from a denial', () {
+    // A law that goes green after a cleanup proves nothing; it has to be able
+    // to fail. Every line below is a shape that actually shipped, or a shape
+    // the fix produced that must not be flagged.
+    List<String> only(String src, {bool html = true, String path = 'x'}) =>
+        vaultClaimsIn(src, path, html: html);
+
+    // THE ONE THAT ESCAPED: split over a newline, which is why this detector
+    // is not line-based. If this case ever goes silent the law is decorative.
+    expect(
+        only('<p>Your Memory Threads, Wish Jar entries and Personal Vault '
+            'files are\n  end-to-end encrypted — those we cannot open.</p>'),
+        isNotEmpty,);
+    // The same claim on one line, and the marketing spelling that named the
+    // cipher.
+    expect(
+        only('<dd>Memory Threads, Wish Jar entries and your Personal Vault '
+            'files are sealed with XChaCha20-Poly1305.</dd>'),
+        isNotEmpty,);
+    // The CSAE shape, where the promise is "we hold no key" rather than the
+    // word encrypted, and it is the operator's own ability that is denied.
+    expect(
+        only('<p>Memory Threads, the text of Wish Jar entries, and files '
+            'stored in the private vault. We hold no key to those.</p>'),
+        isNotEmpty,);
+    // The comment shape: the verb comes BEFORE the noun, so a one-direction
+    // matcher misses it. This is the one that taught the next reader to
+    // repeat the error.
+    expect(
+        only('// What IS end-to-end encrypted: Memory Threads, the text of\n'
+            '// Wish Jar entries, and the FILES in the Private Vault.',
+            html: false,),
+        isNotEmpty,);
+
+    // THE EIGHTH: a bare gerund on the vault screen's own spinner, shown while
+    // _uploadPlain runs. No "vault" within reach — the file's path is the
+    // anchor.
+    expect(
+        only("Text('Encrypting and saving…',\n    style: TextStyle(),),",
+            html: false, path: 'mobile/lib/features/vault/vault_screen.dart',),
+        isNotEmpty,);
+    // The same gerund in a file that is NOT about the vault is not a claim.
+    expect(
+        only("// Encrypting the body put base64 ciphertext on the wire.",
+            html: false, path: 'mobile/lib/features/chat/x.dart',),
+        isEmpty,);
+    // The comment beside the plaintext re-upload, and the README that said
+    // the app's own copies stay encrypted.
+    expect(
+        only('// Fetch the bytes and let the vault keep its OWN encrypted copy.',
+            html: false,),
+        isNotEmpty,);
+    expect(
+        only("Anyone who can read this folder can read all of it. The app's "
+            'own copies\nstay encrypted on the phone and the server; deleting '
+            'this folder deletes\nonly the copy.\n\n  vault/files/  - your '
+            "private vault's files", html: false,),
+        isNotEmpty,);
+    expect(
+        only('Reinstalling the app would currently make everything encrypted '
+            'unreadable — your vault and memories.', html: false,),
+        isNotEmpty,);
+
+    // Narration in the new shapes, which must stay silent: what the vault
+    // USED TO do, what it STOPPED doing, and the OLD encrypted files.
+    expect(
+        only('/// Deliberately NOT the couple key, which is what the vault '
+            'used to encrypt with.', html: false,),
+        isEmpty,);
+    expect(
+        only('/// The vault stopped encrypting on build 60; existing encrypted '
+            'items keep their decrypt read-path.', html: false,),
+        isEmpty,);
+    expect(
+        only('make everything end-to-end encrypted unreadable — your Memory '
+            'Threads, your Wish Jar entries, and any files still in the old '
+            'encrypted vault.', html: false,),
+        isEmpty,);
+
+    // Not the thing. The denial row, where "Not" sits in the previous cell and
+    // only survives because tags are blanked rather than stripped.
+    expect(
+        only('<tr><td>Not end-to-end encrypted</td><td>Chat text; the shared '
+            'gallery; everything in the Personal Vault — its files and '
+            'notes.</td></tr>'),
+        isEmpty,);
+    // The corrected marketing block: the denial trails the noun, and "cannot"
+    // in between must not be read as one.
+    expect(
+        only('<dd>Memory Threads, Wish Jar entries, message reactions and the '
+            'messages written during a separation are sealed with '
+            'XChaCha20-Poly1305 using keys held on your two phones — the '
+            'server stores ciphertext it cannot open. Chat and the Personal '
+            'Vault are not among them.</dd>'),
+        isEmpty,);
+    // The corrected Terms, where the denial is its own sentence.
+    expect(
+        only('<p>Some of Miles is end-to-end encrypted: Memory Threads and '
+            'the text of Wish Jar entries.</p><p>The private Vault is '
+            '<strong>not</strong> in that set.</p>'),
+        isEmpty,);
+    // Narration about how it used to be, in three spellings that all exist.
+    expect(
+        only('/// vault stored ciphertext, so nothing could paint until the '
+            'whole object had been fetched.', html: false,),
+        isEmpty,);
+    expect(
+        only('/// ciphertext cannot be range-requested, so the old encrypted '
+            'vault had to pull the whole file.', html: false,),
+        isEmpty,);
+    expect(
+        only('/// private vault were end-to-end encrypted; they never were on '
+            'any build.', html: false,),
+        isEmpty,);
+    // A byte-layout comment naming ciphertext and the vault in one breath,
+    // which is why bare "ciphertext" is not a term.
+    expect(
+        only('// mac(16)||ciphertext, so the MAC is the FIRST 16 bytes; the '
+            "vault's 40-byte guard is written for nonce||mac||ct.",
+            html: false,),
+        isEmpty,);
+  });
+
+  test('no save affordance names the device gallery in a build that cannot '
+      'write one', () {
+    // 'Save to gallery' sat on a button whose only destination was the
+    // Private Vault (SaveMediaService -> VaultRepository.saveMedia) for two
+    // months; pubspec.yaml carries no gallery writer at all. Comments are
+    // scanned too — the bubble comment misled the maintainer, not the user.
+    final spec = File('pubspec.yaml').readAsStringSync();
+    final hasGalleryWriter = RegExp(
+            r'^\s+(gal|image_gallery_saver|gallery_saver|saver_gallery):',
+            multiLine: true,)
+        .hasMatch(spec);
+    if (hasGalleryWriter) return;
+    final claim = RegExp(r'sav(e|ed|ing)[- ]to[- ](the )?gallery',
+        caseSensitive: false,);
+    final offenders = <String>[];
+    for (final p in tracked()) {
+      if (!p.startsWith('mobile/lib/') || !p.endsWith('.dart')) continue;
+      final src = File('../$p').readAsStringSync();
+      for (final m in claim.allMatches(src)) {
+        offenders.add(
+            '$p:${'\n'.allMatches(src.substring(0, m.start)).length + 1}',);
+      }
+    }
+    expect(offenders, isEmpty,
+        reason: 'a save affordance names the device gallery, and this build '
+            'has no gallery writer — every save lands in the Private Vault: '
+            '$offenders',);
+  });
 }

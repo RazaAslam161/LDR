@@ -724,13 +724,35 @@ class _RevealedView extends StatelessWidget {
   }
 }
 
-class _RevealedItem extends StatelessWidget {
+class _RevealedItem extends StatefulWidget {
   const _RevealedItem({required this.item, required this.onPlayVoice});
   final CapsuleItem item;
   final Future<void> Function(String path) onPlayVoice;
 
   @override
+  State<_RevealedItem> createState() => _RevealedItemState();
+}
+
+class _RevealedItemState extends State<_RevealedItem> {
+  /// Signed once per item, not once per rebuild: a FutureBuilder handed a
+  /// fresh future in build() re-signed the photo on every rebuild of the
+  /// list — a storage round trip each, for a URL that is good for an hour.
+  late Future<String> _url = _sign();
+
+  Future<String> _sign() {
+    final path = widget.item.mediaUrl;
+    return path == null ? Future.value('') : CapsuleRepository.signedUrl(path);
+  }
+
+  @override
+  void didUpdateWidget(_RevealedItem old) {
+    super.didUpdateWidget(old);
+    if (old.item.mediaUrl != widget.item.mediaUrl) _url = _sign();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final item = widget.item;
     Container card(Widget child) => Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -750,9 +772,7 @@ class _RevealedItem extends StatelessWidget {
         return ClipRRect(
           borderRadius: BorderRadius.circular(20),
           child: FutureBuilder<String>(
-            future: item.mediaUrl == null
-                ? Future.value('')
-                : CapsuleRepository.signedUrl(item.mediaUrl!),
+            future: _url,
             builder: (context, snap) {
               if (!snap.hasData || snap.data!.isEmpty) {
                 return Container(
@@ -760,8 +780,22 @@ class _RevealedItem extends StatelessWidget {
                     color: MilesColors.surface2,
                     child: const Center(child: CircularProgressIndicator()),);
               }
-              return Image.network(snap.data!,
-                  fit: BoxFit.cover, width: double.infinity,);
+              // cacheWidth bounds the DECODE, not the file — the same reason
+              // gallery_viewer.dart:257-260 gives for its decodeWidth. A
+              // capsule photo is the untouched original (capsule_fill_screen
+              // uploads the whole file and the repository writes no thumbnail),
+              // so a 12-megapixel reveal decoded at source resolution is ~48 MB
+              // of raster per card. A handful of them blew past the image cache
+              // and OOM-killed the app at the one moment the product exists for.
+              return Image.network(
+                snap.data!,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                cacheWidth:
+                    (MediaQuery.sizeOf(context).width *
+                            MediaQuery.devicePixelRatioOf(context))
+                        .round(),
+              );
             },
           ),
         );
@@ -771,7 +805,7 @@ class _RevealedItem extends StatelessWidget {
             GestureDetector(
               onTap: item.mediaUrl == null
                   ? null
-                  : () => onPlayVoice(item.mediaUrl!),
+                  : () => widget.onPlayVoice(item.mediaUrl!),
               child: Container(
                 width: 46,
                 height: 46,

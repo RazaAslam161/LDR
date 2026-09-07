@@ -447,6 +447,11 @@ class ChatRepository {
   /// longer existed and is never re-emitted. Without this the message is
   /// absent from the list, the screen and _ids: permanently invisible until
   /// the app is killed and relaunched.
+  ///
+  /// One page is not the gap: the caller loops while a page comes back full.
+  /// [catchUpPageSize] is one number for the limit and the short-page test.
+  static const catchUpPageSize = 500;
+
   static Future<List<Message>> fetchSince(String coupleId, int afterSeq) async {
     final res = await _c
         .from('messages')
@@ -454,7 +459,7 @@ class ChatRepository {
         .eq('couple_id', coupleId)
         .gt('seq', afterSeq)
         .order('seq', ascending: true)
-        .limit(500);
+        .limit(catchUpPageSize);
     // Skip a malformed row rather than aborting the whole catch-up.
     final out = await hydrate(_parseRows(res as List, 'chat catch-up'));
     await warmMedia(out);
@@ -504,9 +509,30 @@ class ChatRepository {
         .limit(300);
     // Skip a malformed row rather than blanking the whole conversation.
     final out = await hydrate(_parseRows(res as List, 'chat fetch'));
+    _pageCache[coupleId] = List.unmodifiable(out);
     if (warm) await warmMedia(out);
     return out;
   }
+
+  /// The last page this process rendered, per couple.
+  ///
+  /// The shell builds `bodies[bodyIndex]` rather than an IndexedStack
+  /// (app_shell.dart), so moving off the Chat tab DISPOSES ChatScreen and
+  /// coming back re-runs `_init` from nothing — a full-screen spinner plus a
+  /// 300-row network SELECT plus 300 decrypts, on every single tap of the Chat
+  /// icon, forever. There is no local message store to fall back on.
+  ///
+  /// Memory only, and never written to disk: these are decrypted messages in an
+  /// E2EE app, and [forget] drops them on sign-out. Keyed by couple, so an
+  /// account switch on the same handset cannot read the previous couple's page.
+  static final Map<String, List<Message>> _pageCache = {};
+
+  /// The cached page, or null. Callers paint it immediately and let their own
+  /// [fetch] replace it — it is a head start, never the source of truth.
+  static List<Message>? cachedPage(String coupleId) => _pageCache[coupleId];
+
+  /// Drop every cached page. Sign-out and account switch.
+  static void forget() => _pageCache.clear();
 
   /// Decode one fetched page, skipping any row whose decode throws.
   ///
@@ -1150,6 +1176,16 @@ class ChatRepository {
         'status': status.name,
         'error_class': error?.runtimeType.toString(),
       },);
+      // Diag is inert in shipped builds; this is the sink that leaves the
+      // handset. A refused join means no live message arrives on this phone.
+      if (status == RealtimeSubscribeStatus.channelError ||
+          status == RealtimeSubscribeStatus.timedOut) {
+        ErrorReporter.report(
+          error ?? StateError('realtime messages: ${status.name}'),
+          StackTrace.current,
+          kind: 'realtime-subscribe',
+        );
+      }
       if (kRtChatDebug) {
         debugPrint('[rt] messages:$coupleId join=$status err=${error ?? ''}');
       }

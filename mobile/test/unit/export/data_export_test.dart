@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -277,9 +278,37 @@ void main() {
       expect(service, isNot(contains('fetchPartnerTagHashes')));
     });
 
-    test('vault media decrypts under the vault key, not the couple key', () {
+    test('vault objects are copied as-is; only legacy .enc objects decrypt, '
+        'under the vault key', () {
+      // The vault has written PLAIN objects since build 60 (_uploadPlain,
+      // _plainExt); only pre-ruling rows carry `.enc`. The export must branch
+      // on the object's shape BEFORE it reaches the decrypt — every plain
+      // file used to fail its MAC and land as an export failure.
+      final vault = service.substring(service.indexOf('_runVault('));
+      expect(vault, contains("endsWith('.enc')"));
+      expect(vault, contains('MediaUrls.sign(VaultRepository.bucket'));
+      expect(vault.indexOf("endsWith('.enc')"),
+          lessThan(vault.indexOf('keyOverride: vaultKey')),);
       expect(service, contains('exportVaultKeyBytes'));
       expect(service, contains('keyOverride: vaultKey'));
+    });
+
+    test("the README makes no encryption claim about the app's own copies", () {
+      // The README is written to disk beside the plaintext export. The vault
+      // is plaintext by ruling and the gallery by design; THREAT-MODEL.md §1
+      // is the table of record, and a README is not the place to restate it.
+      final readme = service.substring(service.indexOf('About this folder'),
+          service.indexOf('never touches these files'),);
+      // Memory Threads ARE end-to-end encrypted, so 'their photographs,
+      // decrypted' is true and stays; the vault line and the sentence about
+      // the app's own copies are the ones that lied.
+      expect(readme, isNot(contains('stay encrypted')));
+      for (final line in const LineSplitter().convert(readme)) {
+        if (line.toLowerCase().contains('vault')) {
+          expect(line, isNot(matches(RegExp('crypt', caseSensitive: false))),
+              reason: 'a vault line in the README claims encryption: $line',);
+        }
+      }
     });
 
     test('failures reach ErrorReporter as counts, under the export kind', () {

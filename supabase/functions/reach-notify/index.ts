@@ -254,7 +254,10 @@ Deno.serve(async (req) => {
       // to let go" arrives while there is still a Re-link button.
       | "unlink_lastcall"
       | "unlink_relinked"
-      | "unlink_ended" = payload.kind ?? payload.type ?? "reach";
+      | "unlink_ended"
+      // A closeness check-in tells the other one (20260820030000). Sent since
+      // 2026-08-20 into a client allowlist that dropped it.
+      | "closeness" = payload.kind ?? payload.type ?? "reach";
     const row = payload.record ?? payload;
     const coupleId: string | undefined = row?.couple_id;
 
@@ -423,14 +426,68 @@ Deno.serve(async (req) => {
       return OK();
     }
     const recipient = recipients?.[0];
-    if (!recipient?.fcm_token) {
+    if (!recipient?.id) {
+      console.error("no recipient row", kind);
       return OK();
     }
+    // Every live install of the account (push_tokens, 20260906140300) plus
+    // the profiles slot that every build before 77 still writes, deduplicated.
+    // A build-73 handset never owns a push_tokens row and is reached exactly
+    // as before through that slot; a build-77 account with two phones gets
+    // both. FCM v1 has no multicast, so this is one send per token below.
+    const { data: liveRows, error: tokensErr } = await admin
+      .from("push_tokens")
+      .select("token")
+      .eq("user_id", recipient.id)
+      .is("revoked_at", null);
+    if (tokensErr) {
+      // Named, never swallowed; the profiles leg still gets its send.
+      console.error("push_tokens lookup failed", kind, tokensErr.message);
+    }
+    const tokens = [
+      ...new Set<string>([
+        ...(liveRows ?? []).map((r) => String(r.token ?? "")),
+        ...(recipient.fcm_token ? [String(recipient.fcm_token)] : []),
+      ]),
+    ].filter((t) => t.length > 0);
+    if (tokens.length === 0) {
+      // The one delivery outcome that left no trace: a partner who never
+      // granted notification permission, or whose token was dropped, looked
+      // exactly like a partner who was reached.
+      console.error("no push token", kind, recipient.id);
+      await admin.from("push_failures").insert({
+        user_id: recipient.id,
+        kind,
+        reason: "no_token",
+      });
+      return OK();
+    }
+
+    // Shelf life per kind, once, for both transports. reach and call stay at
+    // 30s: reach_events.expires_at is 30s and the push path shows an overlay
+    // for whatever id it is handed, so a longer TTL would pop a dead reach on
+    // a phone that wakes late (build 73 has no expiry guard at all). care had
+    // fallen through to the same 30s with no expires_at on its row — a nudge
+    // to a dozing phone was simply lost while the row sat there unread.
+    const ttlSec = kind === "unlink_lastcall"
+      ? 300
+      : kind === "unlink" || kind === "unlink_relinked"
+      ? 3600
+      : kind === "message" || kind === "memory" || kind === "ritual" ||
+          kind === "msg_sync" || kind === "unlink_ended" || kind === "care" ||
+          kind === "closeness"
+      ? 86400
+      : 30;
+    // APNs: an absolute epoch in seconds. A relative value reads as already
+    // expired, and no expiration at all meant every kind, calls included,
+    // had an unlimited shelf life on iOS.
+    const apnsExpiration = String(Math.floor(Date.now() / 1000) + ttlSec);
 
     const accessToken = await getAccessToken();
     const message = {
       message: {
-        token: recipient.fcm_token,
+        // Filled per token in the send loop below.
+        token: "",
         // DATA-only: the Android background handler builds the notification (and
         // wears this device's disguise). The keys per kind match exactly what
         // fcm_service.dart / firebaseMessagingBackgroundHandler read.
@@ -458,8 +515,17 @@ Deno.serve(async (req) => {
           // number to answer with — ack_delivered(seq) — and FCM data values
           // are map<string,string>, so a bigint from jsonb must be stringified
           // here or the send is rejected outright.
+          // muted: the recipient has paused this sender (20260906140400,
+          // computed by the trigger - push_muted is not callable from here).
+          // The wake, the ack and the ticks are untouched; only the receiving
+          // handset's drawing is. Absent on rows older than that file, which
+          // reads as not muted.
           ...(kind === "msg_sync"
-            ? { message_id: rowId, seq: String(row?.seq ?? "") }
+            ? {
+              message_id: rowId,
+              seq: String(row?.seq ?? ""),
+              muted: String(row?.muted === true),
+            }
             : {}),
           // unlink adds nothing: type + couple_id is the whole story, and the
           // ceremony row itself is fetched by the client over RLS.
@@ -485,14 +551,7 @@ Deno.serve(async (req) => {
           // the opposite: it is worth having whenever the phone next comes
           // back, because the couple is already dissolved and nothing about
           // it goes stale.
-          ttl: kind === "unlink_lastcall"
-            ? "300s"
-            : kind === "unlink" || kind === "unlink_relinked"
-            ? "3600s"
-            : kind === "message" || kind === "memory" || kind === "ritual" ||
-                kind === "msg_sync" || kind === "unlink_ended"
-            ? "86400s"
-            : "30s",
+          ttl: `${ttlSec}s`,
           // A delivery wake is worth exactly as much as the newest one. Ten
           // messages sent while the partner's phone is offline queue ten
           // identical "go ack yourself" pokes; FCM keeps only the last per
@@ -515,39 +574,49 @@ Deno.serve(async (req) => {
         // cycles.
         apns: kind === "msg_sync"
           ? {
-            headers: { "apns-priority": "5", "apns-push-type": "background" },
+            headers: {
+              "apns-priority": "5",
+              "apns-push-type": "background",
+              "apns-expiration": apnsExpiration,
+            },
             payload: { aps: { "content-available": 1 } },
           }
           : {
-            headers: { "apns-priority": "10" },
+            headers: { "apns-priority": "10", "apns-expiration": apnsExpiration },
             payload: { aps: { sound: "default", "content-available": 1 } },
           },
       },
     };
 
-    const fcmRes = await fetch(
-      `https://fcm.googleapis.com/v1/projects/${FCM_PROJECT_ID}/messages:send`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
+    for (const token of tokens) {
+      message.message.token = token;
+      const fcmRes = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${FCM_PROJECT_ID}/messages:send`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(message),
         },
-        body: JSON.stringify(message),
-      },
-    );
+      );
+      if (fcmRes.ok) continue;
 
-    if (!fcmRes.ok) {
       const errText = await fcmRes.text();
-      // A dead token is recorded, NOT nulled on the profile.
+      // A dead token is recorded and its push_tokens row is revoked, and the
+      // profile column is NOT nulled.
       //
-      // profiles is selected whole by the partner's own client
-      // (supabase_repository.fetchPartner does .select()), so nulling fcm_token
-      // here let the caller watch it go non-null -> null as a direct
-      // consequence of their own call: "their app has been uninstalled,
-      // reinstalled or cleared", delivered on demand, one call at a time.
-      // push_failures is service-role only. The client re-registers its token
-      // on every resume, which is what actually heals a stale one.
+      // profiles is selected whole by a build-73 partner's client
+      // (fetchPartner did .select()), so nulling fcm_token here let the
+      // caller watch it go non-null -> null as a direct consequence of their
+      // own call: "their app has been uninstalled, reinstalled or cleared",
+      // delivered on demand, one call at a time. push_tokens is select-own,
+      // so revoking the row there tells nobody but the account itself - and
+      // that is the answer register_push_token hands back to the handset
+      // ({"dead": true}), which is what finally heals a token FCM has killed.
+      // Production carried 131 'unregistered' rows in fourteen days against
+      // one token the client kept re-uploading before this existed.
       const dead = fcmRes.status === 404 ||
         errText.includes("UNREGISTERED") ||
         errText.includes("NOT_FOUND");
@@ -557,9 +626,22 @@ Deno.serve(async (req) => {
         status: fcmRes.status,
         reason: dead ? "unregistered" : "send_failed",
       });
+      if (dead) {
+        const { error: revokeErr } = await admin
+          .from("push_tokens")
+          .update({
+            revoked_at: new Date().toISOString(),
+            revoked_reason: "unregistered",
+          })
+          .eq("token", token)
+          .is("revoked_at", null);
+        if (revokeErr) {
+          console.error("push_tokens revoke failed", kind, revokeErr.message);
+        }
+      }
       console.error("FCM send failed", fcmRes.status, errText);
-      // 200 so the webhook doesn't retry-storm; we've logged + cleaned up.
-      return OK();
+      // Keep going: the account's other installs still get their send, and
+      // every exit answers OK() (the oracle rule above).
     }
 
     return OK();

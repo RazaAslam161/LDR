@@ -33,6 +33,8 @@ class _VaultScreenState extends State<VaultScreen> {
   List<VaultItem> _items = const [];
   bool _loading = true;
   bool _busy = false;
+  // What the spinner says. Two owners, two truths: a delete is not a save.
+  String _busyLabel = '';
   final Set<String> _selected = <String>{};
   String? _loadError;
 
@@ -44,13 +46,13 @@ class _VaultScreenState extends State<VaultScreen> {
     // up. Memory Threads and Touch Trace already set it; the vault was the one
     // intimate surface still landing in screenshots and in the recent-apps
     // thumbnail, which is the disguise's whole point.
-    SecureScreen.setSecure();
+    SecureScreen.acquire();
     _load();
   }
 
   @override
   void dispose() {
-    SecureScreen.clearSecure();
+    SecureScreen.release();
     super.dispose();
   }
 
@@ -130,7 +132,10 @@ class _VaultScreenState extends State<VaultScreen> {
     );
     if (ok != true || !mounted) return;
 
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _busyLabel = 'Deleting…';
+    });
     var failed = 0;
     for (final id in ids) {
       try {
@@ -211,7 +216,10 @@ class _VaultScreenState extends State<VaultScreen> {
     }
     MilesApp.systemOverlayActive = false;
     if (picked.isEmpty || !mounted) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _busyLabel = 'Saving to your vault…';
+    });
     var failed = 0;
     for (final file in picked) {
       try {
@@ -393,45 +401,75 @@ class _VaultScreenState extends State<VaultScreen> {
 
   bool _isMedia(VaultItem i) => i.type.startsWith('saved_');
 
+  /// SLIVERS, not a ListView of children with a shrinkWrap grid inside.
+  ///
+  /// The old shape built every tile and every note before the first frame —
+  /// `shrinkWrap: true` with `NeverScrollableScrollPhysics` lays the whole grid
+  /// out at once — and each `_VaultTile.initState` starts its own sign,
+  /// download and decrypt. A vault of any size therefore opened by firing one
+  /// network chain per item simultaneously, for items nobody had scrolled to.
+  /// A SliverGrid builds only what is on screen (plus the viewport's cache
+  /// extent), so the fetches follow the eye.
   Widget _buildList() {
     final media = _items.where(_isMedia).toList();
     final notes = _items.where((i) => !_isMedia(i)).toList();
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-      children: [
+    return CustomScrollView(
+      slivers: [
         if (media.isNotEmpty) ...[
-          _sectionHeader('Saved media'),
-          // A grid, not a stack of rows with an "open" button. Square cells
-          // fixed by the delegate, so a tile occupies its final shape before
-          // any bytes arrive and nothing below it reflows as pictures land.
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 3,
-              mainAxisSpacing: 3,
-            ),
-            itemCount: media.length,
-            itemBuilder: (_, i) => _VaultTile(
-              item: media[i],
-              selected: _selected.contains(media[i].id),
-              selecting: _selected.isNotEmpty,
-              onTap: () => _selected.isEmpty
-                  ? _openMedia(media[i])
-                  : _toggle(media[i].id),
-              onLongPress: () => _toggle(media[i].id),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            sliver: SliverToBoxAdapter(child: _sectionHeader('Saved media')),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            // Square cells fixed by the delegate, so a tile occupies its final
+            // shape before any bytes arrive and nothing below it reflows as
+            // pictures land.
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 3,
+                mainAxisSpacing: 3,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => _VaultTile(
+                  // Keyed by id: the list re-sorts and re-filters on every
+                  // save and delete, and an index-matched element would hand
+                  // one item's decrypted tile to another's row.
+                  key: ValueKey(media[i].id),
+                  item: media[i],
+                  selected: _selected.contains(media[i].id),
+                  selecting: _selected.isNotEmpty,
+                  onTap: () => _selected.isEmpty
+                      ? _openMedia(media[i])
+                      : _toggle(media[i].id),
+                  onLongPress: () => _toggle(media[i].id),
+                ),
+                childCount: media.length,
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ],
         if (notes.isNotEmpty) ...[
-          _sectionHeader('Notes'),
-          for (final item in notes) ...[
-            _noteTile(item),
-            const SizedBox(height: 12),
-          ],
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverToBoxAdapter(child: _sectionHeader('Notes')),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _noteTile(notes[i]),
+                ),
+                childCount: notes.length,
+              ),
+            ),
+          ),
         ],
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
     );
   }
@@ -525,15 +563,15 @@ class _VaultScreenState extends State<VaultScreen> {
       ),
       body: SafeArea(
         child: _busy
-            ? const Center(
+            ? Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 14),
-                    Text('Encrypting and saving…',
-                        style:
-                            TextStyle(color: MilesColors.taupe, fontSize: 12),),
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 14),
+                    Text(_busyLabel,
+                        style: const TextStyle(
+                            color: MilesColors.taupe, fontSize: 12,),),
                   ],
                 ),
               )
@@ -595,6 +633,7 @@ class _VaultTile extends StatefulWidget {
     required this.selecting,
     required this.onTap,
     required this.onLongPress,
+    super.key,
   });
 
   final VaultItem item;

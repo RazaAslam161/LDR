@@ -336,7 +336,7 @@ class _AppShellState extends ConsumerState<AppShell>
         await SupabaseService.client.removeChannel(old);
       } catch (_) {}
     }
-    _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
+    _reachChannel = ReachRepository.subscribe(couple.id, _onReach, onAck: _onReachAck);
     unawaited(ref.read(callControllerProvider).reconnect());
     ref.read(sessionProvider.notifier).reconnectPresence();
     // A share into a still-running app arrives as onNewIntent → resume.
@@ -476,11 +476,11 @@ class _AppShellState extends ConsumerState<AppShell>
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
     // Foreground realtime path — works whether or not push is configured.
-    _reachChannel = ReachRepository.subscribe(couple.id, _onReach);
+    _reachChannel = ReachRepository.subscribe(couple.id, _onReach, onAck: _onReachAck);
     // Register this device for push now that we're past login + pairing.
     FcmService.registerToken();
     // A push may have been tapped before the listener attached.
-    _onPendingReach();
+    unawaited(_onPendingReach());
     // Accounts signed in before key escrow existed have no sealed copy of their
     // key, and no reason to ever sign out and acquire one. They lose every
     // encrypted memory on their next reinstall. Asked once, here, because this
@@ -533,6 +533,13 @@ class _AppShellState extends ConsumerState<AppShell>
     unawaited(_offerUnlink());
     _onPendingUnlink();
     _onPendingChat();
+    // Drained here too, and it was the one that was not. The listener at :153
+    // only catches a tap that lands while this state is already alive; a COLD
+    // start from a tapped memory notification sets pendingMemory before the
+    // couple resolves, so the value sat there and the thread never opened.
+    // Self-guarding (fromTap + mounted), so calling it here is free when there
+    // is nothing pending.
+    _onPendingMemory();
     // The shell mounts on '/app', which the observer answers from the selected
     // tab — but that happens before this state exists on a cold start.
     presenceRouteObserver?.publishActiveTab();
@@ -771,6 +778,14 @@ class _AppShellState extends ConsumerState<AppShell>
     await LocationService.onboard(context, coupleId, partnerName);
   }
 
+  /// The partner answered one of OUR reaches. The button that sent it is the
+  /// one place that can show it, so this only routes the id.
+  void _onReachAck(ReachEvent e) {
+    final uid = SupabaseService.currentUserId;
+    if (!e.isMine(uid) || e.acknowledgedAt == null) return;
+    reachAcknowledged.value = e.id;
+  }
+
   void _onReach(ReachEvent e) {
     final uid = SupabaseService.currentUserId;
     if (e.isMine(uid) || !e.isActive) return;
@@ -780,10 +795,28 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   /// From a foreground push or a tapped notification (FcmService.pendingReach).
-  void _onPendingReach() {
+  Future<void> _onPendingReach() async {
     final tap = pendingReach.value;
     if (tap == null) return;
     pendingReach.value = null;
+    if (tap.reachId.isEmpty) {
+      // A push with no id can open nothing worth answering; say so instead of
+      // showing an overlay whose 'I'm here' writes to a row that is not there.
+      ErrorReporter.report(StateError('reach tap with no reach_id'),
+          StackTrace.current, kind: 'reach-tap',);
+      return;
+    }
+    // The realtime path checks isActive; this one never did, so a tray entry
+    // tapped minutes later opened a Reach that expired at thirty seconds. A
+    // fetch that fails is reported and the overlay still shows — the push
+    // TTL already bounds how stale this can be.
+    try {
+      final e = await ReachRepository.fetch(tap.reachId);
+      if (e != null && !e.isActive) return;
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'reach-tap');
+    }
+    if (!mounted) return;
     final name = tap.fromName.isNotEmpty ? tap.fromName : 'Your partner';
     _showReach(tap.reachId, name);
   }

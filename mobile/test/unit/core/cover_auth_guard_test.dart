@@ -150,4 +150,15 @@ void main() {
               'check survives a remount',);
     });
   });
+
+  test('the panic gesture locks as well as covers', () {
+    // On the default install (no cover) raiseCover() hands control straight
+    // back, so the gesture was a full teardown that ended where it started
+    // and never touched App lock — while the FAQ promised the opposite.
+    final at = mainSrc.indexOf('void _emergencyLock() {');
+    expect(at, greaterThan(0));
+    final body = mainSrc.substring(at, mainSrc.indexOf('\n  }', at));
+    expect(body, contains('AppLock.lockIfEnabled'));
+    expect(body, contains('raiseCover'));
+  });
 }

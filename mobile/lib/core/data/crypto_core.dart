@@ -246,6 +246,8 @@ class CryptoCore {
     if (_accountId == uid) return;
     _accountId = uid;
     _myKeyPair = null;
+    // The derivation in flight belongs to the account being left.
+    _keyPairInFlight = null;
     _sharedKey = null;
     // Derived from the OUTGOING account's seed. Left standing it would encrypt
     // the new account's vault under the previous one's key — which on a shared
@@ -304,6 +306,7 @@ class CryptoCore {
   static void forgetAccount() {
     _accountId = null;
     _myKeyPair = null;
+    _keyPairInFlight = null;
     _sharedKey = null;
     _derivedFrom = null;
     _ring = null;
@@ -312,18 +315,39 @@ class CryptoCore {
     _bumpEpoch();
   }
 
-  static Future<SimpleKeyPair> _keyPair() async {
-    if (_myKeyPair != null) return _myKeyPair!;
-    final stored = await _storage.read(key: _seedKey);
-    if (stored != null) {
-      _myKeyPair = await _x25519.newKeyPairFromSeed(base64Decode(stored));
-    } else {
-      final kp = await _x25519.newKeyPair();
-      final data = await kp.extract();
-      await _storage.write(key: _seedKey, value: base64Encode(data.bytes));
-      _myKeyPair = kp;
+  /// The derivation currently running, so concurrent callers share one.
+  ///
+  /// SINGLE-FLIGHT, and on a first run that is a correctness requirement rather
+  /// than an optimisation. Without it two callers both read a null seed, both
+  /// reach `newKeyPair()`, and TWO X25519 identities are minted: both are
+  /// written to the keystore (last write wins) while `_myKeyPair` keeps
+  /// whichever assigned last, so memory and storage can end up holding
+  /// different keys. Anything sealed under the loser — and any public key
+  /// already published from it — is unreadable on the next launch, which in
+  /// this app means silently orphaned rows rather than an error.
+  static Future<SimpleKeyPair>? _keyPairInFlight;
+
+  static Future<SimpleKeyPair> _keyPair() {
+    final ready = _myKeyPair;
+    if (ready != null) return Future.value(ready);
+    return _keyPairInFlight ??= _loadOrMintKeyPair();
+  }
+
+  static Future<SimpleKeyPair> _loadOrMintKeyPair() async {
+    try {
+      final stored = await _storage.read(key: _seedKey);
+      if (stored != null) {
+        _myKeyPair = await _x25519.newKeyPairFromSeed(base64Decode(stored));
+      } else {
+        final kp = await _x25519.newKeyPair();
+        final data = await kp.extract();
+        await _storage.write(key: _seedKey, value: base64Encode(data.bytes));
+        _myKeyPair = kp;
+      }
+      return _myKeyPair!;
+    } finally {
+      _keyPairInFlight = null;
     }
-    return _myKeyPair!;
   }
 
   /// True when this account already has a private key on this device.
@@ -1014,12 +1038,13 @@ class _EncryptRequest {
 
 /// Encrypt on a background isolate.
 ///
-/// The vault encrypts the ORIGINAL media — up to 100MB — and did it here on the
+/// Memory Threads' photos encrypt here. Until build 60 the vault used to
+/// encrypt its ORIGINAL media — up to 100MB — through this path too, on the
 /// main isolate. AES/XChaCha over 100MB plus a base64 encode of the result is
-/// seconds of solid CPU on the UI thread, which is why the upload spinner did
+/// seconds of solid CPU on the UI thread, which is why that upload spinner did
 /// not merely take a long time: it stopped animating entirely, because the
 /// thread that would have animated it was busy. Mirrors the decrypt isolate the
-/// vault cache already uses.
+/// media cache already uses.
 Future<EncryptedPayload> _isolateEncrypt(_EncryptRequest r) async {
   final box = await Xchacha20.poly1305Aead().encrypt(
     r.bytes,

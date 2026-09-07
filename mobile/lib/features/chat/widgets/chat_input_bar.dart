@@ -86,6 +86,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
   final _recorder = AudioRecorder();
   bool _sending = false;
   bool _recording = false;
+
+  /// Whether the FINGER is still down, as opposed to whether the recorder is
+  /// running. `_recording` only goes true after `hasPermission`,
+  /// `getTemporaryDirectory` and `start` have all resolved; a long-press
+  /// released inside that window is invisible to it.
+  bool _wantRecording = false;
   String? _currentRecordingPath;
 
   bool get _hasText => _text.text.trim().isNotEmpty;
@@ -457,6 +463,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _startRecording() async {
+    // Set synchronously, before any await: this tracks the FINGER, while
+    // _recording tracks the recorder. The two diverge for the length of three
+    // awaits, which is the window a quick tap lands in.
+    _wantRecording = true;
     try {
       if (!await _recorder.hasPermission()) {
         if (mounted) {
@@ -487,6 +497,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
         ),
         path: path,
       );
+      // The finger may already be gone. _recording is only true from here, so
+      // a release during any of the three awaits above hit
+      // `if (!_recording) return` in _stopRecording and no-opped — leaving the
+      // microphone live with no gesture behind it and the composer stuck
+      // showing the recording banner until the process restarted.
+      if (!_wantRecording) {
+        await _cancelAmplitude();
+        try {
+          await _recorder.stop();
+        } on Exception {
+          // Already stopped. Nothing a user could act on.
+        }
+        ChatInputBar.recording.value = false;
+        return;
+      }
       setState(() {
         _recording = true;
         _currentRecordingPath = path;
@@ -517,6 +542,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _stopRecording({bool cancel = false}) async {
+    // Cleared first, so a release that arrives mid-start is seen by the guard
+    // at the end of _startRecording even though _recording is still false here.
+    _wantRecording = false;
     if (!_recording) return;
     final path = _currentRecordingPath;
     await _cancelAmplitude();
@@ -684,7 +712,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ),
                 const SizedBox(width: 6),
 
-                // Clear conversation — local & instant, partner unaffected.
+                // Clear conversation. NOT local: with nothing selected the
+                // callback (chat_screen._clearOrDeleteSelected) confirms and
+                // then deletes every message for BOTH of you through the
+                // clear_conversation_everyone RPC, and tells the partner over
+                // the mood channel. With a selection it deletes the selection.
                 if (widget.onClearConversation != null) ...[
                   CircleIconButton(
                     icon: Icons.delete_sweep_outlined,

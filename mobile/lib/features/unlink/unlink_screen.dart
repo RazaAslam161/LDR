@@ -204,7 +204,16 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     // A re-link leaves the couple standing; an execution does not, and this
     // phone may only be learning that now. Mirror of AppShell's
     // _onUnlinkChanged, which cannot run while the gate holds this screen up.
-    final survives = container.read(currentCoupleProvider) != null;
+    // The flag first, because the provider read below races the very teardown
+    // that called this: on the execute path completeUnlink sets it, then
+    // reset() re-enters here synchronously — before its own endCouple and
+    // loadProfile have run — so currentCoupleProvider still answers non-null
+    // and this phone played the REUNION ending over a couple it had just
+    // destroyed. One-shot, cleared here so a later ceremony starts clean.
+    final endedHere = UnlinkState.endedHere;
+    UnlinkState.endedHere = false;
+    final survives =
+        !endedHere && container.read(currentCoupleProvider) != null;
     if (!survives && old != null) {
       await container.read(sessionProvider.notifier).endCouple(old);
     }
@@ -373,7 +382,9 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
     });
   }
 
-  Future<void> _accept(String partnerName) async {
+  /// Returns whether the agreement actually landed — the tear animation is
+  /// latched on the way in and has to be undone when it did not.
+  Future<bool> _accept(String partnerName) async {
     final sure = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -410,7 +421,9 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       // Their bolt should slide the moment this lands, not fifteen seconds
       // into a five-minute window.
       if (ok) _sync?.announceAgreed();
+      return ok;
     }
+    return false;
   }
 
   /// Only a load still in flight closes the editor, and only until it lands.
@@ -1030,7 +1043,14 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       // (whose realtime + the parting film carry the rest).
       if (mounted) setState(() => _torn = true);
       await Future<void>.delayed(MilesMotion.reveal);
-      await _accept(partnerName);
+      // Put back unless the agreement actually landed. _torn had one writer and
+      // no reset, so declining the SECOND confirmation ("Not yet") — or an
+      // accept that failed — left the photograph visibly torn in half for the
+      // rest of the ceremony, up to 24 hours, under the hint "Tear it, and you
+      // agree": the screen showed an irreversible agreement the user had just
+      // refused to make.
+      final agreed = await _accept(partnerName);
+      if (!agreed && mounted) setState(() => _torn = false);
     }
   }
 

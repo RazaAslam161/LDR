@@ -18,12 +18,12 @@ class _TouchTraceScreenState extends ConsumerState<TouchTraceScreen> {
   @override
   void initState() {
     super.initState();
-    SecureScreen.setSecure(); // intimate — block screenshots / recording
+    SecureScreen.acquire(); // intimate — block screenshots / recording
   }
 
   @override
   void dispose() {
-    SecureScreen.clearSecure();
+    SecureScreen.release();
     super.dispose();
   }
 

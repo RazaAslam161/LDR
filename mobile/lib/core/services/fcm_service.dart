@@ -15,6 +15,32 @@ import 'package:miles/features/chat/message_preview_port.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart'
     show DisguiseCoverHost;
 import 'package:miles/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+
+/// Why this handset cannot be reached, when it cannot.
+///
+/// Null is the ordinary state. The three failures are told apart because the
+/// remedy differs: Android's own settings, a retry, or the account. For two
+/// months every one of them looked identical from inside the app — the
+/// registration path swallowed its failures — while the server recorded 131
+/// refused pushes against one dead token.
+class PushHealth {
+  const PushHealth._();
+
+  /// The system prompt was refused: pushes arrive and cannot be drawn.
+  static const blocked = 'blocked';
+
+  /// Google Play Services never handed over a token.
+  static const noToken = 'noToken';
+
+  /// The token exists but the account could not be told about it.
+  static const saveFailed = 'saveFailed';
+}
+
+/// Null while push works. One of the [PushHealth] reasons otherwise; Settings
+/// watches it.
+final ValueNotifier<String?> pushHealth = ValueNotifier<String?>(null);
 
 /// A Reach that should surface the in-app overlay (from a foreground push or a
 /// tapped notification). The AppShell listens to [pendingReach] and shows the
@@ -165,13 +191,45 @@ class FcmService {
 
   static bool _refreshHooked = false;
 
-  /// After login + pairing AND on every app resume: ask permission, fetch the
-  /// token (retrying if Google Play Services isn't ready yet), and re-save it.
+  /// This install's id, minted once and kept until the app data is cleared.
   ///
-  /// Re-saving on each foreground is the important part: the notify functions
-  /// null a recipient's token server-side when FCM reports it UNREGISTERED (a
-  /// stale token after a reinstall/GMS hiccup), which silently stops their
-  /// pushes. Re-registering on the next launch/resume self-heals that.
+  /// A push token belongs to a device; the account it is registered under
+  /// changes with every sign-in, and one account can hold two handsets. The
+  /// id is what tells those rows apart (push_tokens, 20260906140300), and it
+  /// is deliberately NOT the Android id: nothing here needs to survive a
+  /// reinstall, and a hardware identifier in a disguised app is a tell.
+  static Future<String> deviceId() async {
+    final cached = _deviceId;
+    if (cached != null) return cached;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString(_deviceKey);
+      if (stored != null && stored.length >= 8) return _deviceId = stored;
+      final minted = const Uuid().v4();
+      await prefs.setString(_deviceKey, minted);
+      return _deviceId = minted;
+    } catch (e, st) {
+      // A handset that cannot keep an id still has to be reachable: a fresh
+      // one per launch registers a new row each time rather than none, and
+      // the older row is revoked by the same-token claim inside the RPC.
+      ErrorReporter.report(e, st, kind: 'push-register');
+      return _deviceId = const Uuid().v4();
+    }
+  }
+
+  static const _deviceKey = 'push_device_id';
+  static String? _deviceId;
+
+  /// After login + pairing AND on every app resume: ask permission, fetch the
+  /// token, register it for THIS install, and re-check that it still works.
+  ///
+  /// Re-registering on each foreground is the important part. A token dies
+  /// without telling the handset — a reinstall, cleared app data, a GMS
+  /// hiccup — and from here a dead one looks exactly like a live one. The
+  /// server has the only evidence (reach-notify records UNREGISTERED against
+  /// the row), so it answers `dead` and this mints a fresh token rather than
+  /// re-uploading the corpse, which is what production did 131 times in
+  /// fourteen days.
   static Future<void> registerToken() async {
     // Piggy-backs the one hook that already runs on every resume
     // (main.dart:364). A push can be dropped, throttled by FCM, or never sent
@@ -181,7 +239,29 @@ class FcmService {
     unawaited(
       ChatReceiptRepository.ackHighestDelivered(trigger: 'app_resume'),
     );
-    await requestPermission();
+    try {
+      final settings = await FirebaseMessaging.instance.requestPermission();
+      _permitted = settings.authorizationStatus != AuthorizationStatus.denied;
+    } catch (e, st) {
+      // Not fatal — getToken still answers on Android when the prompt fails,
+      // and the push then arrives but cannot be drawn. Recorded, and the
+      // health row says which of the two failed.
+      ErrorReporter.report(e, st, kind: 'push-register');
+    }
+    final token = await _fetchToken();
+    if (token != null) await _save(token);
+    if (!_refreshHooked) {
+      _refreshHooked = true;
+      FirebaseMessaging.instance.onTokenRefresh.listen(_save);
+    }
+    pushHealth.value = _permitted
+        ? (token == null ? PushHealth.noToken : pushHealth.value)
+        : PushHealth.blocked;
+  }
+
+  static bool _permitted = true;
+
+  static Future<String?> _fetchToken() async {
     String? token;
     for (var i = 0; i < 4 && token == null; i++) {
       try {
@@ -191,18 +271,33 @@ class FcmService {
       }
       if (token == null) await Future<void>.delayed(const Duration(seconds: 2));
     }
-    if (token != null) await _save(token);
-    if (!_refreshHooked) {
-      _refreshHooked = true;
-      FirebaseMessaging.instance.onTokenRefresh.listen(_save);
-    }
+    return token;
   }
 
   static Future<void> _save(String token) async {
     try {
-      await SupabaseRepository.setFcmToken(token);
-    } catch (e) {
-      debugPrint('FcmService._save failed: $e');
+      final dead = await SupabaseRepository.registerPushToken(
+        token,
+        await deviceId(),
+      );
+      if (dead) {
+        // FCM has already refused this exact token from this install. Deleting
+        // it is what makes the next getToken() mint a new one; registering
+        // that one is the only thing that ends the silence.
+        await FirebaseMessaging.instance.deleteToken();
+        final fresh = await _fetchToken();
+        if (fresh == null || fresh == token) {
+          pushHealth.value = PushHealth.noToken;
+          return;
+        }
+        await SupabaseRepository.registerPushToken(fresh, await deviceId());
+      }
+      pushHealth.value = null;
+    } catch (e, st) {
+      // Silent here is what hid the whole defect: the handset believed it was
+      // registered for two months. The row in Settings names the cause.
+      pushHealth.value = PushHealth.saveFailed;
+      ErrorReporter.report(e, st, kind: 'push-register');
     }
   }
 
@@ -236,16 +331,41 @@ class FcmService {
     }
   }
 
+  /// Takes down the ring for a call that is over.
+  ///
+  /// Keyed exactly as [showCallNotification] posts it, on the RAW call id, so
+  /// the id computed in the background isolate and the one computed here
+  /// agree. Without this the entry outlived every call: declined, missed and
+  /// answered alike, until someone swiped it — and tapping it later rang a
+  /// call that had ended.
+  static Future<void> clearCallNotification(String callId) async {
+    if (callId.isEmpty) return;
+    try {
+      await _fln.cancel(id: callId.hashCode & 0x7fffffff);
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'notify');
+    }
+  }
+
   static Future<void> forgetDevice() async {
     pendingReach.value = null;
     pendingCall.value = null;
     pendingChat.value = null;
+    pushHealth.value = null;
     await SessionScope.setCouple(null);
     try {
-      await SupabaseRepository.setFcmToken(null);
+      // Server first, and only then the local token: this install's row is
+      // what reach-notify addresses, so leaving it live would keep pushing
+      // the account's private signals to a handset that has left it. Called
+      // without a session (a server-ended one) the RPC cannot run — the
+      // repository returns early and the local half below still happens.
+      await SupabaseRepository.revokePushToken(await deviceId());
       await FirebaseMessaging.instance.deleteToken();
-    } catch (e) {
-      debugPrint('FcmService.forgetDevice failed: $e');
+    } catch (e, st) {
+      // The local half must not be lost to a failed round trip, and a device
+      // that could not unbind itself is exactly what the owner needs to know.
+      unawaited(FirebaseMessaging.instance.deleteToken().catchError((_) {}));
+      ErrorReporter.report(e, st, kind: 'push-register');
     }
   }
 
@@ -349,6 +469,11 @@ class FcmService {
           MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: false);
       return;
     }
+    // A closeness check-in: the Warmth screen subscribes to desire_temps
+    // itself, and a banner over the app is the message-notification
+    // precedent the owner refused. Named so it cannot fall through to the
+    // Reach overlay below.
+    if (type == 'closeness') return;
     if (_isUnlink(type)) {
       // Foreground: realtime usually gets there first, and while the ritual
       // holds the screen UnlinkScreen is refetching on its own. This covers
@@ -383,6 +508,11 @@ class FcmService {
           MemoryTap((m.data['memory_id'] as String?) ?? '', fromTap: true);
       return;
     }
+    // A closeness check-in: the Warmth screen subscribes to desire_temps
+    // itself, and a banner over the app is the message-notification
+    // precedent the owner refused. Named so it cannot fall through to the
+    // Reach overlay below.
+    if (type == 'closeness') return;
     if (_isUnlink(type)) {
       pendingUnlink.value = true;
       return;
@@ -445,6 +575,9 @@ class FcmService {
     // arriving. Like care, the tap just opens the app; falling through would
     // ring the full-screen Reach overlay with a ritual id in the reach slot.
     if (tag == 'ritual') return;
+    // closeness|coupleId — opening the app is the whole answer; the Warmth
+    // screen sits behind the Closer gate and is not deep-linked into.
+    if (tag == 'closeness') return;
     if (tag == 'memory') {
       // memory|memoryId|coupleId — opens the thread. Without this branch it
       // falls through to the Reach default below and pops the full-screen

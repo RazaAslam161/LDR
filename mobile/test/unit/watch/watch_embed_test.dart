@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/watch/watch_embed.dart';
 import 'package:miles/features/watch/watch_source.dart';
@@ -100,5 +102,19 @@ void main() {
       final html = embedHtml(a, a.playerUrl('1', Duration.zero));
       expect(html, isNot(contains('vimeo')));
     });
+  });
+
+  test('the empty state does not promise sync for links the code opens solo',
+      () {
+    // WatchKind.cobrowse never reaches _openSource: 'Watch here' is a local
+    // viewer with no row and no broadcast. The screen doc and the empty state
+    // were written before that branch existed and promised sync for any link.
+    final screen =
+        File('lib/features/watch/watch_together_screen.dart').readAsStringSync();
+    final at = screen.indexOf('watch it in sync');
+    expect(at, greaterThan(0));
+    expect(screen.substring(at, at + 200), contains('your phone only'));
+    final doc = screen.split('\n').take(40).join('\n');
+    expect(doc, isNot(contains('on both phones')));
   });
 }

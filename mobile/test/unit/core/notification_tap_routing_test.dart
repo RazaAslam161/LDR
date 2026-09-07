@@ -48,4 +48,12 @@ void main() {
     expect(pendingChat.value, isNull);
     expect(pendingCall.value, isNull);
   });
+
+  test('a tapped closeness notification just opens the app', () {
+    FcmService.routeFromPayload('closeness|couple-1');
+
+    expect(pendingReach.value, isNull);
+    expect(pendingChat.value, isNull);
+    expect(pendingCall.value, isNull);
+  });
 }

@@ -49,10 +49,31 @@ class UnlinkState {
         debugPrint('[unlink] bad row, showing nothing: ${e.runtimeType}');
       }
     }
+    // A fresh ceremony clears the one-shot latch. _released() normally clears
+    // it as it reads it, but it only runs while the screen is alive — a phone
+    // that executed the unlink with UnlinkScreen already gone would otherwise
+    // carry `endedHere` true into the NEXT couple's ceremony and play the
+    // parting film over their re-link.
+    if (parsed != null) endedHere = false;
     current.value = parsed;
   }
 
   /// Sign-out, account switch, and the couple ending by any door.
+  /// True when THIS phone ran `unlink_execute()` — the couple is gone, and this
+  /// device is the one that ended it.
+  ///
+  /// It is a FACT rather than something to infer, because inferring it raced.
+  /// [reset] fires [current]'s listeners synchronously, so UnlinkScreen's
+  /// `_released()` runs inside the `reset()` call — before completeUnlink's own
+  /// `endCouple`/`loadProfile` have touched the session providers. Its
+  /// `currentCoupleProvider` read therefore still answered "there is a couple",
+  /// and the phone that had just irreversibly dissolved the relationship played
+  /// the RE-LINK ending: the reunion film and the "door opens" cue, at the
+  /// exact moment of the breakup.
+  ///
+  /// One-shot: `_released()` clears it as soon as it has read it.
+  static bool endedHere = false;
+
   static void reset() => current.value = null;
 }
 

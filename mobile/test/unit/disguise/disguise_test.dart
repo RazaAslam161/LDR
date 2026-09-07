@@ -28,6 +28,14 @@ String _code(String src) => src
     .map((l) => l.trimLeft().startsWith('//') ? '' : l)
     .join('\n');
 
+/// Shipped Dart text with adjacent string literals joined across the newline
+/// seam, so a regex over it sees the sentence the user sees. The hint law was
+/// blind for days because `'Hold two '` newline `'fingers'` never held the
+/// words 'two fingers' on one line.
+String _shipped(String src) => _code(src)
+    .replaceAll(RegExp(r"'\s+'"), '')
+    .replaceAll(RegExp(r'"\s+"'), '');
+
 void main() {
   group('disguise catalog', () {
     test('every offered disguise has a cover that exists', () {
@@ -231,12 +239,44 @@ void main() {
           fail('$path is missing; the surface list needs updating');
         }
         final raw = f.readAsStringSync();
-        final text = path.endsWith('.dart') ? _code(raw) : raw;
+        final text = path.endsWith('.dart') ? _shipped(raw) : raw;
         expect(hint.hasMatch(text), isFalse,
             reason: '$path teaches the backup gesture. It is undisclosed: the '
                 'app, the FAQ and the public site must not name it. Play '
                 "Console's App access notes are the only place it belongs.",);
       }
+    });
+
+    test('the hint law can read a hint split across adjacent literals', () {
+      // The exact shape that shipped in settings_screen.dart and passed the
+      // law: the sentence broken over two literals. If this case ever goes
+      // silent the law is decorative.
+      final hint = RegExp(
+        r'(two|2)[\s-]*fingers?|fingers?[\s\S]{0,40}(five|ten|5|10)[\s-]*seconds',
+        caseSensitive: false,
+      );
+      const split = "subtitle: 'Forgotten it? Hold two '\n"
+          "    'fingers still in the middle of the cover for five '\n"
+          "    'seconds, then unlock.',";
+      expect(hint.hasMatch(_code(split)), isFalse,
+          reason: 'the raw source hides the sentence; that is the defect',);
+      expect(hint.hasMatch(_shipped(split)), isTrue,
+          reason: 'joined across the seam the sentence is visible',);
+    });
+
+    test('cover_gate restates no duration', () {
+      // The hold and the splash beat are named constants (kCoverRecoveryHold,
+      // MilesMotion.flicker). A number written beside them is a second source
+      // of truth that drifts — the Settings row said five seconds for ten.
+      final gate =
+          File('lib/features/disguise/cover_gate.dart').readAsStringSync();
+      final from = gate.indexOf('static Future<void> run(');
+      final to = gate.indexOf('/// Gate 3');
+      expect(from, greaterThan(0));
+      expect(to, greaterThan(from));
+      expect(gate.substring(from, to),
+          isNot(matches(RegExp(r'\b\d+(\.\d+)?\s*(ms|s|seconds?)\b'))),
+          reason: 'run() restates a duration; name the constant instead',);
     });
 
     test('the guide documents the backup hold and every cover', () {

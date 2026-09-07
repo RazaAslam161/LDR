@@ -95,6 +95,40 @@ void main() {
   });
 
   group('the diagnostics work on the calls that fail', () {
+    test('a refused invite is never reported as the partner not answering',
+        () {
+      // enforce_send_rate refuses a redial inside 15s with PT429; the insert
+      // is unawaited and its failure went to Diag alone, so the 35s timeout
+      // blamed the callee for a ring that never existed.
+      final insert = fn('Future<void> _insertInvite(');
+      expect(insert, contains('PT429'));
+      expect(insert, contains('_InviteOutcome.rateLimited'));
+      final sentence = fn('void _startConnectTimeout()');
+      expect(sentence.indexOf('_inviteOutcome'),
+          lessThan(sentence.indexOf('_remoteCandTypes.isEmpty')),
+          reason: 'the invite outcome decides the sentence before candidates do',);
+      // This pinned the literal 'was not rung' until an adversarial read
+      // showed it was itself false: startCall BROADCASTS the offer before the
+      // row is written, and a partner whose app is open rings off that
+      // broadcast with no row involved. So a refused insert may not assert
+      // anything about their phone — only about the call being registered,
+      // which is what wakes a CLOSED app. What the law protects is unchanged:
+      // an invite failure must never be reported as the partner ignoring it.
+      // Scoped to the two INVITE arms. The default arm may still say the
+      // partner never answered: it fires when the row landed, so the ring
+      // did happen and silence really was silence.
+      final invite = sentence.substring(
+        sentence.indexOf('_InviteOutcome.rateLimited'),
+        sentence.indexOf('_ => _remoteCandTypes'),
+      );
+      expect(invite, isNot(contains('never answered')));
+      expect(invite, isNot(contains('was not rung')));
+      expect('if their app was'.allMatches(invite).length, 2,
+          reason: 'both invite sentences stay conditional on a closed app',);
+      final teardown = fn('Future<void> _teardown(');
+      expect(teardown, contains('_inviteOutcome = _InviteOutcome.pending'));
+    });
+
     test('sampling starts when the connection is created, not when it connects',
         () {
       // Started on Connected, the monitor only ever ran on calls that

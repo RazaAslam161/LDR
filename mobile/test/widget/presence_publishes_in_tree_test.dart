@@ -31,8 +31,9 @@ void main() {
           '/app/touch',
           '/app/settings',
           '/app/capsule',
-          '/app/capsule/new',
-          '/app/capsule/view',
+          '/app/care',
+          '/app/cycle',
+          '/app/watch',
         ])
           GoRoute(
             path: path,
@@ -72,7 +73,9 @@ void main() {
     router.go('/app/settings');
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(container.read(myScreenProvider), 'Settings');
+    // Settings is private: the partner reads "somewhere", never 'Settings'
+    // — and never the room the user just left, either.
+    expect(container.read(myScreenProvider), isNull);
   });
 
   testWidgets('pushReplacement reports where the user landed', (tester) async {
@@ -82,15 +85,15 @@ void main() {
     // land on the wrong page.
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    unawaited(router.push('/app/capsule'));
+    unawaited(router.push('/app/care'));
     await tester.pumpAndSettle();
-    unawaited(router.push('/app/capsule/new'));
+    unawaited(router.push('/app/cycle'));
     await tester.pumpAndSettle();
-    expect(container.read(myScreenProvider), 'New');
+    expect(container.read(myScreenProvider), 'Cycle');
 
-    unawaited(router.pushReplacement('/app/capsule/view'));
+    unawaited(router.pushReplacement('/app/watch'));
     await tester.pumpAndSettle();
-    expect(container.read(myScreenProvider), 'View');
+    expect(container.read(myScreenProvider), 'Watch');
   });
 
   testWidgets('coming back from the background restores the room',

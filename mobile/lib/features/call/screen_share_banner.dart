@@ -7,9 +7,11 @@ import 'package:miles/features/closer/secure_screen.dart';
 /// them is not the screen their partner is getting.
 ///
 /// Android blanks a FLAG_SECURE window in MediaProjection output, so walking
-/// into the Vault, Memory Threads, Touch Trace, the Touch Map or the media
-/// viewer mid-share sends the partner a black rectangle. That is deliberate and
-/// stays — those screens are secure on purpose. What was wrong is that it
+/// into the Vault, Memory Threads, Touch Trace, the Touch Map, the key-rewrap
+/// screen, or a VIDEO page of the chat media viewer mid-share sends the partner
+/// a black rectangle (the viewer's photo pages hold no flag —
+/// media_viewer._applySecure). That is deliberate and stays — those screens
+/// are secure on purpose. What was wrong is that it
 /// happened silently: the partner saw a black screen indistinguishable from a
 /// broken share, and the sharer had no way to know. Nothing here changes what
 /// is captured; it changes only whether anyone is told.

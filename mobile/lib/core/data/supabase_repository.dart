@@ -504,23 +504,47 @@ class SupabaseRepository {
   /// gotrue skips the local session removal entirely for that scope (it fires
   /// no signedOut event here), so the device the user is holding stays signed
   /// in while the server invalidates the rest.
-  static Future<void> signOutOtherDevices() async {
+  static Future<void> signOutOtherDevices({required String keepDeviceId}) async {
     // gotrue swallows 401/403/404 from this endpoint and returns normally —
     // an expired local JWT would revoke nothing while Settings toasts
     // success. Refreshing first either yields a token the revoke accepts or
     // throws, which the caller surfaces. In a lost-phone feature the one
     // unacceptable outcome is a silent no-op.
     await _c.auth.refreshSession();
+    // The lost phone's push registrations go before its sessions
+    // (20260906140300): a revoked session holding a live token would still
+    // be rung. This handset's row is kept and re-mirrored into
+    // profiles.fcm_token, the one leg every build before 77 reads.
+    await _c.rpc<dynamic>(
+      'revoke_other_push_tokens',
+      params: {'p_keep_device_id': keepDeviceId},
+    );
     await _c.auth.signOut(scope: SignOutScope.others);
   }
 
   // ─── Profile ─────────────────────────────────────────────────
 
+  /// Exactly the columns [Profile.fromJson] reads.
+  ///
+  /// Named rather than `select()`, because `profiles` also carries
+  /// `fcm_token`. A bare select sent the PARTNER's push token to this handset
+  /// on every profile fetch — the model dropped it, but it had already crossed
+  /// the wire and sat in memory. A push token is enough to notify someone
+  /// else's device; nothing in the client has any use for the other person's.
+  static const _profileColumns =
+      'id, couple_id, display_name, avatar_url, timezone, wake_time, '
+      'sleep_time, presence_status, created_at, birth_date, status_message, '
+      'gender, gender_set';
+
   static Future<Profile?> fetchMyProfile() async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return null;
 
-    final res = await _c.from('profiles').select().eq('id', uid).maybeSingle();
+    final res = await _c
+        .from('profiles')
+        .select(_profileColumns)
+        .eq('id', uid)
+        .maybeSingle();
 
     if (res == null) return null;
     return Profile.fromJson(res);
@@ -530,7 +554,7 @@ class SupabaseRepository {
     final uid = SupabaseService.currentUserId;
     final res = await _c
         .from('profiles')
-        .select()
+        .select(_profileColumns)
         .eq('couple_id', coupleId)
         .neq('id', uid!)
         .maybeSingle();
@@ -913,52 +937,90 @@ class SupabaseRepository {
     );
   }
 
-  /// Persists (or clears) this device's FCM push token on the user's profile.
-  /// Pass null on sign-out so stale devices stop receiving Reach pushes.
+  /// Registers this install's FCM token under the signed-in account
+  /// (push_tokens, 20260906140300); the server mirrors it into
+  /// profiles.fcm_token, the leg every build before 77 still reads.
   ///
-  /// Skips the write when the token has not changed, which is almost always.
-  /// registerToken() runs on EVERY resume (main.dart:328) and this wrote
+  /// Returns true when the server answers that this exact token is one FCM
+  /// has already refused from this install ({"dead": true}). Production held
+  /// 131 'unregistered' push failures in fourteen days against a token the
+  /// client re-uploaded on every resume, because from the handset the
+  /// registration always looked fine. The caller mints a fresh token on that
+  /// answer; nothing is stamped for a dead one.
+  ///
+  /// Skips the round trip when the token has not changed within a day.
+  /// registerToken() runs on EVERY resume (main.dart) and used to write
   /// unconditionally, so `fcm_token_updated_at` was a durable, second-resolution
-  /// record of the last time this app came to the foreground — and fetchPartner
-  /// selects every column, so the partner held it. Ringing someone refreshed it,
-  /// which made it a presence oracle that outlived the 45s freshness window
-  /// entirely: call at 3am, see nothing on screen, read the timestamp after.
-  ///
-  /// The last-written value is kept on the device rather than read back, so the
-  /// common path costs no round trip at all.
-  ///
-  /// The skip is BOUNDED to a day. It used to be forever, which asserted the
-  /// wrong thing: "I wrote this once" is not "the server still has it". The
-  /// row changes underneath this cache — sign into a second device and the
-  /// profile carries that device's token; the claim trigger nulls the row
-  /// when another profile claims this token — and a forever-skip meant the
-  /// actively used handset never re-registered: zero pushes, no recovery
-  /// short of reinstalling. One write a day is still too coarse to revive
-  /// the presence oracle the skip was built against.
-  static Future<void> setFcmToken(String? token) async {
+  /// record of the last time this app came to the foreground — and a build-73
+  /// partner's fetchPartner selects every column, so the partner held it.
+  /// Ringing someone refreshed it, which made it a presence oracle that
+  /// outlived the 45s freshness window entirely. The RPC moves that column
+  /// only when the token changes, but a resume must still not cost a round
+  /// trip. The skip is BOUNDED to a day: the row changes underneath this
+  /// cache (a second device, the claim trigger, a dead token revoked by
+  /// reach-notify), and a forever-skip once left the actively used handset
+  /// unregistered with no recovery short of reinstalling.
+  static Future<bool> registerPushToken(String token, String deviceId) async {
     final uid = SupabaseService.currentUserId;
-    if (uid == null) return;
+    if (uid == null) return false;
     final prefs = await SharedPreferences.getInstance();
     final key = 'fcm_token_written:$uid';
     final atKey = 'fcm_token_written_at:$uid';
-    if (token != null && prefs.getString(key) == token) {
+    if (prefs.getString(key) == token) {
       final at = DateTime.tryParse(prefs.getString(atKey) ?? '');
       if (at != null &&
           DateTime.now().toUtc().difference(at) < const Duration(hours: 24)) {
-        return;
+        return false;
       }
     }
-    await _c.from('profiles').update({
-      'fcm_token': token,
-      'fcm_token_updated_at':
-          token == null ? null : DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', uid);
-    if (token == null) {
-      await prefs.remove(key);
-      await prefs.remove(atKey);
-    } else {
-      await prefs.setString(key, token);
-      await prefs.setString(atKey, DateTime.now().toUtc().toIso8601String());
+    final res = await _c.rpc<dynamic>(
+      'register_push_token',
+      params: {
+        'p_token': token,
+        'p_device_id': deviceId,
+        'p_platform': 'android',
+      },
+    );
+    if (res is Map && res['dead'] == true) return true;
+    await prefs.setString(key, token);
+    await prefs.setString(atKey, DateTime.now().toUtc().toIso8601String());
+    return false;
+  }
+
+  /// On sign-out: this install's registration is revoked and, when
+  /// profiles.fcm_token names this very token, that leg is cleared too — so
+  /// no build keeps pushing the account's private signals to a handset that
+  /// left it. Needs the session: called after signOut() it does nothing.
+  static Future<void> revokePushToken(String deviceId) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) return;
+    await _c.rpc<void>(
+      'revoke_push_token',
+      params: {'p_device_id': deviceId},
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('fcm_token_written:$uid');
+    await prefs.remove('fcm_token_written_at:$uid');
+  }
+
+  /// Bytes this account has stored, and its ceiling (20260906140500).
+  ///
+  /// Self-scoped on the server, so there is nothing to pass and nothing to
+  /// leak. Null when the read failed: the number is used to word a refusal
+  /// and to fill a Settings row, and a wrong figure in either place is worse
+  /// than none. The counter is recomputed every five minutes, so it lags a
+  /// deletion by up to that long.
+  static Future<({int bytes, int quota})?> storageUsage() async {
+    try {
+      final res = await _c.rpc<dynamic>('my_storage_usage');
+      final row = _singleRow(res);
+      return (
+        bytes: JsonUtils.parseInt(row['bytes']),
+        quota: JsonUtils.parseInt(row['quota']),
+      );
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'storage-usage');
+      return null;
     }
   }
 

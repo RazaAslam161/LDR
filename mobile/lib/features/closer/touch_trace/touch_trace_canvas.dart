@@ -22,25 +22,21 @@ class _TracePoint {
 /// A stroke = a list of points + the color the drawer picked.
 class _TraceStroke {
   _TraceStroke({required this.color, required this.points});
-  factory _TraceStroke.fromJson(Map<String, dynamic> j) => _TraceStroke(
-        color: Color.fromARGB(
-          255,
-          (j['r'] as num).toInt(),
-          (j['g'] as num).toInt(),
-          (j['b'] as num).toInt(),
-        ),
-        points: (j['points'] as List)
-            .map((p) => _TracePoint.fromJson(p as Map<String, dynamic>))
-            .toList(),
-      );
   final Color color;
   final List<_TracePoint> points;
 
-  Map<String, dynamic> toJson() => {
+  /// The stroke's IDENTITY only — never its points.
+  ///
+  /// The wire used to carry the whole accumulated point list on every one of
+  /// the ~30 sends a second, so one continuous drag cost O(N^2) bytes and the
+  /// receiver rebuilt a fresh stroke each time. Points now travel as a batch
+  /// beside this, keyed by sender + the canvas's per-stroke sequence number.
+  Map<String, dynamic> headerJson(String from, int id) => {
+        'from': from,
+        'stroke': id,
         'r': (color.r * 255.0).round().clamp(0, 255),
         'g': (color.g * 255.0).round().clamp(0, 255),
         'b': (color.b * 255.0).round().clamp(0, 255),
-        'points': points.map((p) => p.toJson()).toList(),
       };
 }
 
@@ -64,6 +60,13 @@ class TouchTraceCanvas extends StatefulWidget {
 class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
   ManagedSubscription? _sub;
   final List<_TraceStroke> _strokes = [];
+
+  /// Partner strokes still being drawn, keyed '<sender>:<stroke id>'. Identity
+  /// on the wire, so two people holding the same colour stay two strokes.
+  final Map<String, _TraceStroke> _incoming = {};
+
+  /// Bumped per stroke this device draws; travels with every point batch.
+  int _strokeSeq = 0;
   _TraceStroke? _activeStroke;
   DateTime? _strokeStart;
 
@@ -100,18 +103,54 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       callback: (payload) {
         final from = payload['from'] as String?;
         if (from == widget.userId) return; // ignore our own echoes
-        final strokeJson = payload['stroke'] as Map<String, dynamic>;
-        final pointJson = payload['point'] as Map<String, dynamic>;
+
+        // BOTH WIRE SHAPES, because the partner's handset updates separately.
+        //
+        //   legacy (build <= 76): {'stroke': {r,g,b,points:[...]}, 'point': {}}
+        //   current            : {'stroke': <int id>, r, g, b, 'points': [...]}
+        //
+        // A build that only knows the legacy shape cannot read the current one
+        // — which is a coordinated-update requirement the owner has to know
+        // about, recorded in BRAIN — but this side costs nothing and means a
+        // NEW phone never goes blank against an OLD one.
+        final rawStroke = payload['stroke'];
+        final legacy = rawStroke is Map<String, dynamic>;
+        final colorSrc = legacy ? rawStroke : payload;
+        // Legacy identity is the colour it always was; there is no id in it.
+        final id = legacy ? 'legacy' : '$rawStroke';
+        final pointsJson = <Map<String, dynamic>>[
+          if (payload['points'] case final List<dynamic> l)
+            for (final p in l)
+              if (p is Map<String, dynamic>) p,
+          if (payload['point'] case final Map<String, dynamic> p) p,
+        ];
+        if (pointsJson.isEmpty) return;
 
         setState(() {
-          // If this is the first point of a new incoming stroke, append a new
-          // stroke container; otherwise append to the most-recent incoming one.
-          final lastIsIncoming = _strokes.isNotEmpty &&
-              _strokes.last.color.toARGB32() != _myColor().toARGB32();
-          if (!lastIsIncoming || _strokes.isEmpty) {
-            _strokes.add(_TraceStroke.fromJson(strokeJson));
+          // Keyed by SENDER + stroke id, never by colour. Both phones start on
+          // _colors[0], so "the last stroke is a different colour from mine"
+          // was false on every broadcast: each one appended a whole new stroke
+          // carrying the partner's entire point history, and the same line was
+          // overdrawn hundreds of times at O(N^2) cost until the canvas locked
+          // up. Two people picking the same colour on purpose did it too.
+          final key = '$from:$id';
+          var stroke = _incoming[key];
+          if (stroke == null) {
+            stroke = _TraceStroke(
+              color: Color.fromARGB(
+                255,
+                (colorSrc['r'] as num).toInt(),
+                (colorSrc['g'] as num).toInt(),
+                (colorSrc['b'] as num).toInt(),
+              ),
+              points: [],
+            );
+            _incoming[key] = stroke;
+            _strokes.add(stroke);
           }
-          _strokes.last.points.add(_TracePoint.fromJson(pointJson));
+          for (final p in pointsJson) {
+            stroke.points.add(_TracePoint.fromJson(p));
+          }
         });
       },
     );
@@ -121,8 +160,10 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       callback: (payload) {
         final from = payload['from'] as String?;
         if (from == widget.userId) return;
-        // Stroke finalised by partner; nothing more to do — already rendered
-        // incrementally. Could trigger a soft fade here.
+        // Already rendered incrementally. The entry is dropped so the map does
+        // not grow for the life of the session — the stroke itself stays in
+        // _strokes and keeps painting.
+        _incoming.remove('$from:${payload['stroke']}');
       },
     );
 
@@ -131,7 +172,10 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
       callback: (payload) {
         final from = payload['from'] as String?;
         if (from == widget.userId) return;
-        setState(_strokes.clear);
+        setState(() {
+          _strokes.clear();
+          _incoming.clear();
+        });
       },
     );
 
@@ -148,6 +192,8 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
 
   void _onPanStart(DragStartDetails _) {
     _strokeStart = DateTime.now();
+    _strokeSeq++;
+    _pending.clear();
     _activeStroke = _TraceStroke(color: _myColor(), points: []);
     setState(() => _strokes.add(_activeStroke!));
   }
@@ -167,9 +213,12 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
   }
 
   void _onPanEnd(DragEndDetails _) {
+    // Flushed before the end marker, or the tail of every stroke — up to a
+    // whole throttle window of points — never reaches the partner at all.
+    if (_activeStroke != null) _flushPending(_activeStroke!);
     _sub?.channel?.sendBroadcastMessage(
       event: 'stroke_end',
-      payload: {'from': widget.userId},
+      payload: {'from': widget.userId, 'stroke': _strokeSeq},
     );
     _activeStroke = null;
     _strokeStart = null;
@@ -177,24 +226,43 @@ class _TouchTraceCanvasState extends State<TouchTraceCanvas> {
 
   // ─── Throttled broadcast (~every 33ms) ────────────────────────────────────
   DateTime? _lastSend;
+
+  /// Points drawn since the last flush.
+  ///
+  /// The throttle used to DROP everything inside its 33 ms window and send the
+  /// whole stroke again, so the rate was capped by discarding points and the
+  /// size was uncapped by resending history — the partner's copy was the
+  /// decimated one and the wire carried the rest. It batches now: every point
+  /// is sent exactly once, ~30 times a second.
+  final List<_TracePoint> _pending = [];
+
   void _throttledSend(_TraceStroke stroke, _TracePoint point) {
+    _pending.add(point);
     final now = DateTime.now();
     if (_lastSend != null && now.difference(_lastSend!).inMilliseconds < 33) {
       return;
     }
-    _lastSend = now;
+    _flushPending(stroke);
+  }
+
+  void _flushPending(_TraceStroke stroke) {
+    if (_pending.isEmpty) return;
+    _lastSend = DateTime.now();
     _sub?.channel?.sendBroadcastMessage(
       event: 'stroke_point',
       payload: {
-        'from': widget.userId,
-        'stroke': stroke.toJson(),
-        'point': point.toJson(),
+        ...stroke.headerJson(widget.userId, _strokeSeq),
+        'points': [for (final p in _pending) p.toJson()],
       },
     );
+    _pending.clear();
   }
 
   void _clearAll() {
-    setState(_strokes.clear);
+    setState(() {
+      _strokes.clear();
+      _incoming.clear();
+    });
     _sub?.channel?.sendBroadcastMessage(
       event: 'clear',
       payload: {'from': widget.userId},

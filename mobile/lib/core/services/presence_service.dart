@@ -282,11 +282,16 @@ class PresenceService {
       // somehow holds a stale couple_id, the very next presence write — any
       // heartbeat, typing, mood, location ping — self-heals it. onConflict is
       // pinned to the user_id primary key so the upsert updates in place.
+      // Activity is claimed only while a person is looking. setOnline refuses
+      // outright; the other writers (a screen, a typing flag, a mood, a
+      // check-in) still land, but without the stamp the partner reads as
+      // "she was just here".
+      final activity = isAppActivity && humanPresent;
       final rows = await _c.from('presence').upsert({
         'user_id': uid,
         'couple_id': coupleId,
         'updated_at': marker,
-        if (isAppActivity) 'app_last_active_at': marker,
+        if (activity) 'app_last_active_at': marker,
         ...patch,
       }, onConflict: 'user_id',).select('updated_at,app_last_active_at');
 
@@ -373,7 +378,21 @@ class PresenceService {
   /// while she is asleep and has touched nothing. A presence system that
   /// reports the PROCESS rather than the PERSON does not just show a wrong dot;
   /// it invents evidence of being ignored.
-  static bool humanPresent = false;
+  static final ValueNotifier<bool> present = ValueNotifier<bool>(false);
+  static bool get humanPresent => present.value;
+  static set humanPresent(bool v) => present.value = v;
+
+  /// The one derivation of "a person is looking". It used to be an alias of
+  /// the disguise cover alone, which the app lock and the stealth scrim never
+  /// lower — and on a build whose cover is `none` the flag was set true once
+  /// and never fell, so the refusal in [setOnline] could not fire at all.
+  static bool derivePresence({
+    required bool realApp,
+    required bool locked,
+    required bool stealth,
+    required bool foregrounded,
+  }) =>
+      realApp && !locked && !stealth && foregrounded;
 
   /// The partner's online/offline as it arrives over the BROADCAST rail, ahead
   /// of the database.
@@ -772,6 +791,13 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
       fetchOk = false;
       debugPrint('[presence] initial partner fetch failed: $e');
     }
+    // The fetch above is awaited, and this notifier can be disposed while it is
+    // in flight — a tab change or a sign-out is enough. Subscribing anyway
+    // joined a realtime channel onto a dead notifier and left it joined, with
+    // its own debounced SELECT loop still firing. Unrelated to the fetch-failure
+    // case the comment above describes: that is about `fetchOk`, this is about
+    // whether anything is still listening.
+    if (!mounted) return;
     _subscribe();
     Diag.record(DiagArea.presence, 'presence_bind', fields: {
       'phase': 'done',
@@ -802,8 +828,22 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
     _expiry = Timer(left + const Duration(seconds: 1), () async {
       final id = _coupleId;
       if (id == null) return;
-      final fresh = await PresenceService.fetchPartner(id, src: 'expiry');
-      if (mounted) _apply(fresh);
+      try {
+        final fresh = await PresenceService.fetchPartner(id, src: 'expiry');
+        if (mounted) _apply(fresh);
+      } catch (e) {
+        // This is a ONE-SHOT: it is the single moment liveness can turn over
+        // without an event, and _apply is what re-arms it. An unguarded throw
+        // here therefore did not merely skip one read — it killed the timer
+        // chain outright and froze the partner at "Online" for the whole
+        // outage, which is the opposite of what the expiry exists to say.
+        debugPrint('[presence] expiry refetch failed: $e');
+        if (!mounted) return;
+        _expiry?.cancel();
+        _expiry = Timer(const Duration(seconds: 15), () {
+          if (mounted) _apply(state);
+        });
+      }
     });
   }
 
@@ -854,6 +894,10 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
           // id rather than trusting the event.
           final rowUser = payload.newRecord['user_id'];
           final me = SupabaseService.currentUserId;
+          // Definitively OUR row. A malformed or absent user_id is not — that
+          // still reconciles below, because then we cannot tell whose it was.
+          final isMine =
+              rowUser is String && rowUser.isNotEmpty && rowUser == me;
           if (rowUser is String && rowUser.isNotEmpty && rowUser != me) {
             try {
               final live = Presence.fromJson(
@@ -872,11 +916,25 @@ class PartnerPresenceNotifier extends StateNotifier<Presence?> {
           // somewhere sets the screen — and this collapses the burst into one
           // SELECT. It is now a CORRECTION rather than the thing the UI waits
           // on, so the delay costs nothing the user can see.
+          // Skipped for our OWN row. This device writes presence on its 30s
+          // heartbeat, that write comes straight back through this callback,
+          // and the reconcile then spent a full-row SELECT asking the server
+          // about a change this device had just made — one wasted round trip
+          // per device every 30 seconds, for the life of the session. _apply
+          // was already correctly skipped above; only the debounce was not.
+          if (isMine) return;
           _refetchDebounce?.cancel();
           _refetchDebounce =
               Timer(const Duration(milliseconds: 800), () async {
-            final p = await PresenceService.fetchPartner(id, src: 'realtime');
-            if (mounted) _apply(p);
+            try {
+              final p = await PresenceService.fetchPartner(id, src: 'realtime');
+              if (mounted) _apply(p);
+            } catch (e) {
+              // The correction, not the mechanism — the realtime row above
+              // already applied. Logged rather than thrown into a timer, where
+              // it would be an unhandled async error nobody ever sees.
+              debugPrint('[presence] realtime reconcile failed: $e');
+            }
           });
         },
       ),

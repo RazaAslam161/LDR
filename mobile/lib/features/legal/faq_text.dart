@@ -108,11 +108,10 @@ List<FaqSection> milesFaq() => [
           'Yes. “App lock” (Settings → Privacy & security) requires your '
               'fingerprint, face, or a PIN every time the app opens. There is '
               'also a panic gesture — shake the phone three times, or press '
-              'volume-up and volume-down together. It only does something '
-              'once you have a cover on: it drops the app straight back to '
-              'that cover screen. With no cover set there is nothing to drop '
-              'to, so on a normal install the app lock is the control that '
-              'protects you here.',
+              'volume-up then volume-down. With a cover on it drops the app '
+              'straight back to that cover screen, and locks the app behind '
+              'it if App lock is on. With no cover it locks the app, if App '
+              'lock is on. With neither set it does nothing.',
         ),
         FaqEntry(
           'Does my partner see my location?',
@@ -134,8 +133,10 @@ List<FaqSection> milesFaq() => [
           'You always. Your partner only while “Share with…” is on in the '
               'cycle screen’s own settings — it starts on, and turning it off '
               'hides your logs from them on the server, not just in their '
-              'app. What they see even then is a gentle heads-up, not your '
-              'entries.',
+              'app. What their app shows while it is on is a countdown to '
+              'your next period, whether it has started, and a note for the '
+              'phase — all worked out from your logs, which their app can '
+              'read while sharing is on.',
         ),
       ]),
       const FaqSection('Messages and calls', [
@@ -256,20 +257,19 @@ List<FaqSection> milesFaq() => [
       const FaqSection('Safety', [
         FaqEntry(
           'What if I need space from my partner inside the app?',
-          '“Pause notifications” (Settings → Partner) stops this phone '
+          '“Pause notifications” (Settings → Notifications) stops this phone '
               'being '
               'interrupted — for an hour, eight hours, a day, or until you '
               'turn it back on. It does not announce itself: your partner is '
               'not told and nothing on their side shows it. Nothing is '
               'deleted, and you can still send.\n\nThe limits are worth '
               'knowing, because a safety feature that is oversold is worse '
-              'than one that is described. Nudges and Reaches stop notifying '
-              'you, and that part is enforced on the server, so it holds '
-              'whether or not your phone is on. An incoming call is dropped '
-              'rather than rung — but that is done by this phone, so the call '
-              'notification itself can still appear, even though opening it '
-              'neither rings nor connects. Messages are not affected: they '
-              'arrive as usual and you see them when you open the app.',
+              'than one that is described. Nudges, Reaches and calls stop '
+              'notifying you, and that part is enforced on the server, so it '
+              'holds whether or not your phone is on. Messages still arrive '
+              'and still show as delivered to your partner — this phone just '
+              'stays quiet about them, and you see them when you open the '
+              'app.',
         ),
         FaqEntry(
           'How do I report a problem or someone’s behaviour?',

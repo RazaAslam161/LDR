@@ -167,20 +167,51 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   void _onFrameStart(String owner) =>
       _frameBaseScale = _frames[owner]?.scale ?? 1;
 
+  /// Last frame send, and the one still owed to the partner.
+  ///
+  /// A pinch or drag delivers ScaleUpdateDetails at the display's pointer rate
+  /// — 90-120 Hz on the target handsets — and every one of them used to put a
+  /// broadcast on the wire. The local setState has to stay at that rate (it is
+  /// what makes the gesture feel attached to the finger), but the partner
+  /// cannot see more than the screen refreshes, so the send is coalesced to
+  /// ~30/s. Coalesced, not dropped: [_onFrameEnd] flushes whatever the last
+  /// throttle window swallowed, so both phones always settle on the SAME
+  /// transform rather than wherever the timing happened to land.
+  DateTime? _lastFrameSend;
+  ({String owner, double scale, double dx, double dy})? _pendingFrame;
+
   void _onFrameUpdate(String owner, ScaleUpdateDetails d, double w, double h) {
     final f = _frames[owner] ?? const _Frame();
     final scale = (_frameBaseScale * d.scale).clamp(1.0, 4.0);
     final dx = (f.dx + d.focalPointDelta.dx / w).clamp(-0.7, 0.7);
     final dy = (f.dy + d.focalPointDelta.dy / h).clamp(-0.7, 0.7);
     setState(() => _frames[owner] = _Frame(scale: scale, dx: dx, dy: dy));
+    _pendingFrame = (owner: owner, scale: scale, dx: dx, dy: dy);
+    final now = DateTime.now();
+    if (_lastFrameSend != null &&
+        now.difference(_lastFrameSend!).inMilliseconds < 33) {
+      return;
+    }
+    _sendFrame();
+  }
+
+  /// Puts the pending transform on the wire. Payload shape is unchanged, so a
+  /// handset still on the older build reads it exactly as before.
+  void _sendFrame() {
+    final p = _pendingFrame;
+    if (p == null) return;
+    _pendingFrame = null;
+    _lastFrameSend = DateTime.now();
     _channel?.channel?.sendBroadcastMessage(event: 'frame', payload: {
       'from': _myUid,
-      'target': owner,
-      'scale': scale,
-      'dx': dx,
-      'dy': dy,
+      'target': p.owner,
+      'scale': p.scale,
+      'dx': p.dx,
+      'dy': p.dy,
     },);
   }
+
+  void _onFrameEnd() => _sendFrame();
 
   void _onFrameMsg(Map<String, dynamic> p) {
     if (!mounted || p['from'] == _myUid) return;
@@ -640,7 +671,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
   @override
   void initState() {
     super.initState();
-    SecureScreen.setSecure(); // intimate photos — block screenshots
+    SecureScreen.acquire(); // intimate photos — block screenshots
     _heatTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _heat > 0) {
         setState(() => _heat = (_heat - 0.03).clamp(0.0, 1.0));
@@ -674,7 +705,7 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
 
   @override
   void dispose() {
-    SecureScreen.clearSecure();
+    SecureScreen.release();
     _heatTimer?.cancel();
     _neonTimer?.cancel();
     _cameraIconTimer?.cancel();
@@ -1141,6 +1172,10 @@ class _TouchMapScreenState extends ConsumerState<TouchMapScreen> {
               onScaleStart: adjusting ? (_) => _onFrameStart(owner) : null,
               onScaleUpdate:
                   adjusting ? (d) => _onFrameUpdate(owner, d, w, h) : null,
+              // Flushes the coalesced transform, so the partner lands on the
+              // frame the finger actually left rather than the last one the
+              // throttle happened to let through.
+              onScaleEnd: adjusting ? (_) => _onFrameEnd() : null,
               child: Stack(
                 fit: StackFit.expand,
                 // Clip.none lets a reaction's oversized glow aura + drifting

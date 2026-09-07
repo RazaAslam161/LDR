@@ -103,4 +103,18 @@ void main() {
   test('the delete button goes quiet while a batch is running', () {
     expect(chat, contains('_selection.busy'));
   });
+
+  test('the input bar does not describe the sweep as local', () {
+    // The comment above the sweep button said 'local & instant, partner
+    // unaffected' while the callback it is bound to runs
+    // clear_conversation_everyone. The RPC's name is the only honest
+    // description; the 'clear for me' half-mechanism has no writer.
+    final bar =
+        File('lib/features/chat/widgets/chat_input_bar.dart').readAsStringSync();
+    final at = bar.indexOf('widget.onClearConversation != null');
+    expect(at, greaterThan(0));
+    final above = bar.substring(at - 400 < 0 ? 0 : at - 400, at);
+    expect(above, isNot(contains('partner unaffected')));
+    expect(above, contains('clear_conversation_everyone'));
+  });
 }

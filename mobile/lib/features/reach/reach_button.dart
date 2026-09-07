@@ -37,11 +37,13 @@ class _ReachButtonState extends State<ReachButton> {
   @override
   void initState() {
     super.initState();
+    reachAcknowledged.addListener(_onAck);
     unawaited(_syncCooldown());
   }
 
   @override
   void dispose() {
+    reachAcknowledged.removeListener(_onAck);
     _ticker?.cancel();
     _bloomTick.dispose();
     super.dispose();
@@ -76,6 +78,20 @@ class _ReachButtonState extends State<ReachButton> {
     });
   }
 
+  /// The Reach this handset sent last, so the partner's "I'm here" can be
+  /// matched to it. The one question the feature exists to answer.
+  String? _lastReachId;
+
+  void _onAck() {
+    final id = reachAcknowledged.value;
+    if (id == null || id != _lastReachId || !mounted) return;
+    unawaited(HapticFeedback.mediumImpact());
+    _bloomTick.value++;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text("${widget.partnerName ?? 'Your partner'} is here 💕"),
+    ),);
+  }
+
   Future<void> _reach() async {
     if (_onCooldown || _sending) return;
     setState(() => _sending = true);
@@ -83,7 +99,7 @@ class _ReachButtonState extends State<ReachButton> {
     MilesSound.cue(Cue.reach);
     var sent = true;
     try {
-      await ReachRepository.reach(widget.coupleId);
+      _lastReachId = await ReachRepository.reach(widget.coupleId);
       _bloomTick.value++;
     } catch (_) {
       sent = false;

@@ -35,6 +35,9 @@ Future<bool> completeUnlink(WidgetRef ref, String coupleId) async {
     debugPrint('[unlink] execute refused: ${e.runtimeType}');
     return false;
   }
+  // BEFORE reset(), which fires its listeners synchronously — UnlinkScreen's
+  // _released() runs inside the next line and needs this already true.
+  UnlinkState.endedHere = true;
   UnlinkState.reset();
   final session = ref.read(sessionProvider.notifier);
   try {

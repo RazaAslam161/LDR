@@ -97,7 +97,7 @@ class ChatReceiptRepository {
       await DeliveredMark.recordOwed(couple, seq);
       _traceAck('ack_delivered', seq, trigger,
           ok: false, error: e, ms: sw.elapsedMilliseconds,);
-      _reportIfNotMerelyOffline(e, s, 'receipt-delivered');
+      reportIfNotMerelyOffline(e, s, 'receipt-delivered');
       debugPrint('[receipts] ackDelivered seq=$seq failed, owed: $e');
     }
   }
@@ -137,7 +137,7 @@ class ChatReceiptRepository {
     } catch (e, s) {
       _traceAck('ack_read', seq, trigger,
           ok: false, error: e, ms: sw.elapsedMilliseconds,);
-      _reportIfNotMerelyOffline(e, s, 'receipt-read');
+      reportIfNotMerelyOffline(e, s, 'receipt-read');
       debugPrint('[receipts] ackRead failed: $e');
     }
   }
@@ -226,7 +226,7 @@ class ChatReceiptRepository {
   /// is a defect: the grant, the RLS policy or the function is wrong, and it
   /// would otherwise be invisible, because [Diag.record] records nothing in a
   /// shipped build and `debugPrint` reaches a cable attached to one handset.
-  static void _reportIfNotMerelyOffline(Object e, StackTrace s, String kind) {
+  static void reportIfNotMerelyOffline(Object e, StackTrace s, String kind) {
     if (e is PostgrestException) ErrorReporter.report(e, s, kind: kind);
   }
 
@@ -265,7 +265,11 @@ class ChatReceiptRepository {
           .eq('user_id', partnerId)
           .maybeSingle();
       return row == null ? null : ChatReceipt.fromJson(JsonUtils.asMap(row));
-    } catch (e) {
+    } catch (e, st) {
+      // The file's own rule, applied to its third RPC path: a Postgrest
+      // refusal here is a schema or policy defect, and it used to read as
+      // 'they have no row yet'.
+      reportIfNotMerelyOffline(e, st, 'receipt-fetch');
       debugPrint('[receipts] fetchPartner failed: $e');
       return null;
     }

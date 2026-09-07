@@ -113,10 +113,10 @@
     <p>Yes. “App lock” (Settings&nbsp;→&nbsp;Privacy&nbsp;&amp;&nbsp;security)
     requires your fingerprint, face, or a PIN every time the app opens.</p>
     <p>There is also a panic gesture — shake the phone three times, or press
-    volume-up and volume-down together. <strong>It only does something once you
-    have a cover on:</strong> it drops the app straight back to that cover
-    screen. With no cover set there is nothing to drop to, so on a normal
-    install the app lock is the control that protects you here.</p>
+    volume-up then volume-down. With a cover on it drops the app straight back
+    to that cover screen, and locks the app behind it if App lock is on. With
+    no cover it locks the app, if App lock is on. With neither set it does
+    nothing.</p>
   </div></details>
   <details><summary>Does my partner see my location?</summary><div>
     <p>Only if sharing is on, and only at the precision set: off, city-level,
@@ -133,8 +133,10 @@
   <details><summary>Who can see the cycle tracker?</summary><div>
     <p>You always. Your partner only while “Share with…” is on in the cycle
     screen's own settings — it starts on, and turning it off hides your logs
-    from them on the server, not just in their app. What they see even then is
-    a gentle heads-up, not your entries.</p>
+    from them on the server, not just in their app. What their app shows while
+    it is on is a countdown to your next period, whether it has started, and a
+    note for the phase &mdash; all worked out from your logs, which their app
+    can read while sharing is on.</p>
   </div></details>
 
   <h2>Messages and calls</h2>
@@ -232,17 +234,17 @@
 
   <h2>Safety</h2>
   <details><summary>What if I need space from my partner inside the app?</summary><div>
-    <p>“Pause notifications” (Settings&nbsp;→&nbsp;Partner) stops this phone
-    being interrupted — for an hour, eight hours, a day, or until you turn it
-    back on. It does not announce itself: your partner is not told and nothing
+    <p>“Pause notifications” (Settings&nbsp;→&nbsp;Notifications) stops this
+    phone being interrupted — for an hour, eight hours, a day, or until you turn
+    it back on. It does not announce itself: your partner is not told and nothing
     on their side shows it. Nothing is deleted, and you can still send.</p>
     <p>The limits are worth knowing, because a safety feature that is oversold
-    is worse than one that is described. Nudges and Reaches stop notifying you,
-    and that part is enforced on the server, so it holds whether or not your
-    phone is on. An incoming call is dropped rather than rung — but that is done
-    by this phone, so the call notification itself can still appear, even though
-    opening it neither rings nor connects. Messages are not affected: they
-    arrive as usual and you see them when you open the app.</p>
+    is worse than one that is described. Nudges, Reaches and calls stop notifying
+    you, and that part is enforced on the server, so it holds whether or not your
+    phone is on. Messages still arrive and still show as delivered to your
+    partner. On the current version this phone also stays quiet about them until
+    you open the app; an older install still shows a count while paused, so if
+    that matters to you, update first.</p>
   </div></details>
   <details><summary>How do I report a problem or someone's behaviour?</summary><div>
     <p>Settings&nbsp;→&nbsp;Support&nbsp;→&nbsp;“Report a problem”. It is also on

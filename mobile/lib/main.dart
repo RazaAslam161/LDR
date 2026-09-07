@@ -26,7 +26,6 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
-import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
@@ -83,6 +82,10 @@ Future<void> main() async {
   // when the write lands first, the next one otherwise. Not awaited: the
   // first frame owes nothing to old crashes, and it never throws.
   unawaited(ExitReasons.report());
+  // Before anything decodes a picture: the cover, the shell and the chat all
+  // paint through the one cache this bounds. Never throws; a phone that will
+  // not say how much memory it has keeps Flutter's default.
+  unawaited(EncryptedMediaCache.boundImageCache());
 
   await dotenv.load();
   // An empty url/key would FormatException on every Supabase request — log
@@ -126,7 +129,19 @@ Future<void> main() async {
   // first evaluation (unawaited, an account that agreed months ago is bounced
   // to the terms for a frame and back out again), and MilesApp.build reads
   // ReleaseGate.isBlocked, a plain static with no listenable.
-  await Future.wait([TermsGate.load(), ReleaseGate.check()]);
+  // Both capped at the SAME 6s budget ReleaseGate.check already uses
+  // (release_gate.dart:189). TermsGate.load() had no overall cap — only two
+  // SERIAL 10s inner timeouts on the server legs — so a phone on a bad
+  // connection sat on the launch screen for twenty seconds before the first
+  // frame. Capping the WAIT is safe and does not cancel the work: load()
+  // assigns _version from the local record before it ever touches the network
+  // (terms_gate.dart:64-65), so the answer the redirect reads is already
+  // correct here, and the server reconciliation finishes in its own time.
+  const startupBudget = Duration(seconds: 6);
+  await Future.wait([
+    TermsGate.load().timeout(startupBudget, onTimeout: () {}),
+    ReleaseGate.check(),
+  ]);
   // Crash reports parked by launches that could not deliver them — signed out,
   // offline, or dead before SupabaseService.init assigned the client — and
   // the death record this launch read above, parked for the same reason.
@@ -170,7 +185,13 @@ Future<void> main() async {
   // Must be registered before runApp; runs in its own isolate when a push
   // arrives while the app is backgrounded or terminated. Needs Firebase ready.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  TzHelper.ensureInit();
+  // TzHelper.ensureInit() used to run HERE, parsing the whole bundled IANA
+  // database (latest_all, 445,672 bytes) synchronously on the platform thread
+  // before runApp — a cost every launch paid whether or not anything asked for
+  // a timezone. It is not needed: every entry point into TzHelper already
+  // calls ensureInit() itself (_location at tz_helper.dart:58, deviceZone at
+  // :80), and it is idempotent. The first screen that wants a partner clock
+  // pays for it instead of the splash.
   initRealtimeAutoResume(); // rejoin channels whenever the socket (re)connects
   // Off the critical path: nothing paints an ad or reads a push before the
   // News cover, the biometric gate and the splash are all behind us, and
@@ -337,6 +358,12 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   /// Instantly drop to the News cover (shake / volume combo). No animation.
   void _emergencyLock() {
+    // Lock as well as cover. With a cover the gate's _pushLock already
+    // tolerates a raised flag (wasLocked); with none the host hands control
+    // straight back and the LockScreen in this Stack is the one prompt —
+    // before this line the gesture was a visual no-op on the default install
+    // while the FAQ said the app lock covered it.
+    unawaited(AppLock.lockIfEnabled());
     MilesApp.raiseCover();
     stealthActive.value = false;
   }
@@ -377,7 +404,7 @@ class _MilesAppState extends ConsumerState<MilesApp>
       //
       // showRealApp is only true after the cover, the biometric gate and the
       // splash are all behind us — which no push can fake.
-      if (!MilesApp.showRealApp.value) return;
+      if (!PresenceService.humanPresent) return;
       final c = ref.read(currentCoupleProvider);
       if (c != null) PresenceService.setOnline(c.id, online: true);
     }
@@ -393,6 +420,9 @@ class _MilesAppState extends ConsumerState<MilesApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Before anything else: a backgrounded process is not a person looking,
+    // and on a no-cover install nothing below lowers showRealApp.
+    _trackHumanPresence();
     // SECURITY (cover layer): drop back to the News screen the instant the app
     // leaves the foreground, so returning ALWAYS requires re-authentication.
     // NEVER set it true here — only the entry flow does, after biometric +
@@ -688,6 +718,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
     MilesApp.showRealApp.addListener(_routeToNewPassword);
     MilesApp.showRealApp.addListener(_dropPlaintextBehindCover);
     MilesApp.showRealApp.addListener(_trackHumanPresence);
+    AppLock.locked.addListener(_trackHumanPresence);
+    stealthActive.addListener(_trackHumanPresence);
     // Seed it: the real app is already showing on a channel with no disguise,
     // where showRealApp is set true in main() before this listener exists and
     // would therefore never fire.
@@ -714,8 +746,23 @@ class _MilesAppState extends ConsumerState<MilesApp>
   ///
   /// Going true also beats immediately rather than waiting up to 30s for the
   /// heartbeat's next tick — she opens the app and her partner sees it now.
+  bool? _lastPresent;
+
   void _trackHumanPresence() {
-    final present = MilesApp.showRealApp.value;
+    // Four inputs, one answer. The cover alone was the old answer, and the
+    // app lock and the stealth scrim are Stack siblings that never lower it;
+    // WidgetsBinding's lifecycle is already updated when its observers run.
+    final st = WidgetsBinding.instance.lifecycleState;
+    final present = PresenceService.derivePresence(
+      realApp: MilesApp.showRealApp.value,
+      locked: AppLock.locked.value,
+      stealth: stealthActive.value,
+      foregrounded: st == null ||
+          st == AppLifecycleState.resumed ||
+          st == AppLifecycleState.inactive,
+    );
+    if (present == _lastPresent) return;
+    _lastPresent = present;
     PresenceService.humanPresent = present;
     if (!present) {
       // Withdraw the channel-presence claim as the person leaves. The cover
@@ -810,6 +857,8 @@ class _MilesAppState extends ConsumerState<MilesApp>
     MilesApp.showRealApp.removeListener(_routeToNewPassword);
     MilesApp.showRealApp.removeListener(_dropPlaintextBehindCover);
     MilesApp.showRealApp.removeListener(_trackHumanPresence);
+    AppLock.locked.removeListener(_trackHumanPresence);
+    stealthActive.removeListener(_trackHumanPresence);
     _volumeChannel.setMethodCallHandler(null);
     EmergencyLockService.dispose();
     _stopHeartbeat();

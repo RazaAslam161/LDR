@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -34,6 +35,29 @@ import 'package:miles/core/data/media_urls.dart';
 /// and permanently.
 class EncryptedMediaCache {
   EncryptedMediaCache._();
+
+  /// Caps the decoded-image cache at what this phone can spare.
+  ///
+  /// Flutter's default is 100 MiB on every device, which on a 2 GB handset is
+  /// the difference between staying resident in the background and being the
+  /// first thing the OS kills. Scaled to RAM — a 48th of it, floored at 32 MiB
+  /// so a screenful of tiles never thrashes, and never above the default. A
+  /// phone that will not say how much it has keeps the default.
+  static Future<void> boundImageCache() async {
+    try {
+      final info = await File('/proc/meminfo').readAsString();
+      final kb = RegExp(r'MemTotal:\s+(\d+) kB').firstMatch(info)?.group(1);
+      if (kb == null) {
+        debugPrint('[image-cache] MemTotal missing from /proc/meminfo');
+        return;
+      }
+      final bytes = (int.parse(kb) * 1024 ~/ 48).clamp(32 << 20, 100 << 20);
+      PaintingBinding.instance.imageCache.maximumSizeBytes = bytes;
+    } catch (e) {
+      debugPrint(
+          '[image-cache] meminfo unreadable (${e.runtimeType}); default kept',);
+    }
+  }
 
   /// Ciphertext on disk. 90 days and 1500 objects: a couple's whole memory
   /// timeline plus its vault, which is the point — this is the layer that makes
@@ -162,9 +186,9 @@ class EncryptedMediaCache {
   ///
   /// Remembering matters as much as building: `MemoryImage.obtainKey` returns
   /// `this`, so every painted photo is strongly reachable from
-  /// `PaintingBinding.instance.imageCache` (1000 entries / 100 MiB, NOT device
-  /// scaled — the same on a 2 GB IN2015). Dropping an L2 entry without evicting
-  /// its providers frees nothing at all.
+  /// `PaintingBinding.instance.imageCache` (1000 entries, under a byte ceiling
+  /// [boundImageCache] scales to the phone). Dropping an L2 entry without
+  /// evicting its providers frees nothing at all.
   ///
   /// `height` is never passed anywhere. Passing both dimensions makes the key
   /// depend on both, so a square grid tile and a width-only underlay miss each

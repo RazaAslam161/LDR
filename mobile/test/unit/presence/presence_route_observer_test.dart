@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,7 +15,9 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('screenNameForPath', () {
-    test('names the screen from the deepest path segment', () {
+    test('names a room only from the table', () {
+      // The deepest segment is the name, but only when the table knows it as
+      // a room; the derive-anything rule was how the Vault announced itself.
       expect(screenNameForPath('/app/touch'), 'Touch');
       expect(screenNameForPath('/app/cycle'), 'Cycle');
       expect(screenNameForPath('/app/heartbeat'), 'Heartbeat');
@@ -21,9 +25,66 @@ void main() {
     });
 
     test('humanises hyphenated segments', () {
-      expect(screenNameForPath('/app/closer/memory-threads'), 'Memory Threads');
-      expect(screenNameForPath('/app/games/truth-dare'), 'Truth Dare');
       expect(screenNameForPath('/app/location-map'), 'Location Map');
+      expect(screenNameForPath('/app/watch-list'), 'Watch List');
+    });
+
+    test('private and gated rooms publish nothing', () {
+      // The join side refused these; the publish side derived a name for
+      // them anyway. Now both sides answer from one table. Null here means
+      // the partner reads "somewhere" — and the observer publishes that
+      // null rather than leaving the previous room standing.
+      for (final p in [
+        '/app/vault',
+        '/app/closer/vault',
+        '/app/disguise',
+        '/app/disguise/entry',
+        '/app/settings',
+        '/app/settings/export',
+        '/app/settings/account',
+        '/unlink',
+        '/new-password',
+        '/app/mood-signal',
+        '/app/capsule/new',
+        // Closer sub-rooms sit behind the two-sided Closer gate and hold
+        // FLAG_SECURE surfaces; 'she is in Memory Threads' is the leak.
+        '/app/closer/memory-threads',
+        '/app/closer/touch-trace',
+        '/app/closer/wish-jar',
+        '/app/closer/pick-for-us',
+        '/app/closer/mood-lamp',
+        '/app/closer/warmth',
+        '/app/games/truth-dare',
+      ]) {
+        expect(screenNameForPath(p), isNull, reason: '$p must not publish');
+      }
+    });
+
+    test('every published name is one the read side would print', () {
+      // isKnownRoom is the read-side filter on Home; whatever this side can
+      // publish must pass it, or a room goes silent on the partner's card.
+      for (final p in [
+        '/app/reasons', '/app/care', '/app/watch', '/app/cycle',
+        '/app/heartbeat', '/app/games', '/app/rituals', '/app/prompt',
+        '/app/timeline', '/app/capsule', '/app/breath', '/app/gallery',
+        '/app/routines', '/app/watch-list', '/app/location-map', '/app/touch',
+      ]) {
+        final name = screenNameForPath(p);
+        expect(name, isNotNull, reason: '$p is a shared room');
+        expect(isKnownRoom(name), isTrue, reason: '$p -> $name');
+      }
+      expect(isKnownRoom('Vault'), isFalse);
+      expect(isKnownRoom(null), isFalse);
+    });
+
+    test('Home never prints a room this build would not publish', () {
+      // A build-73 partner keeps publishing 'Vault'; this is where the word
+      // reached the other phone's screen.
+      final home = File('lib/features/home/home_screen.dart').readAsStringSync();
+      final at = home.indexOf("'In \${");
+      expect(at, greaterThan(0));
+      final guard = home.substring(at - 400 < 0 ? 0 : at - 400, at);
+      expect(guard, contains('isKnownRoom('));
     });
 
     test('reports nothing for places that are not a room', () {
@@ -54,9 +115,11 @@ void main() {
       expect(screenNameForPath('/app'), isNull);
     });
 
-    test('every real route in the app produces a name', () {
+    test('every real route is classified: a table room or nothing', () {
       // The original bug: only 13 of 44 routes ever reported, so walking into
-      // one of the other 31 left the partner seeing where you were last.
+      // one of the other 31 left the partner seeing where you were last. The
+      // observer now publishes null for a room off the table, so "stale" is
+      // impossible — and the only names that can come out are table names.
       const realRoutes = [
         '/app/settings', '/app/disguise', '/app/capsule', '/app/capsule/new',
         '/app/mood-signal', '/app/vault', '/app/touch',
@@ -64,12 +127,12 @@ void main() {
         '/app/heartbeat', '/app/games', '/app/rituals', '/app/prompt',
         '/app/timeline', '/app/location-map', '/app/closer/touch-trace',
         '/app/closer/mood-lamp', '/app/closer/warmth', '/app/closer/vault',
-        '/app/closer/wish-jar', '/app/closer/pick-for-us',
+        '/app/closer/wish-jar', '/app/closer/pick-for-us', '/app/prompt/history',
       ];
       for (final r in realRoutes) {
         final name = screenNameForPath(r);
-        expect(name, isNotNull, reason: '$r would leave presence stale');
-        expect(name, isNotEmpty);
+        expect(name == null || isKnownRoom(name), isTrue,
+            reason: '$r -> $name is not a table room',);
       }
     });
 

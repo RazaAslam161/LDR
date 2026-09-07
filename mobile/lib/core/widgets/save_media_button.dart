@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:miles/core/ui/theme.dart';
 
-/// A small download icon that saves media on tap and shows brief SnackBar
-/// feedback. Reused across chat bubbles, the media viewers, and the Touch
-/// screen so all save actions look and behave the same.
+/// A small download icon that copies media INTO the Private Vault on tap and
+/// shows brief SnackBar feedback. Nothing is written to the device gallery —
+/// this build has no gallery writer. Reused across chat bubbles, the media
+/// viewers, and the Touch screen so all save actions look and behave the same.
 class SaveMediaButton extends StatefulWidget {
   const SaveMediaButton({
     required this.onSave, super.key,

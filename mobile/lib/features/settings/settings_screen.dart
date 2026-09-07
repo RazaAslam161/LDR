@@ -12,6 +12,8 @@ import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/app_lock.dart';
+import 'package:miles/core/services/storage_quota.dart';
+import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
 import 'package:miles/core/services/notification_channel_settings.dart';
@@ -25,6 +27,7 @@ import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/ember_press.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/glow_button.dart';
+import 'package:miles/core/ui/content_language.dart';
 import 'package:miles/core/widgets/language_toggle.dart';
 import 'package:miles/core/widgets/love_text_field.dart';
 import 'package:miles/core/widgets/safety_code_prompt.dart';
@@ -143,6 +146,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       _loadAppLock();
       _loadCoverEntry();
       _loadEscrow();
+      _loadStorage();
       _loadCodeVerified();
       _loadNotificationState();
       _loadConsent();
@@ -235,6 +239,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   Future<void> _loadEscrow() async {
     final missing = await KeyEscrow.isMissing();
     if (mounted) setState(() => _escrowMissing = missing);
+  }
+
+  ({int bytes, int quota})? _storage;
+
+  Future<void> _loadStorage() async {
+    final usage = await StorageQuota.read();
+    if (mounted) setState(() => _storage = usage);
   }
 
   /// Reads the PUBLISHED partner key, not the pinned digest — the same fetch
@@ -764,16 +775,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (confirmed != true) return;
 
     setState(() => _busy = true);
+    // Captured BEFORE the round trip, unlike _changeAvatar's `if (!mounted)
+    // return`. That guard is right where dropping the work is acceptable; here
+    // it is not. The Delete row is disabled by _busy but the AppBar back button
+    // and the system back gesture are both live, so this element can be
+    // disposed mid-call — and `ref.read` on a disposed ConsumerStatefulElement
+    // throws StateError, which the catch below then reported as "could not
+    // delete" for an account the server had ALREADY destroyed, leaving the user
+    // signed into it.
+    final session = ref.read(sessionProvider.notifier);
     try {
       await SupabaseRepository.deleteMyAccount();
-      await ref.read(sessionProvider.notifier).signOut();
-      if (mounted) context.go('/signin');
     } catch (_) {
       // The account still exists, so say so — a silent failure here reads as
       // "deleted" and the user walks away believing their data is gone.
       _toast('Could not delete your account. Please try again.');
       if (mounted) setState(() => _busy = false);
+      return;
     }
+    // Past this line the account is gone and nothing may report failure. The
+    // sign-out runs off the captured notifier so it completes whether or not
+    // this screen survived.
+    await session.signOut();
+    if (mounted) context.go('/signin');
   }
 
   Future<void> _signOut() async {
@@ -871,7 +895,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     );
     if (confirmed != true) return;
     try {
-      await SupabaseRepository.signOutOtherDevices();
+      await SupabaseRepository.signOutOtherDevices(
+        keepDeviceId: await FcmService.deviceId(),
+      );
       _toast('Signed out everywhere else.');
     } catch (e) {
       _toast(friendlyAuthError(e));
@@ -966,11 +992,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               ),
             ),
           ),
-          const _SettingsRow(
+          _SettingsRow(
             icon: Icons.translate,
             title: 'Content language',
-            subtitle: 'Games in English',
-            trailing: LanguageToggle(),
+            subtitle:
+                'Games in ${ref.watch(contentLanguageProvider).label}',
+            trailing: const LanguageToggle(),
           ),
           _SettingsRow(
             icon: Icons.schedule,
@@ -1005,14 +1032,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               _SettingsRow(
                 icon: Icons.touch_app_outlined,
                 title: 'Your way in',
-                // The backup hold is written here because this is the last
-                // screen the owner sees before they need it, and the FAQ
-                // that also carries it is inside the app they are locked out
-                // of.
+                // No hold, no count: the owner ruled (2026-09-03) that the
+                // backup gesture is taught nowhere, and the number this row
+                // used to restate drifted (five for ten) within a day.
                 subtitle: 'The move that opens Miles from the '
-                    '${_wornCover!.label} cover. Forgotten it? Hold two '
-                    'fingers still in the middle of the cover for five '
-                    'seconds, then unlock.',
+                    '${_wornCover!.label} cover.',
                 value: _moveSet ? 'Set' : 'Not set',
                 onTap: _changeCoverEntry,
               ),
@@ -1098,6 +1122,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               value: _escrowMissing ? 'Backup off' : 'Backup on',
               onTap: () => context.push('/app/settings/account'),
             ),
+            // Nothing has ever shown how full the account is, so an upload
+            // refused at the ceiling read as a connection problem. Absent
+            // rather than wrong when the read fails.
+            if (_storage != null)
+              _SettingsRow(
+                icon: Icons.cloud_outlined,
+                title: 'Storage',
+                value: '${StorageQuota.size(_storage!.bytes)} of '
+                    '${StorageQuota.size(_storage!.quota)}',
+              ),
             _SettingsRow(
               icon: Icons.info_outline,
               title: 'About',
@@ -1314,6 +1348,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   : 'Quiet for a while, without ending anything',
               onTap: () => showContactPauseSheet(context),
             ),
+          ),
+          // Whether this phone can actually be reached. It said nothing for
+          // two months while one handset's token was dead at Google and the
+          // app re-uploaded it on every resume — the failure was recorded on
+          // the server and nowhere the owner could see.
+          ValueListenableBuilder<String?>(
+            valueListenable: pushHealth,
+            builder: (context, health, _) => health == null
+                ? const SizedBox.shrink()
+                : _SettingsRow(
+                    icon: Icons.error_outline,
+                    title: 'This phone is not being notified',
+                    subtitle: switch (health) {
+                      PushHealth.blocked =>
+                        'Android is blocking alerts for this app. Turn them '
+                            'on in your phone’s settings.',
+                      PushHealth.noToken =>
+                        'Google Play services did not answer. Reopening the '
+                            'app usually settles it.',
+                      _ => 'Your account could not be told about this phone. '
+                          'Check your connection and reopen the app.',
+                    },
+                  ),
           ),
         ],),
         _SettingsGroup(

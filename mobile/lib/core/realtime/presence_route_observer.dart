@@ -85,11 +85,14 @@ class PresenceRouteObserver extends NavigatorObserver {
       return;
     }
 
-    final name = screenNameForPath(path);
-    // A named route that is deliberately not a place (auth, the capture camera)
-    // leaves the current value alone — nobody has moved rooms.
-    if (name == null) return;
-    publish(name);
+    // Transient — auth, the capture camera, a call: nobody moved rooms, the
+    // current value stands.
+    if (kTransientRoutes.contains(path)) return;
+    // Anything else publishes what the room table allows, or null —
+    // "somewhere". Leaving the previous room standing here was the other
+    // half of the leak: a private route did not merely announce itself, a
+    // denied one went on claiming the last room.
+    publish(screenNameForPath(path));
   }
 
   /// Publish the bottom-nav tab the user is on. The navigator cannot see a tab
@@ -346,15 +349,10 @@ String? joinableTabIdentity(String? screenName) => switch (screenName) {
       _ => null,
     };
 
-/// Human-facing name for a route, derived from its path.
-///
-/// Derived rather than hand-maintained: a per-route table is exactly the thing
-/// that goes stale when someone adds a screen, which is how this broke.
-/// Returns null for routes that are not a "place" the partner should see —
-/// auth, the shell container itself, and the camera (a capture action, not a
-/// room).
-String? screenNameForPath(String path) {
-  const notAPlace = {
+/// Routes that are not a place at all — nobody moved rooms. The observer
+/// leaves the current room standing for these; [screenNameForPath] answers
+/// null for them too.
+const Set<String> kTransientRoutes = {
     '/',
     '/signin',
     '/signup',
@@ -386,16 +384,46 @@ String? screenNameForPath(String path) {
     // PresenceRouteObserver answers that one from the selected index.
     '/app',
   };
-  if (notAPlace.contains(path)) return null;
+
+/// Rooms that publish but are not joinable: plain shared screens behind no
+/// gate, where "she is in the Gallery" is a fact both of them share.
+const Set<String> kSharedRooms = {
+  'Breath',
+  'Gallery',
+  'Routines',
+  'Watch List',
+  'Location Map',
+};
+
+/// Whether [name] is a room THIS build would ever publish: joinable, a tab,
+/// or one of the shared rooms above. Home's read side asks the same question
+/// of what the PARTNER published — a build-73 handset still announces
+/// 'Vault', 'Disguise' and 'Export', and that word must never reach the other
+/// phone's screen.
+bool isKnownRoom(String? name) =>
+    name != null &&
+    (kJoinableRoutes.containsKey(name) ||
+        joinableTabIdentity(name) != null ||
+        kSharedRooms.contains(name));
+
+/// Human-facing name for a route: the deepest path segment, title-cased —
+/// but ONLY when the table knows it as a room. The join side was always an
+/// allowlist while this side derived a name for anything with a path, which
+/// is how the Vault, the disguise picker, the export, the unlink ceremony and
+/// the entry recorder came to announce themselves on the partner's Home.
+/// Null means "somewhere": transient routes and everything private.
+String? screenNameForPath(String path) {
+  if (kTransientRoutes.contains(path)) return null;
 
   final segments =
       path.split('/').where((s) => s.isNotEmpty && s != 'app').toList();
   if (segments.isEmpty) return null;
 
-  // '/app/closer/memory-threads' -> 'Memory Threads'. The deepest segment is
-  // the screen.
-  return segments.last
+  // '/app/location-map' -> 'Location Map'. The deepest segment is the
+  // screen; the table decides whether it is a room.
+  final name = segments.last
       .split('-')
       .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
       .join(' ');
+  return isKnownRoom(name) ? name : null;
 }

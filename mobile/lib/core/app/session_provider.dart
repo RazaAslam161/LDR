@@ -26,6 +26,7 @@ import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/voice_note_cache.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
+import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
@@ -691,6 +692,16 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // silently lifted itself at the moment of a breakup is exactly backwards.
     TermsGate.reset();
     ContactPause.reset();
+    // The chat page cache holds DECRYPTED messages so a tab switch does not
+    // cost a spinner and a round trip. It is process-scoped and keyed by
+    // couple, but it belongs to the account that just left and has no business
+    // outliving it.
+    ChatRepository.forget();
+    // Set true when THIS account published a key over a different one, and it
+    // was only ever set. Left standing, account B signing in on the same
+    // handset inherited account A's permanent "can't be opened here — or on
+    // hers" wording over content of B's that opens perfectly.
+    SupabaseRepository.keyWasReplaced = false;
     // Describes a couple THIS account used to be in. Left standing, the next
     // person to sign in on this handset is told about somebody else's breakup.
     SeveranceState.reset();

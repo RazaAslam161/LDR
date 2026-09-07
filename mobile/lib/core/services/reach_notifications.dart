@@ -177,6 +177,12 @@ Future<void> showCallNotification({
     category: AndroidNotificationCategory.call,
     fullScreenIntent: fullScreen,
     ongoing: true,
+    // The caller gives up at 35s (call_controller._startConnectTimeout) and a
+    // closed callee never receives the hangup, so an ongoing entry with no
+    // expiry sat on the shade until it was swiped — and tapping it rang a
+    // call nobody was placing. Android retires it on the same clock the
+    // caller uses.
+    timeoutAfter: 35000,
     vibrationPattern: callVibrationPattern(),
     icon: style.smallIcon,
     ticker: style.ticker,
@@ -443,6 +449,36 @@ Future<void> showMemoryNotification({
   );
 }
 
+/// A closeness check-in landed and is waiting for yours. Same channel and the
+/// same disguised copy as a memory: the shade learns nothing beyond "open
+/// the app". One id per couple, so a second check-in rewrites the entry.
+Future<void> showClosenessNotification({
+  required FlutterLocalNotificationsPlugin plugin,
+  required String coupleId,
+}) async {
+  final profile = await currentDisguiseProfile();
+  // Covers mean silence — the header would say "Miles" (see showCareNotification).
+  if (profile.cover != DisguiseCover.none) return;
+  final style = notificationStyleFor(profile);
+  final android = AndroidNotificationDetails(
+    kCareChannelId,
+    kCareChannelName,
+    channelDescription: kCareChannelDesc,
+    importance: Importance.high,
+    priority: Priority.high,
+    icon: style.smallIcon,
+    ticker: style.ticker,
+    visibility: NotificationVisibility.secret,
+  );
+  await plugin.show(
+    id: 'closeness:$coupleId'.hashCode & 0x7fffffff,
+    title: style.title,
+    body: style.body,
+    notificationDetails: NotificationDetails(android: android),
+    payload: 'closeness|$coupleId',
+  );
+}
+
 /// Every push the unlinking ritual sends. QUIET on purpose — this is not a
 /// thing to buzz somebody about, it is a thing they must be able to find — and
 /// silent entirely under a cover, like everything else here.
@@ -516,10 +552,25 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       type != 'msg_sync' &&
       type != 'memory' &&
       type != 'ritual' &&
-      // The ceremony's one push. Builds 63 and older fall out of this list
+      // The ceremony's pushes. Builds 63 and older fall out of this list
       // and return — deliberate: they learn at execution, exactly as
       // severance has always worked for them.
-      type != 'unlink') {
+      //
+      // All FOUR beats are named. reach-notify sends `type: kind`, and kind is
+      // one of these four (index.ts:255-257); the branch that builds them is
+      // already written for all four (:645-648, copy at :468-470). Only this
+      // list said 'unlink', so the other three returned here — a backgrounded
+      // partner was never told the other agreed while the Re-link button was
+      // still on their screen.
+      type != 'unlink' &&
+      type != 'unlink_lastcall' &&
+      type != 'unlink_relinked' &&
+      type != 'unlink_ended' &&
+      // A closeness check-in (20260820030000). The third server kind to ship
+      // without a client branch: its trigger had been firing into this return
+      // since 2026-08-20. Named here AND given a branch below — admitting a
+      // kind without one lands it in the Reach fallthrough at the bottom.
+      type != 'closeness') {
     return;
   }
 
@@ -586,7 +637,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // exact breakage the version gate exists to prevent. The wake already
     // arrives for every message; whether anything is drawn is decided here, by
     // this build, on this device.
+    // Counted before the pause is consulted (§296).
     final unread = await UnreadTally.increment(coupleId ?? '');
+
+    // Paused: draw nothing, keep the receipt (20260906140400, §296).
+    if ((message.data['muted'] as String?) == 'true') {
+      await ack;
+      return;
+    }
+
     await androidPlugin?.createNotificationChannel(buildQuietChannel());
     await androidPlugin?.createNotificationChannel(buildMsgChannel());
     await showMessageNotification(
@@ -634,6 +693,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       ritualId: (message.data['ritual_id'] as String?) ?? '',
       coupleId: coupleId ?? '',
     );
+    return;
+  }
+
+  if (type == 'closeness') {
+    await androidPlugin?.createNotificationChannel(buildCareChannel());
+    await showClosenessNotification(plugin: plugin, coupleId: coupleId ?? '');
     return;
   }
 

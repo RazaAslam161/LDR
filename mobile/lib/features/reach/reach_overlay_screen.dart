@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/ui/motion.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/breathing_glow.dart';
@@ -44,7 +45,16 @@ class _ReachOverlayScreenState extends State<ReachOverlayScreen> {
   Future<void> _acknowledge() async {
     try {
       await ReachRepository.acknowledge(widget.eventId);
-    } catch (_) {}
+    } catch (e, st) {
+      // 'I'm here' is the one thing the sender is waiting to hear; a write
+      // that failed in silence left them waiting for nothing.
+      ErrorReporter.report(e, st, kind: 'reach-ack');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Couldn't tell them you're here — no connection."),
+        ),);
+      }
+    }
     if (mounted) Navigator.of(context).pop();
   }
 

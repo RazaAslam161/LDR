@@ -62,6 +62,20 @@ class RealtimeService {
         'status': status.name,
         if (err != null) 'error': err.runtimeType.toString(),
       },);
+      // Diag.record alone was this signal's ONLY sink, and Diag's ring is
+      // deliberately test-only (`_capture` is false unless resetForTest turns
+      // it on, and nothing in lib/ turns it on). So the callback added to stop
+      // a channel failing silently in the field was itself silent in the
+      // field — the exact bug it was written to close, one layer up.
+      // ErrorReporter is the sink that reaches the server.
+      if (status == RealtimeSubscribeStatus.channelError ||
+          status == RealtimeSubscribeStatus.timedOut) {
+        ErrorReporter.report(
+          err ?? StateError('realtime $table: ${status.name}'),
+          StackTrace.current,
+          kind: 'realtime-subscribe',
+        );
+      }
     });
   }
 

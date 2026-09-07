@@ -18,6 +18,7 @@ class TimelineScreen extends ConsumerStatefulWidget {
 
 class _TimelineScreenState extends ConsumerState<TimelineScreen> {
   List<Visit>? _visits;
+  late _Stats _stats;
   String? _error;
   bool _loading = true;
 
@@ -44,10 +45,16 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
       _error = null;
     });
     try {
-      final visits = await TimelineRepository.list(couple.id);
+      final fetched = await TimelineRepository.list(couple.id);
       if (!mounted) return;
+      // Newest first for the timeline. Sorted and summed here, once per
+      // fetch, not in _body on every rebuild. A copy, because the repository
+      // hands back an unmodifiable list and sort() on one throws.
+      final visits = [...fetched]
+        ..sort((a, b) => b.startDate.compareTo(a.startDate));
       setState(() {
         _visits = visits;
+        _stats = _Stats.compute(visits);
         _loading = false;
       });
     } catch (e) {
@@ -123,10 +130,8 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
       );
     }
 
-    // Newest first for the timeline.
-    final ordered = [...visits]
-      ..sort((a, b) => b.startDate.compareTo(a.startDate));
-    final stats = _Stats.compute(ordered);
+    final ordered = visits;
+    final stats = _stats;
 
     return RefreshIndicator(
       color: const Color(0xFFEF6F58),

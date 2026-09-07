@@ -512,6 +512,33 @@ class _BustPainter extends CustomPainter {
     return out;
   }
 
+  /// One shader per face image, kept exactly as long as the image itself is
+  /// reachable. Its only input is the image — clamp tiling, identity matrix,
+  /// medium quality — so a fresh one per frame was the same object allocated
+  /// on every vsync of every screen that wears the badge. An Expando rather
+  /// than a map so a face the LRU has dropped takes its shader with it,
+  /// instead of the shader pinning the pixels the drop was meant to free.
+  static final Expando<ui.ImageShader> _shaders = Expando<ui.ImageShader>();
+  static final _identity = Matrix4.identity().storage;
+  static final Paint _facePaint = Paint()
+    ..filterQuality = FilterQuality.medium;
+
+  static ui.ImageShader _shaderFor(ui.Image face) =>
+      _shaders[face] ??= ui.ImageShader(
+        face,
+        TileMode.clamp,
+        TileMode.clamp,
+        _identity,
+        filterQuality: FilterQuality.medium,
+      );
+
+  /// The pool of shadow under the figure: one gradient per (rect, depth).
+  /// Two sizes of figure exist in the app, so two entries — plus a few more
+  /// while a Hero flight paints the figure at in-between sizes, which is what
+  /// the cap is for.
+  static final Map<(Rect, double), ui.Gradient> _shades = {};
+  static const _shadesKeep = 16;
+
   /// Loops between blinks, and the share of one loop an eye stays shut.
   /// Neither is a round number: a blink landing on the same beat as the breath
   /// is the tell that something is on a timer rather than alive. The host's
@@ -754,17 +781,13 @@ class _BustPainter extends CustomPainter {
     canvas.drawVertices(
       vertices,
       BlendMode.dstOver,
-      Paint()
+      _facePaint
         ..colorFilter = paint.colorFilter
-        ..filterQuality = FilterQuality.medium
-        ..shader = ui.ImageShader(
-          face,
-          TileMode.clamp,
-          TileMode.clamp,
-          Matrix4.identity().storage,
-          filterQuality: FilterQuality.medium,
-        ),
+        ..shader = _shaderFor(face),
     );
+    // The draw has copied the paint; left set, the shader would hold the
+    // last face's pixels after the LRU let the image go.
+    _facePaint.shader = null;
   }
 
   /// How much of the head's motion a point at height [v] takes. Flat across
@@ -806,16 +829,20 @@ class _BustPainter extends CustomPainter {
         height: r * 0.5,
       );
     }
+    if (_shades.length >= _shadesKeep) _shades.clear();
     canvas.drawOval(
       pool,
       Paint()
-        ..shader = ui.Gradient.radial(
-          pool.center,
-          pool.width / 2,
-          [
-            MilesColors.nightDeep.withValues(alpha: depth),
-            MilesColors.nightDeep.withValues(alpha: 0),
-          ],
+        ..shader = _shades.putIfAbsent(
+          (pool, depth),
+          () => ui.Gradient.radial(
+            pool.center,
+            pool.width / 2,
+            [
+              MilesColors.nightDeep.withValues(alpha: depth),
+              MilesColors.nightDeep.withValues(alpha: 0),
+            ],
+          ),
         ),
     );
   }

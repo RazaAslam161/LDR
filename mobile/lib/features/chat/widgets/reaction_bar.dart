@@ -118,6 +118,12 @@ class ReactionBar {
     // Grows from the corner nearest the message, so it reads as coming out of
     // the bubble rather than arriving from the middle of the screen.
     final origin = Alignment(mine ? 1 : -1, at.dy > anchor.top ? -1 : 1);
+    // One per open, not one per frame: transitionBuilder runs on every frame
+    // of the 170ms, and a CurvedAnimation registers a status listener on the
+    // route's animation that nothing here removes (route_motion.dart has the
+    // count). Not a CurveTween, because the close has its own curve and a
+    // tween has no way to carry one. It dies with the route.
+    CurvedAnimation? curve;
 
     return showGeneralDialog<String>(
       context: context,
@@ -144,14 +150,14 @@ class ReactionBar {
         ],
       ),
       transitionBuilder: (_, animation, __, child) {
-        final curve = CurvedAnimation(
+        final scale = curve ??= CurvedAnimation(
           parent: animation,
           curve: Curves.easeOutBack,
           reverseCurve: Curves.easeIn,
         );
         return FadeTransition(
           opacity: animation,
-          child: ScaleTransition(scale: curve, alignment: origin, child: child),
+          child: ScaleTransition(scale: scale, alignment: origin, child: child),
         );
       },
     );

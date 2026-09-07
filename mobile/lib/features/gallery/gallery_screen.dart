@@ -7,6 +7,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
+import 'package:miles/core/services/storage_quota.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/features/gallery/gallery_repository.dart';
@@ -162,6 +163,8 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     // failed tiles the user taps forever.
     var oversize = 0;
     var oversizeMb = 0;
+    // Kept so the sentence below can ask what the refusal actually was.
+    Object? lastError;
     for (final item in batch) {
       try {
         await GalleryRepository.upload(
@@ -179,6 +182,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
         // because a fleet whose uploads fail quietly looks exactly like a
         // fleet whose users stopped adding pictures.
         ErrorReporter.report(e, st, kind: 'gallery');
+        lastError = e;
         failed++;
         _failed.add(item);
       } finally {
@@ -200,11 +204,21 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
       );
     }
     if (failed > 0 && mounted) {
+      // A refused upload and a lost connection look identical in the
+      // exception, so the account's own counter is asked before the sentence
+      // is chosen. Sending someone to their router over a full account is the
+      // same mistake the oversize branch above exists to avoid.
+      final sentence = lastError == null
+          ? null
+          : await StorageQuota.explain(lastError, fallback: '');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(failed == batch.length
-              ? 'Nothing uploaded — check your connection.'
-              : "$failed of ${batch.length} didn't upload.",),
+          content: Text(sentence != null && sentence.isNotEmpty
+              ? sentence
+              : failed == batch.length
+                  ? 'Nothing uploaded — check your connection.'
+                  : "$failed of ${batch.length} didn't upload.",),
           action: SnackBarAction(label: 'Retry', onPressed: _retryAll),
         ),
       );

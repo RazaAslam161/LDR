@@ -453,13 +453,13 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
   @override
   void initState() {
     super.initState();
-    SecureScreen.setSecure();
+    SecureScreen.acquire();
     _ensureKeyAndLoad();
   }
 
   @override
   void dispose() {
-    SecureScreen.clearSecure();
+    SecureScreen.release();
     super.dispose();
   }
 
@@ -553,6 +553,13 @@ class _UnlockedViewState extends ConsumerState<_UnlockedView> {
                           itemBuilder: (context, i) {
                             final me = ref.read(sessionProvider).profile!.id;
                             return _MemoryCard(
+                              // Keyed on the thread, not the index. The list
+                              // re-sorts and re-emits on every realtime delta,
+                              // so index-matched elements handed their State to
+                              // a DIFFERENT memory — and _MemoryCover never
+                              // reloads, which put one memory's private
+                              // photograph under another's title.
+                              key: ValueKey(result.items[i].id),
                               thread: result.items[i],
                               isMine: result.items[i].proposer == me,
                             );
@@ -621,6 +628,7 @@ class _MemoryCard extends StatefulWidget {
   const _MemoryCard({
     required this.thread,
     required this.isMine,
+    super.key,
   });
   final MemoryThread thread;
   final bool isMine;
@@ -652,6 +660,16 @@ class _MemoryCardState extends State<_MemoryCard> {
   }
 
   Future<void> _decrypt() async {
+    // Cleared before the attempt, not after it. didUpdateWidget re-decrypts on
+    // an id or state change, and neither field was ever reset: a thread with no
+    // note kept the PREVIOUS thread's decrypted note on screen, and a card that
+    // failed once kept saying "locked" for a memory that opens fine. Assigned
+    // synchronously rather than through setState — didUpdateWidget runs inside
+    // the parent's rebuild, so this frame's build already reads the reset.
+    _title = null;
+    _note = null;
+    _failure = null;
+    _loading = true;
     try {
       final results = await Future.wait([
         decryptTitle(widget.thread),
@@ -1361,7 +1379,7 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
   @override
   void initState() {
     super.initState();
-    SecureScreen.setSecure();
+    SecureScreen.acquire();
     _load();
   }
 
@@ -1419,7 +1437,7 @@ class _MemoryPhotoViewState extends State<_MemoryPhotoView> {
 
   @override
   void dispose() {
-    SecureScreen.clearSecure();
+    SecureScreen.release();
     super.dispose();
   }
 

@@ -405,7 +405,8 @@ class _CycleScreenState extends ConsumerState<CycleScreen> {
               style: const TextStyle(color: MilesColors.cream50, fontSize: 14),),
           subtitle: Text(
               settings.shareWithPartner
-                  ? 'They see a gentle heads-up — never the details'
+                  ? 'They see a countdown to your next period, whether it '
+                      'has started, and a note for the phase'
                   : 'Private to you',
               style: const TextStyle(color: MilesColors.taupe, fontSize: 12),),
         ),

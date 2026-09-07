@@ -79,4 +79,20 @@ void main() {
         reason: 'ManagedSubscription owns the resume listener; a second one '
             'here would rebuild the channel twice per reconnect.',);
   });
+
+  test('the consent subtitle names what the partner view renders', () {
+    // The switch said 'a gentle heads-up — never the details' while
+    // _partnerView prints a day countdown, whether it has started and a
+    // phase-selected note, from her raw rows. The consent sentence must be
+    // derived from the three things the partner surface renders.
+    final card = bodyOf('Widget _settingsCard(CycleSettings settings) {');
+    expect(card, isNot(contains('never the details')));
+    for (final word in ['countdown', 'started', 'note']) {
+      expect(card, contains(word), reason: 'the subtitle must name: $word');
+    }
+    final partner = bodyOf('List<Widget> _partnerView() {');
+    expect(partner, contains('Next period in'));
+    expect(partner, contains('started her period'));
+    expect(partner, contains('partnerNote'));
+  });
 }

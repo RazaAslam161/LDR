@@ -8696,6 +8696,7 @@ the §85 redesign, so that regression was ours.
   from the owner, verbatim except one cleanup flagged to them (the doubled
   doubled street line): RZ Dev · Razaaslam3210@gmail.com · [postal address
   redacted 2026-09-04 — see §279]. security.txt keeps its RFC 9116 link but is labelled
+  redacted 2026-09-04 — see §275]. security.txt keeps its RFC 9116 link but is labelled
   "(for researchers)" — the raw filename no longer appears as link text.
 - Depth pass, all inside the brand's laws (3D TRANSFORMS are compositor-only
   and legal; blur stays banned): cards tilt on hover (perspective(900px)
@@ -23778,6 +23779,111 @@ Left untouched for whoever else is in this tree: everything outside
   holding the shutter yields an unfiltered video with no indication. The CameraEffect repairs
   this for all 11 presets as a side effect, once armed.
 
+## §276 — 2026-09-04 — performance audit of the whole app, pass 1 (build 76 tree; NO code changed)
+
+Read-only audit against the owner's bar ("insanely fast, butter smooth, don't even take a
+second on anything"). No file in `mobile/` or `supabase/` was edited. **No device was
+attached** — `adb devices` returned an empty list all session, so nothing here is a fresh
+measurement; the two numbers quoted as measured come from earlier sessions' records.
+
+### The baselines that already exist, and what they say
+
+- `tool/perf_budget.py` docstring: build 73, OnePlus 8 = 3516 ms cold start / 324 MB PSS.
+- §~21166 (build 74, OnePlus 7): cold start median **1070 ms** (948/1070/1219) — green
+  against the 1500 ms budget but sitting exactly on the owner's own 1 s bar — and PSS
+  **314 MB**, RED against 150 MB. Memory is the unmoved half.
+- §235 addendum (build 70, OnePlus 8, one-variable flip of badge visibility only):
+  badge visible 405 frames/25 s @ **86.2 % CPU**; badge hidden 49 frames/25 s @ **34.4 %**.
+  Frame TIMING was fine (90th pct 5 ms). The follow-up A/B that would split "the mesh"
+  from "any animation at all" was never run (addenda 2–5) and is **still unrun**.
+
+### Confirmed still present in the build-76 tree
+
+1. **Chat opens cold on every visit.** `chat_screen.dart:95` `_loading = true`;
+   `:2247` renders a bare `CircularProgressIndicator`; cleared only at `:1105`/`:1150`
+   after `ChatRepository.fetch()` (a `SELECT *` of 300 rows) → `hydrate()`
+   (`await CoupleKey.ready()`, then a **serial** `for` loop of `await
+   CryptoCore.decryptString` over up to 300 rows on the UI isolate) → `warmMedia()`
+   (2 more sign round-trips). There is **no in-memory or on-disk message cache**.
+   `tab_dissolve.dart` is single-child by design (documented: an AnimatedSwitcher
+   inverted Touch's FLAG_SECURE and double-joined realtime), so the outgoing tab is
+   disposed and every Chat-tab switch pays the whole chain again.
+   `fetchSince(seq)` already exists — what is missing is the local page + instant paint.
+2. **The AppBar presence badge, on 17 screens** (grep count). `partner_bust.dart:82`
+   `_loop.repeat()` whenever `fresh && !off`. Per frame:
+   `presence_character.dart:691` `_mesh()` allocates 198 `Offset`s + a `ui.Vertices`;
+   `:748` `_drawFace()` builds a **new `ui.ImageShader` every frame** (twice while a mood
+   crossfades); `:620` a `saveLayer` because the badge is `disc:false`. This is the widget
+   the 86.2 %/34.4 % flip measured.
+3. **Touch Map rebuilds the whole screen at ~18 Hz while drawing.**
+   `touch_map_screen.dart:628-637` `Timer.periodic(55 ms)` ending in a bare
+   `setState(() {})`; the build at `:901` is the whole Scaffold — AppBar,
+   `PartnerHereAction` (item 2), drawer, the game-chat `ListView.builder` + `TextField`
+   at `:1019`, the live `CameraPreview`. Plus `_heatTimer` at `:644`, 1 Hz, also bare.
+4. **First frame gated behind two serial network groups.** `main.dart:99` group 1, then
+   `:128` `await Future.wait([TermsGate.load(), ReleaseGate.check()])`.
+   `terms_gate.dart:_fetchAcceptedVersion` caps at `.timeout(10 s)`, `ReleaseGate.check`
+   at a 6 s budget — so the blank-screen ceiling on a weak link is ~10 s. The fix already
+   has its mechanism: `TermsGate.accepted` is a `ValueNotifier` on the router's
+   `refreshListenable`.
+5. **Impeller still force-disabled** at `AndroidManifest.xml:206-212`, and its stated
+   reason names `BackdropFilter` — which now has **zero live sites in `lib/`** (only three
+   comments recording its removal, e.g. `surface_panel.dart:6`). Residual risk is real but
+   narrower: `camera_filter_painter.dart:22-48` still stacks `ColorFiltered(matrix)` +
+   `ImageFiltered(blur)` + `backgroundBlendMode` over `CameraPreview`.
+6. **`ImageCache` at Flutter's 100 MiB / 1000-entry default** — `grep maximumSizeBytes`
+   returns nothing; `encrypted_media_cache.dart:165` even documents it as "NOT device
+   aware". Against a measured 314 MB PSS this is a third of the ceiling, unbounded by tier.
+7. **`CurvedAnimation` built inside `build()`** — the exact leak `route_motion.dart:52-57`
+   documents as forbidden ("~57 leaked objects per navigation"). `motion.dart:216`
+   (`_StaggerItem`, the house entrance) adds a status listener to the shared controller on
+   every rebuild and never removes it; `reaction_bar.dart:147` does it inside a
+   `transitionBuilder` that runs every frame of a 170 ms transition, on the long-press-to-
+   react gesture; `media_viewer.dart:297` once per double-tap.
+8. **Vault defeats grid virtualization.** `vault_screen.dart:405` `GridView.builder(
+   shrinkWrap: true, physics: NeverScrollableScrollPhysics())` inside an eager `ListView`,
+   over `vault_repository.dart:97` `_pageSize = 200` → up to 200 tiles built and laid out
+   and 200 `_load()` futures on open. Decrypts are capped
+   (`media_decode_queue.dart:28 _maxInFlight = 2`); the widget build is not.
+   `:397-398` also makes two full `.where().toList()` copies per build.
+9. **Timeline sorts in `build()`** — `timeline_screen.dart:127-129` `[...visits]..sort()`
+   + `_Stats.compute()` per build, then an eager `for` over every entry at `:139`.
+10. **`FutureBuilder` with a per-build future** — `settings_screen.dart:1255`
+    `future: FsiPermission.canUse()` (a platform channel per rebuild);
+    `capsule_detail_screen.dart:752` re-signs a URL per rebuild.
+11. **Animated `Opacity` instead of `FadeTransition`** — `motion.dart:229`, `:272`,
+    and `gilt_nav_icon.dart:113-114` (two stacked, per nav item, every tab switch).
+12. **`SELECT *` on the hot chat query** over a ≥23-column `messages` table including
+    `body_cipher`/`body_nonce` `bytea`, which postgrest returns hex-encoded — 2× the
+    ciphertext bytes on the wire, ×300 rows, per chat open. Index coverage itself is fine
+    (`messages_couple_created_idx` serves `(couple_id, created_at desc)`).
+
+### Checked and already fixed — do NOT re-audit these
+
+`BackdropFilter` (0 live sites app-wide); `EmberBackground` (24 fps cap, `drawAtlas` with
+baked sprites, static `Paint`s, TickerMode + `covered` gating, `MilesMotion.off` honoured);
+Chat's 5 s tick (now a `ValueNotifier`, `chat_screen.dart:1171-1178`); the presence 15 s
+poll (gone — event-driven with a debounce); the send path (optimistic echo via
+`ChatSendQueue`); postgrest's retry storm (`retryCount: 1, requestTimeout: 10 s`); the
+gallery grid (`GridView.builder` + `cacheWidth: 400`); presence art (decoded with
+`targetWidth`); bundled fonts; `compute()` offload for big blobs; hoisted `DateFormat`s.
+`docs/archive/PERF_PLAN.md` is stale on all of the above and should not be quoted forward.
+
+### Still open
+
+- **The decisive measurement is missing**: no handset was reachable this session. Nothing
+  above is a build-76 number.
+- The build-69-vs-70 badge A/B is still unrun, and now four builds stale.
+- A 17-dimension adversarially-verified fan-out was launched over the same tree and had
+  not returned when this entry was written; its confirmed findings belong in a later
+  addendum, not here.
+
+**Next, in order**: (1) attach a handset and run `python tool/perf_budget.py --serial
+<serial>` plus `adb shell dumpsys gfxinfo com.miles.miles` on Chat and on Touch Map, so
+items 1–3 have build-76 numbers; (2) decide item 1 (the chat page cache) — it is the only
+one on a path the user hits dozens of times a day; (3) re-test Impeller on both phones now
+that the BackdropFilter it was disabled for is gone.
+
 ## §277 — 2026-09-04 — beauty filters, phase 4+9 partial: the maths and the model, both proven
 
 Continues §275 (phases 1-3: the CameraEffect seam, compiling and inert). This section adds the
@@ -23868,6 +23974,108 @@ Left untouched for whoever else is in this tree: everything outside the beauty f
 `MainActivity.kt`, `app/build.gradle.kts`, `pubspec.yaml`, `main.dart` (one line + one import),
 and the three new tests.
 
+## §278 — 2026-09-04 — whole-app audit: 9 agents, 0 code changes, the defects ranked
+
+Read-only audit of the whole client and backend against the owner's bar ("insanely fast,
+butter smooth, never a second on anything"). Nothing in this session edited product code.
+Six read-only subagents plus my own passes; every finding below was re-verified by reading
+the file myself before it went in the report.
+
+### Gates run this session
+- `flutter analyze` — **199 issues, 0 errors/warnings** (all `info`; ran in 440.0s).
+- `flutter test` — started; result recorded by whoever reads this next if it is not below.
+- Supabase advisors, prod `sopictusdonlvuezmfep`: security 71 lints (60 are the
+  by-design `authenticated_security_definer_function_executable`), performance 25.
+- Live row counts, prod: `messages` 9, `personal_vault_items` 5, `gallery_items` 70,
+  `profiles` 4, `visits` 0, `rituals` 0. **This matters for ranking**: every
+  "unbounded list" defect below is structural and does not bite yet.
+
+### Measured, not estimated
+`ChatRepository.hydrate` decrypts a page serially on the UI isolate. Benchmarked the real
+`Xchacha20.poly1305Aead()` path (desktop JIT, `dart run --packages=.dart_tool/package_config.json`):
+
+    round 0: 300 sequential decrypts = 123 ms (413 us each)
+    round 1: 300 sequential decrypts = 141 ms (471 us each)
+    round 2: 300 sequential decrypts =  71 ms (240 us each)
+
+A phone is slower. At today's 9 rows this is invisible; at a full 300-row page it is 4-8
+dropped frames every time the chat opens.
+
+### The findings that bite TODAY (verified, with file:line)
+1. **Every tab switch destroys the tab's State.** `app_shell.dart:913` passes
+   `TabDissolve(index: bodyIndex, child: bodies[bodyIndex])`, and `tab_dissolve.dart:65-68`
+   keys the subtree on `ValueKey(widget.index)`. Chat/Home/Touch/Closer are unmounted and
+   rebuilt from scratch on every tap. `chat_screen.dart:95` `_loading = true` +
+   `:2247` full-screen `CircularProgressIndicator`, and `chat_repository.dart:499-508`
+   `fetch()` is a bare network SELECT with no cache. So tapping Chat is a spinner and a
+   round trip, every time, forever. Scroll position and realtime channels go with it.
+2. **`rapid_camera_screen.dart:236-251` — the camera never returns from background.**
+   The `paused` branch sets `_controller = null`; the guard at :237 is the method's first
+   line, so the `resumed` branch at :250 is unreachable. Permanent spinner, `_denied` false,
+   only escape is leaving the screen.
+3. **`heartbeat_screen.dart:90-128` — leaked back camera with the torch lit.** `_cam = cam`
+   is assigned AFTER `await cam.startImageStream(...)`. If that throws (OEMs that refuse
+   streaming with torch on), the controller is orphaned, `_stopCamera` reads a null `_cam`
+   and returns, and the flash stays on for the life of the process.
+4. **`touch_map_screen.dart:170-182` and `:216-245`** — one realtime broadcast plus a
+   whole-screen `setState` per pointer event, gated only by distance (0.012 norm ≈ 2 px).
+   60-240 Hz on the OnePlus 8. `_active` (:143) is uncapped, one `AnimationController` per
+   glow, no `RepaintBoundary` (the neon layer above it has one and says why at :1174).
+5. **`camera_filter_painter.dart:126-141` — 91,876 `drawRect` per repaint, 15x/second**,
+   `BlendMode.overlay` under an `Opacity` (saveLayer), `shouldRepaint => true`. Two shipped
+   filters turn it on (`camera_filters.dart:82`, `:177`).
+6. **`emergency_lock_service.dart:107-112` — the panic lock can miss.**
+   `addPostFrameCallback` does not schedule a frame; verified in the pinned SDK
+   (`C:\src\flutter\...\scheduler\binding.dart:818-834`, body is `_postFrameCallbacks.add`
+   and nothing else). On a static screen the cover does not come up.
+7. **Cold start blocks unbounded.** `main.dart:129` `await Future.wait([TermsGate.load(),
+   ReleaseGate.check()])` — the gate is capped at 6s, `TermsGate.load()` has only two
+   *serial* inner 10s timeouts and no overall cap. `main.dart:173` then runs
+   `TzHelper.ensureInit()` (the full IANA DB, `latest_all` = 445,672 bytes) synchronously
+   before `runApp`.
+8. **White splash into a dark app.** `values/styles.xml:4,15` is `Theme.Light.NoTitleBar`;
+   `values-night` is correct; there is no `values-v31`.
+9. **`vault_screen.dart:399-436` — the whole vault in one `ListView(children:)`** with a
+   `shrinkWrap` grid inside, over `vault_repository.dart:104-120` which pages with
+   `while (true)` and no cap. Each `_VaultTile.initState` fires its own sign+download+decrypt.
+10. **`data_export_service.dart:744` decrypts vault objects the vault stores in the clear.**
+    `vault_repository.dart:199-206` writes via `_uploadPlain`/`_plainExt`;
+    `vault_viewer.dart:174` and `:256` both branch on `endsWith('.enc')`; the export has no
+    such branch (`grep '\.enc'` in that file returns only two `utf8.encode` hits). Every
+    owned vault file fails to export.
+11. **The realtime health fix reports into a sink that is off in release.**
+    `realtime_service.dart:59-64` sends CHANNEL_ERROR status to `Diag.record` only;
+    `diag.dart:375` `_capture = false` and no `setCapture` caller exists in `lib/`. All 88
+    `Diag.record` sites are no-ops on a handset.
+12. **`reap-storage/index.ts:41-50` negative-caches its secret** (`{ data }` destructured,
+    `error` dropped) — one transient failure pins `_secret = null` and every later cron call
+    403s, so deleted media is never reaped. `reach-notify/index.ts:78-88` has the correct
+    version of the same function.
+13. **`supabase_repository.dart:531-536` `fetchPartner` uses `.select()`** — `profiles`
+    carries `fcm_token` (confirmed live), so each partner's device receives the other's push
+    token.
+14. **`keyWasReplaced` never resets** (`supabase_repository.dart:602`, read at
+    `closer_load_result.dart:39`) — account B on the same handset gets account A's permanent
+    "can't be opened here — or on hers" wording.
+15. **Backend, structural:** `enforce_send_rate` → `send_next_allowed_at` seq-scans and
+    sorts the sender's whole history on **every message INSERT** (no `(sender_id, created_at)`
+    index). Three repo-defined indexes are absent in prod, one of them the UNIQUE
+    `afterglow_one_pending_per_couple`. `config.toml` declares no `verify_jwt` for any
+    function.
+
+### Corrected an agent's claim rather than repeating it
+An agent reported that `main.dart` has no `runZonedGuarded`/`PlatformDispatcher.onError`, so
+async throws vanish. **False** — `main.dart:67` and `:71` set both nets and both call
+`ErrorReporter.report`. Verified before reporting; the claim was dropped.
+
+### Open — the exact next step
+Nothing is fixed. The audit ranks the work; the owner picks. If the first fix is asked for,
+the highest value per line is **(1)** — an `IndexedStack` (or a keep-alive) behind
+`TabDissolve` removes the spinner from every tab switch and takes the 300-row decrypt,
+the channel churn and the lost scroll position with it.
+
+Left untouched for whoever else is in this tree: everything. No product file was edited.
+
 ### §277 addendum — 6785973 pushed, CI green on run 33831577569
 
 144 files, 30,780 insertions. `gates` completed / success.
@@ -23887,6 +24095,28 @@ files are all still uncommitted and intact.
 
 Still true, and unchanged by a green CI: **nothing has rendered.** The effect is
 never armed. `adb devices` is empty. The device gate in §277 is the next step.
+
+
+### §278 addendum — 2026-09-04 — the test gate landed green
+
+The run that was still in flight when §278 was written has finished:
+
+    14:17 +1613 ~3: .../repo_hygiene_test.dart: the app installs as itself, with every cover switched off
+    14:17 +1613 ~3: All tests passed!
+    [exited with code 0]
+
+**1613 passed, 3 skipped, 0 failed.** So the whole §278 defect list — the tab-switch
+teardown, the unreachable camera resume branch, the torch leak, the panic lock that waits
+for a frame nothing schedules, the vault export that decrypts plaintext — exists in a tree
+where `flutter analyze` reports 0 errors and every one of 1613 tests passes.
+
+That is the finding, not a footnote: **the gates are a floor, and this floor has nine
+critical defects under it.** None of the five above is reachable by a widget test, because
+each needs either a real lifecycle event, a real frame schedule, a real camera, or a real
+storage object. Anything that closes them has to be proven on the OnePlus, not in the suite.
+
+Unchanged from §278: nothing was fixed, no product file was edited, and the exact next step
+is still the owner picking the first fix.
 
 ## §279 — 2026-09-04 — the postal address removed, and two more vault claims my own sweep missed
 
@@ -23998,6 +24228,98 @@ tests, which pass). `test/unit/legal|hygiene|disguise`: 173 passed.
 
 Unchanged: Supabase off the free plan, leaked-password protection on, listing assets. Plus
 the two address exposures above, and a push/deploy to put this turn's fixes on the live site.
+
+
+## §280 — 2026-09-05 — audit resumed: the backend drift is 8 indexes, and the ledger is why
+
+Resuming §278 after the previous process died with seven audit subagents still in flight.
+Their transcripts survived but no results landed, so this session re-verifies §278's claims
+and closes the coverage they owed. **No product file edited. Nothing committed.**
+
+### First: every §278 citation still resolves in the current tree
+The tree moved under this session (another session's §275 was appended to this file after
+my §278 addendum, and the uncommitted camera work is gone from `git status`), so every
+line number in §278 was re-read before being trusted. All still valid. One is worse than
+recorded: **§278 #11** said "no `setCapture` caller exists in `lib/`" — the sole writer of
+`_capture = true` is `resetForTest`, marked `@visibleForTesting`, and
+
+    $ grep -rn 'setCapture' lib/ | wc -l
+    0
+
+so `Diag.record`'s 88 call sites are dead in every shipped build, not merely unconfigured.
+
+### §278 #15 corrected: 8 indexes missing, not 3 — and two different causes
+
+The database was asked directly rather than diffed by hand (my first hand-transcription
+of `pg_indexes` dropped rows and produced a false positive). 85 repo-defined index names
+were left-joined against `pg_indexes`:
+
+    missing_in_production
+    ---------------------
+    afterglow_active_timeline_idx
+    afterglow_one_pending_per_couple      <- UNIQUE
+    call_signals_couple_created_idx
+    care_nudges_couple_created_idx
+    cycle_events_user_date_idx
+    cycle_logs_user_start_idx
+    love_reasons_couple_created_idx
+    memory_couple_state_idx               <- has a DROP, intentional
+    memory_threads_live_idx               <- has a DROP, intentional
+    rituals_active_delivery_idx
+
+Adversarially checked against `drop index` in the migrations: two of the ten are dropped on
+purpose. **Eight are genuinely absent.** They split into two causes:
+
+**(a) Two migrations never applied.** `20260601006300` and `20260601006400` are absent from
+`supabase_migrations.schema_migrations` entirely. They carry
+`afterglow_active_timeline_idx`, `rituals_active_delivery_idx`, and the UNIQUE
+`afterglow_one_pending_per_couple` — so the one-pending-per-couple constraint does not
+exist in production and nothing stops a duplicate row.
+
+**(b) Three migrations recorded as applied whose index lines never ran.** This is the real
+finding. `20260601002220`, `20260601002230` and `20260601002250` are all in the ledger:
+
+    version         | name
+    20260601002220  | cycle_and_love_reasons
+    20260601002230  | app_secrets_call_signals_cycle_logs
+    20260601002250  | care_nudges
+
+and `to_regclass` confirms every table they create exists in production. Yet
+`cycle_events_user_date_idx`, `love_reasons_couple_created_idx`,
+`call_signals_couple_created_idx`, `cycle_logs_user_start_idx` and
+`care_nudges_couple_created_idx` — all `create index if not exists` in those same files —
+are absent.
+
+The mechanism: **a migration file was edited after it was applied.** The ledger keys on the
+version, so `db push` will never re-run it, and every line added to an already-applied file
+is silently dead forever. That is not one missing index; it is a hole that keeps producing
+them, and it is invisible to every gate in the repo.
+
+### §278 #15's wording corrected on the trigger
+`enforce_send_rate` -> `send_next_allowed_at` was described as a seq-scan-and-sort. The
+planner on live prod confirms the shape:
+
+    ->  Sort  (cost=0.01..0.02 rows=1 width=8) (actual time=0.036..0.036 rows=0 loops=1)
+          Sort Key: messages.created_at DESC
+          ->  Seq Scan on messages  (cost=0.00..0.00 rows=1)
+                Filter: (sender_id = (InitPlan 1).col1)
+
+but the seq scan is a 9-row-table artifact, not the defect. The defect is the **Sort**: the
+live body is `... where sender_id = $1 order by created_at desc offset 599 limit 1`, and
+`messages` carries only `idx_messages_sender_id` (single column). Without
+`(sender_id, created_at)` that sort is over the sender's entire history, on every INSERT,
+forever. Stated as a seq scan it would be dismissed at scale; stated as the sort it is real.
+
+### Still open
+The refute-and-sweep pass over the ten subsystems §278 never covered (call_controller 2779
+lines, settings 2070, unlink 1659, memory_threads 1554, presence_service 916, watch, push
+and deep links, chat input and send queue, gallery/reels/timeline/capsule, crypto and
+rewrap) is running as this is written. Its results are not in this section.
+
+**Exact next step unchanged: nothing is fixed and the owner picks the first fix.** §278's
+ranking still stands — the tab keep-alive is the highest value per line. The backend items
+above are separate and cheap: applying two migrations and adding one index is not a code
+change and does not touch the client.
 
 ### §279 addendum — e6fddea pushed, CI green on run 33950337267, and the site is actually clean
 
@@ -24382,124 +24704,264 @@ deletions are not — that is the whole trade.
 
 Still true: nothing has rendered. The device pass in §283 is the next step.
 
-## §286 — Covers: why App info still says "Miles", and the share sheet that said it too (2026-09-06)
+## §282 — 2026-09-05 — the vault claim is now a law, and it was proven by breaking it
 
-Owner report: cover set to Calculator, Settings › Apps › App info still shows "Miles".
+Owner asked for the hygiene test. The point of it is not that the tree is clean today — two
+sweeps already said that and were wrong twice — it is that the next person to write the
+claim gets a red build instead of a published lie.
 
-**Root cause, one sentence.** App info reads `<application android:label="Miles">`
-(`src/play/AndroidManifest.xml:26`, `src/sideload/AndroidManifest.xml:10`); a cover only
-enables a different `<activity-alias>`, and Android reads an alias's label for the launcher
-entry (and recents, for a task the alias rooted) — nothing else. No public API changes the
-application label or icon after install (checked against the SDK 36 API index). The only apps
-whose App info says "Calculator" are apps *named* Calculator on Play; the 2026-08-16 ruling
-(§32/§34) keeps Miles under its own name, so App info says Miles by design.
+### What it does
 
-**Verified against AOSP source this session (23 read-only agents, every claim adversarially
-re-checked), version-scoped:**
-- App info header = `ApplicationInfo.loadLabel` (Settings `AppHeaderViewPreferenceController`
-  → `ApplicationsState.AppEntry.label`). Alias never consulted.
-- Notification header = application label. `EXTRA_SUBSTITUTE_APP_NAME` needs
-  `SUBSTITUTE_NOTIFICATION_APP_NAME` (signature|privileged); on 7–12 the check is client-side
-  in `Notification.Builder.loadHeaderAppName`, on 13+ system_server strips the extra. Same
-  outcome everywhere. The repo already knew this for messages
-  (`reach_notifications.dart:280-301` silences them under any cover); Reach, incoming-call,
-  call-service and the Timer cover's countdown still post under covers, headed "Miles".
-- **Share sheet (new finding).** Android 10+ headlines every target with the APPLICATION
-  label and icon (`TargetPresentationGetter.getLabel` → `mAppInfo.loadLabel`;
-  `SUBSTITUTE_SHARE_TARGET_APP_NAME_AND_ICON` is signature|privileged); the activity label is
-  only a second line. On 7–9 the activity label/icon headline. A disabled alias never
-  resolves (no `MATCH_DISABLED_COMPONENTS` in `ResolverListController`). So the comment at
-  `src/main/AndroidManifest.xml` ("Inheriting means it appears as whatever cover is active")
-  was false: the ACTION_SEND filter sat on unlabeled MainActivity and every share sheet on
-  the phone listed "Miles" + the Miles icon under every cover.
-- **Recents.** Launcher3 quickstep titles a task from `activityInfo.loadLabel` of the
-  base-intent component (`origActivity` for an alias) and ignores `TaskDescription`'s label
-  for the visible title; a resource-type `TaskDescription` icon is ignored too (`TODO
-  b/143363444`). Flutter's `Title` pushes `TaskDescription("", icon 0, color)` on initState
-  and on title/colour change (`title.dart:38-62`, `PlatformPlugin.java:234-245`);
-  `main.dart:1026` already passes `title: ''`. So a `setTaskDescription` override would NOT
-  fix anything on Pixel-class launchers — **not built.** Alias-rooted tasks already show the
-  cover; only a task rooted cold by a `tethered://` link shows "Miles" (see Open).
-- Private Space (Android 15): no public `Settings.ACTION_PRIVATE_SPACE_SETTINGS`; hiding is a
-  launcher-cooperative contract, not a guarantee. Not referenced in copy.
+`test/unit/hygiene/repo_hygiene_test.dart`, two new tests at the end:
 
-**Changed (owner chose "leave the share sheet while covered"):**
-- `src/main/AndroidManifest.xml` — ACTION_SEND filter removed from MainActivity; false
-  comment replaced with the verified reason.
-- `src/play/AndroidManifest.xml`, `src/sideload/AndroidManifest.xml` — the same filter added
-  to `.AliasMiles` only. Cover on ⇒ app absent from share sheets; cover off ⇒ "Miles",
-  honestly. `captureSharedText` and `share_intake.dart` are component-agnostic; unchanged.
-  Side effect, improvement: a share into the running app now matches the alias-rooted task's
-  singleTop instance instead of stacking a second MainActivity.
-- `disguise_picker_screen.dart` — confirm dialog no longer says "Miles will not be findable
-  by its own name" (Settings search finds it); footer no longer says Settings calls the app
-  "News" (stale since both manifests went `label="Miles"`). Both now say: home screen shows
-  the cover, the app leaves the share menu, Settings › Apps / permission pop-ups / the top
-  line of any alert still say Miles.
-- `reel_queue_screen.dart` — empty state names "Add link" (the paste path, lines 148-207)
-  instead of telling a covered user to use a share sheet the app is no longer in.
-- `disguise_manifest_test.dart` — new test: no SEND on MainActivity in main; exactly one
-  alias carries it on each channel, it is `.AliasMiles`, with DEFAULT + text/plain pinned.
-- `docs/guides/disguises.md` ("News" → "Miles"; share-sheet bullet),
-  `PLAY-RELEASE-RUNBOOK.md` row 2 wording, `.claude/CLAUDE.md` one line.
+- **`nothing tells anyone the Personal Vault is encrypted`** walks `git ls-files`, reads
+  every `web/*.html` and `mobile/lib/**/*.dart`, and reports `path:line` for any place that
+  asserts a vault is encrypted.
+- **`the vault-claim detector can tell a claim from a denial`** is the control, matching the
+  convention this file already uses for its glass and naked-modal detectors.
 
-**Gates, after the last edit (two adversarial review rounds; round 1 found the reels copy and
-a "recents" over-claim, both fixed):**
+The detector works on the **whole file, not a line at a time**, which is the entire reason
+it exists. HTML tags are blanked out character-for-character rather than deleted, so offsets
+and newlines still line up with the original file and the reported line number is the real
+one.
 
-    flutter analyze --no-pub | grep -c "error -\|warning -"   → 0   (matcher proven: 2 on synthetic error+warning lines)
-    flutter test test/unit/disguise test/unit/hygiene           → 00:45 +159: All tests passed!
+### The three judgement calls, each of which was a false result while it was being written
 
-**Open:**
-- **No handset attached** (`adb devices` empty, twice). The device checks that would settle
-  this: `cmd package query-activities --brief -a android.intent.action.SEND -t text/plain |
-  grep miles` → empty under a cover, `.AliasMiles` without; a share-sheet screenshot from
-  Chrome under a cover; Settings › Apps still "Miles" (expected, by design).
-- Cold `tethered://` deep link with no Miles task in recents roots the task at MainActivity →
-  recents "Miles" + icon until swiped away. Narrow (cover on + task swiped + reset/pairing
-  link). Fix would be an 8-line re-root through the enabled alias in `MainActivity.onCreate`;
-  not built unasked.
-- Reach / incoming-call / call-service / Timer-cover notifications post under covers with
-  the "Miles" header. Owner decision whether they go silent like messages did (§46 → §254-era
-  change at `reach_notifications.dart:301`).
-- found, not fixed: `src/main/AndroidManifest.xml` MAIN/LAUNCHER comment says "the play
-  channel, which has no aliases" — play has ten; `disguise_service.dart:50-54` and
-  `disguise_profile.dart:175-176` still say sideload has no `.AliasMiles` — it does.
-- No build made (owner rule). Build 76 in the tree is unchanged.
+- **Bare `ciphertext` is not a term.** `chat_repository.dart:604` says
+  `mac(16)||ciphertext ... the vault's 40-byte guard`, which asserts nothing about the
+  vault. Including it made the detector cry wolf.
+- **`\bnot\b`, never a bare `not`.** "we cannot open" appears in almost every one of these
+  sentences and would have suppressed every real claim.
+- **`stored` and `old` count as denials**, because "the vault stored ciphertext" and "the old
+  encrypted vault" are narration about how it used to be, not promises.
 
-**Exact next step:** owner builds/installs when ready; run the three device checks above on
-the OnePlus 8 and record the share-sheet screenshot here.
+The suppression window is the span between the encryption term and the nearest `vault`, plus
+a 14-character collar before and 26 after — so a denial attached to either anchor counts
+("Not end-to-end encrypted" in the previous table cell, "the Vault is not in that set" after
+the noun) while a denial about some other subject two sentences away does not.
 
-### §286 addendum — round 2 of the adversarial pass, and a red gate that is not mine (2026-09-06)
+### Proven by breaking it, which is the only proof worth having
 
-Round 2 read the round-1 fixes and found: `disguises.md` contradicting itself two bullets
-apart (channels "listed under whatever the launcher calls this app" — no, under "Miles");
-the CLAUDE.md line saying covers change "only" launcher/recents/cover screens (the
-notification small icon and wording change too); the film-shoot picker mock
-(`scripts/film-shoot/inserts/index.html`) still carrying the deleted "not findable"
-sentence — the store screenshots are shot from it; stale doc-comments in
-`disguise_profile.dart:175` and `disguise_service.dart:50,110` saying sideload has no
-`.AliasMiles`; and "the top line of any alert", read inside an AlertDialog, which now says
-"notification". All fixed. Still `found, not fixed`: `disguises.md:39` marks News as the
-default (both channels ship Miles); `src/main/AndroidManifest.xml` MAIN/LAUNCHER comment
-says play has no aliases.
+Synthetic controls are in the test: four positives, including the exact newline-split shape
+that escaped, and seven negatives including every corrected sentence now in the tree.
 
-**Gates after the last edit:**
+But controls can be written to pass. So the real defect was put back into `web/index.html`
+verbatim and the law was run against it:
 
-    flutter test test/unit/disguise                              00:08 +92: All tests passed!
-    flutter analyze --no-pub | grep "error -\|warning -"         3 warnings, ALL in
-        lib/features/closer/touch_trace/touch_trace_canvas.dart:119,123,124
-        (unnecessary_cast, strict_raw_type x2)
+    Expected: empty
+      Actual: ['web/index.html:293']
 
-That file is another session's in-flight work, proven rather than assumed: my diff never
-touches it (`git diff --stat` on it lists only their 98/31 rewrite), the three warned lines
-sit inside their uncommitted hunk `@@ -103,2 +106,21 @@` (`as List` / `as Map` casts), and
-its mtime (01:50) precedes my last edit (01:54) while my earlier analyze run was 0/0. So
-`repo_hygiene_test` "the analyzer reports no errors and no warnings" is red in this tree
-(`+158 -1`) for their reason, not this change's. Left red, reported, not touched.
+That is the line that was live on the public site. The file was then restored with
+`git checkout --` and the suite re-run green, 65 hygiene tests passing. A law that has never
+been seen to fail is a decoration.
 
-### §286 addendum 2 — b844663 pushed, CI green on run 34001594395 (2026-09-06)
+### Gates
 
-`git push origin fix-sprint` -> `18dc45d..b844663`; `gh run view 34001594395`: analyze + test success, dependency advisories success. Only the 13 files of this change were staged; BRAIN was staged as HEAD + the §286 tail so the other session's §284–285 appends stay uncommitted with the rest of their tree (67 modified files).
+`flutter analyze`: 202 issues, all `info`, 0 error / 0 warning, and **none in the file I
+edited** — the first version added three `unnecessary_raw_strings` and those are fixed
+rather than left as noise. `flutter test test/unit/hygiene test/unit/legal`: 84 passed.
+
+### Still open
+
+Unchanged, and none of it code: Supabase off the free plan, leaked-password protection on,
+listing assets. Plus Play Console's own developer address field and the six commits of
+history that still carry the street line, contained only because the repo is private.
+
+## §284 — 2026-09-05 — the two-month user audit: 126 grounded questions, and the eighth place that still says "encrypting"
+
+Owner asked for a strict Q&A from the perspective of someone who has lived in the app for
+two months, plus the real-world LDR pain it does not cover. No code changed. A 95-agent
+workflow mapped all eight surface clusters and ran ten pain lenses; every headline below
+was then re-verified by hand in this session, because three agent claims did not survive
+that check.
+
+WHAT IS VERIFIED (command output pasted in the session; file:line cited in each):
+
+- `vault_screen.dart:534` still renders "Encrypting and saving…" while `_busy` wraps
+  `VaultRepository.saveMedia` (:214 → :243 → :258), whose upload is `_uploadPlain`. The
+  §267/79084d0 pass fixed SEVEN user-facing places that claimed vault encryption and
+  missed this one. It is the eighth, it is live, and it is the only one on the screen the
+  user is looking at while the plaintext upload happens.
+- `screenNameForPath`'s `notAPlace` set (presence_route_observer.dart:355-388) excludes
+  auth, camera, offline, terms, rewrap, `/call` and `/app` — but NOT `/app/vault`,
+  `/app/disguise` or `/app/settings/export`. The fallback derives the name from the
+  deepest segment, so the partner's Home reads "Vault", "Disguise", "Export". The file's
+  own comment at :382 names the root cause ("an explicit allowlist for joining, an
+  implicit allow-everything for publishing") and the `/call` fix stopped there.
+- Five notifiers early-return on any cover: `reach_notifications.dart` :301 message,
+  :341 care, :397 ritual, :425 memory, :465 unlink. Reach (:60) and call (:162) are above
+  the guard and still fire. A covered handset gets no message push at all.
+- `reach-notify/index.ts:488-495` — the ttl fallthrough is `"30s"`, which catches reach,
+  care and call. A Reach to a dozing handset is dropped by FCM after thirty seconds.
+- `reach_repository.dart` parses `acknowledged_at` (:19) and writes it (:60), no UI reads
+  it, and the subscription is `PostgresChangeEvent.insert` only (:70) — the UPDATE never
+  reaches the sender. "I'm here 💕" is invisible to the person who reached.
+- `ChatRepository.fetch` (:498-504) is `.limit(300)` with no cursor parameter; its two
+  callers are chat_screen.dart:1141 and :1376. No pagination, no search box in the
+  cluster, no local store (no sqflite/hive/drift/isar in pubspec.yaml).
+- `chat_input_bar.dart:627` prints "Slide up to cancel"; `:709` is
+  `onLongPressEnd: (_) => _stopRecording()` with no argument; `cancel: true` appears
+  nowhere in the tree and there is no `onLongPressMoveUpdate`. The gesture is copy only.
+- `chat_screen.dart:2210` tooltip "Save to gallery" → `SaveMediaService`, whose header
+  says "Zero bytes touch device storage: no gallery entry". No gallery-saver package in
+  pubspec.yaml.
+- Sweep icon with no selection → `_clearConversation` → `clear_conversation_everyone`
+  (20260601005400:90-111), which deletes every message for both. The confirm copy IS
+  honest (:1924). The per-device alternative is dead: `chat_cleared_...` is defined at
+  :1972 and written nowhere, so `_clearedBefore` (:1135, :564) is always null.
+- `commonTimezones` (config.dart:21) is 17 IANA names with the comment "kept short; we'll
+  expand later"; `TzHelper.deviceZone` matches by UTC OFFSET, so a DST-mismatched zone
+  (Lagos → Europe/Berlin) is silently an hour out for half the year. No Africa entry, no
+  Manila, no Shanghai.
+- `visits` has `is_upcoming` and an index for it; `addPastVisit` hardcodes `false` and the
+  picker's `lastDate` is `DateTime.now()` (timeline_screen.dart:479). `CountdownDigits`
+  exists and is used by capsules and unlink, never by a visit. The next visit — the one
+  thing an LDR couple counts — cannot be entered.
+- `RoutineRepository.today()` (:88-92) is the DEVICE's local date and `fetch` filters
+  `.eq('on_date', onDate)`, so partners on different calendar dates read different charts;
+  for an 8-12h gap that is most of the day. Only routine test is a retry test.
+- `profiles.wake_time` / `sleep_time` / `presence_status` / `current_activity` are parsed
+  into models and NEVER written — the only write is a hardcoded `'presence_status': 'free'`
+  (supabase_repository.dart:554). `partnerSentence`'s sleep branch therefore never fires.
+- `storage_usage` (5 GB, quota enforced by a RESTRICTIVE RLS insert policy) is read by
+  zero Dart. Hitting the cap is an unexplained upload failure with no usage screen.
+- `media_viewer.dart:200-204` is `isVideo ? setSecure() : clearSecure()` — screenshot
+  blocking follows the storage bucket, not sensitivity. Gallery has no `SecureScreen` at all.
+- No `<receiver>` in any of the three manifests (no home-screen widget); no
+  flutter_localizations, no .arb files, no connectivity package.
+
+THREE AGENT CLAIMS I DID NOT REPRODUCE, recorded so nobody re-reports them:
+- "Escrow restores a byte-identical public key, so a second sign-in is undetectable" —
+  `publishMyPublicKey` documents the opposite as the DEFAULT (reinstall mints a new pair,
+  `keyWasReplaced = true`). The no-device-list conclusion stands; the mechanism does not.
+- "Vault gate says encrypted" — the gate's "Your partner can never open this"
+  (vault_gate_screen.dart:309) is TRUE; it is owner-only by RLS. Only :534 is wrong.
+- The audit initially read the `joinableRouteFor` comment (:328) as proof the vault is not
+  broadcast. It governs FOLLOWING, not PUBLISHING. Read both sides before quoting it.
+
+STILL OPEN / NEXT STEP: nothing here is fixed. If one thing is taken first it is
+`vault_screen.dart:534` — a one-line copy change on the same class of defect §267 already
+ruled on, and the only one of these that is a live false privacy claim rather than a
+missing feature. The other 64 verified gaps consolidate to eight root causes (history is
+live-only; the time model; the dead availability columns; no future tense; delivery is not
+guaranteed; no repair surface; consent asymmetry; reach/accessibility) — sequence by root
+cause, not by the raw list, which double-counts heavily.
+
+## §285 — 2026-09-05 — the §278 findings put through adversarial refutation, plus 10 uncovered subsystems
+
+Resume of the §278 audit. Two things §278 never did: refute its own findings, and cover the
+subsystems it never named. Both done here. **No product file was edited.**
+
+Workflow: 346 agents (165 completed, 181 killed by the session quota at 16:20 PKT).
+15 recorded findings x 3 adversarial lenses = 45 refuters; 10 sweep scopes; per-finding
+verifiers. 18.7M subagent tokens.
+
+### §278's own findings: 14 of 15 survive
+
+- **#2 is REFUTED, and I confirmed the refutation myself rather than taking the vote.**
+  The claim (camera never returns from background because the `c == null` guard makes the
+  `resumed` branch unreachable) is correct as control flow but unreachable in the shipped
+  app. `main.dart:1002-1010` returns a *different* `MaterialApp` when `showRealApp` is
+  false, so backgrounding unmounts the whole real tree and disposes the camera screen —
+  it is never left holding a null controller. The cover's one exemption
+  (`systemOverlayActive`, main.dart:487) is taken by the camera screen itself at
+  `rapid_camera_screen.dart:134`, but that window is the OS permission dialog, which runs
+  *before* the controller exists, so nothing is disposed there either. Decisive evidence:
+  `android/app/build.gradle.kts:83,157` set `DISGUISE_ENABLED = true` on **both** flavors.
+  **The bug becomes live the day disguise is disabled or that exemption widens.** Two of
+  three refuters got the right answer for the wrong reason (they asserted the cover
+  unmounts the tree without checking the exemption); the third said it holds.
+- The other 14 survive. #11 and #12 drew one dissent each, #1 drew none.
+
+### Two corrections to §278, both of which change the work
+
+1. **#1's mechanism is misattributed.** All three lenses agree the *effect* is real and
+   universal, and all three say the `ValueKey(widget.index)` in `tab_dissolve.dart` is
+   **inert** — the four bodies are distinct runtimeTypes, so `Widget.canUpdate` already
+   fails on runtimeType and the element is discarded with or without the key. The cause is
+   `app_shell.dart:913` mounting only `bodies[bodyIndex]` in a plain Column with no
+   IndexedStack and no keep-alive (`grep -rn "AutomaticKeepAliveClientMixin" lib/` returns
+   nothing repo-wide). **Removing the key would fix nothing.** Also: the spinner covers the
+   message-list `Expanded` only (`chat_screen.dart:2246-2248`), not the whole screen.
+2. **#15 understated the missing indexes: it is 8, not 3.** Asked the database directly
+   (85 repo-defined index names left-joined against `pg_indexes`), then removed the two
+   that a later migration explicitly drops:
+
+       afterglow_active_timeline_idx        afterglow_one_pending_per_couple
+       call_signals_couple_created_idx      care_nudges_couple_created_idx
+       cycle_events_user_date_idx           cycle_logs_user_start_idx
+       love_reasons_couple_created_idx      rituals_active_delivery_idx
+
+   `afterglow_one_pending_per_couple` is UNIQUE, so the constraint it exists to enforce
+   does not exist in production. Three of the eight sit in migrations the ledger records as
+   applied (`20260601002220`, `...2230`, `...2250`) — so the files ran and the indexes are
+   still absent, which is worse than an unapplied migration.
+   Also corrected: `explain (analyze)` on the live `send_next_allowed_at` shape returns
+   `Seq Scan on messages` + `Sort` — but at 9 rows that is a small-table artifact. The
+   durable defect is the **sort over the sender's whole history on every INSERT**, which no
+   row count removes; only a `(sender_id, created_at)` index does.
+
+### New: 24 findings found AND adversarially verified (3 lenses each, majority held)
+
+Scopes: closer 12, unlink 7, settings 5. Five are CRITICAL:
+
+1. `memory_threads_screen.dart:555` — `_MemoryCard` built with **no key**, so the sliver
+   matches elements by index while `streamThreads` re-sorts and re-emits on every delta.
+   `_MemoryCoverState` never reloads, so **one memory's private photograph renders under a
+   different memory's title.** Confirmed by reading the itemBuilder.
+2. `memory_threads_screen.dart:663` — `_decrypt()` clears neither `_note` nor `_failure`,
+   so a recycled card keeps the previous memory's decrypted note, or keeps saying "locked"
+   for a memory that decrypts fine.
+3. `memory_threads_screen.dart:1422` — closing the photo viewer calls
+   `SecureScreen.clearSecure()`, which is **not refcounted** (`closer/secure_screen.dart:21`
+   — "Last-call-wins"), stripping FLAG_SECURE from the still-visible PIN-gated timeline.
+   `SecureScreen.active` also flips false, so the banner claims protection that is gone.
+4. `touch_trace_canvas.dart:109` — both phones start at `_colorIdx = 0`, so the
+   "is this incoming?" test compares equal colours and **appends a whole new stroke per
+   broadcast**, each carrying the partner's full accumulated point list. O(N^2) points and
+   O(N^2) bytes; ~900 broadcasts in 30s. Confirmed: `int _colorIdx = 0;` at :78.
+5. `unlink_screen.dart:207` — on the deadline path the phone that **executes** the unlink
+   plays the **re-link** ending: reunion film and the "door opens" cue, at the moment the
+   relationship is irreversibly dissolved.
+
+Plus: account deletion reports failure after succeeding (`settings_screen.dart:763`, not
+736 — line numbers drifted under a concurrent session; `await ref.read(...)` after an
+unguarded await, with the file's own comment two lines below saying why that lie is bad).
+
+### New: 60 findings whose verifiers were killed by the quota — UNVERIFIED
+
+7 of them CRITICAL. **I verified four of those seven myself; all four hold:**
+
+- `reach_notifications.dart:522` — the background push admit-list names only `'unlink'`,
+  but `reach-notify/index.ts:255-257,447` sends `type: kind` where kind is one of
+  `unlink | unlink_lastcall | unlink_relinked | unlink_ended`. **Three of the four
+  ceremony beats are dropped before the branch written to handle them** — a backgrounded
+  partner is never told the other agreed, while the Re-link button is still on screen.
+- `chat_input_bar.dart` `_startRecording` — `_recording = true` is set **after** three
+  awaits (`hasPermission`, `getTemporaryDirectory`, `recorder.start`). Release the
+  long-press inside that window and `_stopRecording` no-ops on `if (!_recording) return`,
+  then start completes: **mic hot indefinitely, composer stuck on the recording banner.**
+- `call_controller.dart` `accept()` — the only re-entry guard is
+  `state != CallState.ringing || _pendingOffer == null`, and neither operand changes
+  before six awaits; `call_screen.dart:386` is a bare `onTap: call.accept` with no
+  disabled state. **Double-tap orphans a camera/mic MediaStream and a peer connection.**
+- `watch_together_screen.dart:555` — both close paths are guarded on `_viewing != null`,
+  but `_viewing` is assigned only at :769 (the cobrowse branch). For YouTube/media/embed
+  the partner's player never clears: **"Close for both of us" leaves their video playing.**
+
+The remaining 3 criticals (2 more in watch, 1 in gallery/capsule) and all 53
+HIGH/MEDIUM are recorded but unverified. Full text was written to this session's
+scratchpad (transient); re-derive from the workflow journal at
+`.claude/projects/D--Miles/<session>/subagents/workflows/wf_d1b8c3b9-914/journal.jsonl`.
+
+### Open — the exact next step
+
+Nothing is fixed. Ranked first fix is unchanged from §278 but for a corrected reason:
+**wrap the shell bodies in an IndexedStack (or a keep-alive) — do NOT touch
+`tab_dissolve.dart`'s key, which is inert.** Second is the push admit-list (a one-line
+list edit that restores three of four ceremony beats). Third is the memory-card key.
+
+13 sweep findings were refuted by their verifiers and are NOT in the counts above.
 
 ## §287 — 2026-09-05 — beauty filters, phase 10: calls get the same retouch — armed only by two switches, still off
 
@@ -24638,6 +25100,253 @@ hook, `MainActivity.kt`, `build.gradle.kts`, `release_gate.dart`, `beauty_*.dart
 `camera_filters.dart`, `rapid_camera_screen.dart`, `call_controller.dart` (3 hunks),
 `settings_screen.dart`, the migration, and the tests named above.
 
+## §288 — 2026-09-05 — 20 of the audited defects fixed; suite green; the migration is blocked
+
+Owner said "fix all" against the §278/§285 backlog. This session fixed the VERIFIED set and
+stopped there deliberately — see "What is NOT fixed". **Nothing committed.**
+
+### Gates, on the final tree
+
+    FLUTTER_TEST_EXIT=0
+    07:10 +1657 ~3: All tests passed!
+
+**1657 passed, 3 skipped, 0 failed.** Analyzer: `202 issues found`, and a grep for
+`^ *(error|warning) -` over the full output returns `count=0`.
+
+Two gate lessons worth keeping:
+
+- **`flutter test | tail` reports the PIPE's exit code, not the suite's.** An earlier run
+  in this session printed `[exited with code 0]` under a "Some tests failed." summary and
+  four red call tests. Every run below captures `$?` from `flutter test` itself, redirected
+  to a file, before any pipe. Do not trust a piped green.
+- **`repo_hygiene_test.dart: the analyzer reports no errors and no warnings` is flaky under
+  full-suite load.** It shells out to `flutter analyze --no-pub` with a 4-minute timeout
+  while the rest of the suite competes for the same analysis server. It failed once, passed
+  alone in 16s, and passed on a clean full re-run. **Not modified** — a flaky gate stays red
+  and gets reported; only the owner changes a gate.
+
+### The self-inflicted one, recorded because it will happen again
+
+The first fix for the call `accept()` re-entry made `accept()` a thin wrapper delegating to
+`_accept()`. That went green on `flutter analyze` and red on four tests:
+
+    test/unit/call/call_glare_test.dart, call_session_binding_test.dart, turn_relay_test.dart
+
+Those are SOURCE-LAW tests. They locate the body with `src.indexOf('Future<void> accept()')`
+and read to the first `\n  }` (turn_relay_test.dart:19-23), then assert the body claims a
+generation before its first await, refuses without a live channel, and calls
+`_startConnectTimeout()`. A wrapper moves all three out of what they can see. The guard now
+lives INSIDE `accept()` as a `try/finally`, which keeps every asserted string in the
+extracted body. **Any refactor that renames or re-homes `accept()` or `startCall(` breaks
+three tests that are checking a real contract — restructure inside the method.**
+
+### Fixed (20), each root-caused and re-read in the tree before editing
+
+Client:
+1. `reach_notifications.dart:522` — admit-list named only `'unlink'`; reach-notify sends
+   `type: kind` for all four beats and the handler at :645 already covered them. Three of
+   four ceremony pushes were dropped before reaching it.
+2. `memory_threads_screen.dart` — `_MemoryCard` now keyed `ValueKey(thread.id)` (+ `super.key`).
+3. `memory_threads_screen.dart` — `_decrypt()` resets `_title/_note/_failure/_loading` first.
+4. `secure_screen.dart` — FLAG_SECURE is REFCOUNTED (`acquire`/`release`, `holders`,
+   `resetForTest`). All 7 scoped call sites converted and verified as balanced
+   initState/dispose pairs; `media_viewer` holds at most one reference across its page toggle.
+5. `touch_trace_canvas.dart` — strokes keyed by sender + stroke id instead of COLOUR (both
+   phones default to `_colors[0]`); points batched instead of dropped by the throttle;
+   payload is now constant-size instead of the whole accumulated history; `_incoming` map
+   cleaned on `stroke_end` and `clear`.
+6. `settings_screen.dart:763` — session notifier captured BEFORE the delete round trip, and
+   the two failure domains separated, so a disposed element can no longer report a
+   succeeded deletion as failed.
+7. `chat_input_bar.dart` — `_wantRecording` tracks the finger; `_recording` tracks the
+   recorder. A release inside the three awaits now tears the recorder down.
+8. `call_controller.dart` — `accept()` re-entry guard (see above).
+9. `watch_together_screen.dart` — `_anythingOpen` replaces `_viewing != null` on both close
+   paths; `_viewing` is only ever set on the cobrowse branch.
+10. `watch_together_screen.dart` — `_resumeAfterHold`: the drift hold's own pause echoes
+    back through `_isEcho` and cleared `_lastPlaying`, which was the flag the release was
+    gated on. Verified by me after the workflow's verifiers died on quota.
+11. `heartbeat_screen.dart` — controller adopted before `setFlashMode`/`startImageStream`,
+    and the catch now calls `_stopCamera()`. Torch could stay lit for the process lifetime.
+12. `supabase_repository.dart` — `_profileColumns` replaces bare `select()` on `profiles`
+    for both fetches; the partner's `fcm_token` no longer crosses to the other handset.
+13. `session_provider.dart` — `keyWasReplaced` reset in `_endSession`.
+14. `emergency_lock_service.dart` — `..scheduleFrame()` beside the post-frame callback.
+15. `realtime_service.dart` — CHANNEL_ERROR / TIMED_OUT now also go to `ErrorReporter`.
+    `Diag.record` alone was the only sink, and Diag's ring is test-only by design
+    (`_capture` false, sole writer `resetForTest`, zero callers in `lib/`).
+16. `unlink_state.dart` / `unlink_completion.dart` / `unlink_screen.dart` — `endedHere`.
+    `UnlinkState.reset()` fires listeners synchronously, so `_released()` read the session
+    providers before `completeUnlink`'s own teardown and concluded the couple survived: the
+    phone that had just executed the dissolution played the RE-LINK ending. Cleared in
+    `applyRow` too, so it cannot leak into the next couple's ceremony.
+17. `unlink_screen.dart` — `_accept` returns bool; `_torn` is put back when the second
+    confirmation is declined or the accept fails.
+
+Backend:
+18. `reap-storage/index.ts` — `error` no longer destructured away; returns without caching,
+    matching reach-notify. One transient read used to pin `_secret = null` for the life of
+    the instance and 403 every later cron run, so deleted media was never reaped.
+
+Written but NOT applied:
+19. `supabase/migrations/20260905150000_the_eight_indexes_that_never_landed.sql` — the 8
+    repo-defined indexes missing from production plus `messages (sender_id, created_at desc)`
+    for the send rate limiter. Rollback in-file. **The apply was refused by the permission
+    classifier** — the owner has to run it.
+20. Root cause of that class, recorded: all eight are `create index if not exists` inside
+    migrations the ledger records as APPLIED. Index DDL appended to an already-applied
+    migration file never runs, and `if not exists` makes a manual re-run look successful.
+    Checked first: zero couples hold more than one unsealed afterglow row, so the UNIQUE
+    `afterglow_one_pending_per_couple` builds rather than failing.
+
+### What is NOT fixed, and why
+
+- **§278 #1, the tab-switch spinner — deliberately left.** `tab_dissolve.dart`'s own header
+  documents that keeping two tab bodies alive inverted the Touch tab's FLAG_SECURE on an
+  A-B-A bounce and double-joined per-couple realtime topics. A plain `IndexedStack` brings
+  that back permanently: TouchMapScreen's initState would hold FLAG_SECURE while the user
+  sits on Home, and all four screens would keep their channels open. The real fix makes
+  Touch/Closer visibility-aware first. **Do not "fix" this by touching the ValueKey — §285
+  proved it inert.**
+- **~56 sweep findings remain unverified.** 13 of the 84 were already refuted by their own
+  verifiers (~15% false positive), so fixing the rest blind would inject defects. Each needs
+  verifying before it is touched.
+- Still open from §278: cold-start caps (#7), white splash (#8), vault list + export (#9,
+  #10), touch_map pointer rate (#4), camera_filter_painter (#5).
+
+### The tree is shared
+
+The working diff also carries another session's files: `encrypted_media_cache.dart`,
+`motion.dart`, `presence_character.dart`, `capsule_detail_screen.dart`, `beauty_engine.dart`,
+`reaction_bar.dart`, `timeline_screen.dart`, `main.dart`. Test count rose 1641 -> 1657 mid-session
+because they were adding tests. **Nothing here was staged or committed.** Anyone committing
+must stage only their own paths.
+
+### Open — the exact next step
+
+Apply the migration (the one blocked action), then take §278 #7 (cold-start caps), which is
+the largest remaining win the owner actually feels. The tab-switch fix needs a design pass,
+not a patch.
+
+## §286 — Covers: why App info still says "Miles", and the share sheet that said it too (2026-09-06)
+
+Owner report: cover set to Calculator, Settings › Apps › App info still shows "Miles".
+
+**Root cause, one sentence.** App info reads `<application android:label="Miles">`
+(`src/play/AndroidManifest.xml:26`, `src/sideload/AndroidManifest.xml:10`); a cover only
+enables a different `<activity-alias>`, and Android reads an alias's label for the launcher
+entry (and recents, for a task the alias rooted) — nothing else. No public API changes the
+application label or icon after install (checked against the SDK 36 API index). The only apps
+whose App info says "Calculator" are apps *named* Calculator on Play; the 2026-08-16 ruling
+(§32/§34) keeps Miles under its own name, so App info says Miles by design.
+
+**Verified against AOSP source this session (23 read-only agents, every claim adversarially
+re-checked), version-scoped:**
+- App info header = `ApplicationInfo.loadLabel` (Settings `AppHeaderViewPreferenceController`
+  → `ApplicationsState.AppEntry.label`). Alias never consulted.
+- Notification header = application label. `EXTRA_SUBSTITUTE_APP_NAME` needs
+  `SUBSTITUTE_NOTIFICATION_APP_NAME` (signature|privileged); on 7–12 the check is client-side
+  in `Notification.Builder.loadHeaderAppName`, on 13+ system_server strips the extra. Same
+  outcome everywhere. The repo already knew this for messages
+  (`reach_notifications.dart:280-301` silences them under any cover); Reach, incoming-call,
+  call-service and the Timer cover's countdown still post under covers, headed "Miles".
+- **Share sheet (new finding).** Android 10+ headlines every target with the APPLICATION
+  label and icon (`TargetPresentationGetter.getLabel` → `mAppInfo.loadLabel`;
+  `SUBSTITUTE_SHARE_TARGET_APP_NAME_AND_ICON` is signature|privileged); the activity label is
+  only a second line. On 7–9 the activity label/icon headline. A disabled alias never
+  resolves (no `MATCH_DISABLED_COMPONENTS` in `ResolverListController`). So the comment at
+  `src/main/AndroidManifest.xml` ("Inheriting means it appears as whatever cover is active")
+  was false: the ACTION_SEND filter sat on unlabeled MainActivity and every share sheet on
+  the phone listed "Miles" + the Miles icon under every cover.
+- **Recents.** Launcher3 quickstep titles a task from `activityInfo.loadLabel` of the
+  base-intent component (`origActivity` for an alias) and ignores `TaskDescription`'s label
+  for the visible title; a resource-type `TaskDescription` icon is ignored too (`TODO
+  b/143363444`). Flutter's `Title` pushes `TaskDescription("", icon 0, color)` on initState
+  and on title/colour change (`title.dart:38-62`, `PlatformPlugin.java:234-245`);
+  `main.dart:1026` already passes `title: ''`. So a `setTaskDescription` override would NOT
+  fix anything on Pixel-class launchers — **not built.** Alias-rooted tasks already show the
+  cover; only a task rooted cold by a `tethered://` link shows "Miles" (see Open).
+- Private Space (Android 15): no public `Settings.ACTION_PRIVATE_SPACE_SETTINGS`; hiding is a
+  launcher-cooperative contract, not a guarantee. Not referenced in copy.
+
+**Changed (owner chose "leave the share sheet while covered"):**
+- `src/main/AndroidManifest.xml` — ACTION_SEND filter removed from MainActivity; false
+  comment replaced with the verified reason.
+- `src/play/AndroidManifest.xml`, `src/sideload/AndroidManifest.xml` — the same filter added
+  to `.AliasMiles` only. Cover on ⇒ app absent from share sheets; cover off ⇒ "Miles",
+  honestly. `captureSharedText` and `share_intake.dart` are component-agnostic; unchanged.
+  Side effect, improvement: a share into the running app now matches the alias-rooted task's
+  singleTop instance instead of stacking a second MainActivity.
+- `disguise_picker_screen.dart` — confirm dialog no longer says "Miles will not be findable
+  by its own name" (Settings search finds it); footer no longer says Settings calls the app
+  "News" (stale since both manifests went `label="Miles"`). Both now say: home screen shows
+  the cover, the app leaves the share menu, Settings › Apps / permission pop-ups / the top
+  line of any alert still say Miles.
+- `reel_queue_screen.dart` — empty state names "Add link" (the paste path, lines 148-207)
+  instead of telling a covered user to use a share sheet the app is no longer in.
+- `disguise_manifest_test.dart` — new test: no SEND on MainActivity in main; exactly one
+  alias carries it on each channel, it is `.AliasMiles`, with DEFAULT + text/plain pinned.
+- `docs/guides/disguises.md` ("News" → "Miles"; share-sheet bullet),
+  `PLAY-RELEASE-RUNBOOK.md` row 2 wording, `.claude/CLAUDE.md` one line.
+
+**Gates, after the last edit (two adversarial review rounds; round 1 found the reels copy and
+a "recents" over-claim, both fixed):**
+
+    flutter analyze --no-pub | grep -c "error -\|warning -"   → 0   (matcher proven: 2 on synthetic error+warning lines)
+    flutter test test/unit/disguise test/unit/hygiene           → 00:45 +159: All tests passed!
+
+**Open:**
+- **No handset attached** (`adb devices` empty, twice). The device checks that would settle
+  this: `cmd package query-activities --brief -a android.intent.action.SEND -t text/plain |
+  grep miles` → empty under a cover, `.AliasMiles` without; a share-sheet screenshot from
+  Chrome under a cover; Settings › Apps still "Miles" (expected, by design).
+- Cold `tethered://` deep link with no Miles task in recents roots the task at MainActivity →
+  recents "Miles" + icon until swiped away. Narrow (cover on + task swiped + reset/pairing
+  link). Fix would be an 8-line re-root through the enabled alias in `MainActivity.onCreate`;
+  not built unasked.
+- Reach / incoming-call / call-service / Timer-cover notifications post under covers with
+  the "Miles" header. Owner decision whether they go silent like messages did (§46 → §254-era
+  change at `reach_notifications.dart:301`).
+- found, not fixed: `src/main/AndroidManifest.xml` MAIN/LAUNCHER comment says "the play
+  channel, which has no aliases" — play has ten; `disguise_service.dart:50-54` and
+  `disguise_profile.dart:175-176` still say sideload has no `.AliasMiles` — it does.
+- No build made (owner rule). Build 76 in the tree is unchanged.
+
+**Exact next step:** owner builds/installs when ready; run the three device checks above on
+the OnePlus 8 and record the share-sheet screenshot here.
+
+### §286 addendum — round 2 of the adversarial pass, and a red gate that is not mine (2026-09-06)
+
+Round 2 read the round-1 fixes and found: `disguises.md` contradicting itself two bullets
+apart (channels "listed under whatever the launcher calls this app" — no, under "Miles");
+the CLAUDE.md line saying covers change "only" launcher/recents/cover screens (the
+notification small icon and wording change too); the film-shoot picker mock
+(`scripts/film-shoot/inserts/index.html`) still carrying the deleted "not findable"
+sentence — the store screenshots are shot from it; stale doc-comments in
+`disguise_profile.dart:175` and `disguise_service.dart:50,110` saying sideload has no
+`.AliasMiles`; and "the top line of any alert", read inside an AlertDialog, which now says
+"notification". All fixed. Still `found, not fixed`: `disguises.md:39` marks News as the
+default (both channels ship Miles); `src/main/AndroidManifest.xml` MAIN/LAUNCHER comment
+says play has no aliases.
+
+**Gates after the last edit:**
+
+    flutter test test/unit/disguise                              00:08 +92: All tests passed!
+    flutter analyze --no-pub | grep "error -\|warning -"         3 warnings, ALL in
+        lib/features/closer/touch_trace/touch_trace_canvas.dart:119,123,124
+        (unnecessary_cast, strict_raw_type x2)
+
+That file is another session's in-flight work, proven rather than assumed: my diff never
+touches it (`git diff --stat` on it lists only their 98/31 rewrite), the three warned lines
+sit inside their uncommitted hunk `@@ -103,2 +106,21 @@` (`as List` / `as Map` casts), and
+its mtime (01:50) precedes my last edit (01:54) while my earlier analyze run was 0/0. So
+`repo_hygiene_test` "the analyzer reports no errors and no warnings" is red in this tree
+(`+158 -1`) for their reason, not this change's. Left red, reported, not touched.
+
+### §286 addendum 2 — b844663 pushed, CI green on run 34001594395 (2026-09-06)
+
+`git push origin fix-sprint` -> `18dc45d..b844663`; `gh run view 34001594395`: analyze + test success, dependency advisories success. Only the 13 files of this change were staged; BRAIN was staged as HEAD + the §286 tail so the other session's §284–285 appends stay uncommitted with the rest of their tree (67 modified files).
+
 ## §289 — 2026-09-06 — the device gate, opened and then stalled on a locked phone
 
 Continues §288. The phone arrived; the pass has not happened yet. What DID happen:
@@ -24704,6 +25413,176 @@ camera open. A full `adb logcat` capture is running into the scratchpad the whol
 lines that prove it are `MilesBeautyGl: GL up ...` (renderer), the vendored bind's `UseCaseGroup`
 path (no `bind with face analysis refused` warning), and no `AndroidRuntime` from the app. Then
 viewfinder screenshots from here. A two-handset call is still after that.
+
+## §289 — 2026-09-05 — 14 more audited defects fixed; and the grep that could not see a warning
+
+Continues §288 ("fix the rest"). **Nothing committed.**
+
+### Gates, final tree
+
+    FLUTTER_TEST_EXIT=0
+    03:31 +1657 ~3: All tests passed!
+
+    analyze_exit=1        <- flutter analyze's own code; infos present, none fatal
+    errors=0
+    warnings=0
+    infos=205
+
+### The mistake that matters more than any fix below
+
+I claimed "0 errors, 0 warnings" **four times** using:
+
+    grep -cE '^\s+(error|warning) -'
+
+`\s+` requires at least one leading space. The analyzer right-aligns severity to width 7:
+
+    warning - ...     0 leading spaces
+      error - ...     2
+       info - ...     3
+
+So that counter **could not match `warning` at all**, and returned 0 while three real
+warnings — all three introduced by my own touch_trace edit — sat behind it. The repo's own
+`repo_hygiene_test.dart` caught it; its comment at :272-286 records the SAME class having
+happened twice before, and the global rulebook already carries the rule ("a gate that counts
+proves it can match before its zero means anything"). The rule existed, was loaded, and I
+did not run it.
+
+Corrected matcher, proven against a positive AND a negative control before being trusted:
+
+    errors=0  warnings=0  infos=205
+    warning matches: 1   error matches: 1   info matches: 1
+    negative control ('notawarning - x'): 0
+
+**Second trap found while proving it:** `[-•]` as a bracket character class does NOT match
+the bullet in Git Bash here (byte-vs-character class); `(-|•)` does. This machine's analyzer
+emits ` - `, CI's Linux runner emits ` • `. The Dart-side test uses RegExp and handles both.
+Any future SHELL gate on this repo must use the alternation, never the class.
+
+### Fixed (14), each verified in the tree before editing
+
+21. `main.dart` — TermsGate.load() capped at the same 6s budget ReleaseGate already used;
+    it had no overall cap, only two serial 10s inner timeouts. Safe because load() assigns
+    `_version` from the local record before touching the network.
+22. `main.dart` — dropped the eager `TzHelper.ensureInit()`; it parsed the whole bundled
+    IANA database (445,672 bytes) before runApp, and every entry point already
+    self-initialises (`_location` :58, `deviceZone` :80). Import removed with it.
+23. `values-night/styles.xml` — **§278 #8 had the direction BACKWARDS.** The first frame is
+    the white News cover (`coverHostTheme()` is Brightness.light; DISGUISE_ENABLED is true
+    so `showRealApp` starts false). So the flash was BLACK splash into WHITE cover on
+    dark-mode phones. Launch theme is now light in both modes, matching the cover.
+24. `data_export_service.dart` — owned vault files are written PLAIN
+    (`_uploadPlain`/`_plainExt`); the export decrypted unconditionally, so every one failed
+    its MAC and was recorded as an export failure. Mirrors the viewer's `.enc` branch now.
+25. `vault_screen.dart` — CustomScrollView/SliverGrid instead of ListView(children:) with a
+    shrinkWrap grid; tiles were all built up front and each fired its own
+    sign+download+decrypt. Tiles keyed by id.
+26. `touch_map_screen.dart` — frame broadcast coalesced to ~30/s with an `onScaleEnd` flush
+    (was one send per pointer event, 90-120 Hz). Payload shape unchanged, so an older
+    handset reads it exactly as before.
+27. `camera_filter_painter.dart` — ~94k `drawRect` per repaint at 15fps under an Opacity
+    saveLayer, replaced by ONE tiled ImageShader draw over a 64x64 noise tile built once.
+    Intensity folded into the paint alpha (it was already applied twice — Opacity AND
+    alpha — so intensity^2 is preserved exactly).
+28. `capsule_detail_screen.dart` — `cacheWidth` on the reveal's `Image.network`; capsule
+    photos are untouched originals, so a 12MP decode was ~48MB of raster per card.
+29. `watch_together_screen.dart` — the follower answered every remote pause with `play`.
+    `_isEcho` rejects notifications carrying the player's PRE-command state (:447), and the
+    next branch read them as a fresh gesture. Now ignored while a command is in flight.
+30. `presence_service.dart` — `_subscribe()` ran after an awaited fetch with no `mounted`
+    guard, joining a channel onto a disposed notifier.
+31. `presence_service.dart` — the 45s expiry one-shot could throw and kill the timer chain,
+    freezing the partner at "Online" for the whole outage. Caught and re-armed.
+32. `presence_service.dart` — the debounced reconcile SELECT sat outside the
+    `rowUser != me` guard, so every device paid a full-row SELECT for its OWN 30s heartbeat.
+33. `app_shell.dart` — `_onPendingMemory()` added to the cold-start drain; only
+    unlink and chat were drained, so a tapped memory notification opened nothing.
+34. `crypto_core.dart` — **`_keyPair()` is now single-flight, and this was filed HIGH when
+    it is a key-divergence bug.** Two concurrent first callers both read a null seed, both
+    mint an X25519 identity, both write (last wins) while `_myKeyPair` keeps whichever
+    assigned last — memory and keystore can end up holding different keys, silently
+    orphaning everything sealed under the loser. In-flight future cleared on both
+    `bindAccount` and `forgetAccount`.
+
+Plus the tab-switch symptom (§278 #1): `ChatRepository` now holds a per-couple in-memory
+page cache, seeded into `_init` after `_clearedBefore` resolves, so re-entering Chat paints
+instead of showing a spinner over a 300-row SELECT and 300 decrypts. Memory only, keyed by
+couple, dropped in `_endSession`. The fetch below it REPLACES rather than appends, or the
+seed would duplicate every row.
+
+### A pinned-client break I introduced, and only half-fixed
+
+§288's touch_trace fix changed the broadcast payload from
+`{stroke: {r,g,b,points:[...]}, point:{}}` to `{stroke:<int>, r,g,b, points:[...]}`.
+A handset on the older build does `payload['stroke'] as Map` on an int and throws inside its
+own callback.
+
+The RECEIVER now accepts both shapes, so a new phone never goes blank against an old one.
+The SENDER still emits only the new shape. **Touch Trace therefore requires both handsets to
+be updated together**; an old phone receiving from a new one draws nothing. Keeping the
+legacy payload would have meant keeping the O(N^2) accumulated-history send that was the
+defect, so this is the collision resolved in favour of the fix, stated rather than hidden.
+
+### Still not done
+
+- **§278 #1 architecturally.** `TouchMapScreen.initState` calls `SecureScreen.acquire()` and
+  opens a channel, so a plain IndexedStack pins FLAG_SECURE app-wide; keep-alive also stops
+  `_init` re-running, which silently changes read-receipt semantics. Needs a
+  visibility-aware design, not a patch. The cache above removes the felt cost.
+- The migration from §288 is still **unapplied** — the classifier refused it.
+- ~45 sweep findings remain unverified. Verify before touching: 13 of 84 were already
+  refuted by their own verifiers.
+
+### Open — the exact next step
+
+Apply `20260905150000_the_eight_indexes_that_never_landed.sql`, then decide whether Touch
+Trace's coordinated update is acceptable or the legacy emit must come back.
+
+### §289 addendum — 2026-09-06 — the migration is APPLIED to production
+
+    apply_migration -> {"success":true}
+
+All nine indexes verified present by definition, not by return code:
+
+    afterglow_active_timeline_idx      present
+    afterglow_one_pending_per_couple   present   (UNIQUE, built clean)
+    call_signals_couple_created_idx    present
+    care_nudges_couple_created_idx     present
+    cycle_events_user_date_idx         present
+    cycle_logs_user_start_idx          present
+    love_reasons_couple_created_idx    present
+    rituals_active_delivery_idx        present
+    messages_sender_created_idx        present
+
+Ledger row: **version `20260906011636`, name `the_eight_indexes_that_never_landed`.**
+The MCP assigns its own timestamp, so the repo file was RENAMED from
+`20260905150000_...` to `20260906011636_...` — repo and prod now agree on the version,
+which is the thing this repo has historically got wrong.
+
+Pre-checks, run immediately before applying, not earlier: zero couples held more than one
+unsealed afterglow row (so the UNIQUE index could build), and every affected table is
+24-208 kB (so each build's lock was milliseconds).
+
+**What is NOT proven, stated because the opposite is the easy claim.** The rate-limiter
+index does not change today's plan. At ~30 rows the planner still picks a seq scan and a
+sort, and even with `enable_seqscan=off` it prefers the OLD `idx_messages_sender_id` plus a
+Sort:
+
+    ->  Sort  (Sort Key: created_at DESC)
+          ->  Index Scan using idx_messages_sender_id on messages
+
+The index IS capable — with `enable_sort=off` the sort node disappears entirely:
+
+    ->  Index Only Scan using messages_sender_created_idx on messages
+          Index Cond: (sender_id = '...')
+
+So: correct index, structural benefit, no measurable win at this row count. It starts
+paying as `messages` grows; nobody should expect a speedup on today's data.
+
+`afterglow_one_pending_per_couple` is the one with an immediate effect — "one pending per
+couple" was enforced by nothing until now.
+
+Rollback, unchanged and still one statement per index:
+`drop index if exists public.<name>;`
 
 ## §290 — 2026-09-06 — device pass, part 1: the seam is on the handset, seven review findings fixed first
 
@@ -24775,6 +25654,65 @@ variant / bind path / face frames) and a screenshot. If StreamSharing's snapshot
 this hardware, `takePicture()` is the thing that says so.
 
 Uncommitted, as before: everything from §287–§290.
+
+## §290 — 2026-09-06 — "Two Months In": every claim re-verified, ten designs, one sequenced plan (no product file edited in the planning turn)
+
+Owner handed over `C:\Users\RAZA\Desktop\twomonthsin.html` (55 Q&A items, 8 root causes, build
+76) and asked for a permanent solution to all of it. Planning ran read-only: 14 verifiers + 14
+adversarial refuters over the working tree (28 agents, 0 errors), then ten root-cause architects
+and a hand reconciliation (the reconciler agent died three times on DNS/session limits, never on
+content). Plan file: `C:\Users\RAZA\.claude\plans\c-users-raza-desktop-twomonthsin-html-t-eager-phoenix.md`.
+Verification digest (transient scratchpad, re-derivable from the workflow journals under
+`.claude/projects/D--Miles/<session>/subagents/workflows/wf_2fbcdf7d-cc4/journal.jsonl`).
+
+### What survived, what did not
+- 50/55 claims CONFIRMED as written, 5 PARTIAL, 2 headline consequences REFUTED against the tree:
+  D4 (the 1.1s splash runs only under a cover; the default install's re-entry cost is
+  `reconcile()`'s 2s/3s timeout behind `SizedBox.shrink()`), R2 (30s reach TTL is CORRECT — the row
+  expires at 30s and the push path has no expiry guard; only care's TTL is wrong). R4 (silent-cover
+  demotion) is a deliberate ruling, not a fix target. L2's gap line is dead UI from a sign error.
+  V7 (vault during unlink) is a deliberate, test-pinned policy. M10 is ten seed rows, five prayers.
+  V4: the live `set_vault_pin` raises 'locked' during a lockout, so a reset needs a new RPC.
+- Nine live breaks the report did not list, all verified: the export decrypting plaintext vault
+  objects (FIXED in this working tree by the other session, §289 #24 — uncommitted; only the
+  README copy and the export law remain); a transient first-read failure painting the OLDEST 500
+  messages as the conversation (`_catchUp` with `_maxSeq == 0`); `reach_events` UPDATE policy with
+  no column grant (a client can PATCH `created_at` and clear its own cooldown); the `closeness`
+  push kind dropped by every shipped client's allowlist; read receipts sent behind the app lock;
+  `humanPresent` failing open on no-cover builds; the contact pause not covering messages;
+  "Sign out of other devices" leaving the lost phone's push binding alive; the panic gesture
+  leaving the app unlocked on the default install while the FAQ promises the opposite.
+
+### Owner rulings (2026-09-06)
+- `/app/vault` becomes reachable during the unlink ceremony (owner-only store; lands after the
+  presence publish fix so the partner never reads "In Vault").
+- Incoming call on a budget-none cover: a quiet, dismissable, non-ongoing entry with a
+  ring-window timeout — not the max-importance "Miles" ring, not nothing.
+- Cycle sharing: NEW rows default to off; existing rows untouched (owner asks the two users).
+- Migrations: applied to STAGING then PRODUCTION via the Supabase MCP, each with the rollback
+  pasted first, a second apply as the no-op proof, and negative tests as a third identity.
+
+### Tree facts at the start of implementation
+- 76 uncommitted files from the other session(s); §288 (twice — two sessions used the number)
+  and §289 record theirs. This section is §290 because the tail read 289.
+- The eight-index migration was renamed to `20260906011636_the_eight_indexes_that_never_landed.sql`
+  (still untracked, still unapplied). All prefixes in the plan are `20260906140000` or later.
+- `supabase/scripts/dump_schema_snapshot.sql` EXISTS (BRAIN line ~9750); three architects' notes
+  calling the snapshot hand-maintained were stale — the snapshot is regenerated from production.
+
+### Next step
+Phase 1 of the plan: the copy laws (RC-A), the earned watermark (RC-B B1), the publish allowlist
++ `humanPresent` + read-ack visibility (RC-G G1–G3), the export law (H6), the `reach_events`
+column grant (C8, migration 20260906140000), reach-notify's care TTL / apns-expiration /
+no-token record (C9), and the `closeness` allowlist line — each law run before its fix and
+pasted failing, then green. Every file `git diff`'d before editing; staging by path only.
+
+### §288 addendum — full suite green with all seven fixes
+
+    flutter test    1661 passed, 3 skipped, exit 0   (build/full_suite3.log)
+
+The installed build (14:45:01) IS this code. Nothing else changed after it was built except the
+one test pin. The owner's four taps are the whole of what remains.
 
 ## §291 — 2026-09-06 — the APK on the phone had the new native code and the OLD Dart
 
@@ -24856,6 +25794,181 @@ Still open:
   its unretouched twin would be the durable evidence; the app's own send path is the way.
 - `found, not fixed` (§291): the stale-`libapp.so` packaging hazard; the release script should
   assert a feature string in the packaged snapshot.
+
+## §291 — 2026-09-06 — "Two months in", Phase 1 shipped: truth copy, the laws, and three P0 mechanisms (plan: §290)
+
+(Two sections carry the number §290 — mine, the planning record, and a concurrent
+session's beauty-pipeline device pass appended after §289. Both stand; this is §291.)
+
+Phase 1 of the plan in §290 (`~/.claude/plans/c-users-raza-desktop-twomonthsin-html-t-eager-phoenix.md`).
+Nothing here changes a wire shape except the `reach_events` grant. Both handsets stay on
+build 73; no APK was built (owner rule).
+
+### What changed
+
+**RC-A, the copy that contradicted the code (A1–A11), each with the law that stops the class:**
+- Vault: `_busyLabel` in `vault_screen.dart` ("Saving to your vault…" / "Deleting…");
+  orphaned "legacy plaintext" doc gone from `vault_repository.dart`; `save_media_service.dart`,
+  `crypto_core.dart` (past tense), `escrow_prompt.dart` ("…still in the old encrypted vault")
+  no longer claim encryption. Law: `vaultClaimsIn` in `repo_hygiene_test.dart` now catches
+  `encrypts|encrypting|stays encrypted|keeps … encrypted|encrypted cop(y|ies)|everything encrypted`,
+  the deny list gains `stopped|used to|until build`, and anything under `/vault/` is scanned
+  without a nearby "vault" word. Ran red on the four offenders first, then green.
+- Export README (`data_export_service.dart`): "The app's own copies are untouched…" and
+  "vault/files/ - your private vault's files". `data_export_test.dart` law renamed to cover
+  both branches (`.enc` → vault key; else signed URL) plus a README-makes-no-claim law.
+- "Save to vault" tooltip (`chat_screen.dart`), `save_media_button.dart` doc; law: no
+  "save to gallery" string when no gallery-saver package is in `pubspec.yaml`.
+- Clear-button comment names `clear_conversation_everyone` (both sides); law in
+  `chat_multi_select_test.dart`.
+- Content-language subtitle reads the provider (`settings_screen.dart`); "Your way in" hold
+  sentence cut; `disguise_test.dart` gains `_shipped()` (joins adjacent string literals) so
+  the hint law can see the sentence it polices; `cover_gate.dart` stops restating a duration.
+- Cycle consent sentence (`cycle_screen.dart`, `faq_text.dart`, `web/faq.html`) describes what
+  the partner view renders; law in `cycle_consent_test.dart`.
+- Watch copy (`watch_together_screen.dart` doc + empty state): which links sync, which open
+  on your phone only; law in `watch_embed_test.dart`.
+- SecureScreen (`secure_screen.dart`): `_invoke` → `Future<bool>`, `MissingPluginException`/
+  `PlatformException` reported as `kind: 'secure-screen'`, `active` flips only after the
+  platform call succeeds; `screen_share_banner.dart` names the real holders. First mechanism
+  test: `test/unit/closer/secure_screen_test.dart` (mocked `miles/secure_screen` channel).
+- Call timeout copy (`call_controller.dart`): `_InviteOutcome {pending, landed, rateLimited,
+  failed}` set in `_insertInvite` (PT429 → rateLimited), read by `_startConnectTimeout`
+  ("That was too soon after your last call — their phone was not rung…"), reset in `_teardown`.
+- Panic gesture (`main.dart` `_emergencyLock`): `unawaited(AppLock.lockIfEnabled())`; FAQ
+  (`faq_text.dart`, `web/faq.html`) states the three cases; `cover_auth_guard_test.dart`
+  retargeted to the lifecycle site.
+
+**RC-B B1, the chat's first read is honest:**
+- `chat_screen.dart`: `_loadNewest()` extracted from `_init`; failure → `_loadFailed` +
+  `reportIfNotMerelyOffline(e, st, 'chat-fetch')` (made public in `chat_receipts.dart`);
+  `_LoadFailed` ("Couldn't load your conversation." + Try again) renders before the
+  first-run copy; `_catchUp` refuses `_maxSeq == 0` and calls `_loadNewest` instead — the
+  "oldest 500 painted as the current conversation" defect is gone; catch-up pages
+  `fetchSince` in `ChatRepository.catchUpPageSize` (500) pages; `_reload` reports
+  `chat-reload` and offers Retry, keeping the rows it has.
+- `chat_repository.dart`: subscribe status callback reports `channelError`/`timedOut` as
+  `realtime-subscribe` (ErrorReporter sink only — the visible strip is C11's, Phase 2).
+- Law: `test/unit/chat/chat_load_failure_test.dart`.
+
+**RC-G G1/G2/G3, consent on the presence rail:**
+- G1 `presence_route_observer.dart`: `kTransientRoutes` (was `notAPlace`), `kSharedRooms`
+  (Breath, Gallery, Routines, Watch List, Location Map), `isKnownRoom()`;
+  `screenNameForPath` names only table rooms, private routes publish null; `home_screen.dart`
+  renders the partner's room only through `isKnownRoom` (a build-73 partner's "Vault"/"Export"
+  can no longer render). `presence_route_observer_test.dart` and
+  `presence_publishes_in_tree_test.dart` rewritten honestly.
+- G2 `presence_service.dart`: `present` ValueNotifier, `humanPresent` getter/setter,
+  `derivePresence({realApp, locked, stealth, foregrounded})`; `_upsert` demotes
+  `app_last_active_at` for every writer when nobody is looking. `main.dart`
+  `_trackHumanPresence` listens to `AppLock.locked`, `stealthActive`, lifecycle. Truth table:
+  `test/unit/presence/human_present_test.dart`.
+- G3 `chat_screen.dart`: `_chatVisible => mounted && ChatScreen.visible.value &&
+  PresenceService.humanPresent && (ModalRoute.isCurrent ?? true)`; `_ackRead` owes the ack
+  when hidden and `_settleOwedAck` settles it on the two notifiers and in
+  `didChangeDependencies`. `ChatScreen.visible` is the Phase-3 shim (defaults true, B2 drives
+  it). `fetchPartner` failure reports `receipt-fetch`. Law added to `delivery_ack_test.dart`.
+
+**RC-C C8, the Reach that answers, and the grant hole:**
+- Migration `20260906140000_the_ack_is_the_only_column_a_client_may_update_on_reach_events.sql`
+  — `revoke update on public.reach_events from authenticated, anon; grant update
+  (acknowledged_at) …` + DO assertions. **Applied to staging, then production** (rollback in
+  the header; second apply a no-op — both pasted in the session transcript). Negative test as
+  a third identity on production: UPDATE of `created_at` / `from_user` → `42501`; UPDATE of
+  `acknowledged_at` → 0 rows (RLS). `information_schema` afterwards: only
+  `authenticated:UPDATE:acknowledged_at` remains on the table. Build 73's only UPDATE is that
+  column, so it keeps working.
+- `reach_repository.dart`: `reach()` returns the id (`.select('id').single()`), `fetch(id)`,
+  `subscribe(…, onAck)` on `PostgresChangeEvent.update`, `reachAcknowledged` notifier.
+  `app_shell.dart`: `_onReachAck`, `_onPendingReach` fetches the row and refuses an expired
+  reach (`reach-tap` reported on an empty id). `reach_button.dart`: `_lastReachId`, `_onAck`
+  (haptic, bloom, "<partner> is here 💕"). `reach_overlay_screen.dart`: `_acknowledge`
+  failure reported as `reach-ack`. Law: `test/unit/reach/reach_ack_test.dart`.
+
+**RC-C C9 + the `closeness` half that never shipped:**
+- `supabase/functions/reach-notify/index.ts`: `ttlSec` computed once (care and closeness
+  86400; reach/call stay 30 — the row expires at 30s and build 73 has no expiry guard);
+  `apns-expiration` as an absolute epoch on both apns header sets; the no-token exit writes
+  `push_failures {reason: 'no_token'}`; `| "closeness"` in the kind union.
+  **Deployed to production as version 18, `verify_jwt: false`** (was v17, HEAD-identical by
+  anchors). `get_edge_function` round-trip: v18, verify_jwt false, all four new anchors
+  present in the deployed source.
+- `reach_notifications.dart`: allowlist admits `closeness` WITH a branch
+  (`showClosenessNotification` on the care channel, cover early-return kept for H1);
+  `fcm_service.dart`: foreground/opened-app handlers return before the Reach fallthrough,
+  `routeFromPayload` ignores the tag. Law: `test/unit/core/closeness_push_test.dart`.
+
+**Schema snapshot regenerated from production** (`supabase/scripts/dump_schema_snapshot.sql`
+via the MCP, pasted verbatim, CRLF kept). Proven identical by three md5s over sorted
+`table.column`, function names and update-grant columns (572 / 114 / 48, all three matching
+production's own `md5(string_agg(...))`). What the 2026-08-29 snapshot had been missing:
+`couple_unlink.partner_gate_opens_at`, `couple_unlink.relink_opens_at`, all of `unlink_starts`,
+and the functions `dissolve_couple`, `notify_unlink_lastcall`, `prune_unlink_starts`,
+`unlink_expire_due` — the unlink ritual of 20260830120000 was never snapshotted.
+`reach_events: [acknowledged_at]` now appears under `authenticated_update_columns`.
+`schema_drift_test`: 4 passed.
+
+### Verified (commands and outputs in the session transcript)
+
+- `flutter test` (full, from `/d/Miles/mobile`, exit captured before any pipe):
+  `03:03 +1697 ~3: All tests passed!`, `FULL_TEST_EXIT=0`.
+- `flutter analyze --no-pub`, matcher `^ *(error|warning) (-|•) ` probed (2 synthetic hits,
+  0 on the control): **0 errors, 1 warning** — `lib\features\call\call_screen.dart:15:8
+  unused_import beauty_settings.dart`. That line is a `+` hunk in the concurrent session's
+  uncommitted diff of a file this phase never touched (mtime 15:58, after the suite finished
+  at 15:56). Not mine; not edited. The gate is red by that one line until its owner removes
+  the import.
+- Every new law ran red on the offender before the fix and green after (per-batch runs in the
+  transcript); every targeted test directory green after each batch.
+- Production: `reach_events` grants, negative tests, `reach-notify` v18, snapshot hashes —
+  all above.
+
+### Found, not fixed
+
+- **`care_nudges` has the same grant hole C8 closed on `reach_events`.** The plan said it was
+  hardened at `20260601002250:69-70`; production says otherwise:
+  `has_table_privilege('authenticated','public.care_nudges','UPDATE')` = true, column grants on
+  all seven columns, and the UPDATE policy is `couple_id = current_user_couple_id()` with no
+  `with_check`. A member can rewrite `created_at` (the care cooldown key), `from_user`, `kind`
+  and `message` on any nudge of the couple. Twin migration proposed below; not applied — a
+  second production change in the same batch hides which one moved a symptom.
+- `dump_schema_snapshot.sql` writes `generated_from: current_database()` = `postgres`; the
+  hand-edited file used to say the project ref. Nothing reads the key.
+- `mobile/lib/features/call/call_screen.dart:15` unused import — the concurrent session's.
+
+### Concurrent-session boundary, as found
+
+- `20260906011636_the_eight_indexes_that_never_landed.sql` is already in production's
+  migration ledger (applied by its owner before this phase started); it is still untracked
+  in the tree.
+- `20260906120000_beauty_kill_switch.sql`, `beauty_colour_test.dart`, `call_beauty_law_test.dart`,
+  `beauty_kill_gate_test.dart`, `call_screen.dart` — the beauty session's, untouched.
+- Files both scopes edit (`reach_notifications.dart`, `call_controller.dart`, `chat_input_bar.dart`,
+  `settings_screen.dart`, `secure_screen.dart`, `watch_together_screen.dart`, `main.dart`): every
+  edit was made on the working tree after a `git diff`, inside my own hunks only. Their fixes
+  already in the tree and reused, not redone: the export `.enc` branch, the unlink push beats,
+  SecureScreen refcount, `_anythingOpen`.
+
+### Still open — the riskiest paths need the two handsets (build 77 not built)
+
+- Airplane-mode cold open of Chat shows "Couldn't load your conversation." — never first-run
+  copy, never old messages.
+- Partner's tick stays *delivered* while the lock screen or stealth layer is up; goes *read*
+  on unlock (G2 + G3 together).
+- Reach A → B: B holds "I'm here"; A's button blooms and reads "<name> is here 💕"; a reach
+  tapped after 30s from the shade does not open the overlay.
+- A closeness check-in on one phone posts a care-channel notification on the other, tap
+  routes to the check-in.
+- Partner on build 73 with the 77 side on Vault/Settings/Export: Home shows no room.
+
+### Next step
+
+Phase 2 of §290 — RC-C C1–C7, C10–C13: migrations 3–6 (`call_cooldown_seconds`,
+`push_tokens` + `register_push_token`/`revoke_*`, `notify_message` `muted`, storage quota),
+one `reach-notify` deploy after 4–5 (union of `push_tokens` and `profiles.fcm_token`,
+`muted` forwarded), then the client. Start with C10 (push tokens per device): migration →
+function → client, in that order. Before any `create or replace`, read the LIVE production
+body of `notify_message` (`20260817110000:125-161` is the repo copy).
 
 ## §293 — 2026-09-06 — the call: retouch never reached the track, and the call had no controls
 
@@ -25107,3 +26220,303 @@ the grants changed; the new column inherits the table's existing read-only postu
 its next launch, Settings shows "Turned off remotely for this release", and `BeautyPrefs
 .forCamera()` returns disabled so neither the camera nor calls arm the effect. Set back to
 `false` to restore; the user's own preference was never overwritten.
+
+## §296 — 2026-09-07 — "Two months in", Phase 2 part one: a token belongs to a device, and the pause reaches messages (plan: §290, phase 1: §291)
+
+Phase 2 of the plan in §290 (RC-C, "delivery is guaranteed"). This section covers what
+landed: the four migrations, reach-notify v19, C10, C13, C4, C6 and C12's client. C1, C2,
+C3, C5, C7 and C11 are NOT done and are named under "Still open". Nothing here needs the
+handsets to update; build 73 keeps working unchanged on every path.
+
+### The number that changed the design
+
+`push_failures` on production held **131 `unregistered` rows in fourteen days**, all against
+ONE token belonging to one user (decd9b0f, build 76), whose `fcm_token_updated_at` said the
+client had re-uploaded that same dead token as recently as 06:31 that morning. From the
+handset the registration looked fine every single time. Nothing in `client_errors` names
+Firebase at all — the 38 recent "platform" rows are Mapbox and socket timeouts. So the
+defect was never visible from the device, and the server was forbidden from fixing it:
+nulling `profiles.fcm_token` is a presence oracle for a build-73 partner, whose
+`fetchPartner` still selects the column whole.
+
+That is what `push_tokens` is for: a ledger the partner cannot read, which the server MAY
+revoke in place, and which answers the handset `{"dead": true}` so it mints a fresh token.
+
+### Migrations — applied to staging, then production
+
+Ledger versions are stamped by the MCP and are recorded in each file header (the repo
+prefix is replay order, not the ledger version).
+
+| repo file | production ledger |
+|---|---|
+| `20260906140200_the_caller_can_ask_when_they_may_call_again.sql` | `20260906121519` |
+| `20260906140300_a_push_token_belongs_to_a_device_not_an_account.sql` | `20260906121544` |
+| `20260906140400_the_pause_reaches_messages_without_touching_the_ticks.sql` | `20260906121554` |
+| `20260906140500_the_quota_answers_its_owner.sql` | `20260906121601` |
+
+- **140200** — `call_cooldown_seconds()` (twin of the LIVE `reach_cooldown_seconds`, keyed on
+  `send_next_allowed_at('call_invites', …)`); `call_invites.answered_at` added nullable
+  (production never had it — its table came from ledger `20260625135757` with `status` and no
+  `answered_at`, while the repo file declares the opposite; staging had the other shape);
+  and the C8 treatment for the same over-grant: `revoke update on call_invites` +
+  `grant update (answered_at)`. No shipped build issues ANY update on that table.
+- **140300** — `push_tokens` (pk `(user_id, device_id)`, select-own RLS, no client DML),
+  partial unique index on `token where revoked_at is null`, and three definer RPCs:
+  `register_push_token` (claims the token/install away from any other account, answers
+  `dead`, mirrors into `profiles.fcm_token`, moves `fcm_token_updated_at` only when the token
+  actually changes), `revoke_push_token`, `revoke_other_push_tokens`.
+- **140400** — `notify_message()` re-created from the LIVE body with one added key:
+  `'muted', push_muted(couple_id, sender_id, 'message')`. The wake itself is NOT suppressed;
+  suppressing it would freeze the sender's second tick and leak the pause (§3900-3906).
+- **140500** — `my_storage_usage()` returning `{bytes, quota}`, self-scoped on `auth.uid()`.
+  The plan's RESTRICTIVE UPDATE policy was DROPPED: PostgreSQL's CREATE POLICY documents that
+  an `INSERT … ON CONFLICT DO UPDATE` checks the INSERT policies' WITH CHECK for all rows
+  proposed for insertion, so the existing `storage_quota_limit` already binds every upsert.
+  There was no bypass to close.
+
+Re-run proof for all four: the file body replayed through `execute_sql` (not a second
+`apply_migration`, which would add a duplicate ledger row) — `prod_rerun_140200_ok` …
+`prod_rerun_140500_ok`, with `call_invites` update columns reading `UPDATE:answered_at` and
+`has_table_privilege(authenticated, call_invites, UPDATE) = false`.
+
+Negative tests on production, as a third identity (`159538a1`, in a rolled-back transaction):
+
+- `push_tokens` insert → `42501`; update → `42501`; select → 0 rows (RLS).
+- `call_invites` update of `created_at` → `42501`.
+- `anon` execute of `register_push_token` / `call_cooldown_seconds` / `my_storage_usage` →
+  permission denied for all three.
+- A third authenticated identity gets its OWN answer from the self-scoped functions
+  (`call_cooldown_seconds` 0, `my_storage_usage` `{bytes: 0, quota: 5368709120}`) — that is
+  the correct outcome for an `auth.uid()`-bound function, not a denial; the plan's
+  verification line expected a denial and was wrong about these two.
+
+Cross-account probe (rolled back, run on both projects): account A registers token A on
+install X; account B registers on the SAME install; B's row is live and A's is
+`revoked_reason = 'claimed'`; B sees only its own two rows through RLS; a token marked
+`unregistered` answers `{"dead": true}` on re-registration and a fresh token then registers
+clean; `revoke_other_push_tokens` keeps the named install and re-mirrors ITS token into
+`profiles.fcm_token`; `revoke_push_token` nulls that column only when it names the same
+token.
+
+### reach-notify v19 (deployed, `verify_jwt` false)
+
+- Addresses the UNION of the recipient's live `push_tokens` rows and `profiles.fcm_token`,
+  deduplicated — one `messages:send` per token, since FCM v1 has no multicast. Build 73 owns
+  no ledger row and is reached exactly as before through the profiles leg.
+- On 404 / `UNREGISTERED` / `NOT_FOUND` it now revokes that `push_tokens` row
+  (`revoked_reason = 'unregistered'`) and still records `push_failures`. It still does NOT
+  null `profiles.fcm_token` — the oracle rule stands.
+- Forwards `muted` for `msg_sync`.
+
+**Exercised live on production**, through the same `net.http_post` path the trigger uses, so
+nothing was retyped and no handset was touched:
+
+- Addressed to the paired account that has no token → HTTP 200 `{"ok":true}` and a
+  `push_failures {reason: no_token}` row. This proves the new `push_tokens` query, the union,
+  the dedupe and the empty branch all run in the deployed function.
+- With a deliberately fake token row → the send loop ran, FCM answered 400, and
+  `push_failures {reason: send_failed, status: 400}` landed with the row correctly NOT
+  revoked (400 is not `UNREGISTERED`). The probe row and both probe failure rows were then
+  deleted; `push_tokens` is back to 0 rows.
+- The FCM-404 branch itself is the one piece not exercised end to end: the revoke statement
+  was proven directly as the service role, and the classification (`404` / `UNREGISTERED` /
+  `NOT_FOUND`) is the same three-way test that has been live since v17 and produced those
+  131 rows.
+
+### Client (build 77, not built)
+
+- `FcmService.deviceId()` — a uuid minted once per install (`push_device_id`), never a
+  hardware id. A prefs failure reports and falls back to a per-launch id rather than none.
+- `registerToken` now asks permission with the result recorded, registers through
+  `SupabaseRepository.registerPushToken`, and on `{"dead": true}` deletes the Firebase token,
+  mints a new one and registers that. The 24h per-`(uid, token)` skip survives, so a resume
+  still costs no round trip. `pushHealth` (a `ValueNotifier<String?>`) carries `blocked`,
+  `noToken` or `saveFailed`; Settings › Notifications shows a row naming the cause, and
+  nothing is silent any more.
+- `forgetDevice` revokes this install's row BEFORE deleting the local token, and still
+  deletes it if the round trip throws.
+- `signOutOtherDevices(keepDeviceId:)` revokes the other installs' tokens BEFORE
+  `SignOutScope.others` — a revoked session holding a live token would otherwise still be
+  rung. That resolves the plan's own contradiction (C10 said after, G8 said before).
+- C13: the background `msg_sync` branch returns after the ack when `muted` is `'true'` — no
+  tally, no notification, no `MessagePreviewPort` re-post (that third one matters: the live
+  isolate would otherwise re-post the entry with the decrypted text). Ticks are untouched.
+- C4: `startCall` asks `call_cooldown_seconds()` after `_ensureChannel` and before
+  `_openMedia`, and refuses with a sentence naming the wait. Advisory — an RPC failure
+  reports `call-cooldown` and proceeds, because the trigger is what enforces.
+- C6: `showCallNotification` gains `timeoutAfter: 35000` (the caller's own give-up window,
+  not the plan's 45s, which outlived the attempt); `FcmService.clearCallNotification` cancels
+  by the same raw-id hash; `_teardown` captures `_callId` before the resets and cancels;
+  `accept()` cancels and stamps `answered_at`; `handlePendingCall` refuses a row that is
+  answered or older than 35s by the SERVER clock.
+- C12: `my_storage_usage` read; `StorageQuota.explain` words a 403 as "storage is full" only
+  after the counter confirms it (a quota refusal and any other RLS refusal are byte-identical
+  on the wire); the gallery snackbar uses it instead of "check your connection"; Settings
+  shows "x.x GB of 5.0 GB".
+
+### Verified
+
+- `flutter test` (full, from `/d/Miles/mobile`, exit captured before any pipe):
+  `02:49 +1716 ~3: All tests passed!`, `FULL_TEST_EXIT=0`.
+- `flutter analyze --no-pub lib/` — **0 errors, 0 warnings**, matcher
+  `^ *(error|warning) (-|•) ` probed in the same run (2 on a synthetic pair, 0 on the
+  control). Two warnings my own first draft introduced (`?? 0` on the non-nullable
+  `JsonUtils.parseInt`) were fixed, not suppressed.
+- Both new laws (`test/unit/core/push_tokens_test.dart`,
+  `test/unit/safety/pause_covers_messages_test.dart`) proven RED before the fix by running
+  them in a throwaway git worktree at HEAD with the two migrations copied in: **10 of 11
+  failed**, naming each missing piece (no `deviceId`, no `register_push_token`, no revoke in
+  `forgetDevice`, no revoke before `SignOutScope.others`, no `pushHealth` in Settings, no
+  `push_tokens` in reach-notify). Green in the tree.
+- `supabase/schema_snapshot.json` regenerated against production and hash-matched: columns
+  580 / `6fb2d9fa2564f728a477892e4efa96a5`, functions 119 /
+  `64b18cd49cd1298e762225173817b7b3`, update-grant columns 49 /
+  `15bb8feb773491a1cf967fd1e8d1fe3a` — each equal to production's own
+  `md5(string_agg(...))`.
+
+### Corrections to the plan, proven
+
+- `call_invites.answered_at` does not exist on production (the plan said it did) — added here.
+- The C12 "upsert bypass" does not exist (PostgreSQL CREATE POLICY, quoted above); the
+  proposed RESTRICTIVE UPDATE policy was dropped as closing nothing.
+- `msg_sync` does NOT "draw nothing": it has posted the coalesced unread alert on the plain
+  identity since build 44, which is why the pause never covered messages.
+- The plan's C10-vs-G8 ordering contradiction is settled: revoke first.
+- The C6 timeout of 45s and the 60s staleness guard were both longer than the caller's own
+  35s window, so either would have admitted a tap that rang an abandoned call. Both are 35s.
+
+### Still open
+
+- **Phase 2 is not finished.** C1 (send-queue durability and auto-retry), C2 (voice cancel),
+  C3 (captions), C5 (ICE restart), C7 (call duration) and C11 (realtime health) are NOT
+  started. C12 landed its read and the gallery sentence; the chat failed-bubble sentence
+  depends on C1's failure channel and is not done.
+- **Nothing here has run on a handset.** The riskiest paths need build 77 on both phones:
+  a dead token healing itself on a real device; the pause silencing a real message while the
+  sender's ticks still turn; a redial inside 15s refused before the camera opens; a tapped
+  call notification older than 35s refusing to ring; the ring disappearing on hangup.
+- `care_nudges` still carries the same full-column UPDATE grant that `reach_events` and
+  `call_invites` have now had narrowed (found in §291, still not fixed — it is a one-file
+  twin of 140200).
+- The FCM-404 revoke branch inside reach-notify is proven only by its parts.
+
+### Next step
+
+Finish Phase 2 in this order, smallest first: C11 (realtime health, `ManagedSubscription`
+only — the chat channels stay hand-rolled), C7 (`connectedAt` + a clock widget), C5 (ICE
+restart, copying `screen_share_session`'s 3s/12s/max-2 constants, NOT the plan's 2s/20s),
+then C1 → C2 → C3 as one chat pass. Before C5, re-read `screen_share_session.dart:167-182`
+and the three offer gates in `_onSignal`: a restart offer must be answered in place and must
+never fall through to the `ended → idle` adoption, or a torn-down callee RINGS for it.
+
+## §297 — 2026-09-07 — the adversarial round on §296, and the two high defects it found in my own work
+
+32 agents (6 attackers, 26 refutation passes) read the Phase 2 diff. **7 findings survived
+refutation, 19 were refuted.** Two were high, and both were mine. The round is the reason
+this section exists: everything in §296 passed its gates and its laws before this ran.
+
+### The two high ones
+
+**1. `revoke_other_push_tokens` could silence the phone it promises to keep.**
+`20260906140300` re-mirrored the kept install's token into `profiles.fcm_token`
+unconditionally:
+
+```
+select token into v_keep from public.push_tokens
+ where user_id = v_uid and device_id = p_keep_device_id and revoked_at is null;
+update public.profiles set fcm_token = v_keep, ... where id = v_uid ...;
+```
+
+`v_keep` is NULL whenever the ledger holds no live row for this install — an ordinary
+state, not an error: `registerToken()` is fire-and-forget on resume, the client's own 24h
+skip can return before the RPC is ever called (its prefs key survives an in-place update
+from a build that wrote `profiles.fcm_token` directly), `getToken()` can answer null on a
+GMS hiccup, and permission may simply have been refused. In all of those the account still
+had a working token in `profiles` — and "Sign out of other devices", whose dialog says
+"This phone stays signed in", would null it. The write also lands
+`fcm_token_updated_at = null`, which a build-73 partner can read.
+
+Fixed by **`20260906140600_signing_out_elsewhere_must_not_silence_the_phone_in_your_hand.sql`**
+(applied staging then production; production ledger `20260906234347`): the re-mirror only
+runs `if v_keep is not null`. The rule, stated in the header: this function may only ever
+REPLACE the profiles leg with a real token, never erase it — erasing is
+`revoke_push_token`'s job, and only when it names the token being revoked.
+
+Proven on both projects, rolled back. Production, with the real account's live token and no
+ledger row for the kept install:
+
+```
+before                                     fp 0fbad1fd
+revoke_other_push_tokens('this-install')   0
+after (must be unchanged)                  fp 0fbad1fd, fcm_token_updated_at null = false
+```
+
+**2. The call cooldown gate refused calls that would have connected.**
+`startCall` BROADCASTS the offer over the live channel before the invite row is written,
+and a partner whose app is open rings off that broadcast with no row involved. The row is
+only the durable wake for a CLOSED app. My gate aborted before the broadcast, so: hang up
+at eight seconds, press Call again at twelve, and a partner watching their screen would
+never hear it — a call that connects today.
+
+Fixed: the cooldown no longer refuses anything. It sets `_inviteOutcome = rateLimited`
+before dialling, so it only decides what the attempt will SAY if it times out at 35s.
+`call_cooldown_seconds()` keeps its consumer and nothing is vetoed.
+
+### The other five
+
+3. **"their phone was not rung" was itself false** — same reason: the broadcast rang an
+   open app. Both invite sentences are now conditional: "if their app was closed, it could
+   not ring". The default arm still says the partner never answered, correctly, because it
+   fires when the row landed.
+4. **`_inviteOutcome` survived a glare adoption**, so a person who ANSWERED their partner's
+   call could be told their own call could not be registered — reliably, because a build-73
+   peer advertises no glare flag and the 77 side yields every time. Reset added in
+   `_discardOutgoingForResolution`.
+5. **The 35s staleness guard ran on the device clock on exactly the path it exists for.**
+   `handlePendingCall` runs on a COLD start, before any heartbeat, so `ServerClock.now()`
+   was the handset's own clock; a phone more than 35s fast would drop every FCM-woken call
+   silently. Now gated on `ServerClock.isKnown`.
+6. **The pause destroyed the unread count instead of deferring it.** My `muted` early return
+   sat above `UnreadTally.increment`. Under a cover that tally is the ONLY unread signal
+   that exists (no notification is ever posted there), and nothing backfills — so a paused
+   window left a covered phone with no dot, permanently. On the plain identity, which both
+   handsets run, the next message after the pause said "1 new message" while thirteen
+   waited. `increment` now runs BEFORE the muted return: the message is counted, only the
+   drawing stops.
+7. **The public FAQ promised quieting no installed build performs.** `web/faq.html` is not
+   version-locked to the APK, and build 73 ignores the `muted` key. Reworded to say an
+   older install still shows a count while paused.
+
+### Two laws amended, with the reason
+
+- `pause_covers_messages_test.dart` asserted `muted < tally` ("a paused message must not
+  move the cover dot"). That intent was wrong — it is what destroyed the count. Now asserts
+  `tally < muted`.
+- `turn_relay_test.dart` pinned the literal `'was not rung'`, the exact phrase proven false.
+  Now scoped to the two invite arms: they may not contain `never answered` or `was not
+  rung`, and both must stay conditional. The law's purpose is unchanged — an invite failure
+  must never be reported as the partner ignoring the call.
+
+Two of my own comments then blew two source-law windows (`msg_sync` → `showMessageNotification`
+1600 raw chars; `'connect_timeout'` → `_lastError` 900). Both were prose, not logic; trimmed
+to 1473 and 811 with the reasoning kept here instead.
+
+### Verified after the fixes
+
+- `flutter test` (full): `03:05 +1717 ~3: All tests passed!`, `FULL_TEST_EXIT=0`.
+- `flutter analyze --no-pub lib/`: 0 errors, 0 warnings, matcher probed (2 / 0).
+- The new migration proven on staging and production, rolled back, output above.
+
+### Still open
+
+- A second adversarial round over THESE fixes is running; its findings are not in this
+  section.
+- Nothing has run on a handset; build 77 is not built.
+- C1, C2, C3, C5, C7 and C11 of Phase 2 remain unstarted.
+- `care_nudges` still carries the full-column UPDATE grant.
+
+### Next step
+
+Read the second-round findings and act on them; then Phase 2's remaining items in the order
+§296 names. The lesson worth carrying: both high defects were in code that had passed the
+gates, the laws and my own reading — and one of them was introduced by a fix.

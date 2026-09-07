@@ -41,11 +41,23 @@ const MAX_PER_RUN = 2000;
 let _secret: string | null | undefined;
 async function notifySecret(): Promise<string | null> {
   if (_secret !== undefined) return _secret;
-  const { data } = await admin
+  const { data, error } = await admin
     .from("app_secrets")
     .select("value")
     .eq("key", "NOTIFY_SHARED_SECRET")
     .maybeSingle();
+  // Returned WITHOUT caching, the same shape reach-notify already uses. `error`
+  // used to be destructured away: one transient read failure pinned _secret to
+  // null for the life of the instance, every later cron call answered 403, and
+  // deleted media was never reaped again — silently, because a 403 from a
+  // scheduled job is nobody's screen.
+  if (error) {
+    console.error(
+      "app_secrets read failed for NOTIFY_SHARED_SECRET",
+      error.message,
+    );
+    return null;
+  }
   _secret = data?.value ?? null;
   return _secret;
 }

@@ -107,7 +107,14 @@ class EmergencyLockService {
   static void _trigger() {
     final cb = _onLock;
     if (cb == null) return;
-    // Run on the main isolate after the current frame.
-    SchedulerBinding.instance.addPostFrameCallback((_) => cb());
+    // Run on the main isolate after the current frame — and ASK for that frame.
+    // addPostFrameCallback only appends to _postFrameCallbacks; it schedules
+    // nothing. The panic gesture is pressed on a screen that is sitting still,
+    // which is exactly when no frame is pending, so the cover never came up:
+    // the one control whose whole purpose is to work immediately was the one
+    // waiting on something that was never going to happen.
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) => cb())
+      ..scheduleFrame();
   }
 }

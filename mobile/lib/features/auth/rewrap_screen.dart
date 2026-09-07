@@ -80,13 +80,13 @@ class _RewrapScreenState extends ConsumerState<RewrapScreen> {
     // The ceremony screen names the product and shows a live code. Fix A keeps
     // the tree alive under the OS unlock, so the recents snapshot would
     // otherwise show this screen — FLAG_SECURE blanks it there.
-    unawaited(SecureScreen.setSecure());
+    unawaited(SecureScreen.acquire());
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
   void dispose() {
-    unawaited(SecureScreen.clearSecure());
+    unawaited(SecureScreen.release());
     _tick?.cancel();
     _sub?.dispose();
     _typed.dispose();

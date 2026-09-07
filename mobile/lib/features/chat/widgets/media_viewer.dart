@@ -123,7 +123,7 @@ class _MediaViewerState extends State<MediaViewer>
       ..dispose();
     _transform.dispose();
     _pages.dispose();
-    unawaited(SecureScreen.clearSecure());
+    if (_secureHeld) unawaited(SecureScreen.release());
     super.dispose();
   }
 
@@ -199,10 +199,18 @@ class _MediaViewerState extends State<MediaViewer>
   /// mixed pager the flag has to follow the page rather than the screen.
   void _applySecure(int i) {
     if (i >= widget.source.length) return;
-    unawaited(widget.source.itemAt(i).isVideo
-        ? SecureScreen.setSecure()
-        : SecureScreen.clearSecure(),);
+    // At most ONE reference held, flipped as the page changes. SecureScreen is
+    // refcounted now, so an unbalanced acquire here would pin the flag on for
+    // the rest of the process and an unbalanced release would drop a screen
+    // underneath out of FLAG_SECURE.
+    final want = widget.source.itemAt(i).isVideo;
+    if (want == _secureHeld) return;
+    _secureHeld = want;
+    unawaited(want ? SecureScreen.acquire() : SecureScreen.release());
   }
+
+  /// Whether this viewer currently holds a [SecureScreen] reference.
+  bool _secureHeld = false;
 
   void _maybeExtend(int i) {
     if (i >= widget.source.length - _extendWithin) widget.source.extend();
@@ -293,9 +301,9 @@ class _MediaViewerState extends State<MediaViewer>
               -point.dy * (_doubleTapScale - 1), 0, 1,)
           ..scaleByDouble(
               _doubleTapScale, _doubleTapScale, _doubleTapScale, 1,));
-    _zoomTo = Matrix4Tween(begin: _transform.value, end: target).animate(
-      CurvedAnimation(parent: _zoom, curve: Curves.easeOutCubic),
-    );
+    _zoomTo = Matrix4Tween(begin: _transform.value, end: target)
+        .chain(CurveTween(curve: Curves.easeOutCubic))
+        .animate(_zoom);
     _zoom.forward(from: 0);
   }
 

@@ -98,7 +98,8 @@ class CoverEntry {
       if (!passed || !navContext.mounted) return;
 
       // The splash is a deliberate beat of delay — but not while someone is
-      // ringing. 1.2s of branding against a caller who is counting seconds is
+      // ringing. A splash's worth of branding (MilesMotion.flicker, the length
+      // IntroSplashScreen runs) against a caller who is counting seconds is
       // the wrong trade, and the shoulder-surfer argument does not apply when
       // the user is answering a call they were just notified about.
       if (!forCall) {

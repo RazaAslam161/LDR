@@ -81,6 +81,11 @@ import 'package:uuid/uuid.dart';
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
 
+  /// Whether the chat is the tab the user is looking at. Today the shell
+  /// mounts one tab body, so a mounted chat is a selected one and this stays
+  /// true; the retained-tab shell drives it. Read by the read-ack gate.
+  static final ValueNotifier<bool> visible = ValueNotifier<bool>(true);
+
   @override
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
@@ -739,6 +744,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     realtimeResumed.addListener(_subscribe); // rejoin on any socket reconnect
+    // The app lock and the stealth scrim are Stack siblings over a still-
+    // mounted chat: no route changes, so an owed read ack has to be settled
+    // when THEY move, not only when the route does.
+    ChatScreen.visible.addListener(_settleOwedAck);
+    PresenceService.present.addListener(_settleOwedAck);
     // Sends can start anywhere — the shell's camera tab opens with this screen
     // unmounted — so the chat follows the queue rather than owning it.
     ChatSendQueue.instance.addListener(_adoptPending);
@@ -791,7 +801,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   ///
   /// [flush] for the transitions where the written value has to be right before
   /// this screen stops existing: open, catch-up, background, close.
+  /// A read receipt says a PERSON saw the message. The old test was `mounted`,
+  /// and the chat stays mounted under the app lock, under the stealth scrim
+  /// and under any page pushed over it — so a message arriving while the
+  /// phone lay locked went green on the sender's side. Everything downstream
+  /// (the 'read' broadcast, the coalesced ack_read, the close-time flush)
+  /// advances only through here, so this one gate covers all of it.
+  bool get _chatVisible =>
+      mounted &&
+      ChatScreen.visible.value &&
+      PresenceService.humanPresent &&
+      (ModalRoute.of(context)?.isCurrent ?? true);
+
+  /// An ack that arrived while nobody was looking, to be sent the moment
+  /// somebody is.
+  bool _ackOwed = false;
+
+  void _settleOwedAck() {
+    if (!_ackOwed || !_chatVisible) return;
+    _ackOwed = false;
+    _ackRead('visible', flush: true);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // ModalRoute.of registers this State on the route, so a page pushed over
+    // the chat and popped again re-runs this — the route leg of visibility.
+    _settleOwedAck();
+  }
+
   void _ackRead(String trigger, {bool flush = false}) {
+    if (!_chatVisible) {
+      _ackOwed = true;
+      return;
+    }
     final seq = _maxSeq;
     if (seq <= 0) return;
     if (seq > _broadcastReadSeq) {
@@ -921,20 +965,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // it inside the try would skip the commonest case of all, a partner who
     // reacted without sending anything. Not awaited; the rejoin does not wait
     // on a repaint.
-    try {
-      final missed = await ChatRepository.fetchSince(couple, _maxSeq);
-      if (mounted && missed.isNotEmpty) {
-        for (final m in missed) {
-          _onIncoming(m, fromDb: true, source: 'catchup');
+    if (_maxSeq == 0) {
+      // A zero watermark is not a cursor, it is the absence of one:
+      // fetchSince(0) is the OLDEST 500 rows of the relationship, and a first
+      // read that failed used to paint them here as the conversation — with
+      // no spinner, no banner and the list pinned to the newest of THOSE.
+      await _loadNewest();
+      if (mounted) setState(() {});
+    } else {
+      try {
+        var after = _maxSeq;
+        var any = false;
+        while (true) {
+          final page = await ChatRepository.fetchSince(couple, after);
+          if (!mounted) return;
+          for (final m in page) {
+            _onIncoming(m, fromDb: true, source: 'catchup');
+          }
+          any = any || page.isNotEmpty;
+          // A short page is the end; a full one may have a successor. One
+          // page used to be the whole answer, and a gap longer than it was
+          // truncated for the life of the screen.
+          if (page.length < ChatRepository.catchUpPageSize) break;
+          after = page.last.seq;
         }
-        // We have now genuinely received them; say so, and if the chat is open
-        // they are also read.
-        unawaited(
-            ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger),);
-        _ackRead(trigger, flush: true);
+        if (any) {
+          // We have now genuinely received them; say so, and if the chat is
+          // open they are also read.
+          unawaited(
+              ChatReceiptRepository.ackDelivered(_maxSeq, trigger: trigger),);
+          _ackRead(trigger, flush: true);
+        }
+      } catch (e, st) {
+        ChatReceiptRepository.reportIfNotMerelyOffline(e, st, 'chat-catchup');
+        debugPrint('[chat] catch-up failed: $e');
       }
-    } catch (e) {
-      debugPrint('[chat] catch-up failed: $e');
     }
     if (trigger != 'chat_open' && mounted) unawaited(_loadReactions(couple));
   }
@@ -1133,18 +1198,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       }),);
     }
     _clearedBefore = await _loadClearedBefore(couple.id);
-    try {
-      // warm: false — signing is a round trip per bucket and nothing below
-      // paints a bubble. The spinner used to cover the fetch AND the signing
-      // AND the subscribe AND two receipt refreshes, so the conversation was
-      // withheld until every one of them had returned.
-      final msgs = await ChatRepository.fetch(couple.id, warm: false);
-      _messages.addAll(msgs);
+    // Paint the page this process already has, in the same spirit as the
+    // receipt peek above: a tab switch disposes this screen, so without it
+    // every return to Chat is a full-screen spinner over a 300-row SELECT and
+    // 300 decrypts. Seeded AFTER _clearedBefore resolves — that is a disk read,
+    // not a round trip — because painting first would show messages the user
+    // has already cleared. The network fetch below still runs and replaces
+    // this; the cache only removes the wait.
+    final cached = ChatRepository.cachedPage(couple.id);
+    if (cached != null && cached.isNotEmpty && mounted) {
+      _messages.addAll(cached);
       _sortMessages();
-      _ids.addAll(msgs.map((m) => m.id));
-    } catch (_) {
-      // first-run is fine
+      _ids.addAll(cached.map((m) => m.id));
+      setState(() => _loading = false);
     }
+    await _loadNewest();
     // Paint here. Everything after this point is network work the list does not
     // need in order to show text, and text is most of a conversation.
     if (mounted) setState(() => _loading = false);
@@ -1369,6 +1437,59 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     await PresenceService.setMood(id, m.key, m.hex, at: at);
   }
 
+  /// The read failed. Nothing was deleted — but an empty list rendered the
+  /// first-run screen, so every dead-signal moment read as the partner having
+  /// wiped the conversation.
+  bool _loadFailed = false;
+
+  /// The newest page, replacing what is on screen. Shared by the first open,
+  /// the retry button and a catch-up that has no watermark to catch up from.
+  Future<void> _loadNewest() async {
+    final couple = _coupleId;
+    if (couple == null) return;
+    try {
+      // warm: false — signing is a round trip per bucket and nothing below
+      // paints a bubble. The spinner used to cover the fetch AND the signing
+      // AND the subscribe AND two receipt refreshes, so the conversation was
+      // withheld until every one of them had returned.
+      final msgs = await ChatRepository.fetch(couple, warm: false);
+      // REPLACE, not append: the cache seed may already hold this page, and
+      // anything that arrived over realtime while the fetch was in flight has
+      // to survive it. Rebuilt from the fetched page plus whatever ids the
+      // page does not carry.
+      final fetchedIds = msgs.map((m) => m.id).toSet();
+      final live = _messages.where((m) => !fetchedIds.contains(m.id)).toList();
+      _messages
+        ..clear()
+        ..addAll(msgs)
+        ..addAll(live);
+      _sortMessages();
+      _ids
+        ..clear()
+        ..addAll(_messages.map((m) => m.id));
+      _loadFailed = false;
+    } catch (e, st) {
+      // Not first-run. Offline is not reported (the discriminator drops it);
+      // a Postgrest refusal is a policy or schema defect and leaves the phone.
+      _loadFailed = true;
+      ChatReceiptRepository.reportIfNotMerelyOffline(e, st, 'chat-fetch');
+    }
+  }
+
+  Future<void> _retryLoad() async {
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
+    await _loadNewest();
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (_loadFailed) return;
+    unawaited(ChatRepository.warmMedia(List.of(_messages)).then((_) {
+      if (mounted) setState(() {});
+    }));
+  }
+
   Future<void> _reload() async {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
@@ -1391,7 +1512,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // the map is a leak the length of the conversation.
         _rowOffsets.forgetAllExcept(_ids);
       });
-    } catch (_) {}
+    } catch (e, st) {
+      // The rows already on screen stay; a failed refresh after a delete
+      // leaves a deleted message visible, so say so and offer the retry.
+      ChatReceiptRepository.reportIfNotMerelyOffline(e, st, 'chat-reload');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text("Couldn't refresh the conversation."),
+        action: SnackBarAction(label: 'Retry', onPressed: _reload),
+      ),);
+    }
   }
 
   _MsgStatus _statusFor(Message m, Presence? p) {
@@ -1985,6 +2115,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     realtimeResumed.removeListener(_subscribe);
+    ChatScreen.visible.removeListener(_settleOwedAck);
+    PresenceService.present.removeListener(_settleOwedAck);
     _receiptTick.dispose();
     final rc = _receiptChannel;
     if (rc != null) SupabaseService.client.removeChannel(rc);
@@ -2207,7 +2339,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                     if (one.kind == 'image' ||
                                         one.kind == 'video')
                                       IconButton(
-                                        tooltip: 'Save to gallery',
+                                        tooltip: 'Save to vault',
                                         icon: const Icon(Icons.download_rounded,
                                             color: MilesColors.cream50,),
                                         onPressed: () {
@@ -2246,7 +2378,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       Expanded(
                         child: _loading
                             ? const Center(child: CircularProgressIndicator())
-                            : _messages.isEmpty
+                            : _loadFailed && _messages.isEmpty
+                                ? _LoadFailed(onRetry: _retryLoad)
+                                : _messages.isEmpty
                                 ? const _EmptyChat()
                                 : Builder(builder: (_) {
                                     // Media sent together collapses into one
@@ -3266,7 +3400,7 @@ class _Content extends StatelessWidget {
                       ),
                     ),
                   ),
-                // Save-to-gallery — only once uploaded (url available).
+                // Save to vault — only once uploaded (url available).
                 if (url != null && m.sendStatus == SendStatus.sent)
                   Positioned(
                     bottom: 6,
@@ -3620,6 +3754,42 @@ class _EmptyChat extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: MilesColors.taupe, height: 1.5),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The read failed. Not first-run: painting "Say something sweet" over a
+/// failed fetch told people their partner had wiped the conversation.
+class _LoadFailed extends StatelessWidget {
+  const _LoadFailed({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_outlined,
+                color: MilesColors.taupe, size: 40,),
+            const SizedBox(height: 16),
+            Text("Couldn't load your conversation.",
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.displaySmall,),
+            const SizedBox(height: 8),
+            const Text(
+              'Nothing was deleted. Check your connection and try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: MilesColors.taupe, height: 1.5),
+            ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: onRetry, child: const Text('Try again')),
           ],
         ),
       ),

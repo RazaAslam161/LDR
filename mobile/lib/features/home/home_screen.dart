@@ -15,6 +15,7 @@ import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/realtime/presence_route_observer.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/core/ui/mood.dart';
@@ -471,7 +472,10 @@ class _PartnerStatusCard extends StatelessWidget {
             _InfoRow(
                 icon: Icons.favorite_outline, text: 'Feeling ${mood.label}',),
           ],
-          if (online && presence?.currentScreen != null) ...[
+          // isKnownRoom, not `!= null`: a build-73 partner still publishes
+          // 'Vault', 'Disguise', 'Export' — this line is where that word
+          // reached the other phone's eyes.
+          if (online && isKnownRoom(presence?.currentScreen)) ...[
             const SizedBox(height: 8),
             _InfoRow(
                 icon: Icons.smartphone_outlined,

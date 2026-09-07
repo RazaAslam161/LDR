@@ -231,11 +231,6 @@ class VaultRepository {
     }
   }
 
-  /// A packed blob whose first 40 bytes are all zero is the legacy plaintext
-  /// shape — nonce and MAC both empty. Uploading one would put the vault's
-  /// contents in storage in the clear.
-  ///
-
   /// The bucket's allow-list already carries these (verified live:
   /// image/jpeg|png|webp, video/mp4|quicktime, audio/mp4|aac|mpeg).
   static String _plainExt(String mime) => switch (mime) {

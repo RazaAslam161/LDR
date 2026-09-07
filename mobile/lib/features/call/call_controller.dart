@@ -14,6 +14,9 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
+import 'package:miles/core/services/fcm_service.dart';
+import 'package:miles/core/services/server_clock.dart';
+import 'package:miles/core/utils/json_utils.dart';
 import 'package:miles/features/call/call_foreground.dart';
 import 'package:miles/features/call/call_stats.dart';
 import 'package:miles/features/call/pip_mode.dart';
@@ -208,6 +211,11 @@ class CallController extends ChangeNotifier {
   /// row after the insert it is racing has actually landed.
   Future<void>? _inviteWrite;
 
+  /// What became of this attempt's call_invites row. The 35s sentence reads
+  /// it: a refused row is a ring that never existed, and must not be reported
+  /// as the partner not answering.
+  _InviteOutcome _inviteOutcome = _InviteOutcome.pending;
+
   /// Candidate types seen, ours and theirs. The counts are the whole diagnosis
   /// when a call fails: no local relay means TURN never allocated, no remote
   /// candidates at all means signalling never arrived, and both present with no
@@ -379,10 +387,19 @@ class CallController extends ChangeNotifier {
         // The screen pops itself the moment state returns to idle, so a call
         // that ran the full 35 seconds and died used to leave nothing at all
         // behind — the same blank as a call that was simply declined.
-        _lastError = _remoteCandTypes.isEmpty
-            ? 'Your partner never answered — their app may be closed.'
-            : 'Could not connect the call. One of you may be on a network '
-                'that blocks calls.';
+        // Neither sentence may claim their phone did not ring (§296).
+        _lastError = switch (_inviteOutcome) {
+          _InviteOutcome.rateLimited =>
+            'That was too soon after your last call — if their app was '
+                'closed, it could not ring. Wait a few seconds and try again.',
+          _InviteOutcome.failed =>
+            'The call could not be registered — if their app was closed, it '
+                'could not ring. Check your connection and try again.',
+          _ => _remoteCandTypes.isEmpty
+              ? 'Your partner never answered — their app may be closed.'
+              : 'Could not connect the call. One of you may be on a network '
+                  'that blocks calls.',
+        };
         _send('hangup', {});
         _teardown(CallState.ended);
       }
@@ -413,6 +430,7 @@ class CallController extends ChangeNotifier {
         'has_me': me != null,
         'has_callee': callee != null,
       },);
+      _inviteOutcome = _InviteOutcome.failed;
       return;
     }
     try {
@@ -427,7 +445,13 @@ class CallController extends ChangeNotifier {
         'video': video,
       });
       Diag.record(DiagArea.call, 'invite_inserted', corr: id);
+      _inviteOutcome = _InviteOutcome.landed;
     } catch (e, st) {
+      // PT429 is enforce_send_rate: the caller's previous row is under the
+      // 15s gap, so no durable ring exists for this attempt.
+      _inviteOutcome = e is PostgrestException && e.code == 'PT429'
+          ? _InviteOutcome.rateLimited
+          : _InviteOutcome.failed;
       // `catch (_) {}` before. This insert is what fires the push that rings a
       // closed app, so when it fails the caller waits the full 35s and tears
       // down with no reason to show.
@@ -481,6 +505,22 @@ class CallController extends ChangeNotifier {
 
   /// Ring a call delivered by FCM (the realtime offer was likely missed because
   /// the app was closed). Fetch the stored offer and present it as ringing.
+  /// Seconds before this account may place another call, or 0.
+  ///
+  /// Advisory: a refused RPC must never stop a call the trigger would have
+  /// allowed, so a failure answers 0 and the insert takes the refusal as it
+  /// always did.
+  Future<int> _callCooldown() async {
+    try {
+      final seconds =
+          await SupabaseService.client.rpc<dynamic>('call_cooldown_seconds');
+      return JsonUtils.parseInt(seconds);
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'call-cooldown');
+      return 0;
+    }
+  }
+
   Future<void> handlePendingCall(
       String callId, String fromName, bool fallbackVideo,) async {
     if (state != CallState.idle || callId.isEmpty) return;
@@ -502,6 +542,27 @@ class CallController extends ChangeNotifier {
           .maybeSingle();
       final sdp = row?['offer_sdp'] as String?;
       if (sdp == null || sdp.isEmpty || state != CallState.idle) return;
+      // A tapped notification can arrive long after the caller gave up: the
+      // row lives two days, the caller's own attempt ends at 35s, and rows
+      // are never deleted. Ringing off one of those is the "phone rang for a
+      // call nobody was placing" the report describes. Both guards use the
+      // SERVER clock — handset clocks in this repo have measured seconds
+      // apart.
+      if (row?['answered_at'] != null) return;
+      final placed = DateTime.tryParse(row?['created_at']?.toString() ?? '');
+      // Only when the server clock is actually known. This runs on a COLD
+      // start — the app was woken by the push — so the first heartbeat may
+      // not have landed and ServerClock.now() is then just the handset's own
+      // clock. A phone running more than 35s fast would drop every incoming
+      // call it was woken for, silently, which is worse than the stale ring
+      // this guard exists to stop.
+      if (ServerClock.isKnown &&
+          placed != null &&
+          ServerClock.now().difference(placed.toUtc()) >
+              const Duration(seconds: 35)) {
+        Diag.record(DiagArea.call, 'pending_call_stale', corr: callId);
+        return;
+      }
       // The invite row id IS the call id, so a callee woken by FCM files its
       // trace under the same name as the caller who never saw it ring.
       _callId = callId;
@@ -1016,6 +1077,21 @@ class CallController extends ChangeNotifier {
     // camera opens, so it is the likeliest place for a resolution to land. Past
     // this line the controller may already belong to the peer's call.
     if (attempt != _attempt) return;
+    // Ask before dialling, and NEVER refuse on the answer.
+    //
+    // The 15s gap that 20260819110000 enforces on call_invites governs the
+    // DURABLE ring only — the row is what wakes a closed app through FCM. The
+    // offer this method broadcasts a few lines below rings a partner whose app
+    // is already open, on a channel proven live, with no row involved. A gate
+    // that aborted here would therefore refuse calls that connect today: hang
+    // up at eight seconds, press Call again at twelve, and the partner
+    // watching their screen would never hear it.
+    //
+    // So the cooldown only decides what this attempt will SAY if it times
+    // out. Set before the offer goes out, because the insert is unawaited and
+    // its own PT429 may land after the 35s sentence has already been chosen.
+    if (await _callCooldown() > 0) _inviteOutcome = _InviteOutcome.rateLimited;
+    if (attempt != _attempt) return;
     try {
       await _openMedia(video: video);
       if (attempt != _attempt) return;
@@ -1114,74 +1190,115 @@ class CallController extends ChangeNotifier {
     _setState(CallState.ringing);
   }
 
+  /// True for the whole of [accept], which is six awaits long.
+  ///
+  /// Neither operand of the guard below changes until the very end of that
+  /// chain, and call_screen's Accept is a bare `onTap: call.accept` with no
+  /// disabled state — so a second tap (the natural response to a tap that
+  /// shows nothing for one to ten seconds) re-entered the whole thing, bumped
+  /// `_attempt`, and orphaned the FIRST attempt's camera, microphone and peer
+  /// connection. They stayed capturing after the call ended and through every
+  /// later call.
+  ///
+  /// The guard lives INSIDE accept() rather than in a wrapper: three source-law
+  /// tests read this method's body by locating 'Future<void> accept()', and a
+  /// wrapper moved the generation claim, the channel refusal and the connect
+  /// timeout out of what they can see.
+  bool _accepting = false;
+
   Future<void> accept() async {
-    if (state != CallState.ringing || _pendingOffer == null) return;
-    // Six awaits, and the same orphan shape as startCall: a hangup arriving
-    // mid-accept runs _teardown, and without a generation the media and the
-    // peer connection opened after it are published to a call that has ended.
-    final attempt = ++_attempt;
-    camOn = _pendingVideo;
-    _startedAt = DateTime.now();
-    _localCandTypes.clear();
-    _remoteCandTypes.clear();
-    Diag.record(DiagArea.call, 'accept', corr: _callId, fields: {
-      'video': isVideo,
-      'relay_known': relayKnown,
-      'chan': _chan != null,
-      'chan_live': _chanLive,
-    },);
-    // The answer and every candidate this side gathers ride the same channel.
-    // Answering without it is a phone that rings, is picked up, and connects to
-    // nothing — reported as "the call never worked", never as an error.
-    if (!await _ensureChannel()) {
-      if (attempt != _attempt) return;
-      _failWithoutChannel('accept_no_channel');
-      return;
-    }
-    if (attempt != _attempt) return;
+    if (_accepting) return;
+    _accepting = true;
     try {
-      await _openMedia(video: isVideo);
-      await _routeAudio();
-      await _ensureRelay();
-      await _createPc();
-      await _pc!.setRemoteDescription(_pendingOffer!);
-      _remoteSet = true;
-      await _flushPending();
-      final answer = await _pc!.createAnswer();
-      await _pc!.setLocalDescription(answer);
-      // Everything below writes state a teardown has already reset.
-      if (attempt != _attempt) return;
-      _send('answer', {'sdp': answer.sdp, 'type': answer.type});
-      // NOT connected — nothing has been negotiated with the network yet. Set
-      // here, the callee showed "connected" over a black screen for 35s while
-      // the caller still showed "Calling…", so the two people had two
-      // irreconcilable stories and neither described the real failure.
-      // onConnectionState is the only authority for connected.
-      _setState(CallState.calling);
-      // The callee had no timeout at all: its only exit was the caller's
-      // hangup broadcast, and if that never arrived the wakelock and the
-      // foreground service outlived a call that did not exist.
-      _startConnectTimeout();
-      _pendingOffer = null;
-      await CallForegroundService.start();
-    } catch (e, st) {
-      if (attempt != _attempt) return;
-      // `catch (_)` before: the exception was bound and dropped. It covers
-      // _openMedia (permissions, camera in use by another app), _routeAudio,
-      // _ensureRelay, _createPc and the SDP exchange — five very different
-      // causes collapsed into one silent hangup, on the device that was TRYING
-      // TO ANSWER. From the caller's side this is indistinguishable from being
-      // ignored.
-      Diag.record(DiagArea.call, 'accept_failed', corr: _callId, fields: {
-        'error': e.runtimeType.toString(),
-        'has_pc': _pc != null,
-        'remote_set': _remoteSet,
+      if (state != CallState.ringing || _pendingOffer == null) return;
+      // Six awaits, and the same orphan shape as startCall: a hangup arriving
+      // mid-accept runs _teardown, and without a generation the media and the
+      // peer connection opened after it are published to a call that has ended.
+      final attempt = ++_attempt;
+      camOn = _pendingVideo;
+      _startedAt = DateTime.now();
+      _localCandTypes.clear();
+      _remoteCandTypes.clear();
+      Diag.record(DiagArea.call, 'accept', corr: _callId, fields: {
+        'video': isVideo,
+        'relay_known': relayKnown,
+        'chan': _chan != null,
+        'chan_live': _chanLive,
       },);
-      // The five causes above are only distinguishable by their type, and the
-      // type only leaves the handset through here.
-      ErrorReporter.report(e, st, kind: 'call-accept');
-      _send('hangup', {});
-      unawaited(_teardown(CallState.ended));
+      // The answer and every candidate this side gathers ride the same channel.
+      // Answering without it is a phone that rings, is picked up, and connects to
+      // nothing — reported as "the call never worked", never as an error.
+      if (!await _ensureChannel()) {
+        if (attempt != _attempt) return;
+        _failWithoutChannel('accept_no_channel');
+        return;
+      }
+      if (attempt != _attempt) return;
+      try {
+        await _openMedia(video: isVideo);
+        await _routeAudio();
+        await _ensureRelay();
+        await _createPc();
+        await _pc!.setRemoteDescription(_pendingOffer!);
+        _remoteSet = true;
+        await _flushPending();
+        final answer = await _pc!.createAnswer();
+        await _pc!.setLocalDescription(answer);
+        // Everything below writes state a teardown has already reset.
+        if (attempt != _attempt) return;
+        _send('answer', {'sdp': answer.sdp, 'type': answer.type});
+        // NOT connected — nothing has been negotiated with the network yet. Set
+        // here, the callee showed "connected" over a black screen for 35s while
+        // the caller still showed "Calling…", so the two people had two
+        // irreconcilable stories and neither described the real failure.
+        // onConnectionState is the only authority for connected.
+        _setState(CallState.calling);
+        // The callee had no timeout at all: its only exit was the caller's
+        // hangup broadcast, and if that never arrived the wakelock and the
+        // foreground service outlived a call that did not exist.
+        _startConnectTimeout();
+        _pendingOffer = null;
+        // Answered, so the ring comes down here as well as in _teardown — the
+        // shade must not still be offering a call this device just picked up
+        // — and the row says so, which is what stops a later tap on a copy of
+        // that notification ringing it again (handlePendingCall).
+        final answered = _callId;
+        if (answered != null) {
+          unawaited(FcmService.clearCallNotification(answered));
+          unawaited(
+            SupabaseService.client
+                .from('call_invites')
+                .update({'answered_at': DateTime.now().toUtc().toIso8601String()})
+                .eq('id', answered)
+                .then(
+                  (_) {},
+                  onError: (Object e, StackTrace st) =>
+                      ErrorReporter.report(e, st, kind: 'call-answered'),
+                ),
+          );
+        }
+        await CallForegroundService.start();
+      } catch (e, st) {
+        if (attempt != _attempt) return;
+        // `catch (_)` before: the exception was bound and dropped. It covers
+        // _openMedia (permissions, camera in use by another app), _routeAudio,
+        // _ensureRelay, _createPc and the SDP exchange — five very different
+        // causes collapsed into one silent hangup, on the device that was TRYING
+        // TO ANSWER. From the caller's side this is indistinguishable from being
+        // ignored.
+        Diag.record(DiagArea.call, 'accept_failed', corr: _callId, fields: {
+          'error': e.runtimeType.toString(),
+          'has_pc': _pc != null,
+          'remote_set': _remoteSet,
+        },);
+        // The five causes above are only distinguishable by their type, and the
+        // type only leaves the handset through here.
+        ErrorReporter.report(e, st, kind: 'call-accept');
+        _send('hangup', {});
+        unawaited(_teardown(CallState.ended));
+      }
+    } finally {
+      _accepting = false;
     }
   }
 
@@ -2350,6 +2467,12 @@ class CallController extends ChangeNotifier {
     // publishes its peer connection over the call being rescued.
     final attempt = ++_attempt;
     _connectTimer?.cancel();
+    // The outgoing attempt's verdict dies with it. Without this the adopted
+    // INCOMING call inherits it, and a person who answered their partner's
+    // call is told their own call could not be registered — reliably, because
+    // a build-73 peer advertises no glare flag and this side yields every
+    // time.
+    _inviteOutcome = _InviteOutcome.pending;
     // The monitor's 2s timer would go on sampling the connection disposed
     // below, and `stats` would carry the abandoned call's last sample into the
     // adopted call's teardown row as if it described that one.
@@ -2512,6 +2635,10 @@ class CallController extends ChangeNotifier {
     // glare branch that a controller still reading `calling` is on its way out.
     if (_tearingDown) return;
     _tearingDown = true;
+    // Captured before the resets below null it: the ring on the shade is keyed
+    // on this id, and a call that is over must not leave one behind.
+    final ringing = _callId;
+    if (ringing != null) unawaited(FcmService.clearCallNotification(ringing));
     // Before anything can await: an attempt still in flight has to stop writing
     // to fields this method is about to reset, or it republishes _pc after the
     // dispose below and leaves the microphone open on a call that has ended.
@@ -2576,6 +2703,7 @@ class CallController extends ChangeNotifier {
       _resolvingCallId = null;
       _resolvingIce.clear();
       _inviteWrite = null;
+      _inviteOutcome = _InviteOutcome.pending;
       isCaller = false;
       micOn = true;
       camOn = true;
@@ -2801,3 +2929,8 @@ final callControllerProvider = ChangeNotifierProvider<CallController>((ref) {
   );
   return c;
 });
+
+/// The fate of an attempt's durable ring. [pending] until the insert returns;
+/// [landed] rings a closed phone; [rateLimited] and [failed] mean no row
+/// exists and the callee's phone was never asked to ring.
+enum _InviteOutcome { pending, landed, rateLimited, failed }

@@ -213,21 +213,27 @@ class _StaggerItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final anim = CurvedAnimation(
-      parent: controller,
-      curve: Interval(begin, (begin + 0.55).clamp(0.0, 1.0),
-          curve: MilesMotion.enter,),
+    // drive(CurveTween), never CurvedAnimation — route_motion.dart says why:
+    // one registers a status listener on the controller that only dispose()
+    // removes, and this build runs on every rebuild of the screen it enters.
+    final anim = controller.drive(
+      CurveTween(
+        curve: Interval(begin, (begin + 0.55).clamp(0.0, 1.0),
+            curve: MilesMotion.enter,),
+      ),
     );
-    return AnimatedBuilder(
-      animation: anim,
-      // Built once and reused every frame: the subtree does not depend on the
-      // animation value, only the two wrappers around it do. Rebuilding a form
-      // field sixty times a second is how an entrance animation turns into a
-      // dropped-frame report on a five-year-old handset.
-      child: child,
-      builder: (context, child) => Opacity(
-        opacity: anim.value,
-        child: Transform.translate(
+    // The fade rides the render object: FadeTransition listens to the
+    // animation itself, so only the lift below re-runs per frame.
+    return FadeTransition(
+      opacity: anim,
+      child: AnimatedBuilder(
+        animation: anim,
+        // Built once and reused every frame: the subtree does not depend on
+        // the animation value, only the wrapper around it does. Rebuilding a
+        // form field sixty times a second is how an entrance animation turns
+        // into a dropped-frame report on a five-year-old handset.
+        child: child,
+        builder: (context, child) => Transform.translate(
           offset: Offset(0, MilesMotion.rise * (1 - anim.value)),
           child: child,
         ),

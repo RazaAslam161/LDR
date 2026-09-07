@@ -3,10 +3,11 @@ import 'package:miles/core/diag/diag.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 
-/// Saves received/sent chat + touch media into the Private Vault — and ONLY the
-/// vault. Zero bytes touch device storage: no gallery entry, no Downloads file,
-/// no temp file. We store a reference (public URL, or `intimate:<path>` for the
-/// private bucket) in the PIN-protected vault; the bytes stay in Supabase.
+/// Copies received/sent chat + touch media into the Private Vault — and ONLY
+/// the vault. The bytes are downloaded once and re-uploaded, in the clear,
+/// under the owner's own folder of the personal_vault bucket (owner-only RLS,
+/// behind the vault PIN and FLAG_SECURE — THREAT-MODEL §1). Zero bytes touch
+/// device storage: no gallery entry, no Downloads file, no temp file.
 class SaveMediaService {
   SaveMediaService._();
 
@@ -47,7 +48,8 @@ class SaveMediaService {
   }) async {
     final label = '$noun from $senderName · ${_formatDate(DateTime.now())}';
     try {
-      // Fetch the bytes and let the vault keep its OWN encrypted copy.
+      // Fetch the bytes and give the vault its OWN copy, in the owner's folder
+      // of the personal bucket rather than the couple's shared one.
       //
       // Storing a pointer was the whole defect: a publicUrl is a signed link
       // that expires within a day, and a storagePath lives in the couple's

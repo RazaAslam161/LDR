@@ -68,6 +68,31 @@ void main() {
   });
 
   group('delivered is not read', () {
+    test('read is acked from visibility, not from mount', () {
+      // The lock screen and the stealth scrim are Stack siblings over a
+      // still-mounted chat, and a full-screen page pushed over it leaves it
+      // mounted too. `mounted` was the only guard, so a message arriving
+      // while the phone lay locked turned the sender's tick green.
+      final chat = _read('lib/features/chat/chat_screen.dart');
+      final at = chat.indexOf('void _ackRead(');
+      expect(at, greaterThan(-1));
+      final body = chat.substring(at, chat.indexOf('\n  }', at));
+      expect(body.trimLeft(),
+          startsWith('void _ackRead(String trigger, {bool flush = false}) {'),);
+      expect(body.indexOf('if (!_chatVisible)'), lessThan(body.indexOf('_maxSeq')),
+          reason: 'visibility is checked before anything advances',);
+      final gate = chat.indexOf('bool get _chatVisible');
+      expect(gate, greaterThan(-1));
+      final predicate = chat.substring(gate, gate + 300);
+      expect(predicate, contains('humanPresent'));
+      expect(predicate, contains('isCurrent'));
+      expect(predicate, contains('ChatScreen.visible'));
+      final deps = chat.indexOf('void didChangeDependencies()');
+      expect(deps, greaterThan(-1));
+      expect(chat.substring(deps, deps + 400), contains('_settleOwedAck()'));
+      expect(chat, contains('PresenceService.present.addListener(_settleOwedAck)'));
+    });
+
     final receipts = _read('lib/features/chat/chat_receipts.dart');
     final fcm = _read('lib/core/services/fcm_service.dart');
     final resume = _read('lib/core/realtime/realtime_resume.dart');

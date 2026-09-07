@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,5 +103,18 @@ void main() {
     container.read(contentLanguageProvider);
     await tester.pumpAndSettle();
     expect(container.read(contentLanguageProvider), ContentLanguage.english);
+  });
+
+  test('the settings row says which language the toggle holds', () {
+    // The row was a const with 'Games in English' baked in, one line above
+    // the toggle that changes it. Source-law: the settings screen cannot be
+    // pumped (about_links_a11y_test.dart documents the wall).
+    final settings =
+        File('lib/features/settings/settings_screen.dart').readAsStringSync();
+    final at = settings.indexOf("title: 'Content language'");
+    expect(at, greaterThan(0));
+    final row = settings.substring(at, at + 300);
+    expect(row, isNot(contains("'Games in English'")));
+    expect(row, contains('contentLanguageProvider'));
   });
 }

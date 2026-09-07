@@ -21,10 +21,12 @@ import 'package:miles/features/watch/watch_viewer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Watch & listen together — paste any video link. YouTube plays inline;
-/// anything else opens in the browser on both phones. Play, pause and seek stay
-/// synced via a broadcast channel: whoever touches the controls drives, the
-/// other follows.
+/// Watch & listen together — paste a link. YouTube, direct video/audio and
+/// embeddable players play inline for both of you with play, pause and seek
+/// carried over a broadcast channel: whoever touches the controls drives, the
+/// other follows. Everything else (Instagram, X, Reddit, Facebook, Drive…) is a
+/// cobrowse link: 'Watch here' opens it in a viewer on THIS phone only —
+/// nothing is persisted or broadcast for it.
 class WatchTogetherScreen extends ConsumerStatefulWidget {
   const WatchTogetherScreen({super.key});
 
@@ -78,6 +80,13 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
 
   /// The follower's held correction — playback is paused until this passes.
   DateTime? _holdUntil;
+
+  /// Whether the hold above should end in `play()`.
+  ///
+  /// Separate from [_lastPlaying] because the micro-pause that starts the hold
+  /// echoes back and drives [_lastPlaying] to false, which is the flag the
+  /// release used to consult.
+  bool _resumeAfterHold = false;
 
   /// When the partner last told us anything, for stall detection.
   DateTime? _heardAt;
@@ -217,7 +226,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     // exactly like "nothing to restore" — is what left the partner still
     // playing a link the host had already shut.
     if (session == null) {
-      if (_viewing != null) setState(_clearViewing);
+      if (_anythingOpen) setState(_clearViewing);
       return;
     }
     // Not broadcast: this is us catching up to a decision already made, and
@@ -233,6 +242,19 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     _player?.dispose();
     _player = null;
   }
+
+  /// Whether anything is open that [_clearViewing] would close.
+  ///
+  /// Both close paths used to ask `_viewing != null`, but `_viewing` is only
+  /// ever set on the cobrowse branch — a YouTube, media or embed session lives
+  /// in `_videoId`/`_player`. So "Close for both of us" cleared the closer's
+  /// own screen and deleted the row while the partner's video kept playing,
+  /// with sound, on the one control described as the only way a session ends.
+  bool get _anythingOpen =>
+      _viewing != null ||
+      _handoff != null ||
+      _videoId != null ||
+      _player != null;
 
   /// Ends it for both. The only way a session closes — leaving the screen used
   /// to do it, which is the bug.
@@ -452,6 +474,29 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
       return;
     }
 
+    // A command is in flight and the player is still reporting the state it
+    // held BEFORE it. That is not a gesture.
+    //
+    // _isEcho deliberately rejects these (:447 — the state does not match what
+    // was asked for), and the branch below then read them as the user reaching
+    // for the controls: the follower answered every remote pause with a `play`
+    // broadcast and every remote play with a `pause`, took the lead, and the
+    // two phones fought on every control press. youtube_player_flutter ticks
+    // 10x/second while playing, so the window is wide enough to fire every
+    // time, not just under load.
+    //
+    // Bounded by the same echo window, and _isEcho clears _expectUntil the
+    // moment the real echo lands — so this stops swallowing as soon as the
+    // command actually takes, normally within ~100ms.
+    final pendingPlaying = _expectPlaying;
+    final pendingUntil = _expectUntil;
+    if (pendingPlaying != null &&
+        pendingUntil != null &&
+        DateTime.now().isBefore(pendingUntil) &&
+        playing != pendingPlaying) {
+      return;
+    }
+
     if (playing != _lastPlaying) {
       _lastPlaying = playing;
       _lastPosMs = pos;
@@ -511,7 +556,11 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     final hold = _holdUntil;
     if (hold != null && !DateTime.now().isBefore(hold)) {
       _holdUntil = null;
-      if (_lastPlaying) _applyLocal(c.play);
+      // _resumeAfterHold, not _lastPlaying: the hold's own pause echo sets
+      // _lastPlaying false before this ever runs. See _applyDrift.
+      final resume = _resumeAfterHold;
+      _resumeAfterHold = false;
+      if (resume || _lastPlaying) _applyLocal(c.play);
     }
 
     if (_isLeader) {
@@ -552,7 +601,7 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
     // Before the leader election: closing is not a bid to drive, and it has to
     // land whether or not a player is still up to receive it.
     if (msg.intent == WatchIntent.close) {
-      if (_viewing != null) setState(_clearViewing);
+      if (_anythingOpen) setState(_clearViewing);
       return;
     }
 
@@ -639,6 +688,15 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
         // other product uses is not available here; a micro-pause sheds the
         // same time and costs no rebuffer.
         if (drift > 0) {
+          // The session is PLAYING — this method returns at :644 unless both
+          // sides are — and this pause is a deliberate micro-pause of our own,
+          // not a change of state. Recorded before it, because the pause's own
+          // echo comes back through _isEcho (:462) and overwrites _lastPlaying
+          // to false; the release at :527 was gated on exactly that, so it
+          // never fired. The follower froze on a frame for the rest of the
+          // session while the footer still said "they're driving" — and a
+          // third-of-a-second drift is the everyday case, not an edge one.
+          _resumeAfterHold = true;
           _applyLocal(c.pause, playing: false);
           _holdUntil = DateTime.now()
               .add(Duration(milliseconds: drift.clamp(0, kSeekMs)));
@@ -799,8 +857,9 @@ class _WatchTogetherScreenState extends ConsumerState<WatchTogetherScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(32),
                       child: Text(
-                        'Paste a YouTube link and press Play —\n'
-                        'you and $partnerName watch it in sync.',
+                        'Paste a YouTube or video link and press Play —\n'
+                        'you and $partnerName watch it in sync.\n'
+                        'Other links open here, on your phone only.',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                             color: MilesColors.taupe, fontSize: 13,),

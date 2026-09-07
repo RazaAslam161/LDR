@@ -106,12 +106,18 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
       await cam.initialize();
+      // Adopted the moment it exists, BEFORE anything that can throw. The
+      // torch is lit and the stream opened below, and `startImageStream` does
+      // fail on OEMs that refuse streaming with the torch on — but the
+      // controller used to be adopted only after both. A throw there orphaned
+      // a live camera with the flash lit: _stopCamera read a null _cam,
+      // returned, and the torch stayed on for the life of the process.
+      _cam = cam;
       try {
         await cam.setFlashMode(FlashMode.torch);
       } catch (_) {/* some devices block torch in stream mode */}
       _ppg.reset();
       await cam.startImageStream(_onFrame);
-      _cam = cam;
       if (mounted) {
         setState(() {
           _measuring = true;
@@ -119,6 +125,11 @@ class _HeartbeatScreenState extends ConsumerState<HeartbeatScreen>
         });
       }
     } catch (e) {
+      // Releases whatever was adopted above — torch off, stream stopped,
+      // controller disposed. Without this the error message was shown over a
+      // camera that was still running.
+      debugPrint('[heartbeat] camera start failed: $e');
+      await _stopCamera();
       if (mounted) {
         setState(() {
           _busy = false;

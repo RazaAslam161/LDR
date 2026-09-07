@@ -741,9 +741,36 @@ class DataExportService {
         final name = '${item.id}.${extForMime(mime)}';
         onProgress('Private Vault', item.mediaUrl ?? name);
         try {
+          final storagePath = item.storagePath!;
+          // Plaintext objects are what the vault WRITES today — _uploadPlain
+          // with _plainExt, vault_repository.dart:199-205 — and only legacy
+          // rows carry `.enc`. The viewer has always branched on this
+          // (vault_viewer.dart:174 and :256); the export never did, so every
+          // owned file went through the decrypt below, failed its MAC, and was
+          // recorded as an export failure. The user's own vault was the one
+          // module their data export could not produce.
+          if (!storagePath.endsWith('.enc')) {
+            final url = MediaUrls.cached(VaultRepository.bucket, storagePath) ??
+                await MediaUrls.sign(VaultRepository.bucket, storagePath);
+            if (url == null) throw const MediaTransient();
+            final actual = await _downloadTo(
+              treeUri: treeUri,
+              relativePath: relativePath([root, 'vault', 'files', name]),
+              mime: mime,
+              url: url,
+            );
+            index.add({
+              'type': item.type,
+              'label': item.mediaUrl,
+              'file': 'files/$actual',
+              'savedAt': savedAt,
+            });
+            s.exported++;
+            continue;
+          }
           final bytes = await EncryptedMediaCache.bytes(
             bucket: VaultRepository.bucket,
-            path: item.storagePath!,
+            path: storagePath,
             associatedData: VaultRepository.fullAdFor(item.id),
             keyOverride: vaultKey,
           );
@@ -909,8 +936,7 @@ About this folder
 
 Everything here is an UNENCRYPTED copy of what was selected for export.
 Anyone who can read this folder can read all of it. The app's own copies
-stay encrypted on the phone and the server; deleting this folder deletes
-only the copy.
+are untouched; deleting this folder deletes only the copy.
 
 Layout:
   README.txt             - this file
@@ -925,7 +951,7 @@ Layout:
   memories/photos/       - their photographs, decrypted
   wish_jar.json          - your own wish jar entries (only your own)
   vault/notes.json       - your private vault's notes and file index
-  vault/files/           - your private vault's files, decrypted
+  vault/files/           - your private vault's files
 
 Each run writes its own dated folder. A re-run creates a new one beside
 this one and never touches these files.

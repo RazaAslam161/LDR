@@ -171,8 +171,10 @@ class _EscrowDialogState extends State<_EscrowDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Reinstalling the app would currently make everything encrypted '
-              'unreadable — your vault and memories. Confirming '
+              'Reinstalling the app would currently make everything '
+              'end-to-end encrypted unreadable — your Memory Threads, your '
+              'Wish Jar entries, and any files still in the old encrypted '
+              'vault. Confirming '
               'your password once stores a sealed copy of your key so that '
               "can't happen.\n\n"
               "We can't read it. It's locked with your password, which never "
