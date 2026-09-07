@@ -26,6 +26,7 @@ import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
 import 'package:miles/core/widgets/lock_screen.dart';
@@ -526,6 +527,9 @@ class _MilesAppState extends ConsumerState<MilesApp>
       // person who has just opened the app expects the message they wrote an
       // hour ago to be gone, not waiting three more minutes.
       ChatSendQueue.instance.kick();
+      // A push written to disk by the background isolate while the app was
+      // away. The notifier lives in this process and knows nothing about it.
+      unawaited(UnreadTally.refresh(ref.read(sessionProvider).couple?.id));
       // Refresh the FCM token every resume — self-heals a token the notify
       // functions nulled server-side (UNREGISTERED), restoring pushes.
       FcmService.registerToken();

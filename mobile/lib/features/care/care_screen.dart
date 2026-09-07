@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:miles/core/app/session_provider.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/ember_background.dart';
@@ -74,6 +77,13 @@ class _CareScreenState extends ConsumerState<CareScreen> {
       final n = await CareRepository.list(id);
       if (mounted) {
         setState(() {
+          // This replaces the list with the newest page, so every page loaded
+          // behind it is gone — and the flag that says whether more exist has
+          // to go back with it. _load is reached from initState, from a send,
+          // from the Done tap and from realtime, so without this one tap of
+          // Done collapsed a list the user had paged through and then claimed
+          // there was nothing older.
+          _moreNudges = true;
           _nudges = n;
           _loadError = null;
           _loading = false;
@@ -249,11 +259,14 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                                 style: TextStyle(color: MilesColors.taupe),),)
                         : ListView.separated(
                             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                            itemCount: _nudges.length,
+                            // +1 for the tail: either one more page, or the
+                            // sentence that explains why the list ends.
+                            itemCount: _nudges.length + 1,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
-                            itemBuilder: (context, i) =>
-                                _nudgeTile(_nudges[i]),
+                            itemBuilder: (context, i) => i == _nudges.length
+                                ? _tail()
+                                : _nudgeTile(_nudges[i]),
                           ),
               ),
             ],
@@ -261,6 +274,87 @@ class _CareScreenState extends ConsumerState<CareScreen> {
         ),
       ),
     );
+  }
+
+  /// Whether a page has been asked for and not answered yet.
+  bool _loadingMore = false;
+
+  /// False once a short page has proved there is nothing behind it.
+  bool _moreNudges = true;
+
+  Future<void> _loadMore() async {
+    final id = _coupleId;
+    if (_loadingMore || !_moreNudges || id == null || _nudges.isEmpty) return;
+    setState(() => _loadingMore = true);
+    try {
+      final older =
+          await CareRepository.list(id, before: _nudges.last.createdAt);
+      if (!mounted) return;
+      final have = {for (final n in _nudges) n.id};
+      setState(() {
+        _moreNudges = older.length >= CareRepository.pageSize;
+        _nudges = [..._nudges, ...older.where((n) => have.add(n.id))];
+      });
+    } catch (e, st) {
+      // Not a snackbar: the page the user already has is still on screen and
+      // still correct, so this only has to stop pretending there is more.
+      // Reported, though — bound-and-dropped was the whole defect class this
+      // repo keeps finding.
+      ErrorReporter.report(e, st, kind: 'care-page');
+      if (mounted) setState(() => _moreNudges = false);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  /// The end of the list, and why it ends there.
+  ///
+  /// The retention sweep deletes anything older than 30 days
+  /// (20260601005000), and the screen never said so — a reminder simply was
+  /// not there any more, which reads as the app having lost it.
+  Widget _tail() {
+    if (_moreNudges && _nudges.isNotEmpty) {
+      return Center(
+        child: _loadingMore
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: MilesColors.taupe,),
+                ),
+              )
+            : TextButton(
+                onPressed: () => unawaited(_loadMore()),
+                child: const Text('Show older',
+                    style: TextStyle(color: MilesColors.taupe),),
+              ),
+      );
+    }
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 14),
+      child: Center(
+        child: Text(
+          'Reminders are kept for 30 days.',
+          style: TextStyle(color: MilesColors.faint, fontSize: 12),
+        ),
+      ),
+    );
+  }
+
+  /// How long ago, in the shape the rest of the app uses.
+  ///
+  /// Every tile said only WHAT it was — "For you", "You sent this" — so a
+  /// reminder from three weeks ago and one from ten minutes ago were the same
+  /// row. On a list that only ever grows, that is the difference between a
+  /// reminder and a wall.
+  static String _age(DateTime at) {
+    final d = DateTime.now().difference(at);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    return '${d.inDays}d ago';
   }
 
   Widget _nudgeTile(CareNudge n) {
@@ -282,9 +376,8 @@ class _CareScreenState extends ConsumerState<CareScreen> {
                         color: MilesColors.cream50, fontSize: 14,),),
                 const SizedBox(height: 2),
                 Text(
-                  mine
-                      ? (n.acknowledged ? 'They did it ✓' : 'You sent this')
-                      : (n.acknowledged ? 'You marked done ✓' : 'For you'),
+                  '${mine ? (n.acknowledged ? 'They did it ✓' : 'You sent this') : (n.acknowledged ? 'You marked done ✓' : 'For you')}'
+                  ' · ${_age(n.createdAt)}',
                   style: TextStyle(
                       color: n.acknowledged
                           ? MilesColors.sage

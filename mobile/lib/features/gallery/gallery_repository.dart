@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/thumbnails.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/utils/json_utils.dart';
@@ -173,6 +174,19 @@ class GalleryRepository {
   /// Live grid. Seeds once, then patches per change — a partner's upload
   /// appears without a refresh, which is the difference between a shared
   /// gallery and two galleries.
+  /// A live grid the caller can also page BACKWARDS.
+  ///
+  /// [stream] seeds from [fetch], which is capped at 500 — deliberately, since
+  /// it is a grid decision — and nothing could reach past it. A couple who
+  /// share a picture a day hit that inside two years and their earliest
+  /// photographs simply stopped existing as far as the app was concerned.
+  ///
+  /// The vocabulary is SharedMediaWindow's, because the question is the same
+  /// one: busy while a page is in flight, atEnd once a short page has proved
+  /// there is nothing behind it, failed so the screen can offer a retry rather
+  /// than a silence.
+  static GalleryWindow window(String coupleId) => GalleryWindow._(coupleId);
+
   static Stream<List<GalleryItem>> stream(String coupleId) {
     final byId = <String, GalleryItem>{};
     ManagedSubscription? sub;
@@ -404,4 +418,157 @@ class GalleryTooLarge implements Exception {
 
   @override
   String toString() => 'GalleryTooLarge';
+}
+
+
+/// A [GalleryRepository.stream] with a back-page.
+///
+/// Holds the live map itself rather than wrapping the closure-scoped one in
+/// `stream()`, because a page loaded from underneath has to merge into exactly
+/// the map the realtime deltas patch — two maps would let a deleted picture
+/// come back through the older page.
+class GalleryWindow {
+  GalleryWindow._(this.coupleId);
+
+  final String coupleId;
+
+  final Map<String, GalleryItem> _byId = {};
+  ManagedSubscription? _sub;
+  StreamController<List<GalleryItem>>? _controller;
+
+  /// A page is in flight.
+  bool busy = false;
+
+  /// A short page has proved there is nothing behind this one.
+  bool atEnd = false;
+
+  /// The last page threw. The pictures already on screen are still correct.
+  Object? failed;
+
+  /// How far back the pages have reached.
+  ///
+  /// Held separately, NOT derived as the minimum of [_byId]: realtime patches
+  /// that map and is not window-scoped, so a delete of the oldest picture
+  /// moved a derived cursor FORWARD and the next page skipped every row
+  /// between the two — silently, and permanently, since nothing re-asks.
+  /// This only ever moves backwards, as a cursor must.
+  DateTime? _floor;
+
+  DateTime? get _cursor {
+    final floor = _floor;
+    if (_byId.isEmpty) return floor;
+    final min = _byId.values
+        .map((i) => i.createdAt)
+        .reduce((a, b) => a.isBefore(b) ? a : b);
+    if (floor == null || min.isBefore(floor)) return min;
+    return floor;
+  }
+
+  List<GalleryItem> _snapshot() {
+    final live = _byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List.unmodifiable(live);
+  }
+
+  void _emit() {
+    final c = _controller;
+    if (c != null && !c.isClosed) c.add(_snapshot());
+  }
+
+  Future<void> _apply(PostgresChangePayload p) async {
+    try {
+      if (p.eventType == PostgresChangeEvent.delete) {
+        final id = p.oldRecord['id'];
+        if (id != null) _byId.remove(JsonUtils.parseString(id));
+      } else {
+        final row = GalleryItem.fromJson(p.newRecord);
+        if (p.newRecord['deleted'] == true) {
+          _byId.remove(row.id);
+        } else {
+          _byId[row.id] = row;
+          await GalleryRepository._warm([row]);
+        }
+      }
+    } catch (e) {
+      debugPrint('[gallery] delta: ${e.runtimeType}');
+      return;
+    }
+    _emit();
+  }
+
+  Stream<List<GalleryItem>> get stream {
+    final existing = _controller;
+    if (existing != null) return existing.stream;
+    final c = _controller = StreamController<List<GalleryItem>>.broadcast(
+      onListen: () async {
+        _sub = ManagedSubscription.start(
+          () => RealtimeService.coupleTable(
+            channelName: 'gallery:$coupleId',
+            table: 'gallery_items',
+            coupleId: coupleId,
+            onChange: (p) => unawaited(_apply(p)),
+          ),
+        );
+        try {
+          for (final i in await GalleryRepository.fetch(coupleId)) {
+            _byId.putIfAbsent(i.id, () => i);
+          }
+          _emit();
+        } catch (e) {
+          final ctrl = _controller;
+          if (ctrl != null && !ctrl.isClosed) ctrl.addError(e);
+        }
+      },
+      onCancel: dispose,
+    );
+    return c.stream;
+  }
+
+  /// One page older. A no-op while busy, at the end, or before the seed has
+  /// landed — a null cursor would ask for everything.
+  Future<void> more() async {
+    final before = _cursor;
+    if (busy || atEnd || before == null) return;
+    busy = true;
+    failed = null;
+    try {
+      final page =
+          await GalleryRepository.fetchPage(coupleId, before: before);
+      atEnd = page.length < GalleryRepository.pageSize;
+      // Recorded from the PAGE, not from the map, and never allowed forward.
+      for (final i in page) {
+        final f = _floor;
+        if (f == null || i.createdAt.isBefore(f)) _floor = i.createdAt;
+      }
+      var added = false;
+      for (final i in page) {
+        // putIfAbsent, never assignment: a realtime delta that arrived while
+        // this page was on the wire is NEWER than the row the page carries.
+        if (_byId.containsKey(i.id)) continue;
+        _byId[i.id] = i;
+        added = true;
+      }
+      if (added) {
+        // Signed before it paints, exactly as the seed and the deltas are.
+        await GalleryRepository._warm(page);
+        _emit();
+      }
+    } catch (e, st) {
+      failed = e;
+      // `failed` had no reader anywhere, so a back-page that threw was the one
+      // silent failure path in this file — every sibling logs or addErrors.
+      debugPrint('[gallery] page failed: ${e.runtimeType}');
+      ErrorReporter.report(e, st, kind: 'gallery-page');
+    } finally {
+      busy = false;
+    }
+  }
+
+  void dispose() {
+    _sub?.dispose();
+    _sub = null;
+    final c = _controller;
+    _controller = null;
+    unawaited(c?.close());
+  }
 }

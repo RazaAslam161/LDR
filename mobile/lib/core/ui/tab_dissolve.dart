@@ -62,10 +62,13 @@ class _TabDissolveState extends State<TabDissolve>
       // drive(), not CurvedAnimation: build runs per tab switch and a
       // CurvedAnimation leaves a status listener on the controller forever.
       opacity: _c.drive(CurveTween(curve: MilesMotion.enter)),
-      child: KeyedSubtree(
-        key: ValueKey(widget.index),
-        child: widget.child,
-      ),
+      // NOT a KeyedSubtree keyed on the index any more. The shell hands this
+      // one IndexedStack that holds every tab, so a key that changes with the
+      // index would remount the whole stack on every tab change — destroying
+      // the Chat body it exists to keep alive, which is the entire point of
+      // the stack. The fade is driven by the controller above; the key was
+      // never what made it run.
+      child: widget.child,
     );
   }
 }

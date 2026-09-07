@@ -59,13 +59,22 @@ class CareRepository {
     }).eq('id', id);
   }
 
-  static Future<List<CareNudge>> list(String coupleId) async {
-    final res = await _c
-        .from('care_nudges')
-        .select()
-        .eq('couple_id', coupleId)
-        .order('created_at', ascending: false)
-        .limit(50);
+  /// One page of reminders. 50 is what the screen opens on.
+  static const pageSize = 50;
+
+  /// [before] pages further back, cursored on the same column the list is
+  /// ordered by. The screen showed the newest 50 and had no way to reach
+  /// anything behind them — which for a couple who use this daily is under
+  /// three weeks, inside the 30-day retention window, so reminders that still
+  /// EXISTED were unreachable.
+  static Future<List<CareNudge>> list(String coupleId,
+      {DateTime? before,}) async {
+    var q = _c.from('care_nudges').select().eq('couple_id', coupleId);
+    if (before != null) {
+      q = q.lt('created_at', before.toUtc().toIso8601String());
+    }
+    final res =
+        await q.order('created_at', ascending: false).limit(pageSize);
     return (res as List)
         .map((e) => CareNudge.fromJson(e as Map<String, dynamic>))
         .toList(growable: false);

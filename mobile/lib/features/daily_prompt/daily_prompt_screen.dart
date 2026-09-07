@@ -116,7 +116,16 @@ class _DailyPromptScreenState extends ConsumerState<DailyPromptScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        actions: const [PartnerHereAction()],
+        actions: [
+          // The way in to everything they have already answered. Without it
+          // the history exists and is reachable from nowhere.
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Past questions',
+            onPressed: () => context.push('/app/prompt/history'),
+          ),
+          const PartnerHereAction(),
+        ],
         title: const Text('Daily Question'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

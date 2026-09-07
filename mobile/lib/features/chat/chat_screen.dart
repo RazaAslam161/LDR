@@ -86,7 +86,21 @@ class ChatScreen extends ConsumerStatefulWidget {
   /// Whether the chat is the tab the user is looking at. Today the shell
   /// mounts one tab body, so a mounted chat is a selected one and this stays
   /// true; the retained-tab shell drives it. Read by the read-ack gate.
-  static final ValueNotifier<bool> visible = ValueNotifier<bool>(true);
+  /// FALSE by default, and that default is load-bearing.
+  ///
+  /// The shell is the only writer and it writes post-frame, so this value is
+  /// whatever it was initialised to for the whole of the first build — during
+  /// which the IndexedStack already mounts this screen and runs `_init`.
+  /// Initialised true, a cold launch onto Home passed every read gate and
+  /// wiped the unread count, the shade entry and the cover dot for messages
+  /// nobody had looked at. `shellTabProvider` defaults to 'home', so false is
+  /// the correct answer for the first frame of every process; the shell raises
+  /// it the moment the Chat tab really is showing.
+  ///
+  /// Lowered again by AppShell.dispose, because the disguise cover replaces
+  /// the whole router subtree — leaving this stale-true for the length of a
+  /// covered session, which is exactly when nothing may be marked read.
+  static final ValueNotifier<bool> visible = ValueNotifier<bool>(false);
 
   @override
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
@@ -784,8 +798,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // The app lock and the stealth scrim are Stack siblings over a still-
     // mounted chat: no route changes, so an owed read ack has to be settled
     // when THEY move, not only when the route does.
-    ChatScreen.visible.addListener(_settleOwedAck);
-    PresenceService.present.addListener(_settleOwedAck);
+    ChatScreen.visible.addListener(_onVisibilityChanged);
+    // The same handler, because presence is the OTHER half of the same
+    // question. Unlocking the phone while already standing on the Chat tab
+    // changes no tab and no route — so with only _settleOwedAck here the ack
+    // went out and the shade entry and the badge stayed, for a conversation
+    // the owner was looking straight at.
+    PresenceService.present.addListener(_onVisibilityChanged);
     // Sends can start anywhere — the shell's camera tab opens with this screen
     // unmounted — so the chat follows the queue rather than owning it.
     ChatSendQueue.instance.addListener(_adoptPending);
@@ -858,6 +877,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (!_ackOwed || !_chatVisible) return;
     _ackOwed = false;
     _ackRead('visible', flush: true);
+  }
+
+  /// Visibility is the new "arrived": with the chat retained across tabs it is
+  /// this notifier, not a mount, that means the owner has come to look.
+  void _onVisibilityChanged() {
+    _settleOwedAck();
+    // Whatever arrived while they were on another tab has now been seen: the
+    // badge comes down with the shade entry, and `clear` zeroes the notifier
+    // itself. Deliberately NOT followed by a refresh — that would re-read the
+    // key `clear` is in the middle of removing and could put the count back.
+    _readIfShowing();
+  }
+
+  /// The shade entry and the unread count, cleared only while the owner is
+  /// actually looking at the conversation.
+  ///
+  /// Re-run whenever visibility changes, because with the chat retained across
+  /// tabs "arriving" is no longer a mount — it is this notifier turning true.
+  void _readIfShowing([String? coupleId]) {
+    final id = coupleId ?? _coupleId;
+    if (id == null || !_chatVisible) return;
+    unawaited(UnreadTally.clear(id));
+    unawaited(FcmService.clearMessageNotification(id));
   }
 
   @override
@@ -1271,6 +1313,89 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (_hasNewMessage && _isAtBottom()) {
       setState(() => _hasNewMessage = false);
     }
+    // reverse: true, so `extentAfter` is the distance to the OLDEST message on
+    // screen — the top of the list. 600px of runway, roughly three bubbles, so
+    // the page is usually in hand before the finger reaches the end of it.
+    if (_scroll.hasClients && _scroll.position.extentAfter < 600) {
+      unawaited(_loadOlder());
+    }
+  }
+
+  /// Whether the conversation has more history behind what is on screen.
+  /// Null means nobody has asked yet.
+  bool? _moreHistory;
+  bool _loadingOlder = false;
+  bool _historyFailed = false;
+
+  /// The oldest seq currently held. 0 while the list holds only optimistic
+  /// sends, which have no server seq at all — and a cursor of 0 would ask for
+  /// everything before the beginning.
+  int get _minSeq => _messages.fold<int>(
+      0, (a, m) => m.seq > 0 && (a == 0 || m.seq < a) ? m.seq : a,);
+
+  /// One page further back.
+  ///
+  /// The conversation opened on the newest 300 and there was nothing behind
+  /// it: a couple ten weeks in could not reach anything they had said in week
+  /// one, from the app, at all.
+  /// Bumped by anything that replaces the conversation wholesale. A page in
+  /// flight across one of those belongs to a list that no longer exists.
+  int _historyGeneration = 0;
+
+  /// Everything the back-page knows, forgotten.
+  ///
+  /// `_reload` refills from the newest 300 and `_onClearedBroadcast` empties
+  /// the list entirely — and neither touched any of this, so a conversation
+  /// that had been paged to its end kept `_moreHistory == false` and could
+  /// never load history again, while a page in flight across a partner's
+  /// clear-for-everyone re-appended a hundred bubbles the partner had just
+  /// deleted.
+  void _resetHistory() {
+    _historyGeneration++;
+    _moreHistory = null;
+    _loadingOlder = false;
+    _historyFailed = false;
+  }
+
+  Future<void> _loadOlder() async {
+    // The cheap guards BEFORE the fold. _onScroll fires on every frame of a
+    // scroll, and _minSeq walks the whole conversation — several hundred
+    // messages, sixty times a second, to decide not to do anything.
+    final couple = _coupleId;
+    if (_loadingOlder || _moreHistory == false || couple == null) return;
+    final cursor = _minSeq;
+    if (cursor <= 0) return;
+    final generation = _historyGeneration;
+    _loadingOlder = true;
+    if (_historyFailed && mounted) setState(() => _historyFailed = false);
+    try {
+      final older = await ChatRepository.fetchOlder(couple, beforeSeq: cursor);
+      // The conversation was replaced under the round trip — an unlink, a
+      // reload, or the partner clearing it for both of them. These rows belong
+      // to a list that no longer exists.
+      if (!mounted ||
+          _coupleId != couple ||
+          _historyGeneration != generation) {
+        return;
+      }
+      // A short page is the end of the conversation. Asked once, remembered,
+      // so a user who keeps scrolling at the top does not keep asking.
+      final atEnd = older.length < ChatRepository.historyPageSize;
+      final fresh = older.where((m) => _ids.add(m.id)).toList();
+      setState(() {
+        _moreHistory = !atEnd;
+        // Appended, never through _onIncoming: that path owns the NEWEST
+        // watermark, and history must not move it — an old message would
+        // otherwise ack a read the user never made.
+        _messages.addAll(fresh);
+        _sortMessages();
+      });
+    } catch (e, st) {
+      ChatReceiptRepository.reportIfNotMerelyOffline(e, st, 'chat-history');
+      if (mounted) setState(() => _historyFailed = true);
+    } finally {
+      _loadingOlder = false;
+    }
   }
 
   Future<void> _init() async {
@@ -1293,8 +1418,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     // Opening the chat IS reading it. Both halves together, or the shade keeps
     // an entry the owner has already dealt with and the next message counts up
     // from a number nothing on screen agrees with.
-    unawaited(UnreadTally.clear(couple.id));
-    unawaited(FcmService.clearMessageNotification(couple.id));
+    //
+    // NOT read-marked here. `_init` runs from initState, and _chatVisible
+    // calls ModalRoute.of(context) — which asserts if it is reached before
+    // initState completes, and in a release build (where the assert is
+    // stripped) simply answers true. Either way this is the wrong place to
+    // decide the owner is looking at the conversation.
+    //
+    // The shell raises `visible` post-frame when the Chat tab is the one
+    // showing, and _onVisibilityChanged does the marking from there.
     // Before anything is awaited, so the first frame of a re-entered chat draws
     // the ticks it was already showing when the user left it. The disk copy
     // (one frame later, or a whole process later) goes through the same upward
@@ -1419,6 +1551,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       }
       trace();
       return;
+    }
+    // Arrived while the owner was somewhere else. The chat is retained across
+    // tabs now, so "the message reached this screen" no longer means anybody
+    // saw it — and on a covered install the badge and the cover dot are the
+    // only unread signal that exists.
+    //
+    // LIVE arrivals only. A catch-up page replays messages a background push
+    // already counted on disk, and the two dedupe sets are in different
+    // isolates — so counting those again would inflate the badge by however
+    // many pushes landed while the app was closed.
+    const live = {'rt_insert', 'broadcast', 'local_send'};
+    if (live.contains(source) &&
+        !m.isMine(SupabaseService.currentUserId) &&
+        !_chatVisible) {
+      final couple = _coupleId;
+      if (couple != null) unawaited(UnreadTally.noteUnread(couple, m.id));
     }
     _ids.add(m.id);
     if (!mounted) {
@@ -1602,6 +1750,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _reload() async {
     final couple = ref.read(sessionProvider).couple;
     if (couple == null) return;
+    // This refills from the newest 300, so every page loaded behind them is
+    // about to be discarded — and the flags that remember how far back the
+    // conversation goes have to go with them.
+    _resetHistory();
     try {
       final msgs = await ChatRepository.fetch(couple.id);
       if (!mounted) return;
@@ -1751,6 +1903,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// rows are already gone server-side, so just empty the screen locally.
   void _onClearedBroadcast(Map<String, dynamic> payload) {
     if (!mounted) return;
+    // A page already on the wire would otherwise land after this and put a
+    // hundred deleted bubbles back on a screen the partner just wiped.
+    _resetHistory();
     setState(() {
       _messages.clear();
       _ids.clear();
@@ -2242,8 +2397,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     realtimeResumed.removeListener(_subscribe);
     _joinCheck?.cancel();
     RealtimeStatus.forget(_healthKey);
-    ChatScreen.visible.removeListener(_settleOwedAck);
-    PresenceService.present.removeListener(_settleOwedAck);
+    ChatScreen.visible.removeListener(_onVisibilityChanged);
+    PresenceService.present.removeListener(_onVisibilityChanged);
     _receiptTick.dispose();
     final rc = _receiptChannel;
     if (rc != null) SupabaseService.client.removeChannel(rc);
@@ -2532,8 +2687,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                           reverse: true,
                                           padding: const EdgeInsets.fromLTRB(
                                               16, 12, 16, 12,),
-                                          itemCount: rows.length,
+                                          // +1 for the history footer, which
+                                          // sits past the OLDEST row —
+                                          // reverse: true puts that at the top
+                                          // of the screen, where a person
+                                          // scrolling back is looking.
+                                          itemCount: rows.length + 1,
                                           itemBuilder: (_, i) {
+                                            if (i == rows.length) {
+                                              return _HistoryFooter(
+                                                loading: _loadingOlder,
+                                                failed: _historyFailed,
+                                                atEnd: _moreHistory == false,
+                                                onRetry: () =>
+                                                    unawaited(_loadOlder()),
+                                              );
+                                            }
                                             final row = rows[i];
                                             final m = row.newest;
                                             // Descending list: the older neighbour is
@@ -3986,6 +4155,63 @@ class _LiveUpdatesStrip extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+
+/// What sits above the oldest message on screen.
+///
+/// The conversation opened on the newest 300 and stopped there, with nothing
+/// to say it had stopped: a couple ten weeks in scrolled to the top and simply
+/// found the list would not move any further, which reads as the app having
+/// lost everything before that point.
+class _HistoryFooter extends StatelessWidget {
+  const _HistoryFooter({
+    required this.loading,
+    required this.failed,
+    required this.atEnd,
+    required this.onRetry,
+  });
+
+  final bool loading;
+  final bool failed;
+  final bool atEnd;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    // Nothing at all in the ordinary case: the next page is already on its way
+    // (the scroll listener asks 600px early), and a spinner that appears every
+    // time someone scrolls up would be the most-seen widget in the app.
+    if (!loading && !failed && !atEnd) return const SizedBox(height: 8);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Center(
+        child: failed
+            ? TextButton(
+                onPressed: onRetry,
+                child: const Text(
+                  'Could not load older messages — try again',
+                  style: TextStyle(color: MilesColors.taupe, fontSize: 13),
+                ),
+              )
+            : loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: MilesColors.taupe,),
+                  )
+                : const Text(
+                    'The beginning',
+                    style: TextStyle(
+                      color: MilesColors.faint,
+                      fontSize: 12,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+      ),
     );
   }
 }

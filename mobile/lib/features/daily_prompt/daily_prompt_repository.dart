@@ -81,6 +81,52 @@ class DailyPromptRepository {
     return DailyPrompt.fromJson(inserted);
   }
 
+  /// One page of past prompts, newest first.
+  static const historyPageSize = 30;
+
+  /// Prompts BEFORE [before] (a `scheduled_date`), newest first.
+  ///
+  /// The question of the day was the only one that existed: yesterday's, and
+  /// every answer either of them had written to it, was gone from the app the
+  /// moment the date rolled over. The rows were always there — nothing ever
+  /// read them.
+  ///
+  /// Cursored on `scheduled_date`, which is the unique key this table already
+  /// has per couple, so no index is added for this.
+  static Future<List<DailyPrompt>> history(
+    String coupleId, {
+    String? before,
+  }) async {
+    var q = _c.from('daily_prompts').select().eq('couple_id', coupleId);
+    if (before != null) q = q.lt('scheduled_date', before);
+    final res = await q
+        .order('scheduled_date', ascending: false)
+        .limit(historyPageSize);
+    return (res as List)
+        .map((e) => DailyPrompt.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  /// Responses for a whole page of prompts, in ONE round trip.
+  ///
+  /// Asking per prompt would be thirty selects behind one screen, on a phone,
+  /// on mobile data.
+  static Future<Map<String, List<PromptResponse>>> responsesForMany(
+    List<String> promptIds,
+  ) async {
+    if (promptIds.isEmpty) return const {};
+    final res = await _c
+        .from('prompt_responses')
+        .select()
+        .inFilter('prompt_id', promptIds);
+    final out = <String, List<PromptResponse>>{};
+    for (final e in res as List) {
+      final r = PromptResponse.fromJson(e as Map<String, dynamic>);
+      (out[r.promptId] ??= []).add(r);
+    }
+    return out;
+  }
+
   /// All responses for [promptId].
   static Future<List<PromptResponse>> responsesFor(String promptId) async {
     final res = await _c

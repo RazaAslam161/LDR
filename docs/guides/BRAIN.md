@@ -27175,3 +27175,241 @@ Unchanged and still the headline: **nothing in 763d474 has run on a handset.**
 
 Next step: unchanged from §300 — build, then a call across a real network handover and an
 `adb shell am force-stop` between a send and its landing.
+
+
+## §301 — 2026-09-07 — Phase 3: the app stops forgetting things it still has
+
+RC-B, "history is live-only". Six items, and the thread through all of them is the same:
+the rows were in the database the whole time and nothing read them. Chat kept the newest
+300 and no way back. The daily question kept today's. Care reminders kept fifty. The
+gallery kept five hundred. And changing tab destroyed the conversation outright.
+
+Phase 1's B1 was already in the tree (`_loadNewest`, `_loadFailed`, the `_maxSeq == 0`
+guard, the `ChatScreen.visible` shim defaulting to true) — checked before writing anything,
+because B2 and B3 both build on it.
+
+### B2 — changing tab destroyed the conversation
+
+`app_shell` built `bodies[bodyIndex]` straight into a Column, so moving to Home **disposed
+ChatScreen**. Coming back re-ran `_init` from nothing: a full-screen spinner, a 300-row
+SELECT, 300 decrypts, and the scroll position gone — on every single tap of the Chat icon,
+forever. `ChatRepository._pageCache` exists only to soften that, and its own doc comment
+named the disposal as the reason.
+
+An `IndexedStack` now holds the bodies, and **only Chat is retained**: every other slot is
+`SizedBox.shrink()` unless it is the selected tab. That is §288's ruling, not caution — a
+retained Touch body inverts its FLAG_SECURE on a quick A-B-A bounce, and every retained body
+double-joins its per-couple realtime topics into the documented joined-but-dead state. Touch
+and Closer keep exactly the mount-per-visit lifecycle they had.
+
+`TabDissolve`'s `KeyedSubtree(key: ValueKey(index))` had to go with it. The shell hands it
+one stack now, so a key that changes with the index would remount the whole thing on every
+tab change — destroying the body the stack exists to keep. The fade was never driven by the
+key; it is driven by the controller.
+
+**The consequence that needed the most care: `mounted` stopped meaning "looked at".** That
+question gates the read receipt, the typing broadcast and the unread count, and the shell is
+the only thing that can answer it — so the shell drives `ChatScreen.visible`, post-frame,
+because the notifier has listeners that call setState and writing it inline is a setState
+during a build. And `_init` now runs at LAUNCH, so the two "opening the chat IS reading it"
+side effects — `UnreadTally.clear` and `clearMessageNotification` — moved out of it into a
+visibility-gated `_readIfShowing()`. Ungated, opening the app on Home would have cleared the
+shade entry and the count for messages nobody had looked at.
+
+### B3 — the conversation had no back-page
+
+Cursored on `seq`, not `created_at`: seq is the server's own monotonic order, so a page
+boundary cannot repeat or skip a message when two arrive inside the same clock tick.
+
+Two filters, and the difference between them is the point. A message the viewer deleted FOR
+THEMSELVES must not come back through the history door — `not('deleted_by','cs',[uid])`,
+verbatim from the shared-media grid. A message deleted for EVERYONE must come back: its row
+is a tombstone the conversation renders as "This message was deleted", and filtering it here
+would make the placeholder exist only above the fold. (There is no clear watermark to
+respect either — `clear_conversation_everyone` hard-deletes the rows.)
+
+History is appended directly, never through `_onIncoming`: that path owns the NEWEST
+watermark, and an old message arriving through it would ack a read the user never made.
+
+The footer draws **nothing** in the ordinary case. The next page is asked for 600px early,
+so a spinner on every upward scroll would be the most-seen widget in the app. It speaks only
+to say a page failed, or to say "The beginning".
+
+### B4 — the count existed on disk with nothing reading it
+
+`UnreadTally` was written by the background isolate and read by the cover dot. `count` is a
+notifier now, and the Chat destination wears a badge.
+
+`noteUnread(coupleId, messageId)` dedupes by id, because **the same message arrives at least
+twice by design** — the realtime broadcast is the fast path, the postgres echo is the durable
+one, and a foreground push can make it three. Counted from the chat when the owner is not
+looking, and from `fcm_service`'s foreground branch when the chat is not visible: on a covered
+install no notification is ever posted, so this count and the cover dot are the only unread
+signal that exists there.
+
+`refresh` runs on a couple change and on app resume — the notifier lives in this process and
+knows nothing about what the background isolate wrote to disk while the app was away. That
+is the half that needed it most.
+
+**A race I wrote and then removed:** the first cut called `refresh` right after `clear` in the
+visibility handler. Both touch the same key asynchronously; if the read landed before the
+remove, the count came back. `clear` already zeroes the notifier synchronously, so the
+refresh was redundant as well as wrong.
+
+### B5 / B6 / B7 — three surfaces that stopped at their first page
+
+- **Gallery.** `GalleryWindow` wraps the live stream with a `more()` on `fetchPage`'s
+  created_at cursor, in SharedMediaWindow's vocabulary (busy / atEnd / failed). It owns the
+  live map itself rather than wrapping the closure-scoped one in `stream()`, because a page
+  loaded from underneath has to merge into exactly the map the realtime deltas patch — two
+  maps would let a deleted picture come back through the older page. Merged with
+  `containsKey ? continue`, never assignment: a delta that arrived while the page was on the
+  wire is newer than the row the page carries.
+- **Daily question.** `history()` on `scheduled_date` (the unique key the table already has,
+  so no index added) and `responsesForMany()` in ONE round trip — per prompt would be thirty
+  selects behind one screen, on mobile data. The history keeps the SAME reveal rule the day's
+  card keeps: both answers appear together or neither does, because a screen that showed the
+  partner's answer to a question you never answered is a way to read them without ever
+  writing back. Routed at `/app/prompt/history`, reachable from a history button on the day's
+  own screen — `presence_route_observer_test` already listed the path.
+- **Care.** `list(before:)` pages on created_at, every tile carries its age, and the end of
+  the list says **"Reminders are kept for 30 days."** — which is true (`20260601005000`
+  hard-deletes at 30 days) and which the screen had never said, so a reminder was simply not
+  there any more, reading as the app having lost it.
+
+### Verified
+
+    flutter analyze --no-pub lib/     0 errors, 0 warnings, 160 infos
+      matcher probed the same turn:   2 of 2 synthetic (error + warning), 0 on the info line
+      160 is the Phase-2 baseline exactly — this diff adds no new info either
+    flutter test --no-pub (full)      04:24 +1804 ~3: All tests passed!
+                                      FULL_TEST_EXIT=0   (1771 before Phase 3)
+
+Three new law files. Proven red at HEAD first, in a `927ab8a` worktree: the paging law
+failed 9 of 9 assertions, and the keep-alive law's source assertions — lifted into a
+throwaway probe so they would RUN rather than die on symbols HEAD lacks — failed 10 of 10.
+
+### Not built, and named rather than half-built
+
+**The gallery's month headers.** B5 asked for a `CustomScrollView` with month-grouped
+slivers. I built the paging mechanism — which is what makes an old picture reachable — and
+stopped there rather than rewrite the grid of a screen I had read a fraction of, late in a
+session, with no adversarial read left to spend on it. The headers are presentation on top
+of a mechanism that now works; they are one contained change whenever someone wants them.
+
+### Still open
+
+- **Nothing here has run on a handset**, and B2 is the most device-shaped change in weeks:
+  Home↔Chat five times with no spinner and no refetch, and the partner's tick staying
+  *delivered* until the Chat tab is actually showing, are both things only a phone can
+  answer. Build 78 is cut and uninstalled.
+- Phase 2's two carried-over gaps stand: the media rung still re-uploads bytes after a
+  successful upload, and a realtime channel that dies after a successful join is never
+  demoted.
+- `care_nudges` still carries the full-column UPDATE grant that `20260906140000` closed on
+  `reach_events`.
+- Four hand-rolled "N ago" formatters now exist (presence, rss, location map, care). Nobody
+  should add a fifth.
+
+### Next step
+
+Read the Phase 3 adversarial findings and act on them. Then the device pass — which now owes
+three checks, not two: the call handover, the force-stop mid-send, and the tab bounce.
+
+### §301 addendum — the adversarial round on §301, and the cold-launch defect it caught
+
+31 agents (4 attackers, 27 refutation passes). **19 findings survived refutation, 8 were
+refuted.** Written before the list, because it is the point: **the worst one was created by
+the fix that was supposed to prevent it.**
+
+#### The one that would have wiped a real unread count
+
+§301 above records, in my own words, that `_readIfShowing` exists because "`_init` runs at
+LAUNCH. Ungated, opening the app on Home would clear the shade entry and the count for
+messages the owner has not looked at."
+
+**The gate was inert.** `ChatScreen.visible` was declared `ValueNotifier<bool>(true)`, and
+its only writer is the shell's `addPostFrameCallback` — which runs strictly AFTER the build
+that mounts the chat. So on a cold launch onto Home the gate read `true`, `humanPresent` was
+already true (seeded in `MilesApp.initState`, before the router builds anything), and
+`UnreadTally.clear` + `clearMessageNotification` both ran. Every unread signal gone at once —
+the badge, the shade entry, and the cover dot that reads the same prefs key — for messages
+nobody had opened. Nothing re-derives it; the row is deleted.
+
+Worse, and this is the part worth keeping: `_chatVisible` calls `ModalRoute.of(context)`,
+which **asserts if it is reached before `initState` completes**. In a debug build the throw
+made `_init` abort silently (the chat simply never loaded). In a release build the assert is
+stripped, `isCurrent` answers true, and the wipe happens. **The bug was invisible in exactly
+the build a developer runs, and live in exactly the R8 build that reaches the two handsets.**
+
+Fixed three ways: the notifier defaults to **false** (`shellTabProvider` defaults to 'home',
+so false is right for the first frame of every process); `_init` no longer marks anything
+read at all — the shell raising `visible` is what triggers it, from a post-frame callback
+where `ModalRoute.of` is legal; and `AppShell.dispose` lowers it, because the disguise cover
+replaces the router subtree and a process-scoped static left true would keep marking messages
+read for the whole covered session.
+
+#### The rest, by what they cost
+
+- **A conversation paged to its end could never load history again.** `_reload` refills from
+  the newest 300 and `_onClearedBroadcast` empties the list; neither touched `_moreHistory`.
+  Worse in the other direction: a page in flight across a partner's clear-for-everyone
+  re-appended a hundred bubbles the partner had just deleted. `_resetHistory()` plus a
+  generation token checked after the await.
+- **The prompt-history cursor lost a day east of Greenwich.** `scheduled_date` is a bare
+  `date`, so PostgREST hands it over zoneless and `parseDate` makes a LOCAL midnight;
+  `.toUtc()` on that moves it to the previous evening. A verifier RAN it on this machine
+  (UTC+5, the owner's own zone): a page ending on the 6th asked for everything before the
+  **5th**, skipping a day of questions at every page boundary. Formatted from the date parts
+  now, never through UTC.
+- **The gallery cursor could move FORWARD.** It was a live minimum over the map realtime
+  patches, and realtime is not window-scoped — so deleting the oldest picture advanced the
+  cursor and the next page skipped every row between the two, silently and permanently. A
+  `_floor` is recorded from the PAGE now and only ever moves backwards.
+- **The badge started at zero on every launch.** `ref.listen` fires on a CHANGE, and on a
+  cold start the couple is usually already resolved — so every message that arrived while the
+  app was closed went uncounted, which is the half the badge exists for.
+- **Catch-up rows double-counted.** A replayed page re-counts messages a background push
+  already counted on disk, and the two dedupe sets live in different isolates. Counting is
+  restricted to live arrivals now.
+- **One tap of Done collapsed a paged care list.** `_load` replaces the list with the newest
+  50 and is reached from four places (initState, a send, the Done handler, realtime) — none
+  of which reset `_moreNudges`, so the list shrank and then claimed there was nothing older.
+- **Three silent catches**, all newly written by me: `GalleryWindow.more()` (its `failed`
+  field had no reader anywhere), the care page, and the prompt-history page — which also left
+  `_more` true, so its footer spun forever over a failure nothing mentioned and the scroll
+  listener re-fired it every frame. All three report now; the prompt history grew a retry.
+- **Unlocking on the Chat tab never cleared the tally** — no tab change, no route change, so
+  nothing fired. Presence routes through the same handler as the tab change now. (Found by my
+  own read before the agents reported.)
+- **`_minSeq` folded the whole conversation on every scroll frame** — the cheap guards ran
+  after it. Also mine, also found before the round.
+
+#### Refuted, worth recording
+
+That `IndexedStack` starves the hidden Chat body's tickers (it wraps children in
+`Visibility(maintainState: true, maintainAnimation: true)`, so no `TickerMode(false)` reaches
+it); that the retained body breaks focus traversal (Visibility handles it); that
+`GalleryRepository.stream()` being unused is a defect (it is dead code, and named as such).
+
+#### Verified after the fixes
+
+    flutter analyze --no-pub lib/    0 errors, 0 warnings, 160 infos
+      matcher probed the same turn:  2 of 2 synthetic, 0 on the info line
+    flutter test --no-pub (full)     03:16 +1807 ~3: All tests passed!
+                                     FULL_TEST_EXIT=0
+
+Two laws amended with the superseded belief written above them: `delivery_ack_test`'s
+presence listener, and the keep-alive law's claim that `_init` should mark anything read.
+
+#### Still open from this round, not fixed
+
+- **ChatScreen now mounts at launch and runs `_init` — a 300-row fetch, a decrypt pass and
+  four channel joins — even for someone who only opens Home.** That is the price of the
+  keep-alive, not an accident, but it is new work at boot and it has never been measured on a
+  handset. If it hurts, the fix is to defer `_init` until the first time `visible` goes true.
+- The gallery's month headers (§301, deliberately not built).
+
+**Nothing here has run on a handset.** The device pass now owes three checks: a call across a
+network handover, a force-stop between a send and its landing, and Home↔Chat five times with
+a background push waiting.

@@ -29,6 +29,7 @@ import 'package:miles/features/closer/touch_trace/touch_trace_screen.dart';
 import 'package:miles/features/closer/warmth/warmth_meter_screen.dart';
 import 'package:miles/features/closer/wish_jar/wish_jar_screen.dart';
 import 'package:miles/features/cycle/cycle_screen.dart';
+import 'package:miles/features/daily_prompt/daily_prompt_history_screen.dart';
 import 'package:miles/features/daily_prompt/daily_prompt_screen.dart';
 import 'package:miles/features/disguise/disguise_picker_screen.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
@@ -504,6 +505,10 @@ GoRouter buildRouter(Ref ref) {
       GoRoute(
         path: '/app/prompt',
         builder: (context, state) => const DailyPromptScreen(),
+      ),
+      GoRoute(
+        path: '/app/prompt/history',
+        builder: (context, state) => const DailyPromptHistoryScreen(),
       ),
       GoRoute(
         path: '/app/timeline',

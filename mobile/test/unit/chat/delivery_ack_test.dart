@@ -90,7 +90,16 @@ void main() {
       final deps = chat.indexOf('void didChangeDependencies()');
       expect(deps, greaterThan(-1));
       expect(chat.substring(deps, deps + 400), contains('_settleOwedAck()'));
-      expect(chat, contains('PresenceService.present.addListener(_settleOwedAck)'));
+      // Was `_settleOwedAck`. Presence routes through the SAME handler as the
+      // tab change now, because unlocking the phone while already standing on
+      // the Chat tab changes no tab and no route — so with only the ack
+      // settler here the receipt went out while the shade entry and the badge
+      // stayed, for a conversation the owner was looking straight at.
+      // _onVisibilityChanged calls _settleOwedAck first, so this law's
+      // subject — a read is acked from visibility, never from mount — is
+      // unchanged.
+      expect(chat,
+          contains('PresenceService.present.addListener(_onVisibilityChanged)'),);
     });
 
     final receipts = _read('lib/features/chat/chat_receipts.dart');

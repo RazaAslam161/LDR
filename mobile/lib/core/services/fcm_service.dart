@@ -9,8 +9,10 @@ import 'package:miles/core/diag/diag_event.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/reach_notifications.dart';
 import 'package:miles/core/services/session_scope.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
+import 'package:miles/features/chat/chat_screen.dart';
 import 'package:miles/features/chat/message_preview_port.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart'
     show DisguiseCoverHost;
@@ -449,6 +451,16 @@ class FcmService {
       // Delivered, never read. Nobody has looked at anything: the app may be
       // behind the cover, behind the biometric lock, or on another tab.
       unawaited(_ackDelivery(m.data, trigger: 'push_fg'));
+      // Counted unless the owner is looking at the conversation. The push
+      // reaches a foregrounded app sitting on the cover or on another tab, and
+      // on a covered install no notification is ever posted — so this count is
+      // the only thing that says a message arrived. Deduped by message id, so
+      // the realtime copy of the same message does not count it twice.
+      final msgId = m.data['message_id'] as String?;
+      final coupleId = m.data['couple_id'] as String?;
+      if (msgId != null && coupleId != null && !ChatScreen.visible.value) {
+        unawaited(UnreadTally.noteUnread(coupleId, msgId));
+      }
       // No notification. The chat's realtime subscription already delivers the
       // message when it is mounted, and the owner does not want message
       // banners — the push is here to move the tick, nothing else.

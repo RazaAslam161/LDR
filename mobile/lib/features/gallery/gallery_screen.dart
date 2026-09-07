@@ -71,8 +71,30 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     super.didChangeDependencies();
     final coupleId = ref.read(sessionProvider).couple?.id;
     if (coupleId != null && _stream == null) {
-      _stream = GalleryRepository.stream(coupleId);
+      _window = GalleryRepository.window(coupleId);
+      _stream = _window!.stream;
+      _grid.addListener(_onGridScroll);
     }
+  }
+
+  /// The live grid, and the handle that can page behind its 500-item seed.
+  GalleryWindow? _window;
+
+  final _grid = ScrollController();
+
+  /// Ask for the next page while there is still a screenful to scroll through,
+  /// so the pictures are usually in hand before the finger reaches them.
+  void _onGridScroll() {
+    if (!_grid.hasClients) return;
+    if (_grid.position.extentAfter > 600) return;
+    final w = _window;
+    if (w == null || w.busy || w.atEnd) return;
+    unawaited(w.more().then((_) {
+      // The window is not a notifier; the stream only emits when rows were
+      // actually ADDED, so a page that ended the list or failed has to
+      // repaint the footer itself.
+      if (mounted) setState(() {});
+    }));
   }
 
   /// Held true from a Try again tap for one beat — see the builder, which is
@@ -105,13 +127,17 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     });
     setState(() {
       _retrying = true;
-      _stream = GalleryRepository.stream(coupleId);
+      _window?.dispose();
+      _window = GalleryRepository.window(coupleId);
+      _stream = _window!.stream;
     });
   }
 
   @override
   void dispose() {
     _retryHold?.cancel();
+    _grid.dispose();
+    _window?.dispose();
     super.dispose();
   }
 
@@ -378,6 +404,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                   ),
                 Expanded(
                   child: GridView.builder(
+                    controller: _grid,
                     padding: const EdgeInsets.all(2),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(

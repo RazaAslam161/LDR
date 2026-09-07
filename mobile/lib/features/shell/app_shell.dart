@@ -18,7 +18,9 @@ import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/fsi_permission.dart';
 import 'package:miles/core/services/location_service.dart';
+import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/core/ui/tab_dissolve.dart';
+import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/app_lock_pin_sheet.dart';
 import 'package:miles/core/widgets/escrow_prompt.dart';
 import 'package:miles/core/widgets/gilt_nav_icon.dart';
@@ -863,8 +865,15 @@ class _AppShellState extends ConsumerState<AppShell>
     );
   }
 
+  /// The couple whose stored unread count has been read into the notifier.
+  String? _talliedFor;
+
   @override
   void dispose() {
+    // The cover replaces the whole router subtree on every background, and
+    // this notifier is a process-scoped static: left true, a covered session
+    // would keep marking messages read and would stop counting pushes.
+    ChatScreen.visible.value = false;
     WidgetsBinding.instance.removeObserver(this);
     pendingReach.removeListener(_onPendingReach);
     pendingChat.removeListener(_onPendingChat);
@@ -920,22 +929,78 @@ class _AppShellState extends ConsumerState<AppShell>
         }
       });
     }
+    // The Chat body is now alive on every tab, so "is the chat mounted" stopped
+    // meaning "is the user looking at it" — and that question gates the read
+    // receipt, the typing broadcast and the unread count. Answered here,
+    // because the shell is the only thing that knows.
+    //
+    // Post-frame, never in build: this notifier has listeners that call
+    // setState, and setting it inline is a setState during a build.
+    // What a background push wrote to disk while the app was closed, and what
+    // a couple resolving late means for it. Without this the badge only ever
+    // showed messages that arrived with the app already open — which is the
+    // half that needs it least.
+    ref.listen(sessionProvider, (prev, next) {
+      if (prev?.couple?.id == next.couple?.id) return;
+      unawaited(UnreadTally.refresh(next.couple?.id));
+    });
+    // ref.listen fires only on a CHANGE, and on a cold start the couple is
+    // usually already resolved by the time this shell first builds — so
+    // without a read here the badge stayed at its initialised zero and every
+    // message that arrived while the app was closed went uncounted, which is
+    // the half the badge exists for. Once per couple, not once per build.
+    final coupleNow = ref.read(sessionProvider).couple?.id;
+    if (coupleNow != null && coupleNow != _talliedFor) {
+      _talliedFor = coupleNow;
+      unawaited(UnreadTally.refresh(coupleNow));
+    }
+    final chatShowing = identity == _chatTab;
+    if (ChatScreen.visible.value != chatShowing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ChatScreen.visible.value = chatShowing;
+      });
+    }
     final index = _tabIndex(identity, touch: showTouch, closer: showCloser);
     // Bottom-nav bodies (Home, Chat, [Touch], [Closer]). The Camera tab is a
     // full-screen PUSH inserted at nav index 2 — it has no body, so nav indices
     // map past it. Built rather than sliced: Touch sits in the MIDDLE, so
     // dropping it with sublist would have silently shifted Closer's index.
-    final bodies = <Widget>[
-      const HomeScreen(),
-      const ChatScreen(),
-      if (showTouch) const TouchMapScreen(),
-      if (showCloser) const CloserScreen(),
+    // Builders, not widgets: which of them actually run depends on the index,
+    // and the index depends on how many there are.
+    final builders = <Widget Function()>[
+      HomeScreen.new,
+      ChatScreen.new,
+      if (showTouch) TouchMapScreen.new,
+      if (showCloser) CloserScreen.new,
     ];
     const cameraTab = 2;
-    final destCount = bodies.length + 1; // + the Camera tab
+    const chatBody = 1;
+    final destCount = builders.length + 1; // + the Camera tab
     final selected = index.clamp(0, destCount - 1);
     final bodyIndex = (selected < cameraTab ? selected : selected - 1)
-        .clamp(0, bodies.length - 1);
+        .clamp(0, builders.length - 1);
+
+    // Chat is built ALWAYS; every other body only while it is selected.
+    //
+    // The shell used to build `bodies[bodyIndex]` alone, so changing tab
+    // DISPOSED ChatScreen: coming back re-ran _init from nothing — a
+    // full-screen spinner, a 300-row SELECT and 300 decrypts, on every tap of
+    // the Chat icon, forever. (ChatRepository.cachedPage exists only to soften
+    // that.) An IndexedStack keeps the element alive, so the conversation, its
+    // scroll offset and its live channels survive a trip to Home.
+    //
+    // Only Chat, and that is §288's ruling, not caution: keeping Touch alive
+    // inverts its FLAG_SECURE on a quick A-B-A bounce, and every retained body
+    // double-joins its per-couple realtime topics into the documented
+    // joined-but-dead state. A SizedBox in the slot gives those tabs back
+    // exactly the mount-per-visit lifecycle they had.
+    final bodies = <Widget>[
+      for (var i = 0; i < builders.length; i++)
+        if (i == chatBody || i == bodyIndex)
+          builders[i]()
+        else
+          const SizedBox.shrink(),
+    ];
 
     return Scaffold(
       key: rootScaffoldKey,
@@ -943,7 +1008,17 @@ class _AppShellState extends ConsumerState<AppShell>
       body: Column(
         children: [
           Expanded(
-            child: TabDissolve(index: bodyIndex, child: bodies[bodyIndex]),
+            child: TabDissolve(
+              index: bodyIndex,
+              // IndexedStack, not `bodies[bodyIndex]`: the unselected children
+              // stay in the tree unpainted, which is what keeps Chat's State —
+              // and its scroll offset — alive across a tab change.
+              child: IndexedStack(
+                index: bodyIndex,
+                sizing: StackFit.expand,
+                children: bodies,
+              ),
+            ),
           ),
         ],
       ),
@@ -977,10 +1052,26 @@ class _AppShellState extends ConsumerState<AppShell>
               label: 'Home',
             ),
             NavigationDestination(
-              icon: GiltNavIcon(
-                icon: const Icon(Icons.chat_bubble_outline),
-                selectedIcon: const Icon(Icons.chat_bubble),
-                selected: selected == 1,
+              // The count, where the eye already is. On a covered install this
+              // and the cover's own dot are the ONLY unread signal there is —
+              // no notification is ever posted there — and until now the count
+              // existed on disk with nothing on screen reading it.
+              icon: ValueListenableBuilder<int>(
+                valueListenable: UnreadTally.count,
+                builder: (context, unread, icon) => Badge(
+                  isLabelVisible: unread > 0 && !chatShowing,
+                  // Capped, not because the number is wrong but because a
+                  // three-digit badge stops being a number and becomes a
+                  // smear over the icon it is attached to.
+                  label: Text(unread > 99 ? '99+' : '$unread'),
+                  backgroundColor: MilesColors.ember,
+                  child: icon,
+                ),
+                child: GiltNavIcon(
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  selectedIcon: const Icon(Icons.chat_bubble),
+                  selected: selected == 1,
+                ),
               ),
               label: 'Chat',
             ),

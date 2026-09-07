@@ -514,13 +514,52 @@ class ChatRepository {
     return out;
   }
 
+  /// How many older messages one back-page carries.
+  ///
+  /// Smaller than the opening 300: this runs while the user is already reading
+  /// and holding a finger on the list, so the round trip and the decrypt pass
+  /// have to fit inside a scroll rather than inside a spinner.
+  static const historyPageSize = 100;
+
+  /// The page BEFORE [beforeSeq], oldest-last, for the conversation's history.
+  ///
+  /// Cursored on `seq`, not on `created_at`: seq is the server's own monotonic
+  /// order, so a page boundary cannot repeat or skip a message when two arrive
+  /// inside the same clock tick — and it is the column the composite index is
+  /// on.
+  ///
+  /// Two filters, and the difference between them matters. A message the
+  /// viewer deleted FOR THEMSELVES must not come back through the history door
+  /// (the `deleted_by` array, filtered exactly as the shared-media grid does
+  /// it). A message deleted for EVERYONE must: its row is a tombstone that the
+  /// conversation renders as "This message was deleted", and dropping it here
+  /// would make the placeholder appear only above the fold.
+  static Future<List<Message>> fetchOlder(
+    String coupleId, {
+    required int beforeSeq,
+  }) async {
+    var q = _c
+        .from('messages')
+        .select()
+        .eq('couple_id', coupleId)
+        .lt('seq', beforeSeq);
+    final uid = SupabaseService.currentUserId;
+    if (uid != null) q = q.not('deleted_by', 'cs', [uid]);
+    final res =
+        await q.order('seq', ascending: false).limit(historyPageSize);
+    final out = await hydrate(_parseRows(res as List, 'chat history'));
+    await warmMedia(out);
+    return out;
+  }
+
   /// The last page this process rendered, per couple.
   ///
-  /// The shell builds `bodies[bodyIndex]` rather than an IndexedStack
-  /// (app_shell.dart), so moving off the Chat tab DISPOSES ChatScreen and
-  /// coming back re-runs `_init` from nothing — a full-screen spinner plus a
-  /// 300-row network SELECT plus 300 decrypts, on every single tap of the Chat
-  /// icon, forever. There is no local message store to fall back on.
+  /// The shell keeps the Chat body in an IndexedStack now (app_shell.dart), so
+  /// a tab change no longer disposes ChatScreen and this is no longer the only
+  /// thing standing between the user and a spinner on every tap of the Chat
+  /// icon. It still earns its place: the disguise cover replaces the whole
+  /// router subtree on every background, and THAT still rebuilds the screen
+  /// from nothing. There is no local message store to fall back on.
   ///
   /// Memory only, and never written to disk: these are decrypted messages in an
   /// E2EE app, and [forget] drops them on sign-out. Keyed by couple, so an
