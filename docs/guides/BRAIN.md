@@ -27518,3 +27518,33 @@ whenever the retouch is not running, so exactly one chip is always selected.
 Nobody has seen ANY of it — the guided filter has never rendered a frame that a person judged.
 Build 79 carries: the edge-preserving smoother (§298), the strength fix and twelve looks
 (§299), and this two-scale work. The owner will test it all in one pass.
+
+### §302 addendum — build 80 is the tester APK, and it carries every session
+
+Cut for the owner's "cleanest, fully updated with all the changes across all sessions".
+
+    release.sh   checked 1 libapp.so, all stamped miles-build-80
+                 ABIs in the APK: ['arm64-v8a']
+                 CN=Miles, O=R&D Dev, C=PK — matches the installed base, updates in place
+                 sha256 6769b8d478529c54f868ec9ccd049a4f8b048533cb82ca9c8af3df9e9cb2f523
+    artifacts    D:\Miles\Miles.apk  and
+                 mobile/build/app/outputs/flutter-apk/app-play-release.apk
+
+**"All sessions" verified by ancestry, not by guessing at strings.** HEAD's chain carries the
+concurrent session's `fa609d1` (push token per device), `763d474` (message/call survival),
+`00e9714` (history), and this session's `76903c2` and `09f108f`. `git merge-base --is-ancestor`
+confirms each. The beauty markers are in the packaged snapshot directly: Retouch, miles/beauty,
+beauty_kill, Porcelain, Bold, "In video calls", MilesBeautyGl.
+
+Build 79's APK was cut from an UNCOMMITTED tree. That is the same ambiguity that shipped stale
+Dart twice this week, so 80 exists to map the artifact to exactly one commit (`2e1df6f`), and
+the bump is committed rather than floating.
+
+One file is in the APK but not in any commit: `values-night/styles.xml`, another session's
+in-flight launch-theme change. `release.sh` builds the WORKING TREE, not HEAD, so it rode along.
+Harmless — a launch theme — but recorded here because an artifact containing uncommitted work is
+exactly what the paragraph above is about, and this one is not mine to commit.
+
+Still open, unchanged and still the whole question: **nobody has seen any of the retouch
+render.** Build 80 is the first artifact carrying the guided filter, the strength fix, the
+twelve looks on the strip, and the two-scale skin together.
