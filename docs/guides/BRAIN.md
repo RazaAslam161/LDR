@@ -27548,3 +27548,14 @@ exactly what the paragraph above is about, and this one is not mine to commit.
 Still open, unchanged and still the whole question: **nobody has seen any of the retouch
 render.** Build 80 is the first artifact carrying the guided filter, the strength fix, the
 twelve looks on the strip, and the two-scale skin together.
+
+### §302 addendum 2 — build 80 installed on the handset
+
+    versionCode  77 -> 80   (in place; adb install -r, never uninstall, seed intact)
+    lastUpdateTime          2026-09-07 21:08:45
+    logcat cleared, so the next camera open reads clean
+
+A note for whoever automates this next: `adb devices` reported zero for a full 30-second retry
+loop and then listed the OnePlus 8 immediately afterwards — the daemon had been killed and the
+device enumerated a beat after the loop gave up. `adb devices -l` is the check worth trusting,
+and "no devices" is worth re-reading once before it is reported as unplugged.
