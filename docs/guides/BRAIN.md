@@ -27413,3 +27413,38 @@ presence listener, and the keep-alive law's claim that `_init` should mark anyth
 **Nothing here has run on a handset.** The device pass now owes three checks: a call across a
 network handover, a force-stop between a send and its landing, and Home↔Chat five times with
 a background push waiting.
+
+### §301 addendum 2 — 00e9714 pushed; BRAIN.md was mine alone this time
+
+    00e9714  20 files, +1791 / -46      927ab8a..00e9714  fix-sprint -> fix-sprint
+    local  00e97144db1e50aee322db97aa02162844153956
+    remote 00e97144db1e50aee322db97aa02162844153956   MATCH
+
+Gated on the INDEX, not the working tree, by the method §300's addendum records:
+`git checkout-index -a -f --prefix=` into a scratch directory, then `git init` + `add -A`
+there — without that second step two `repo_hygiene_test` cases report themselves blind
+(*"git ls-files returned almost nothing"*), which reads as red and is not.
+
+    flutter analyze --no-pub lib/   0 errors, 0 warnings, 164 infos
+      matcher probed the same turn: 2 of 2 synthetic, 0 on the info line
+    flutter test --no-pub           04:31 +1802 ~3: All tests passed!   exit 0
+
+1802 against the working tree's 1807: the five are the beauty session's own new tests,
+correctly absent from this commit.
+
+**Unlike 763d474, this commit's BRAIN.md hunk is entirely mine** — §298/§299 went out with
+763d474, so the 238-line append here is §301 and its addendum and nothing else. No
+coherent-tree escape hatch was needed.
+
+Still left uncommitted for the beauty session, unchanged and untouched for 12 hours: the four
+Kotlin/resource files, `beauty_settings.dart`, the two camera tests, and the `76 -> 78`
+version pair. The pair stays theirs for the reason 763d474 gave — committing 78 without the
+beauty code it names puts two different builds behind one number.
+
+**Nothing in 00e9714 has run on a handset.** The device pass owes three checks now: a call
+across a real network handover, an `adb shell am force-stop` between a send and its landing,
+and Home↔Chat five times with a background push waiting — the last of which is B2's whole
+subject and has never been seen.
+
+Next step: unchanged — build, then those three checks. Phase 4 (RC-D time, RC-F
+availability) is the next block of the plan if the owner wants to keep going first.
