@@ -16,7 +16,10 @@ void main() {
       // processing pass they never asked for.
       const s = BeautySettings();
       expect(s.enabled, isFalse);
-      expect(s.amount, 0.5);
+      // amount is a TRIM, not a halving. It shipped at 0.5, which multiplied
+      // every axis by a half on top of the skin mask; a "Natural" preset
+      // landed as a ~9% blend and read as nothing happening on a real face.
+      expect(s.amount, 1);
       expect(s.reshape.isIdentity, isTrue);
       expect(s.makeup.isEmpty, isTrue);
     });
@@ -221,7 +224,7 @@ void main() {
         'lips': 'red',
       });
       expect(s.enabled, isFalse);
-      expect(s.amount, 0.5);
+      expect(s.amount, 1);
       expect(s.makeup.lips.shadeId, isNull);
     });
   });

@@ -66,6 +66,9 @@ internal class FaceTracker {
     @Volatile
     private var warnedDegenerate = false
 
+    /** Last reported presence, so the log records transitions and not 30 lines a second. */
+    private var loggedHasFace: Boolean? = null
+
     /**
      * Where the effect's input sits on the sensor, from `SurfaceRequest.TransformationInfo`.
      * Updated by CameraX whenever the crop changes (zoom), so landmarks stay on the face.
@@ -206,8 +209,16 @@ internal class FaceTracker {
         val mesh = meshes.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
         val pts = mesh?.allPoints
         if (pts == null || pts.size < FaceGeometry.POINT_COUNT) {
+            if (loggedHasFace != false) {
+                loggedHasFace = false
+                Log.i(TAG, "no face in frame — makeup and reshape are inert until one returns")
+            }
             latest = null
             return
+        }
+        if (loggedHasFace != true) {
+            loggedHasFace = true
+            Log.i(TAG, "face acquired: ${pts.size} points — makeup and reshape are live")
         }
 
         // analysis-buffer px → sensor → effect-buffer px, when both transforms are known.

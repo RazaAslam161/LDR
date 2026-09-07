@@ -69,6 +69,7 @@ internal class BeautyGlRenderer {
     private var copy: Program? = null
     private var blur: Program? = null
     private var mask: Program? = null
+    private var guided: Program? = null
     private var composite: Program? = null
 
     private var fbo = 0
@@ -77,6 +78,25 @@ internal class BeautyGlRenderer {
     private var texH1 = 0
     private var texM0 = 0
     private var texM1 = 0
+    private var texG0 = 0
+    private var texG1 = 0
+    private var texG2 = 0
+    private var texG3 = 0
+
+    /** Guided-filter edge threshold. Below this local variance a region is skin and is
+     *  flattened; above it the structure is an edge and survives. Driven by the smooth
+     *  slider so "more smoothing" widens what counts as skin rather than just blending
+     *  harder toward a blur — which is what made the old path go plastic. */
+    private var guidedEps = 0.0016f
+
+    /** |detail| below this is pore and hair texture and is restored; above uBlemishT it is a
+     *  blemish and stays removed. Between them it fades. */
+    private var poreT = 0.012f
+    private var blemishT = 0.055f
+
+    /** Coarse-scale edge threshold. Larger than the fine one: at this radius a cheek
+     *  blotch is "flat" and should go, while the nose and jaw are still structure. */
+    private var guidedEpsCoarse = 0.006f
     private var bufW = 0
     private var bufH = 0
     private var aspect = 1f
@@ -183,6 +203,7 @@ internal class BeautyGlRenderer {
         copy = build(BeautyShaders.COPY) ?: return false
         blur = build(BeautyShaders.BLUR) ?: return false
         mask = build(BeautyShaders.MASK) ?: return fail("mask shader; this GPU cannot hold the polygon uniforms")
+        guided = build(BeautyShaders.GUIDED) ?: return fail("guided-filter shader")
 
         val budget = IntArray(1)
         GLES20.glGetIntegerv(GLES20.GL_MAX_FRAGMENT_UNIFORM_VECTORS, budget, 0)
@@ -199,15 +220,29 @@ internal class BeautyGlRenderer {
             GLES20.glUniform1i(p.loc("uTexture"), 0)
             GLES20.glUniform1i(p.loc("uBlur"), 1)
             GLES20.glUniform1i(p.loc("uMask"), 2)
+            GLES20.glUniform1i(p.loc("uGuide"), 3)
+                GLES20.glUniform1i(p.loc("uGuideCoarse"), 4)
         }
         val ids = IntArray(1)
         GLES20.glGenFramebuffers(1, ids, 0)
         fbo = ids[0]
         inputTextureId = createTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+        // Fragment highp is what keeps the guided filter honest: var = E[Y2] - E[Y]2 is a
+        // catastrophic cancellation and mediump (fp16) cannot hold it. Absent, the filter
+        // degrades toward a = 0 everywhere, i.e. the flat look this replaced — no crash, but
+        // worth being able to read off a log rather than guess at.
+        val hpRange = IntArray(2)
+        val hpBits = IntArray(1)
+        GLES20.glGetShaderPrecisionFormat(
+            GLES20.GL_FRAGMENT_SHADER, GLES20.GL_HIGH_FLOAT, hpRange, 0, hpBits, 0,
+        )
+        if (hpBits[0] < 16) {
+            Log.w(TAG, "fragment highp is ${hpBits[0]}-bit; skin smoothing will be coarse")
+        }
         Log.i(
             TAG,
             "GL up: ES$glVersion, ${GLES20.glGetString(GLES20.GL_RENDERER)}, uniform budget ${budget[0]}, " +
-                "variant ${if (fullVariant) "full" else "lite"}, ${if (ownsContext) "own" else "adopted"} context",
+                "variant ${if (fullVariant) "full" else "lite"}, highp ${hpBits[0]}-bit, ${if (ownsContext) "own" else "adopted"} context",
         )
         return true
     }
@@ -296,6 +331,11 @@ internal class BeautyGlRenderer {
             Log.e(TAG, "eglMakeCurrent(pbuffer) failed: ${EGL14.eglGetError()}")
             return false
         }
+        // eps is what "more smoothing" should widen: the band of local variance counted as
+        // skin rather than edge. Cross-fading harder toward a blur instead is precisely how
+        // the old path went plastic. Both engines set it here, so camera and call agree.
+        guidedEps = 0.0008f + p.smooth * 0.0040f
+        guidedEpsCoarse = 0.0030f + p.smooth * 0.0120f
         val fa = runPasses(inputTextureId, inputW, inputH, stMatrix, face, faceAlpha)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         var ok = true
@@ -338,6 +378,11 @@ internal class BeautyGlRenderer {
         val out = acquireOutput(w, h) ?: return null
         GLES20.glGetIntegerv(GLES20.GL_FRAMEBUFFER_BINDING, savedFbo, 0)
         GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0)
+        // eps is what "more smoothing" should widen: the band of local variance counted as
+        // skin rather than edge. Cross-fading harder toward a blur instead is precisely how
+        // the old path went plastic. Both engines set it here, so camera and call agree.
+        guidedEps = 0.0008f + p.smooth * 0.0040f
+        guidedEpsCoarse = 0.0030f + p.smooth * 0.0120f
         val fa = runPasses(inputOes, w, h, stMatrix, face, faceAlpha)
         attach(out.tex)
         GLES20.glViewport(0, 0, w, h)
@@ -390,6 +435,8 @@ internal class BeautyGlRenderer {
         ensureBuffers(inputW, inputH)
         val hw = maxOf(1, inputW / 2)
         val hh = maxOf(1, inputH / 2)
+        val qw = maxOf(1, inputW / 4)
+        val qh = maxOf(1, inputH / 4)
         aspect = inputW.toFloat() / inputH.toFloat()
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
 
@@ -405,7 +452,58 @@ internal class BeautyGlRenderer {
         bind(GLES20.GL_TEXTURE_2D, texA, 0)
         drawQuad(copy!!, identity)
 
+        // Guided-filter coefficients, measured on the SHARP half — before the blur below
+        // overwrites texH0 — because local variance is the whole signal and a smeared input
+        // has none.
+        val g = guided!!
+        attach(texG0)
+        GLES20.glUseProgram(g.id)
+        bind(GLES20.GL_TEXTURE_2D, texH0, 0)
+        GLES20.glUniform2f(g.loc("uTexel"), 1f / hw, 1f / hh)
+        GLES20.glUniform1f(g.loc("uEps"), guidedEps)
+        drawQuad(g, identity)
+
         val b = blur!!
+        GLES20.glUseProgram(b.id)
+
+        // Box-smooth (a, b): the guided filter's own averaging step, and what widens the
+        // support from a 5x5 patch to roughly a blemish. The existing blur does it — a and b
+        // ride the r and g channels.
+        attach(texG1)
+        bind(GLES20.GL_TEXTURE_2D, texG0, 0)
+        GLES20.glUniform2f(b.loc("uStep"), 1f / hw, 0f)
+        drawQuad(b, identity)
+        attach(texG0)
+        bind(GLES20.GL_TEXTURE_2D, texG1, 0)
+        GLES20.glUniform2f(b.loc("uStep"), 0f, 1f / hh)
+        drawQuad(b, identity)
+
+        // ── the COARSE scale ────────────────────────────────────────────────────────────
+        // A second guided model at quarter res with wider taps and a larger eps. At this
+        // radius a cheek blotch reads as flat and is removed, while the nose, jaw and
+        // hairline are still structure and survive. One scale could never do both: the
+        // radius that evens a blotch also erases the pores, and the radius that keeps pores
+        // cannot see a blotch at all.
+        GLES20.glUseProgram(g.id)
+        attach(texG2)
+        GLES20.glViewport(0, 0, qw, qh)
+        bind(GLES20.GL_TEXTURE_2D, texH0, 0)
+        GLES20.glUniform2f(g.loc("uTexel"), 1f / qw, 1f / qh)
+        GLES20.glUniform1f(g.loc("uEps"), guidedEpsCoarse)
+        drawQuad(g, identity)
+
+        GLES20.glUseProgram(b.id)
+        attach(texG3)
+        bind(GLES20.GL_TEXTURE_2D, texG2, 0)
+        GLES20.glUniform2f(b.loc("uStep"), 1f / qw, 0f)
+        drawQuad(b, identity)
+        attach(texG2)
+        bind(GLES20.GL_TEXTURE_2D, texG3, 0)
+        GLES20.glUniform2f(b.loc("uStep"), 0f, 1f / qh)
+        drawQuad(b, identity)
+
+        // Back to half res for the mask work below.
+        GLES20.glViewport(0, 0, hw, hh)
         GLES20.glUseProgram(b.id)
         repeat(2) {
             attach(texH1)
@@ -454,11 +552,18 @@ internal class BeautyGlRenderer {
         bind(GLES20.GL_TEXTURE_2D, texA, 0)
         bind(GLES20.GL_TEXTURE_2D, texH0, 1)
         bind(GLES20.GL_TEXTURE_2D, texM0, 2)
+        bind(GLES20.GL_TEXTURE_2D, texG0, 3)
+        bind(GLES20.GL_TEXTURE_2D, texG2, 4)
         GLES20.glUniform1f(c.loc("uAspect"), aspect)
         GLES20.glUniform1f(c.loc("uSmooth"), p.smooth)
         GLES20.glUniform1f(c.loc("uTone"), p.tone)
         GLES20.glUniform1f(c.loc("uBrighten"), p.brighten)
         GLES20.glUniform1f(c.loc("uDetail"), p.detail)
+        GLES20.glUniform1f(c.loc("uPoreT"), poreT)
+        GLES20.glUniform1f(c.loc("uBlemishT"), blemishT)
+        // How much of the blotch band survives. 1.0 would put the uneven tone straight back;
+        // 0.0 flattens it completely and reads as a mask. Stronger looks keep less of it.
+        GLES20.glUniform1f(c.loc("uEvenness"), 0.45f - 0.30f * p.smooth)
         GLES20.glUniform1f(c.loc("uFaceAlpha"), fa)
         if (fullVariant && face != null) uploadFace(c, face, p)
         if (colour == null) {
@@ -530,8 +635,8 @@ internal class BeautyGlRenderer {
             EGL14.eglGetCurrentContext() != EGL14.EGL_NO_CONTEXT
         }
         if (live) {
-            for (p in listOf(oes, copy, blur, mask, composite)) p?.let { GLES20.glDeleteProgram(it.id) }
-            val tex = intArrayOf(inputTextureId, texA, texH0, texH1, texM0, texM1) + pool.filterNotNull().map { it.tex }.toIntArray()
+            for (p in listOf(oes, copy, blur, mask, guided, composite)) p?.let { GLES20.glDeleteProgram(it.id) }
+            val tex = intArrayOf(inputTextureId, texA, texH0, texH1, texM0, texM1, texG0, texG1, texG2, texG3) + pool.filterNotNull().map { it.tex }.toIntArray()
             GLES20.glDeleteTextures(tex.size, tex, 0)
             if (fbo != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
         }
@@ -545,8 +650,8 @@ internal class BeautyGlRenderer {
         context = EGL14.EGL_NO_CONTEXT
         pbuffer = EGL14.EGL_NO_SURFACE
         ownsContext = false
-        oes = null; copy = null; blur = null; mask = null; composite = null
-        inputTextureId = 0; texA = 0; texH0 = 0; texH1 = 0; texM0 = 0; texM1 = 0; fbo = 0
+        oes = null; copy = null; blur = null; mask = null; guided = null; composite = null
+        inputTextureId = 0; texA = 0; texH0 = 0; texH1 = 0; texM0 = 0; texM1 = 0; texG0 = 0; texG1 = 0; texG2 = 0; texG3 = 0; fbo = 0
         bufW = 0; bufH = 0
         pool.fill(null)
     }
@@ -555,15 +660,23 @@ internal class BeautyGlRenderer {
 
     private fun ensureBuffers(w: Int, h: Int) {
         if (w == bufW && h == bufH) return
-        val old = intArrayOf(texA, texH0, texH1, texM0, texM1)
+        val old = intArrayOf(texA, texH0, texH1, texM0, texM1, texG0, texG1, texG2, texG3)
         if (texA != 0) GLES20.glDeleteTextures(old.size, old, 0)
         val hw = maxOf(1, w / 2)
         val hh = maxOf(1, h / 2)
+        val qw = maxOf(1, w / 4)
+        val qh = maxOf(1, h / 4)
         texA = createTexture(GLES20.GL_TEXTURE_2D, w, h)
         texH0 = createTexture(GLES20.GL_TEXTURE_2D, hw, hh)
         texH1 = createTexture(GLES20.GL_TEXTURE_2D, hw, hh)
         texM0 = createTexture(GLES20.GL_TEXTURE_2D, hw, hh)
         texM1 = createTexture(GLES20.GL_TEXTURE_2D, hw, hh)
+        texG0 = createTexture(GLES20.GL_TEXTURE_2D, hw, hh)
+        texG1 = createTexture(GLES20.GL_TEXTURE_2D, hw, hh)
+        // Quarter res for the coarse scale: a wider support for a quarter of the fill, and the
+        // coefficients are smooth by construction so there is nothing to lose by it.
+        texG2 = createTexture(GLES20.GL_TEXTURE_2D, qw, qh)
+        texG3 = createTexture(GLES20.GL_TEXTURE_2D, qw, qh)
         bufW = w
         bufH = h
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)

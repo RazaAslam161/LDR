@@ -27448,3 +27448,73 @@ subject and has never been seen.
 
 Next step: unchanged — build, then those three checks. Phase 4 (RC-D time, RC-F
 availability) is the next block of the plan if the owner wants to keep going first.
+
+## §302 — 2026-09-07 — two-scale skin, edge-aware chroma, and the looks moved onto the strip
+
+Owner: "just add high quality beauty filters extremely smooth." Three things were still short
+of that, and one assumption of mine was wrong.
+
+### The wrong assumption, checked before acting
+
+I went in expecting the half-resolution guided coefficients to be the quality ceiling. They are
+not: sampling (a, b) at half res and evaluating `q = a*Y + b` against FULL-res luma is the fast
+guided filter (He & Sun 2015) working as designed, and the composite already does exactly that.
+"Fixing" it would have cost fill rate for nothing. Read the pass structure first; the real
+limits were elsewhere.
+
+### What actually limited it
+
+1. **One scale.** A single radius cannot separate a pore from a blotch — the radius that evens
+   a blotch erases pores, and the radius that keeps pores cannot see the blotch. Skin stayed
+   visibly uneven however hard it was smoothed.
+2. **Chroma went through the Gaussian.** `uTone` blended colour toward an edge-BLIND blur, so
+   redness smoothing bled across the lip and nose borders and left a colour halo — the same
+   defect the luma path had already been fixed for.
+3. **The looks were behind a small face icon**, not on the strip, which is the literal answer
+   to "why there is no new filters": they were unreachable without knowing where to tap.
+
+### Two-scale, three bands
+
+A second guided model at QUARTER res with wider taps and a larger eps (`0.003 + smooth*0.012`
+against the fine `0.0008 + smooth*0.004`). Quarter res buys a much wider support for a quarter
+of the fill, and costs nothing in quality because the coefficients are smooth by construction.
+Three draws, all at quarter res.
+
+The composite now separates three bands instead of two:
+
+    mid  = gY - gC   uneven tone and blotches   → mostly discarded (uEvenness)
+    fine = Y  - gY   pores, fine hair, grain    → kept when small, dropped when large
+    out  = gC + mid*uEvenness + fine*keep*uDetail
+
+`uEvenness = 0.45 - 0.30*smooth`: at full strength 15% of the blotch band survives, which is
+what keeps it from flattening into a mask.
+
+Chroma evening is now gated by the guided model's own edge term — `uTone * m * 0.9 * (1 - ab.x)`.
+`ab.x` is 1 at an edge and 0 on flat skin, so the blend stops exactly where it used to smear.
+
+### The looks are on the strip
+
+A second row above the eleven colour filters. A look retouches the FACE; a filter grades the
+whole FRAME; they compose, so they are two rows and not one. 'off' is the identity and is lit
+whenever the retouch is not running, so exactly one chip is always selected.
+
+### Two gates caught two real mistakes
+
+- My own §298 law failed: the three-band rewrite renamed `det` to `fine`, so the law pinning
+  selective detail restore no longer matched. Updated to pin the NEW invariant, plus the three
+  bands, `uEvenness`, and the `(1 - ab.x)` chroma gate.
+- `repo_hygiene`'s glassmorphism gate failed on my chip: `Colors.black.withValues(alpha: 0.35)`
+  under text. The strip's own idiom two rows down is `MilesColors.tint(Colors.black, 0.28)` —
+  opaque. Restyled to match, which is both compliant and consistent.
+
+### Verified
+
+    flutter analyze --no-pub                              0 errors, 0 warnings
+    ./gradlew :app:compileSideloadDebugKotlin             BUILD SUCCESSFUL in 4m 37s
+    flutter test                                          1807 passed, 3 skipped, exit 0
+
+### Still open
+
+Nobody has seen ANY of it — the guided filter has never rendered a frame that a person judged.
+Build 79 carries: the edge-preserving smoother (§298), the strength fix and twelve looks
+(§299), and this two-scale work. The owner will test it all in one pass.

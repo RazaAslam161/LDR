@@ -15,7 +15,7 @@ import 'package:flutter/foundation.dart';
 class BeautySettings {
   const BeautySettings({
     this.enabled = false,
-    this.amount = 0.5,
+    this.amount = 1,
     this.presetId = 'natural',
     this.retouch = const RetouchParams(),
     this.reshape = const ReshapeParams(),
@@ -132,7 +132,7 @@ class BeautySettings {
             : null;
     return BeautySettings(
       enabled: j['enabled'] == true,
-      amount: _unit(j['amount'], 0.5),
+      amount: _unit(j['amount'], 1),
       presetId: validPreset,
       retouch: RetouchParams(
         smooth: _unit(j['smooth'], 0),
@@ -351,24 +351,30 @@ const List<BeautyPreset> kBeautyPresets = [
     label: 'Off',
     settings: BeautySettings(presetId: 'off'),
   ),
+  // Everything below is deliberately STRONG. The first set was authored at
+  // roughly a fifth of these values and read as "nothing happened" on a real
+  // face: every axis is attenuated twice more after this point — once by
+  // [BeautySettings.amount] and again by the skin mask in the shader — so a
+  // preset that looks bold here lands as something believable on screen.
   BeautyPreset(
     id: 'natural',
     label: 'Natural',
     settings: BeautySettings(
       enabled: true,
-      amount: 0.5,
       presetId: 'natural',
-      retouch: RetouchParams(smooth: 0.45, tone: 0.3, brighten: 0.15),
+      retouch: RetouchParams(smooth: 0.85, tone: 0.55, brighten: 0.25),
     ),
   ),
   BeautyPreset(
-    id: 'soft',
-    label: 'Soft',
+    id: 'smooth',
+    label: 'Smooth',
     settings: BeautySettings(
       enabled: true,
-      amount: 0.55,
-      presetId: 'soft',
-      retouch: RetouchParams(smooth: 0.7, tone: 0.4, brighten: 0.2, detail: 0.4),
+      presetId: 'smooth',
+      // The silky one. Detail stays high on purpose: the guided filter removes
+      // the blemish, and putting pore texture back is what keeps this from
+      // reading as plastic.
+      retouch: RetouchParams(smooth: 1, tone: 0.6, brighten: 0.3, detail: 0.55),
     ),
   ),
   BeautyPreset(
@@ -376,9 +382,41 @@ const List<BeautyPreset> kBeautyPresets = [
     label: 'Bright',
     settings: BeautySettings(
       enabled: true,
-      amount: 0.5,
       presetId: 'bright',
-      retouch: RetouchParams(smooth: 0.4, tone: 0.5, brighten: 0.55),
+      retouch: RetouchParams(smooth: 0.7, tone: 0.75, brighten: 0.8),
+    ),
+  ),
+  BeautyPreset(
+    id: 'fresh',
+    label: 'Fresh',
+    settings: BeautySettings(
+      enabled: true,
+      presetId: 'fresh',
+      retouch: RetouchParams(smooth: 0.8, tone: 0.7, brighten: 0.45),
+      makeup: MakeupParams(
+        blush: MakeupLayer(shadeId: 'blush.peach', intensity: 0.55),
+      ),
+    ),
+  ),
+  BeautyPreset(
+    id: 'glow',
+    label: 'Glow',
+    settings: BeautySettings(
+      enabled: true,
+      presetId: 'glow',
+      retouch: RetouchParams(smooth: 0.85, tone: 0.6, brighten: 0.7),
+      makeup: MakeupParams(
+        blush: MakeupLayer(shadeId: 'blush.warm', intensity: 0.5),
+      ),
+    ),
+  ),
+  BeautyPreset(
+    id: 'porcelain',
+    label: 'Porcelain',
+    settings: BeautySettings(
+      enabled: true,
+      presetId: 'porcelain',
+      retouch: RetouchParams(smooth: 1, tone: 0.85, brighten: 0.6, detail: 0.35),
     ),
   ),
   BeautyPreset(
@@ -386,10 +424,12 @@ const List<BeautyPreset> kBeautyPresets = [
     label: 'Defined',
     settings: BeautySettings(
       enabled: true,
-      amount: 0.5,
       presetId: 'defined',
-      retouch: RetouchParams(smooth: 0.35, tone: 0.25, detail: 0.6),
-      reshape: ReshapeParams(jaw: 0.3, chin: 0.15, nose: 0.2),
+      retouch: RetouchParams(smooth: 0.65, tone: 0.5, detail: 0.7),
+      reshape: ReshapeParams(jaw: 0.55, chin: 0.3, nose: 0.35),
+      makeup: MakeupParams(
+        brows: MakeupLayer(shadeId: 'brows.deep', intensity: 0.45),
+      ),
     ),
   ),
   BeautyPreset(
@@ -397,13 +437,27 @@ const List<BeautyPreset> kBeautyPresets = [
     label: 'Polished',
     settings: BeautySettings(
       enabled: true,
-      amount: 0.55,
       presetId: 'polished',
-      retouch: RetouchParams(smooth: 0.55, tone: 0.45, brighten: 0.25),
-      reshape: ReshapeParams(jaw: 0.2, eyes: 0.15),
+      retouch: RetouchParams(smooth: 0.9, tone: 0.7, brighten: 0.4),
+      reshape: ReshapeParams(jaw: 0.35, eyes: 0.3),
       makeup: MakeupParams(
-        lips: MakeupLayer(shadeId: 'lips.soft', intensity: 0.35),
-        blush: MakeupLayer(shadeId: 'blush.peach', intensity: 0.3),
+        lips: MakeupLayer(shadeId: 'lips.soft', intensity: 0.6),
+        blush: MakeupLayer(shadeId: 'blush.peach', intensity: 0.5),
+        brows: MakeupLayer(shadeId: 'brows.soft', intensity: 0.4),
+      ),
+    ),
+  ),
+  BeautyPreset(
+    id: 'rose',
+    label: 'Rose',
+    settings: BeautySettings(
+      enabled: true,
+      presetId: 'rose',
+      retouch: RetouchParams(smooth: 0.85, tone: 0.65, brighten: 0.4),
+      reshape: ReshapeParams(eyes: 0.25),
+      makeup: MakeupParams(
+        lips: MakeupLayer(shadeId: 'lips.rose', intensity: 0.75),
+        blush: MakeupLayer(shadeId: 'blush.rose', intensity: 0.55),
       ),
     ),
   ),
@@ -412,15 +466,30 @@ const List<BeautyPreset> kBeautyPresets = [
     label: 'Evening',
     settings: BeautySettings(
       enabled: true,
-      amount: 0.6,
       presetId: 'evening',
-      retouch: RetouchParams(smooth: 0.6, tone: 0.4, brighten: 0.2),
-      reshape: ReshapeParams(jaw: 0.25, eyes: 0.2),
+      retouch: RetouchParams(smooth: 0.9, tone: 0.65, brighten: 0.35),
+      reshape: ReshapeParams(jaw: 0.4, eyes: 0.35),
       makeup: MakeupParams(
-        lips: MakeupLayer(shadeId: 'lips.berry', intensity: 0.5),
-        blush: MakeupLayer(shadeId: 'blush.rose', intensity: 0.35),
-        brows: MakeupLayer(shadeId: 'brows.soft', intensity: 0.3),
-        eyeshadow: MakeupLayer(shadeId: 'eyeshadow.bronze', intensity: 0.35),
+        lips: MakeupLayer(shadeId: 'lips.berry', intensity: 0.9),
+        blush: MakeupLayer(shadeId: 'blush.rose', intensity: 0.6),
+        brows: MakeupLayer(shadeId: 'brows.soft', intensity: 0.5),
+        eyeshadow: MakeupLayer(shadeId: 'eyeshadow.bronze', intensity: 0.65),
+      ),
+    ),
+  ),
+  BeautyPreset(
+    id: 'bold',
+    label: 'Bold',
+    settings: BeautySettings(
+      enabled: true,
+      presetId: 'bold',
+      retouch: RetouchParams(smooth: 0.95, tone: 0.7, brighten: 0.4),
+      reshape: ReshapeParams(jaw: 0.5, eyes: 0.4, chin: 0.2),
+      makeup: MakeupParams(
+        lips: MakeupLayer(shadeId: 'lips.plum', intensity: 1),
+        blush: MakeupLayer(shadeId: 'blush.warm', intensity: 0.6),
+        brows: MakeupLayer(shadeId: 'brows.deep', intensity: 0.6),
+        eyeshadow: MakeupLayer(shadeId: 'eyeshadow.slate', intensity: 0.75),
       ),
     ),
   ),

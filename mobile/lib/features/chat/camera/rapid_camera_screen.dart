@@ -813,6 +813,10 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (!recording) ...[
+                SizedBox(height: 62, child: _beautyStrip()),
+                const SizedBox(height: 6),
+              ],
               SizedBox(
                 height: 72,
                 child: recording
@@ -845,6 +849,58 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
           ),
         ),
       ),
+    );
+  }
+
+  /// The looks, on the strip rather than behind an icon.
+  ///
+  /// They were reachable only through the retouch sheet, which is why the answer to "why
+  /// are there no new filters" was that nobody could see them. A look is not a colour
+  /// filter and does not replace one — this row retouches the face, the row below grades
+  /// the frame, and they compose.
+  Widget _beautyStrip() {
+    return ListView.builder(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      physics: const BouncingScrollPhysics(),
+      itemCount: kBeautyPresets.length,
+      itemBuilder: (context, i) {
+        final p = kBeautyPresets[i];
+        // 'off' is the identity and is selected whenever the retouch is not running, so
+        // there is always exactly one chip lit.
+        final selected = _beauty.enabled
+            ? _beauty.presetId == p.id
+            : p.id == 'off';
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: GestureDetector(
+            onTap: () => unawaited(_applyBeauty(p.settings)),
+            child: Container(
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                // tint(), not withValues(alpha:) — repo_hygiene forbids a
+                // translucent surface under text, and this is the strip's own
+                // idiom two rows down.
+                color: MilesColors.tint(Colors.black, 0.28),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: selected ? MilesColors.ember : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+              child: Text(
+                p.label,
+                style: const TextStyle(
+                  color: MilesColors.cream100,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

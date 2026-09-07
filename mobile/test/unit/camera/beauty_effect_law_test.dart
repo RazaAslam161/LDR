@@ -194,6 +194,80 @@ void main() {
     });
   });
 
+  group('the smoothing core is edge-preserving, not a Gaussian', () {
+    // GLSL is compiled by NOTHING here — not flutter test, not the analyzer, not CI. Only a
+    // handset ever sees it. These are the invariants whose loss would look like a quality
+    // regression rather than a failure, which is the kind that survives a release.
+    final shaders = File(
+      'android/app/src/main/kotlin/com/miles/miles/beauty/BeautyShaders.kt',
+    ).readAsStringSync();
+    final renderer = File(
+      'android/app/src/main/kotlin/com/miles/miles/beauty/BeautyGlRenderer.kt',
+    ).readAsStringSync();
+
+    test('the guided filter exists and the composite consumes it', () {
+      expect(shaders, contains('const val GUIDED'));
+      expect(shaders, contains('vari / (vari + uEps)'),
+          reason: 'a = var/(var+eps) IS the skin-or-edge decision; without it there is '
+              'no edge preservation and the look goes back to plastic',);
+      expect(shaders, contains('float gY = ab.x * Y + ab.y;'),
+          reason: 'the composite must apply the linear model, not just compute it',);
+    });
+
+    test('the statistics are computed in highp and never stored as moments', () {
+      // var = E[Y2] - E[Y]2 cancels catastrophically: skin variance ~1e-4 against means
+      // ~0.25. fp16 destroys it, and an 8-bit texture destroys it again. The moments must
+      // stay in registers; only (a, b), both well conditioned in 0..1, may be written.
+      final guided = shaders.substring(
+        shaders.indexOf('const val GUIDED'),
+        shaders.indexOf('const val MASK'),
+      );
+      expect(guided, contains('precision highp float'),
+          reason: 'mediump cannot hold the variance subtraction',);
+      expect(guided, contains('gl_FragColor = vec4(a, mean * (1.0 - a)'),
+          reason: 'only the coefficients leave this shader; storing the moments in an '
+              '8-bit target would lose the very signal they carry',);
+    });
+
+    test('the detail layer is restored selectively, not as a flat fraction', () {
+      // A flat fraction puts the blemish back AND keeps pores flattened — wrong at both
+      // ends, and what the Gaussian path did.
+      expect(shaders, contains('1.0 - smoothstep(uPoreT, uBlemishT, abs(fine))'));
+      expect(shaders.contains('vec3 hi = a - b;'), isFalse,
+          reason: 'the old frequency-separation core must not come back',);
+      // THREE bands, not two. One scale cannot separate a blotch from a pore: the
+      // radius that evens a blotch erases the pores, and the radius that keeps
+      // pores cannot see the blotch at all.
+      expect(shaders, contains('float mid = gY - gC;'));
+      expect(shaders, contains('float fine = Y - gY;'));
+      expect(shaders, contains('uEvenness'),
+          reason: 'the blotch band needs its own weight, or it is either fully '
+              'restored or fully flattened into a mask',);
+      // Chroma evening must be held back at edges too; blending toward the
+      // edge-blind Gaussian is what left a colour halo at the lips and nose.
+      expect(shaders, contains('(1.0 - ab.x)'),
+          reason: "the guided model's own edge term must gate the chroma blend",);
+    });
+
+    test('the coefficients are measured on the SHARP half, before the blur', () {
+      // The blur overwrites texH0 in place. Measuring local variance after it would be
+      // measuring the blur's variance, which is nearly zero everywhere — the filter would
+      // smooth the entire frame including the eyes.
+      final guidedAt = renderer.indexOf('val g = guided!!');
+      final blurAt = renderer.indexOf('val b = blur!!');
+      expect(guidedAt, greaterThan(0));
+      expect(guidedAt, lessThan(blurAt),
+          reason: 'the guided pass must run before the blur clobbers the sharp half',);
+    });
+
+    test('eps follows the smooth slider on BOTH engines', () {
+      // Camera and call share runPasses; each sets eps from its own params. If only one
+      // did, the same look would smooth differently on a call than on a snap.
+      expect('guidedEps = 0.0008f + p.smooth'.allMatches(renderer).length, 2,
+          reason: 'render() and renderToTexture() must both set it',);
+    });
+  });
+
   group('the override that makes the fork load at all', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
 
