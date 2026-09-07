@@ -26520,3 +26520,35 @@ to 1473 and 811 with the reasoning kept here instead.
 Read the second-round findings and act on them; then Phase 2's remaining items in the order
 §296 names. The lesson worth carrying: both high defects were in code that had passed the
 gates, the laws and my own reading — and one of them was introduced by a fix.
+
+### §297 addendum — 2026-09-07 05:35 — committed and pushed as fa609d1
+
+`git push origin fix-sprint` → `76903c2..fa609d1`. Remote and local head agree
+(`fa609d145ccd727b51f1f306d5f43349c75c784f`). 85 files, +6069/-1180.
+
+Gate re-run on the exact staged tree, after the last edit:
+`12:12 +1717 ~3: All tests passed!`, `FULL_TEST_EXIT=0` — which includes
+repo_hygiene's own `flutter analyze` law, so the analyzer is green inside that
+number rather than beside it.
+
+**Committed broadly, deliberately.** The tree held three sessions' work. The
+beauty session's Dart had already landed in 957890b/76903c2, but the audit
+session's §288/§289 fixes were still uncommitted and interleaved with mine in
+twelve shared files — `call_controller` (accept re-entry), `supabase_repository`
+(_profileColumns), `main.dart` (startup budget, TzHelper), `chat_repository`
+(page cache), `chat_input_bar` (_wantRecording), `media_viewer` (SecureScreen
+refcount), `watch_together_screen`, `session_provider`, `encrypted_media_cache`,
+`emergency_lock_service`, `reach_notifications` (unlink beats), `chat_screen`.
+Non-interactive git cannot split those hunks, the gates are green over all of
+them, and the rulebook's escape hatch covers exactly this — so it is one commit
+with the attribution written into the message body.
+
+**Left unstaged on purpose:** `BeautyGlRenderer.kt`, `BeautyShaders.kt`,
+`values-night/styles.xml`. Their mtimes were 20 minutes old at commit time, so
+that session is still editing them; they are not mine to freeze.
+
+Still open, unchanged by the commit: nothing has run on a handset (build 77 is
+not built); the round-2 adversarial workflow over the fixes was killed by the
+session exit and never reported (`wf_6be100e3-19c`, resumable); C1, C2, C3, C5,
+C7 and C11 of Phase 2 remain; `care_nudges` still carries the full-column UPDATE
+grant.
