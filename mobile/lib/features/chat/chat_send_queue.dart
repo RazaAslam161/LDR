@@ -4,9 +4,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
+import 'package:miles/core/realtime/realtime_resume.dart';
 import 'package:miles/features/chat/chat_broadcast_service.dart';
+import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/chat/chat_text_outbox.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 /// One upload+insert — the real one, or a fake in a test.
@@ -53,6 +58,12 @@ class PendingSend {
   final String? fileName;
 
   SendStatus status;
+
+  /// How many times this has been attempted, and when the ladder next allows
+  /// one. Both in memory only: a restored send starts its ladder again, which
+  /// is right — the process died, so the network it failed on is long gone.
+  int attempts = 0;
+  DateTime? nextAttempt;
 }
 
 /// A text message that has been accepted from the user but has not landed yet.
@@ -75,6 +86,9 @@ class PendingText {
   final String? replyToId;
 
   SendStatus status;
+
+  int attempts = 0;
+  DateTime? nextAttempt;
 }
 
 /// Owns media sends from the moment the user commits to them.
@@ -95,6 +109,10 @@ class ChatSendQueue extends ChangeNotifier {
     // lazily built singleton, so its construction is the first moment anything
     // can observe the queue at all — whichever screen sends or watches first.
     unawaited(_restore());
+    // The socket opening is the most literal signal this app has for "the
+    // network came back", and a queue that only retried on its own ladder
+    // would sit out the first two minutes of a restored connection.
+    realtimeResumed.addListener(kick);
   }
   static final ChatSendQueue instance = ChatSendQueue._();
 
@@ -122,6 +140,12 @@ class ChatSendQueue extends ChangeNotifier {
   /// bubbles resolve while the rest queue.
   static const _maxInFlight = 3;
 
+  /// How many times a MEDIA send climbs the ladder before it stops and waits
+  /// for a person. Six rungs is the table through 90 seconds — long enough to
+  /// ride out a tunnel, short enough that a phone on a dead link is not still
+  /// pushing the same video an hour later.
+  static const _maxMediaAttempts = 6;
+
   final List<PendingSend> _pending = [];
   final List<PendingText> _text = [];
 
@@ -129,6 +153,14 @@ class ChatSendQueue extends ChangeNotifier {
   /// [SendStatus.sending] to the chat — a queued item shows the same spinner —
   /// so the distinction cannot be read off the status.
   final Set<String> _inFlight = {};
+
+  /// The same, for text — and a SEPARATE set on purpose.
+  ///
+  /// Sharing `_inFlight` would put text sends inside the upload cap, which is
+  /// the one thing PendingText exists to stay out of: three messages typed in a
+  /// row would then hold every slot and stop a photo uploading at all, and the
+  /// row IS the send, so there is nothing here to bound.
+  final Set<String> _textInFlight = {};
 
   /// The upload itself. Swappable because nothing that matters here — the cap,
   /// one item failing without touching the others — is observable through a
@@ -149,11 +181,12 @@ class ChatSendQueue extends ChangeNotifier {
   /// Accept a photo and start uploading. Returns immediately — the caller is
   /// expected to dismiss its screen on the next line.
   String enqueueImage(String coupleId, File file,
-          {String? replyToId, String? id,}) =>
-      _enqueue(coupleId, file, 'image', replyToId, id);
+          {String? replyToId, String? id, String? caption,}) =>
+      _enqueue(coupleId, file, 'image', replyToId, id, caption);
 
-  String enqueueVideo(String coupleId, File file, {String? replyToId}) =>
-      _enqueue(coupleId, file, 'video', replyToId, null);
+  String enqueueVideo(String coupleId, File file,
+          {String? replyToId, String? id, String? caption,}) =>
+      _enqueue(coupleId, file, 'video', replyToId, id, caption);
 
   /// Accept a whole document pick at once, in the order it was picked.
   List<String> enqueueFiles(
@@ -189,6 +222,7 @@ class ChatSendQueue extends ChangeNotifier {
     String coupleId,
     List<({File file, bool isVideo})> items, {
     String? replyToId,
+    String? caption,
   }) {
     final ids = <String>[];
     // One id for the whole pick, and only when there is actually a group to
@@ -209,6 +243,7 @@ class ChatSendQueue extends ChangeNotifier {
       _pending.add(send);
       ids.add(send.id);
     }
+    _sendCaption(coupleId, caption);
     _changed();
     _pump();
     return ids;
@@ -220,6 +255,7 @@ class ChatSendQueue extends ChangeNotifier {
     String kind,
     String? replyToId,
     String? id,
+    String? caption,
   ) {
     final send = PendingSend(
       id: id ?? _uuid.v4(),
@@ -229,9 +265,27 @@ class ChatSendQueue extends ChangeNotifier {
       replyToId: replyToId,
     );
     _pending.add(send);
+    _sendCaption(coupleId, caption);
     _changed();
     _pump();
     return send.id;
+  }
+
+  /// What the sender typed under a picture goes as its own text message.
+  ///
+  /// Not as the media row's body, which is where it started: a build-73 phone
+  /// never reads a body in the image or video arm, so the sentence decrypted
+  /// there and was thrown away by every surface that build has — while the
+  /// composer had already deleted the draft. Two handsets in the field run it
+  /// and can never be made to update.
+  ///
+  /// A text row is the one shape both builds already render, and it inherits
+  /// the whole durability path this queue just grew rather than needing its
+  /// own.
+  void _sendCaption(String coupleId, String? caption) {
+    final body = caption?.trim() ?? '';
+    if (body.isEmpty) return;
+    enqueueText(coupleId, body);
   }
 
   /// Accept a text message and start inserting it.
@@ -241,10 +295,15 @@ class ChatSendQueue extends ChangeNotifier {
   /// and a failure arriving after that had nowhere to land — the optimistic
   /// bubble went with the widget and the message then existed nowhere at all.
   ///
-  /// Deliberately NOT persisted across a process kill, unlike [_pending]: the
-  /// bodies would sit in plain SharedPreferences, which is the one place the
-  /// app's disguise cannot cover. A text send is a single insert — it lands in
-  /// seconds or the sender is looking at a bubble they can retry.
+  /// Persisted across a process kill, in [ChatTextOutbox] rather than in the
+  /// prefs blob beside the media queue. The old reasoning here — that a body in
+  /// plain SharedPreferences was worse than losing it — had the right objection
+  /// and the wrong conclusion: the store the DRAFT of the same sentence already
+  /// uses is encrypted at rest, so there was never a choice to make.
+  ///
+  /// "It lands in seconds or the sender is looking at a bubble they can retry"
+  /// was also only true while the process lived. Android kills this app while
+  /// it is backgrounded, and backgrounding is when the cover goes up.
   String enqueueText(
     String coupleId,
     String body, {
@@ -258,9 +317,55 @@ class ChatSendQueue extends ChangeNotifier {
       replyToId: replyToId,
     );
     _text.add(send);
+    _keepBody(send.id, coupleId, body, replyToId);
     _changed();
-    unawaited(_runText(send));
+    _pumpText();
     return send.id;
+  }
+
+  /// Put a body where a process kill cannot reach it. No-op for a null or
+  /// empty one — a photo with no caption writes nothing.
+  void _keepBody(
+    String id,
+    String coupleId,
+    String body,
+    String? replyToId, {
+    bool failed = false,
+  }) {
+    if (body.isEmpty) return;
+    final uid = _uid;
+    if (uid == null) return;
+    unawaited(ChatTextOutbox.put(id, {
+      'id': id,
+      'u': uid,
+      'c': coupleId,
+      'b': body,
+      if (replyToId != null) 'r': replyToId,
+      // The media half has always persisted this (`_persist`'s 'failed' key)
+      // and the body half did not, so a send the ladder had permanently given
+      // up on came back as `sending` on the next launch and ground against the
+      // same refusal for the life of the install.
+      if (failed) 'f': true,
+      // A monotonic stamp, because the outbox is keyed by uuid and
+      // `readAll()` hands its entries back in hash order — three messages
+      // typed in a row came back shuffled and were then inserted in that
+      // order. Never sent as created_at: the server stamps that, and the two
+      // phones' clocks differ.
+      'n': DateTime.now().microsecondsSinceEpoch,
+    }));
+  }
+
+  /// The signed-in account, or null before the client has one.
+  ///
+  /// Guarded because `SupabaseService.client` is a `late final` that throws
+  /// anywhere the app has not booted — and this singleton is built by whichever
+  /// screen touches it first.
+  static String? get _uid {
+    try {
+      return SupabaseService.currentUserId;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Try a failed send again. No-op for anything already in flight.
@@ -268,6 +373,10 @@ class ChatSendQueue extends ChangeNotifier {
     final send = _pending.where((s) => s.id == id).firstOrNull;
     if (send == null || send.status != SendStatus.failed) return;
     send.status = SendStatus.sending;
+    // The person pressing Retry is a better signal than any ladder: their
+    // network changed, or they know something the backoff does not.
+    send.attempts = 0;
+    send.nextAttempt = null;
     _changed();
     _pump();
   }
@@ -277,15 +386,34 @@ class ChatSendQueue extends ChangeNotifier {
     final send = _text.where((s) => s.id == id).firstOrNull;
     if (send == null || send.status != SendStatus.failed) return;
     send.status = SendStatus.sending;
+    send.attempts = 0;
+    send.nextAttempt = null;
     _changed();
-    unawaited(_runText(send));
+    _pumpText();
   }
 
   /// Give up on a failed send and forget it.
   void discard(String id) {
     _pending.removeWhere((s) => s.id == id && s.status == SendStatus.failed);
+    unawaited(ChatTextOutbox.remove(id));
     _changed();
   }
+
+  /// Give up on a failed text and forget it — including the stored body.
+  ///
+  /// Without it a message the ladder had permanently given up on could be
+  /// deleted from the conversation and still come back on the next launch,
+  /// because the only copy of it was the one on disk.
+  void discardText(String id) {
+    _text.removeWhere((s) => s.id == id && s.status == SendStatus.failed);
+    unawaited(ChatTextOutbox.remove(id));
+    _changed();
+  }
+
+  /// Whether a failed send with this id is the queue's to forget.
+  bool holdsFailed(String id) =>
+      _pending.any((s) => s.id == id && s.status == SendStatus.failed) ||
+      _text.any((s) => s.id == id && s.status == SendStatus.failed);
 
   /// Drop everything on sign-out.
   ///
@@ -297,6 +425,18 @@ class ChatSendQueue extends ChangeNotifier {
   void clear() {
     _pending.clear();
     _text.clear();
+    _inFlight.clear();
+    _textInFlight.clear();
+    _lastKick = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _restoredFor = null;
+    // The bodies go with them, and this is the one place that rule differs
+    // from ChatReactionOutbox's (which keeps its disk copy for the next
+    // sign-in). This runs when the COUPLE ends, however it ended: a message
+    // typed during the argument and left unsent must not be resurrected and
+    // delivered to a couple the user has walked away from.
+    unawaited(ChatTextOutbox.clearAll());
     _changed();
   }
 
@@ -347,6 +487,17 @@ class ChatSendQueue extends ChangeNotifier {
   /// Restored sends keep their id, so one that actually landed just before the
   /// kill reconciles against its own row instead of arriving twice.
   Future<void> _restore() async {
+    await _restoreMedia();
+    await _restoreText();
+  }
+
+  /// The media half — paths and ids, from SharedPreferences.
+  ///
+  /// Split out because the two halves were one method with an early `return`
+  /// on a null prefs blob, and a text-only queue writes no prefs blob at all:
+  /// the bodies were skipped on exactly the launch that had bodies to restore
+  /// and no media. That is the whole feature, silently off.
+  Future<void> _restoreMedia() async {
     try {
       final raw = (await SharedPreferences.getInstance()).getString(_storeKey);
       if (raw == null) return;
@@ -357,7 +508,24 @@ class ChatSendQueue extends ChangeNotifier {
         // The temp directory is the OS's to empty whenever it likes. A send
         // whose file is gone can only ever fail, and a bubble offering a retry
         // that cannot work is worse than the send being gone.
-        if (!file.existsSync()) continue;
+        //
+        // Reported rather than dropped in silence. This is the queue losing a
+        // photo the user believes they sent, and "the OS emptied the cache"
+        // and "we wrote the wrong path" produce exactly the same nothing.
+        if (!file.existsSync()) {
+          ErrorReporter.report(
+            DeliveryFailure(
+              j['kind']?.toString() ?? 'media',
+              attempt: 0,
+              permanent: true,
+              code: 'file.gone',
+            ),
+            StackTrace.current,
+            kind: 'chat-send-restore',
+          );
+          unawaited(ChatTextOutbox.remove(j['id'] as String));
+          continue;
+        }
         restored.add(PendingSend(
           id: j['id'] as String,
           coupleId: j['couple'] as String,
@@ -369,11 +537,12 @@ class ChatSendQueue extends ChangeNotifier {
           status: j['failed'] == true ? SendStatus.failed : SendStatus.sending,
         ),);
       }
-      if (restored.isEmpty) return;
-      // Ahead of anything accepted while this was reading: these are older.
-      _pending.insertAll(0, restored);
-      _changed();
-      _pump();
+      if (restored.isNotEmpty) {
+        // Ahead of anything accepted while this was reading: these are older.
+        _pending.insertAll(0, restored);
+        _changed();
+        _pump();
+      }
     } catch (e) {
       // This fleet is sideloaded and has no update channel, so a build will
       // meet shapes it did not write. Carry on sending rather than throw on
@@ -382,16 +551,90 @@ class ChatSendQueue extends ChangeNotifier {
     }
   }
 
+  /// Which account's bodies are already in memory. Null until one is, so a
+  /// queue built before sign-in picks them up on the first [kick].
+  String? _restoredFor;
+
+  /// Bring back the bodies a previous process was still holding.
+  ///
+  /// Separate from [_restore] because it depends on there being a session:
+  /// the outbox is scoped by user id, and this singleton is built by whichever
+  /// screen touches it first — which on a cold start is before sign-in
+  /// resolves. Re-run on every [kick] until it lands.
+  Future<void> _restoreText() async {
+    final uid = _uid;
+    if (uid == null || _restoredFor == uid) return;
+    _restoredFor = uid;
+    final rows = await ChatTextOutbox.restore(uid);
+    if (rows == null) {
+      // The store could not be read. Unlatch, so the next kick tries again —
+      // latching on a failure meant one transient read turned into bodies that
+      // were never restored and were then deleted by the next sign-out.
+      _restoredFor = null;
+      return;
+    }
+    if (rows.isEmpty) return;
+    // The outbox is keyed by uuid and `readAll()` returns its entries in hash
+    // order, which is deterministic and has nothing to do with typing order.
+    // Three messages written while offline came back shuffled and were then
+    // inserted in that order — permanently, since the server stamps created_at
+    // at insert time.
+    rows.sort((a, b) => ((a['n'] as num?) ?? 0).compareTo((b['n'] as num?) ?? 0));
+    var changed = false;
+    for (final j in rows) {
+      final id = j['id']?.toString();
+      final body = j['b']?.toString();
+      if (id == null || body == null || body.isEmpty) continue;
+      if (_text.any((t) => t.id == id)) continue;
+      _text.add(PendingText(
+        id: id,
+        coupleId: j['c']?.toString() ?? '',
+        body: body,
+        replyToId: j['r']?.toString(),
+        // Carried across the restart, as the media half always has. Without
+        // it a send the ladder had permanently given up on came back as
+        // `sending` and ground against the same refusal on every launch.
+        status: j['f'] == true ? SendStatus.failed : SendStatus.sending,
+      ));
+      changed = true;
+    }
+    if (!changed) return;
+    _changed();
+    _pumpText();
+  }
+
+
   /// Start as many accepted sends as the cap allows, oldest first.
   void _pump() {
+    final now = DateTime.now();
     for (final send in _pending) {
       if (_inFlight.length >= _maxInFlight) return;
       if (send.status != SendStatus.sending || _inFlight.contains(send.id)) {
         continue;
       }
+      // Waiting out its backoff. It still reads as `sending` to the chat,
+      // which is the truth: nothing has been given up on.
+      if (send.nextAttempt?.isAfter(now) ?? false) continue;
       _inFlight.add(send.id);
       unawaited(_run(send));
     }
+    _arm();
+  }
+
+  /// The same, for text. No cap: there is no upload here, so a text send does
+  /// not compete for the [_maxInFlight] slots a photo needs.
+  void _pumpText() {
+    final now = DateTime.now();
+    for (final send in _text) {
+      if (send.status != SendStatus.sending ||
+          _textInFlight.contains(send.id)) {
+        continue;
+      }
+      if (send.nextAttempt?.isAfter(now) ?? false) continue;
+      _textInFlight.add(send.id);
+      unawaited(_runText(send));
+    }
+    _arm();
   }
 
   Future<void> _run(PendingSend send) async {
@@ -400,13 +643,25 @@ class ChatSendQueue extends ChangeNotifier {
       // Landed. The DB echo carries the same id, so the chat reconciles the
       // optimistic bubble rather than showing it twice.
       _pending.removeWhere((s) => s.id == send.id);
+      unawaited(ChatTextOutbox.remove(send.id));
       _changed();
     } catch (e) {
-      debugPrint('[send] ${send.kind} ${send.id} failed: $e');
-      // Kept, not dropped: a failed photo used to disappear with no way to try
-      // again. It stays in the list as failed so the chat can offer a retry.
-      // One item failing is one item — the rest of a batch keeps going.
-      send.status = SendStatus.failed;
+      // Capped, unlike text. Every rung re-runs the WHOLE send — the upload
+      // included, under a fresh random object name — so an unbounded ladder on
+      // a 40 MB video is that video going up the phone's metered link again at
+      // 1s, 3s, 8s, 20s, 45s, 90s and then every three minutes for as long as
+      // the app lives, each attempt orphaning another object in the couple's
+      // bucket. Text has no such cost and keeps trying forever.
+      //
+      // Reaching the cap is also what gives the person a way out: `failed` is
+      // what makes the bubble selectable and its Retry chip appear, and while
+      // it reads `sending` there is no gesture anywhere that can stop it.
+      final n = ++send.attempts;
+      _afterFailure(send.kind, send.id, e, n, (gaveUp) {
+        send.status = gaveUp ? SendStatus.failed : SendStatus.sending;
+        send.nextAttempt =
+            gaveUp ? null : DateTime.now().add(ChatReactionOutbox.backoffFor(n));
+      }, capped: n >= _maxMediaAttempts,);
       _changed();
     } finally {
       _inFlight.remove(send.id);
@@ -421,13 +676,136 @@ class ChatSendQueue extends ChangeNotifier {
       // Landed. The DB echo carries the same id, so the chat reconciles the
       // optimistic bubble rather than showing it twice.
       _text.removeWhere((s) => s.id == send.id);
+      unawaited(ChatTextOutbox.remove(send.id));
     } catch (e) {
-      debugPrint('[send] text ${send.id} failed: $e');
-      // Kept, not dropped: the input bar cleared the moment the user pressed
-      // send, so this body is the only copy of the message left anywhere.
-      send.status = SendStatus.failed;
+      _afterFailure('text', send.id, e, ++send.attempts, (gaveUp) {
+        send.status = gaveUp ? SendStatus.failed : SendStatus.sending;
+        send.nextAttempt = gaveUp
+            ? null
+            : DateTime.now().add(ChatReactionOutbox.backoffFor(send.attempts));
+        // Disk has to agree with memory, or the next launch resurrects it.
+        if (gaveUp) {
+          _keepBody(send.id, send.coupleId, send.body, send.replyToId,
+              failed: true,);
+        }
+      });
+    } finally {
+      _textInFlight.remove(send.id);
+      _changed();
+      _pumpText();
     }
-    _changed();
+  }
+
+  /// Classify one failure, record it, and let the caller park or re-arm.
+  ///
+  /// Every failure used to go straight to `failed` — and to `debugPrint`,
+  /// which is inert in a release build. So one dead second of network left a
+  /// message sitting there wearing a retry button nobody was in the room to
+  /// press, and no record that it had ever been attempted. A send now stops
+  /// trying only when trying could not possibly help.
+  void _afterFailure(
+    String what,
+    String id,
+    Object e,
+    int attempts,
+    void Function(bool gaveUp) settle, {
+    bool capped = false,
+  }) {
+    final gaveUp = permanent(e) || capped;
+    settle(gaveUp);
+    debugPrint('[send] $what $id attempt $attempts: ${e.runtimeType}'
+        '${gaveUp ? ' (gave up)' : ''}');
+    // The first failure and the giving-up, never every rung: a queue grinding
+    // against a dead network must not spend the run's whole report budget
+    // saying so.
+    if (attempts != 1 && !gaveUp) return;
+    ErrorReporter.report(
+      DeliveryFailure(
+        what,
+        attempt: attempts,
+        permanent: gaveUp,
+        code: _codeOf(e),
+      ),
+      StackTrace.current,
+      kind: 'chat-send',
+    );
+  }
+
+  static String? _codeOf(Object e) => switch (e) {
+        PostgrestException(:final code) => code,
+        StorageException(:final statusCode) => 'storage.$statusCode',
+        _ => null,
+      };
+
+  /// Whether retrying could ever help.
+  ///
+  /// Postgrest is classified by [ChatReactionOutbox.permanent] rather than by a
+  /// second copy of the same table: a reaction and a message that will not land
+  /// are the same outage, and two classifiers would drift apart.
+  ///
+  /// Storage is this queue's alone, because a reaction never uploads anything.
+  /// Both of its refusals are final — 413 means the file is bigger than the
+  /// bucket will ever accept, and 403 is an RLS decision, including the one a
+  /// full account produces (which StorageQuota.explain is what puts into
+  /// words). Climbing a ladder against either is a spinner that never resolves.
+  @visibleForTesting
+  static bool permanent(Object e) {
+    if (e is StorageException) {
+      return e.statusCode == '413' || e.statusCode == '403';
+    }
+    return ChatReactionOutbox.permanent(e);
+  }
+
+  Timer? _retryTimer;
+
+  /// When the last [kick] collapsed the ladder. A flapping socket ticks
+  /// [realtimeResumed] repeatedly and unpaced, and without a floor every tick
+  /// would fire each parked send at a connection that is still broken.
+  DateTime? _lastKick;
+
+  /// The network probably just came back — try everything again, now.
+  ///
+  /// Called on app resume and on every socket open, and deliberately more
+  /// aggressive than the ladder: someone who has just opened the app expects
+  /// the message they sent an hour ago to go now, not at the next rung.
+  void kick() {
+    unawaited(_restoreText());
+    final now = DateTime.now();
+    if (_lastKick != null &&
+        now.difference(_lastKick!) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastKick = now;
+    for (final s in _pending) {
+      if (s.status == SendStatus.sending) s.nextAttempt = null;
+    }
+    for (final s in _text) {
+      if (s.status == SendStatus.sending) s.nextAttempt = null;
+    }
+    _pump();
+    _pumpText();
+  }
+
+  /// One timer for the whole queue, set to the soonest rung.
+  void _arm() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    DateTime? soonest;
+    for (final at in [
+      for (final s in _pending)
+        if (s.status == SendStatus.sending) s.nextAttempt,
+      for (final s in _text)
+        if (s.status == SendStatus.sending) s.nextAttempt,
+    ]) {
+      if (at == null) continue;
+      if (soonest == null || at.isBefore(soonest)) soonest = at;
+    }
+    if (soonest == null) return;
+    final wait = soonest.difference(DateTime.now());
+    _retryTimer = Timer(wait.isNegative ? Duration.zero : wait, () {
+      _pump();
+      _pumpText();
+    });
   }
 
   static Future<void> _sendText(PendingText send) => ChatRepository.sendText(

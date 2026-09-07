@@ -11,6 +11,7 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/models.dart';
 import 'package:miles/core/data/supabase_repository.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/app_lock.dart';
 import 'package:miles/core/services/storage_quota.dart';
 import 'package:miles/core/services/fcm_service.dart';
@@ -1370,6 +1371,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                       _ => 'Your account could not be told about this phone. '
                           'Check your connection and reopen the app.',
                     },
+                  ),
+          ),
+          // The other half of the same question. A push tells this phone
+          // something happened while the app was closed; live updates are what
+          // move a tick, a typing dot or an incoming message while it is OPEN.
+          // Both can be broken independently, and neither said so.
+          ValueListenableBuilder<RealtimeHealth>(
+            valueListenable: RealtimeStatus.worst,
+            builder: (context, health, _) => health != RealtimeHealth.dead
+                ? const SizedBox.shrink()
+                : const _SettingsRow(
+                    icon: Icons.cloud_off_outlined,
+                    title: 'Live updates paused',
+                    subtitle: 'This phone has stopped hearing the other one. '
+                        'It keeps retrying — reopening the app is faster.',
                   ),
           ),
         ],),

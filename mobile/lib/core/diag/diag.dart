@@ -79,13 +79,23 @@ class ErrorReporter {
     if (!force && _sent >= _maxPerRun) return;
     final type = _cap(error.runtimeType.toString(), _maxTypeChars);
     final trace = _stack(stack);
+    final detail = _detail(error);
     // kind is part of the key: chat-fetch and shared-media can both die
     // inside Message.fromJson with the same type and first frame, and one
     // must not suppress the other for the whole run.
-    if (!_seen.add('$kind\n$type\n${trace.split('\n').first}')) return;
+    //
+    // So is `detail`, and that is newer. The synthetic report types funnel
+    // every one of their reports through ONE call site — the send queue's
+    // 'chat-send' is one line with one runtimeType and one first frame — so
+    // without this exactly one such report could ever leave a handset per run,
+    // whichever fired first. `detail` is a bounded machine code, already
+    // capped at 64 characters, and `_maxPerRun` still bounds the volume.
+    if (!_seen.add('$kind\n$type\n${detail ?? ''}\n'
+        '${trace.split('\n').first}')) {
+      return;
+    }
     if (!force) _sent++;
 
-    final detail = _detail(error);
     final row = <String, Object?>{
       'build': ReleaseGate.buildNumber,
       'kind': kind,
@@ -260,6 +270,16 @@ class ErrorReporter {
         // report — the N of M — died right here in the switch.
         ParseShortfall(:final where, :final parsed, :final of, :final first) =>
           '$where: $parsed/$of, first=$first',
+        // Same contract: a code location, two counts, a flag, and a machine
+        // code. The attempt number is the whole point — a first failure and a
+        // twentieth are the same exception and completely different reports.
+        DeliveryFailure(
+          :final what,
+          :final attempt,
+          :final permanent,
+          :final code
+        ) =>
+          '$what n=$attempt ${permanent ? 'gave-up' : 'retrying'} ${code ?? ''}',
         // Same contract: booleans, a count, a class name, and 8 chars of a
         // key that is already public.
         // Key facts FIRST, cause last: `detail` is capped at 64 chars and the
@@ -436,6 +456,39 @@ class ParseShortfall implements Exception {
 
   @override
   String toString() => 'ParseShortfall';
+}
+
+/// A send that has not landed, with how hard it has tried.
+///
+/// The queue retried in silence: every failure went to `debugPrint`, which is
+/// inert in a release build, so a message that never left the phone produced no
+/// record of a single attempt. "It said sending forever" and "it was refused
+/// nineteen times by RLS" then look identical from here.
+///
+/// Safe by construction, on the [ParseShortfall] model: a code location, a
+/// count, a flag, and a machine code the server already assigned. No body, no
+/// path, no id.
+class DeliveryFailure implements Exception {
+  DeliveryFailure(
+    this.what, {
+    required this.attempt,
+    required this.permanent,
+    this.code,
+  });
+
+  /// Which send fell over — 'text', 'image', 'video', 'file'. Never data.
+  final String what;
+  final int attempt;
+
+  /// Whether the ladder gave up on it, as opposed to arming another try.
+  final bool permanent;
+
+  /// The server's own code, when it gave one: a Postgrest code, or
+  /// `storage.<status>`.
+  final String? code;
+
+  @override
+  String toString() => 'DeliveryFailure';
 }
 
 /// Why a stored ceremony note would not open, in facts that cannot leak.

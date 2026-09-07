@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// The queue is what stands between "the user tapped send" and the photo
 /// actually existing somewhere. It runs with no chat screen mounted and it is
@@ -21,15 +22,24 @@ void main() {
     tmp = Directory.systemTemp.createTempSync('sendq');
     photo = File('${tmp.path}/snap.jpg')..writeAsBytesSync([1, 2, 3]);
     // Each test starts from an empty queue — it is a singleton by design.
-    for (final s in ChatSendQueue.instance.pending.toList()) {
-      ChatSendQueue.instance.discard(s.id);
-    }
+    // clear(), not a discard loop: discard only removes a send the queue has
+    // GIVEN UP on, and the ladder means a send can now be parked on a backoff
+    // rung instead, with a timer that would fire inside the next test.
+    ChatSendQueue.instance.clear();
     // The upload fails by NAME. Without this seam the failure was a
     // LateInitializationError from a Supabase client that does not exist in
     // a unit test, which reads like a bug in the bench rather than the path
     // being pinned.
-    ChatSendQueue.instance.uploader =
-        (_) async => throw StateError('no upload on the bench');
+    //
+    // A PERMANENT refusal, and that is a change to this bench. It used to
+    // throw a StateError, which the queue now reads as transient and RETRIES
+    // — correctly: a dead second of network is not a reason to stop. Every
+    // test below is about what happens once the queue has given up, so the
+    // bench has to produce a failure it actually gives up on. 42501 is RLS.
+    // The transient half of the ladder is pinned in
+    // chat_send_durability_test.dart.
+    ChatSendQueue.instance.uploader = (_) async =>
+        throw const PostgrestException(message: 'denied', code: '42501');
   });
   tearDown(() {
     ChatSendQueue.instance.uploader = null;
@@ -61,7 +71,7 @@ void main() {
     expect(notified, greaterThan(0));
   });
 
-  test('a failed send is KEPT, not dropped', () async {
+  test('a send the server refuses outright is KEPT, not dropped', () async {
     // The old behaviour: the photo vanished with no way to try again.
     final id = ChatSendQueue.instance.enqueueImage('couple-1', photo);
     await settle();

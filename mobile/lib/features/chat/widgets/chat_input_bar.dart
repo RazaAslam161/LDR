@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -34,7 +35,10 @@ class ChatInputBar extends StatefulWidget {
   /// A whole gallery pick — photos and videos together, in pick order. Not a
   /// Future: these are handed to the send queue and are on screen before the
   /// first upload starts, so there is nothing here to wait on.
-  final void Function(List<PickedMedia> items) onSendMedia;
+  /// [caption] is whatever was in the composer when the pick was made, and
+  /// the bar clears itself when it hands one over — a sentence cannot be both
+  /// the caption of this photo and the draft of the next message.
+  final void Function(List<PickedMedia> items, String? caption) onSendMedia;
 
   /// A whole document pick. Same contract as [onSendMedia]: handed to the send
   /// queue, on screen before the first byte moves.
@@ -42,7 +46,10 @@ class ChatInputBar extends StatefulWidget {
   /// The id is minted by the bar, not the send path, so a retry of the SAME
   /// recording reuses it and the second insert conflicts instead of duplicating.
   final Future<void> Function(File voice, String id, String? peaks) onSendVoice;
-  final Future<void> Function(File video) onSendVideo;
+  /// Same contract as [onSendMedia] now that a recorded video goes through the
+  /// send queue: handed over, on screen as a bubble before a byte moves. It
+  /// used to be awaited behind the bar's spinner while the whole upload ran.
+  final void Function(File video, String? caption) onSendVideo;
 
   /// A GIF/sticker picked from the phone keyboard — flung (rises on both phones).
   final Future<void> Function(File gif) onFlingGif;
@@ -92,9 +99,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// `getTemporaryDirectory` and `start` have all resolved; a long-press
   /// released inside that window is invisible to it.
   bool _wantRecording = false;
+
+  /// The finger has slid far enough up that releasing will THROW the note
+  /// away.
+  ///
+  /// The composer has told people to "slide up to cancel" since voice notes
+  /// shipped, and no gesture existed: `onLongPressEnd` sent unconditionally,
+  /// so the only way out of a recording you regretted was to send it and then
+  /// delete it from both phones.
+  bool _cancelArmed = false;
   String? _currentRecordingPath;
 
   bool get _hasText => _text.text.trim().isNotEmpty;
+
+  /// Whether the hold gesture is switched off — never mid-recording.
+  ///
+  /// `_hasText` alone would be a trap: RawGestureDetector re-uses the LIVE
+  /// recognizer across a rebuild and re-assigns its callbacks, so text
+  /// appearing while the finger is down (the draft load landing late on a slow
+  /// cold start) would null the release handler and leave the microphone open
+  /// with nothing able to stop it.
+  bool get _muteHold => _hasText && !_recording;
   bool _lastHasText = false;
 
   /// Debounce for writing the draft. A platform round trip per keystroke is a
@@ -247,6 +272,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  /// The composer's text, handed to a pick and cleared in the same breath.
+  ///
+  /// Cleared here rather than left for the user: a caption they have already
+  /// attached to a photo, still sitting in the box, is a sentence they will
+  /// send twice.
+  String? _takeCaption() {
+    final t = _text.text.trim();
+    if (t.isEmpty) return null;
+    _text.clear();
+    _draftTimer?.cancel();
+    unawaited(ChatDraftStore.clear(widget.coupleId));
+    return t;
+  }
+
   Future<void> _sendText() async {
     final t = _text.text.trim();
     if (t.isEmpty || _sending) return;
@@ -298,7 +337,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         );
       }
       if (items.isEmpty) return;
-      widget.onSendMedia(items);
+      widget.onSendMedia(items, _takeCaption());
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -342,16 +381,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
     try {
       final file = await PhotoPickerService.pickVideo(source: ImageSource.camera);
       if (file == null) return;
-      setState(() => _sending = true);
-      await widget.onSendVideo(file);
+      widget.onSendVideo(file, _takeCaption());
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not attach that video.')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -456,6 +492,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// subscription left over from one note therefore goes on appending the NEXT
   /// note's samples to a buffer that already holds the first one, and both
   /// notes end up drawn with the wrong shape.
+  /// How far up counts as cancelling.
+  ///
+  /// 56 is one finger-width above the button: far enough that the drift of a
+  /// held thumb never reaches it, close enough to be a flick rather than a
+  /// stretch.
+  static const double _cancelSlide = 56;
+
+  void _armCancel(bool armed) {
+    if (armed == _cancelArmed || !_recording) return;
+    setState(() => _cancelArmed = armed);
+    // The banner changing under the thumb is the only confirmation there is
+    // that letting go now throws the note away.
+    HapticFeedback.selectionClick();
+  }
+
   Future<void> _cancelAmplitude() async {
     final sub = _amplitude;
     _amplitude = null;
@@ -467,6 +518,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // _recording tracks the recorder. The two diverge for the length of three
     // awaits, which is the window a quick tap lands in.
     _wantRecording = true;
+    _cancelArmed = false;
     try {
       if (!await _recorder.hasPermission()) {
         if (mounted) {
@@ -560,10 +612,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
     setState(() {
       _recording = false;
       _currentRecordingPath = null;
+      _cancelArmed = false;
     });
     ChatInputBar.recording.value = false;
-    if (cancel || path == null) return;
+    if (path == null) return;
     final file = File(path);
+    if (cancel) {
+      // A cancelled note is not merely unsent — it is a recording of the room
+      // the user decided nobody should have, and leaving it in the cache means
+      // the export writes it out and anyone with the handset can play it.
+      try {
+        if (file.existsSync()) await file.delete();
+      } catch (e, st) {
+        ErrorReporter.report(e, st, kind: 'voice-cancel-delete');
+      }
+      return;
+    }
     if (!await file.exists()) return;
     await _sendVoice(file, peaks);
   }
@@ -646,14 +710,21 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             borderRadius: BorderRadius.circular(24),
                           ),
                           alignment: Alignment.centerLeft,
-                          child: const Row(
+                          child: Row(
                             children: [
-                              Icon(Icons.fiber_manual_record,
-                                  color: MilesColors.ember, size: 16,),
-                              SizedBox(width: 8),
+                              Icon(
+                                _cancelArmed
+                                    ? Icons.delete_outline
+                                    : Icons.fiber_manual_record,
+                                color: MilesColors.ember,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 8),
                               Text(
-                                'Slide up to cancel · release to send',
-                                style: TextStyle(
+                                _cancelArmed
+                                    ? 'Release to cancel'
+                                    : 'Slide up to cancel · release to send',
+                                style: const TextStyle(
                                     color: MilesColors.cream50, fontSize: 13,),
                               ),
                             ],
@@ -737,8 +808,31 @@ class _ChatInputBarState extends State<ChatInputBar> {
                               strokeWidth: 2, color: MilesColors.cream50,),
                         ),
                       ) else GestureDetector(
-                        onLongPressStart: (_) => _startRecording(),
-                        onLongPressEnd: (_) => _stopRecording(),
+                        // ALL of them null while there is text, not just
+                        // the start. A LongPressGestureRecognizer is built if
+                        // any one of these is non-null, and it wins the arena
+                        // at 500ms — which rejects the TapGestureRecognizer, so
+                        // `onTap: _sendText` never fires. Nulling only the
+                        // start left a send button that opened no microphone
+                        // AND sent nothing on a half-second press.
+                        onLongPressStart:
+                            _muteHold ? null : (_) => _startRecording(),
+                        onLongPressMoveUpdate: _muteHold
+                            ? null
+                            : (d) => _armCancel(
+                                  d.localOffsetFromOrigin.dy <= -_cancelSlide,
+                                ),
+                        onLongPressEnd: _muteHold
+                            ? null
+                            : (_) => _stopRecording(cancel: _cancelArmed),
+                        // NOT a cancel. Once the long press is accepted the
+                        // arena cannot take it back — the only thing that
+                        // reaches here is a synthesized PointerCancelEvent,
+                        // and the app's own Navigator sends one on EVERY route
+                        // push and pop. Treating that as "the user threw the
+                        // note away" deletes a recording nobody discarded, so
+                        // this keeps the file and sends it.
+                        onLongPressCancel: _muteHold ? null : _stopRecording,
                         onTap: _hasText ? _sendText : null,
                         child: Container(
                           width: 44,

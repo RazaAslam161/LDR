@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -22,6 +23,7 @@ import 'package:miles/core/links/link_open.dart';
 import 'package:miles/core/links/link_scan.dart';
 import 'package:miles/core/links/link_target.dart';
 import 'package:miles/core/realtime/realtime_resume.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/core/services/document_picker_service.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
@@ -153,6 +155,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// How many times this screen has (re)joined its channels. A join that keeps
   /// climbing is a flapping socket, which from the outside looks like nothing.
   int _joinAttempt = 0;
+
+  /// Consecutive join checks that found the channels not joined.
+  int _joinRetry = 0;
+
+  /// Which of this screen's channels have reported `subscribed` for the
+  /// CURRENT attempt. Cleared by [_subscribe] before it rebuilds any of them,
+  /// so a stale success from the last attempt cannot vouch for this one.
+  final Set<String> _joinedTopics = {};
+
+  /// How many of this screen's channels must report `subscribed` before the
+  /// chat counts as live.
+  ///
+  /// Captured when the channels are BUILT, not when the check runs: the
+  /// partner id can resolve or vanish inside the 12s window, and a count taken
+  /// afterwards would then be asking about a channel that was never created.
+  ///
+  /// Messages, the broadcast fast path, and — when there is a partner id to
+  /// filter on — receipts, which this file calls the only live path by which
+  /// the sender's tick ever advances. Reactions are deliberately not required:
+  /// they are durable and refetched on every open, so a refused join there
+  /// costs a repaint, not a fact.
+  int _requiredTopics = 2;
 
   /// Last traced tick per message. _statusFor runs for every bubble on every
   /// 5s tick, and a trace that re-states 300 unchanged ticks buries the one
@@ -353,10 +377,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Nothing is awaited and nothing is re-encoded: all of it is on screen as
   /// bubbles on this frame, and the queue uploads a few at a time behind them.
   /// A failure belongs to its own item, which keeps its file and its retry.
-  void _sendMediaBatch(String coupleId, List<PickedMedia> items) {
+  void _sendMediaBatch(
+      String coupleId, List<PickedMedia> items, String? caption,) {
     if (items.isEmpty) return;
     ChatSendQueue.instance.enqueueAll(coupleId, items,
-        replyToId: _takeReplyId(),);
+        replyToId: _takeReplyId(), caption: caption,);
+    _adoptPending();
+  }
+
+  /// A video recorded from the composer, through the queue like every other
+  /// send.
+  ///
+  /// It used to call ChatRepository.sendVideo directly and await it behind the
+  /// bar's spinner: no optimistic bubble, no retry, and on a dropped connection
+  /// the recording was gone with one snackbar.
+  void _sendVideoFast(String coupleId, File f, String? caption) {
+    ChatSendQueue.instance
+        .enqueueVideo(coupleId, f, replyToId: _takeReplyId(), caption: caption);
     _adoptPending();
   }
 
@@ -1008,6 +1045,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final id = _coupleId;
     if (id == null || !mounted || _subscribing) return;
     _subscribing = true;
+    _joinedTopics.clear();
     final attempt = ++_joinAttempt;
     try {
       final client = SupabaseService.client;
@@ -1044,6 +1082,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         id,
         (m) => _onIncoming(m, fromDb: true, source: 'rt_insert'),
         onDelete: _onRemoteDelete,
+        onJoined: () {
+          // Guarded by the attempt: a join landing for a channel this screen
+          // has already replaced must not vouch for the one that replaced it.
+          if (attempt == _joinAttempt) _joinedTopics.add('messages');
+        },
       );
       _moodChannel = client
           .channel('mood_burst:$id', opts: const RealtimeChannelConfig(private: true))
@@ -1063,6 +1106,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'error_class': err?.runtimeType.toString(),
           'attempt_n': attempt,
         },);
+        if (status == RealtimeSubscribeStatus.subscribed &&
+            attempt == _joinAttempt) {
+          _joinedTopics.add('mood_burst');
+        }
       });
       // Let other screens (e.g. the rapid camera) push the fast-path on THIS
       // live channel instead of creating a duplicate-topic one.
@@ -1097,6 +1144,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // The partner's receipt row, live. Without this the sender's tick only
       // moved when something else happened to rebuild the screen.
       final partnerId = ref.read(sessionProvider).partner?.id;
+      _requiredTopics = partnerId != null ? 3 : 2;
       if (partnerId != null) {
         _receiptChannel = client
             .channel('receipts:$id', opts: const RealtimeChannelConfig(private: true))
@@ -1137,6 +1185,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             'partner_id_known': true,
             'attempt_n': attempt,
           },);
+          if (status == RealtimeSubscribeStatus.subscribed &&
+              attempt == _joinAttempt) {
+            _joinedTopics.add('receipts');
+          }
         });
       } else {
         // No partner id means no receipts channel is created at all, so the
@@ -1155,8 +1207,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       await _refreshPartnerReceipt(source: trigger);
     } finally {
       _subscribing = false;
+      // In the finally, not after the awaits above: a catch-up that throws
+      // would otherwise skip the check entirely, and a join nobody verified is
+      // exactly the silent hole this exists to close.
+      _armJoinCheck();
     }
   }
+
+  Timer? _joinCheck;
+
+  /// This screen's four channels do not go through [ManagedSubscription], so
+  /// nothing ever checked whether their joins LANDED.
+  ///
+  /// That matters more here than anywhere: a refused join is not retried by the
+  /// client library (the rate limiter answers with a plain `error` reply, which
+  /// schedules nothing), and `subscribe()` throws on a second call for the same
+  /// channel — so recovery has to be a fresh channel, which is what `_subscribe`
+  /// builds. Until this, a chat whose joins were refused sat perfectly still and
+  /// looked exactly like a partner with nothing to say.
+  ///
+  /// 12s, longer than the client's own 10s join timeout, so a join that is
+  /// merely slow is never counted as a failure.
+  void _armJoinCheck() {
+    _joinCheck?.cancel();
+    if (!mounted) return;
+    RealtimeStatus.publish(_healthKey, RealtimeHealth.joining);
+    _joinCheck = Timer(const Duration(seconds: 12), () {
+      if (!mounted) return;
+      // Read off the status callbacks this screen already passes to
+      // subscribe(), not off the channel's internal `isJoined`: `subscribed`
+      // is the SERVER saying the join landed, which is the fact in question.
+      if (_joinedTopics.length >= _requiredTopics) {
+        _joinRetry = 0;
+        RealtimeStatus.publish(_healthKey, RealtimeHealth.joined);
+        return;
+      }
+      if (_joinRetry >= 5) {
+        RealtimeStatus.publish(_healthKey, RealtimeHealth.dead);
+        // Parked, never abandoned: a minute costs nothing and a rate limiter
+        // that refused the whole fleet at once has long since let go.
+        _joinCheck = Timer(const Duration(seconds: 60), () {
+          _joinRetry = 0;
+          unawaited(_subscribe(trigger: 'rt_parked'));
+        });
+        return;
+      }
+      RealtimeStatus.publish(_healthKey, RealtimeHealth.retrying);
+      // Equal jitter, as ManagedSubscription does it: two handsets that lost
+      // the same socket otherwise retry on identical schedules and reproduce
+      // the storm at every step.
+      final base = 1000 << _joinRetry.clamp(0, 4);
+      _joinRetry++;
+      _joinCheck = Timer(
+        Duration(milliseconds: base ~/ 2 + Random().nextInt(base ~/ 2)),
+        () => unawaited(_subscribe(trigger: 'rt_join_retry')),
+      );
+    });
+  }
+
+  String get _healthKey => 'chat:${_coupleId ?? ''}';
 
   void _onScroll() {
     if (_hasNewMessage && _isAtBottom()) {
@@ -1963,6 +2072,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// way to remove anything, which for a handful of photos is a lot of taps for
   /// something the user has already decided.
   Future<void> _deleteSelected({required bool everyone}) async {
+    // A send the queue gave up on has no row anywhere, so the RPC would touch
+    // nothing and report success — leaving the bubble on screen looking as
+    // though the delete had been ignored. Drained here instead, before the
+    // server ever hears about it.
+    for (final m in _selection.resolve(_messages)) {
+      if (!ChatSendQueue.instance.holdsFailed(m.id)) continue;
+      ChatSendQueue.instance
+        ..discard(m.id)
+        ..discardText(m.id);
+      _selection.toggle(m);
+      _messages.removeWhere((x) => x.id == m.id);
+    }
+    if (!_selection.isActive) {
+      setState(() {});
+      return;
+    }
     // deleteAll marks itself busy synchronously, so start it first and then
     // rebuild: the delete button reads busy and goes quiet for the duration
     // rather than queueing a second pass over the same messages.
@@ -2115,6 +2240,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     realtimeResumed.removeListener(_subscribe);
+    _joinCheck?.cancel();
+    RealtimeStatus.forget(_healthKey);
     ChatScreen.visible.removeListener(_settleOwedAck);
     PresenceService.present.removeListener(_settleOwedAck);
     _receiptTick.dispose();
@@ -2570,6 +2697,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       // for up to 20 seconds after they had walked away. One
                       // signal, one source — see PartnerHereAction
                       // (partner_bust.dart).
+                      _LiveUpdatesStrip(healthKey: _healthKey),
                       ChatInputBar(
                         coupleId: couple.id,
                         onChanged: _onTyping,
@@ -2583,14 +2711,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                               ? _sendTextFast(couple.id, t)
                               : _saveEdit(editing, t);
                         },
-                        onSendMedia: (items) =>
-                            _sendMediaBatch(couple.id, items),
+                        onSendMedia: (items, caption) =>
+                            _sendMediaBatch(couple.id, items, caption),
                         onSendFiles: (docs) =>
                             _sendDocuments(couple.id, docs),
                         onSendVoice: (f, id, peaks) =>
                             _sendVoiceOnce(couple.id, f, id, peaks),
-                        onSendVideo: (f) => ChatRepository.sendVideo(couple.id, f,
-                            replyToId: _takeReplyId(),),
+                        onSendVideo: (f, caption) =>
+                            _sendVideoFast(couple.id, f, caption),
                         onFlingGif: _flingGifFile,
                         onPickGif: _attachGif,
                         onClearConversation: _clearOrDeleteSelected,
@@ -3811,6 +3939,53 @@ class _NotLinked extends StatelessWidget {
           style: TextStyle(color: MilesColors.taupe),
         ),
       ),
+    );
+  }
+}
+
+
+/// Says when this screen has stopped hearing the other phone.
+///
+/// Silence used to be indistinguishable from a partner with nothing to say: a
+/// chat whose channels were refused delivered nothing, said nothing, and looked
+/// completely normal. It is deliberately quiet about a rejoin in progress —
+/// `retrying` is what a lift or a tunnel produces several times a day — and
+/// only speaks when the joins have actually run out.
+class _LiveUpdatesStrip extends StatelessWidget {
+  const _LiveUpdatesStrip({required this.healthKey});
+
+  /// THIS chat's key, not the app-wide worst. Reading the worst made the strip
+  /// say the conversation had stopped updating whenever any channel anywhere
+  /// was refused — a screen the user is not even on.
+  final String healthKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<RealtimeHealth>(
+      valueListenable: RealtimeStatus.of(healthKey),
+      builder: (context, health, _) {
+        if (health != RealtimeHealth.dead) return const SizedBox.shrink();
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          color: MilesColors.surface1,
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.cloud_off_outlined,
+                  size: 14, color: MilesColors.taupe,),
+              SizedBox(width: 7),
+              // No tap target: the retry is already armed and running, and a
+              // button that does what is happening anyway is a button that
+              // reads as broken when it changes nothing.
+              Text(
+                'Live updates paused — reconnecting',
+                style: TextStyle(color: MilesColors.taupe, fontSize: 12),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

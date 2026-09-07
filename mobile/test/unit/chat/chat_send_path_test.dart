@@ -31,7 +31,7 @@ void main() {
     });
 
     test('the pick is handed to the queue, not awaited', () {
-      expect(chat, contains('onSendMedia: (items) =>'));
+      expect(chat, contains('onSendMedia: (items, caption) =>'));
       expect(chat, contains('ChatSendQueue.instance.enqueueAll'));
     });
   });

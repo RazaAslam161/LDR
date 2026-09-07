@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/diag/diag_event.dart';
@@ -84,6 +85,87 @@ class RealtimeService {
   static RealtimeChannel broadcast(String name) => _c.channel(name, opts: const RealtimeChannelConfig(private: true));
 }
 
+/// What one live subscription is doing, worst case across the app.
+///
+/// `dead` used to be reachable and permanent: [ManagedSubscription._verifyJoin]
+/// gave up after five refused joins and simply returned, so the channel stayed
+/// silent until the socket happened to cycle. Nothing anywhere read that state,
+/// so the whole failure reached the user as a partner who never wrote back.
+enum RealtimeHealth { joining, joined, retrying, dead }
+
+/// The app's one answer to "are live updates working right now".
+///
+/// A registry rather than a field on each subscription, because the question is
+/// never about one channel: the chat's receipt channel joining while its
+/// message channel is dead is still a broken chat. Every subscriber publishes
+/// under a key and the notifier carries the WORST of them, which is what a
+/// banner and a settings row both want to read.
+class RealtimeStatus {
+  RealtimeStatus._();
+
+  static final Map<String, RealtimeHealth> _by = {};
+
+  /// The worst health any live subscription is reporting, or `joined` when
+  /// nothing is subscribed at all — nothing is broken if nothing is asked for.
+  static final ValueNotifier<RealtimeHealth> worst =
+      ValueNotifier<RealtimeHealth>(RealtimeHealth.joined);
+
+  static final Map<String, ValueNotifier<RealtimeHealth>> _keyed = {};
+
+  /// One key's health, for a surface that speaks for one screen.
+  ///
+  /// The chat's strip says "this screen has stopped hearing the other phone",
+  /// and reading [worst] made it say that whenever ANY channel anywhere was
+  /// refused — the rewrap channel, a screen the user is not on. Settings keeps
+  /// reading [worst], which is the app-wide question it actually asks.
+  static ValueListenable<RealtimeHealth> of(String key) =>
+      _keyed.putIfAbsent(
+          key, () => ValueNotifier<RealtimeHealth>(RealtimeHealth.joined),);
+
+  /// How many subscriptions have exhausted their join attempts. Surfaced in
+  /// Settings, where it is the difference between "the network is slow" and
+  /// "this app has stopped listening".
+  static int get deadCount =>
+      _by.values.where((h) => h == RealtimeHealth.dead).length;
+
+  /// A key that has reported `dead` STAYS dead until a join actually lands.
+  ///
+  /// Without this the banner flickered: the parked retry publishes `joining`
+  /// the moment it fires, so a channel that has been refused for an hour hid
+  /// the warning for twelve seconds out of every seventy-five — and the
+  /// twelve-second gap is when a person looks up.
+  static void publish(String key, RealtimeHealth h) {
+    if (_by[key] == RealtimeHealth.dead && h != RealtimeHealth.joined) return;
+    if (_by[key] == h) return;
+    _by[key] = h;
+    _recompute();
+  }
+
+  static void forget(String key) {
+    if (_by.remove(key) == null) return;
+    _recompute();
+  }
+
+  /// Everything, on sign-out. The keys are couple-scoped topics and a stale
+  /// `dead` from the last account would show a permanent warning to the next.
+  static void reset() {
+    if (_by.isEmpty) return;
+    _by.clear();
+    _recompute();
+  }
+
+  static void _recompute() {
+    var w = RealtimeHealth.joined;
+    for (final h in _by.values) {
+      if (h.index > w.index) w = h;
+    }
+    worst.value = w;
+    for (final e in _keyed.entries) {
+      e.value.value = _by[e.key] ?? RealtimeHealth.joined;
+    }
+  }
+}
+
 /// A self-healing realtime subscription — the canonical Pattern A primitive.
 ///
 /// It subscribes once and, on every socket reconnect ([realtimeResumed]), tears
@@ -125,12 +207,28 @@ class ManagedSubscription {
   static const _joinCheck = Duration(seconds: 12);
   static const _maxAttempts = 5;
 
-  static ManagedSubscription start(RealtimeChannel Function() build) {
-    final s = ManagedSubscription._(build);
+  /// How long a subscription that has run out of attempts waits before trying
+  /// the whole ladder again.
+  static const _parked = Duration(seconds: 60);
+
+  /// [key] names this subscription in [RealtimeStatus]. Defaults to the
+  /// channel's own topic once one exists; pass one when the caller wants a
+  /// stable name across rebuilds.
+  static ManagedSubscription start(
+    RealtimeChannel Function() build, {
+    String? key,
+  }) {
+    final s = ManagedSubscription._(build).._key = key;
     s._resubscribe();
     realtimeResumed.addListener(s._onResumed);
     return s;
   }
+
+  String? _key;
+
+  String get _statusKey => _key ?? _topic ?? 'rt_${identityHashCode(this)}';
+
+  void _publish(RealtimeHealth h) => RealtimeStatus.publish(_statusKey, h);
 
   /// Realtime restarts are routine, and they reconnect every client on the
   /// platform within the same second. This notifier then fans that one tick out
@@ -173,6 +271,8 @@ class ManagedSubscription {
       }
       if (_disposed) return;
       _channel = _build();
+      _key ??= _topic;
+      _publish(RealtimeHealth.joining);
       _schedule(_joinCheck, _verifyJoin);
     } finally {
       _busy = false;
@@ -203,6 +303,7 @@ class ManagedSubscription {
     if (_disposed) return;
     if (_joined) {
       _attempt = 0;
+      _publish(RealtimeHealth.joined);
       return;
     }
     if (_attempt >= _maxAttempts) {
@@ -210,8 +311,22 @@ class ManagedSubscription {
       // partner who never writes. Nothing else in the app separates them.
       Diag.record(DiagArea.app, 'rt_join_dead',
           fields: {'topic': _topic, 'attempts': _attempt},);
+      _publish(RealtimeHealth.dead);
+      // Parked, not abandoned. This used to `return` and that was the end of
+      // it: the channel stayed silent until the socket happened to cycle,
+      // which on a phone left alone can be hours. A minute is slow enough to
+      // be no load at all and fast enough that a rate limiter which refused
+      // the whole fleet at once has long since let go.
+      _schedule(
+        _parked + Duration(milliseconds: _rand.nextInt(15000)),
+        () {
+          _attempt = 0;
+          unawaited(_resubscribe());
+        },
+      );
       return;
     }
+    _publish(RealtimeHealth.retrying);
     // Equal jitter: clients that lost the same socket otherwise retry on the
     // same schedule, which reproduces the storm at every step of the backoff.
     final base = 1000 << _attempt.clamp(0, 4);
@@ -233,6 +348,7 @@ class ManagedSubscription {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    RealtimeStatus.forget(_statusKey);
     realtimeResumed.removeListener(_onResumed);
     final c = _channel;
     _channel = null;

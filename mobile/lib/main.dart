@@ -39,6 +39,7 @@ import 'package:miles/features/call/call_route_bridge.dart';
 import 'package:miles/features/call/pip_mode.dart';
 import 'package:miles/features/call/screen_share_banner.dart';
 import 'package:miles/features/chat/camera/beauty/beauty_prefs.dart';
+import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/disguise/disguise_cover_host.dart';
 import 'package:miles/features/disguise/disguise_service.dart';
 import 'package:miles/features/legal/terms_gate.dart';
@@ -520,6 +521,11 @@ class _MilesAppState extends ConsumerState<MilesApp>
       if (MilesApp.showRealApp.value && AppLock.locked.value) {
         AppLock.authenticate(); // re-prompt on return
       }
+      // The network usually came back with the app. Anything the send queue
+      // parked on a backoff rung goes now rather than at its next rung — a
+      // person who has just opened the app expects the message they wrote an
+      // hour ago to be gone, not waiting three more minutes.
+      ChatSendQueue.instance.kick();
       // Refresh the FCM token every resume — self-heals a token the notify
       // functions nulled server-side (UNREGISTERED), restoring pushes.
       FcmService.registerToken();

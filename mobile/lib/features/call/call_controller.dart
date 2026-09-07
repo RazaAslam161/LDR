@@ -349,6 +349,10 @@ class CallController extends ChangeNotifier {
     return _chanLive;
   }
 
+  /// Cleared at the end of every call by whoever owns a per-call overlay.
+  /// Set by call_screen, which owns the only one today.
+  static void Function()? resetCallOverlays;
+
   /// Refuse a call that has nowhere to signal, and say so.
   ///
   /// Placing it anyway is what produced 228 sends that went nowhere, six
@@ -1041,6 +1045,11 @@ class CallController extends ChangeNotifier {
     // pressed Call, this side lost the tie-break, and every line after that
     // point would otherwise write over the call being rescued.
     final attempt = ++_attempt;
+    // Cleared where the attempt BEGINS, never in _teardown. The call screen
+    // consumes it as it pops, so a call whose screen was never mounted — a
+    // minimised call, a ring that timed out in the background — left its
+    // sentence standing to surface over the next, unrelated call.
+    _lastError = null;
     isCaller = true;
     isVideo = video;
     camOn = video;
@@ -1182,6 +1191,7 @@ class CallController extends ChangeNotifier {
     required bool video,
     required String from,
   }) {
+    _lastError = null;
     isCaller = false;
     _pendingOffer = offer;
     _pendingVideo = video;
@@ -1294,6 +1304,10 @@ class CallController extends ChangeNotifier {
         // The five causes above are only distinguishable by their type, and the
         // type only leaves the handset through here.
         ErrorReporter.report(e, st, kind: 'call-accept');
+        // And it has to reach the PERSON, not only the server. Answering a
+        // call and having the screen close with nothing said is the shape
+        // people report as "it just hung up on me".
+        _lastError = _readableCallError(e);
         _send('hangup', {});
         unawaited(_teardown(CallState.ended));
       }
@@ -1966,12 +1980,157 @@ class CallController extends ChangeNotifier {
       },);
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectTimer?.cancel();
+        _restartDebounce?.cancel();
+        _restartDebounce = null;
+        _iceGiveUp?.cancel();
+        _iceGiveUp = null;
+        // The budget is per INCIDENT, not per call. Two recovered handovers
+        // over a long call used to spend it, so the third — the one that
+        // actually needed it — got no restart at all. Given back only after
+        // the link has held for a while: an unconditional reset here would let
+        // a connection flapping every few seconds re-offer forever, which is
+        // what the budget exists to stop.
+        _restartBudget?.cancel();
+        _restartBudget = Timer(_restartBudgetResetAfter, () {
+          if (identical(pc, _pc) && state == CallState.connected) {
+            _iceRestarts = 0;
+          }
+        });
+        _connectedAt ??= DateTime.now();
         _setState(CallState.connected);
-      } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+      } else if (s ==
+          RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        // Not a failure yet — this is what a wifi-to-mobile handover, a lift,
+        // or a tunnel looks like. There was no arm for it at all, so the call
+        // sat mute until ICE gave up on its own and reached Failed, which
+        // tore it down with no sentence. Now the credentials are refreshed on
+        // the standing connection and the give-up clock is the only way out.
+        _armRestart(pc);
+      } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        // Only if nothing more specific already explained it — the invite
+        // outcome and the relay error both say more than this does.
+        _lastError ??= 'The call lost its connection and could not get it '
+            'back. One of you may have changed network.';
+        _teardown(CallState.ended);
+      } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
         _teardown(CallState.ended);
       }
     };
+  }
+
+  /// Debounce before re-offering, and the clock that ends a call the restart
+  /// cannot save.
+  ///
+  /// Both lifted from [ScreenShareSession], which has run this exact shape in
+  /// the field since §220. The numbers differ in one place only: a share can be
+  /// abandoned, a call cannot, so the give-up is 20s rather than 12.
+  static const _restartDebounceDelay = Duration(seconds: 2);
+  static const _iceGiveUpAfter = Duration(seconds: 20);
+  static const _maxIceRestarts = 2;
+
+  /// How long the link has to hold before the restart budget is given back.
+  static const _restartBudgetResetAfter = Duration(seconds: 30);
+
+  Timer? _restartDebounce;
+  Timer? _iceGiveUp;
+  Timer? _restartBudget;
+  int _iceRestarts = 0;
+
+  /// When the media path actually came up, for the duration clock. Null for
+  /// a call that never connected.
+  DateTime? _connectedAt;
+
+  /// How long this call has been connected, or null before it was.
+  Duration? get connectedFor => _connectedAt == null
+      ? null
+      : DateTime.now().difference(_connectedAt!);
+
+  void _armRestart(RTCPeerConnection pc) {
+    // One side re-offers. Both sides re-offering at once is glare on a live
+    // connection, and the tie-break above only runs from idle — isCaller is
+    // the asymmetry that already exists and is guaranteed opposite.
+    //
+    // The give-up clock is BELOW this return, so only the side that can
+    // actually repair the connection runs one. Armed on both, it ended the
+    // callee's call at 20s inside the window in which libwebrtc's own ICE was
+    // still probing and would have recovered — a call killed by the timer that
+    // exists to explain calls that die. The callee keeps the Failed arm, which
+    // now leaves a sentence of its own.
+    if (!isCaller) return;
+    _iceGiveUp ??= Timer(_iceGiveUpAfter, () {
+      if (!identical(pc, _pc)) return;
+      _lastError = 'The call lost its connection for '
+          '${_iceGiveUpAfter.inSeconds} seconds and could not get it back.';
+      unawaited(_teardown(CallState.ended));
+    });
+    _restartDebounce?.cancel();
+    _restartDebounce = Timer(_restartDebounceDelay, () {
+      if (!identical(pc, _pc)) return;
+      unawaited(_restartIce(pc));
+    });
+  }
+
+  /// New ICE credentials on the SAME connection — the partner answers in
+  /// place, no rebuild, no ring, no black gap. `restartIce()` only flags the
+  /// need; the fresh ufrag/pwd ride the next offer.
+  Future<void> _restartIce(RTCPeerConnection pc) async {
+    if (_iceRestarts >= _maxIceRestarts) return; // the give-up clock decides
+    _iceRestarts++;
+    Diag.record(DiagArea.call, 'ice_restart',
+        corr: _callId, fields: {'n': _iceRestarts},);
+    try {
+      await pc.restartIce();
+      final offer = await pc.createOffer({});
+      if (!identical(pc, _pc)) return;
+      await pc.setLocalDescription(offer);
+      // Its OWN kind, never 'offer' with a flag on it.
+      //
+      // The first cut sent `offer` + `restart: true`, and a build-73 phone does
+      // not know that key: its _onSignal skips the foreign-id gate for offers
+      // and, from idle, falls straight into _ring — so a caller whose call went
+      // through a tunnel would have made the partner's phone ring with a
+      // full-screen INCOMING CALL for a call that was already up. Build 73's
+      // switch has nine cases and no default arm (checked against 3238b5f), so
+      // a kind it has never heard of is silently ignored, which is exactly the
+      // degradation this needs: it simply does not recover, and the give-up
+      // clock ends the call at 20s with a sentence.
+      _send('reoffer', {
+        'sdp': offer.sdp,
+        'type': offer.type,
+        'video': isVideo,
+      });
+    } catch (e) {
+      Diag.record(DiagArea.call, 'ice_restart_failed', corr: _callId,
+          fields: {'error': e.runtimeType.toString()},);
+    }
+  }
+
+  /// Answer a restart offer on the connection that is already up.
+  ///
+  /// A build that does not know about restarts drops this offer as "busy" and
+  /// the give-up clock ends the call at 20s with the sentence it deserves —
+  /// which is what both handsets on build 73 will do until they update.
+  Future<void> _answerRestart(Map<String, dynamic> map) async {
+    final pc = _pc;
+    if (pc == null || state != CallState.connected) return;
+    Diag.record(DiagArea.call, 'ice_restart_answering', corr: _callId);
+    try {
+      await pc.setRemoteDescription(RTCSessionDescription(
+          map['sdp']?.toString(), map['type']?.toString(),),);
+      final answer = await pc.createAnswer({});
+      if (!identical(pc, _pc)) return;
+      await pc.setLocalDescription(answer);
+      _send('answer', {
+        'sdp': answer.sdp,
+        'type': answer.type,
+        'restart': true,
+      });
+      // Only ever sent in reply to a 'reoffer', which only a build that
+      // understands them can send — so this never reaches build 73.
+    } catch (e) {
+      Diag.record(DiagArea.call, 'ice_restart_answer_failed', corr: _callId,
+          fields: {'error': e.runtimeType.toString()},);
+    }
   }
 
   void _onSignal(Map<String, dynamic> payload) {
@@ -2040,6 +2199,12 @@ class CallController extends ChangeNotifier {
       return;
     }
     switch (kind) {
+      // An ICE restart is not a new call — it is fresh credentials for the
+      // connection already standing, answered in place. Its own kind rather
+      // than a flag on 'offer', so a build that has never heard of it ignores
+      // it instead of ringing (see _restartIce).
+      case 'reoffer':
+        unawaited(_answerRestart(map));
       case 'offer':
         if (state != CallState.idle) {
           // Only an outgoing call that is still ours to give up can be yielded.
@@ -2660,6 +2825,18 @@ class CallController extends ChangeNotifier {
         'tx_kbps': stats?.sendKbps,
       },);
       _connectTimer?.cancel();
+      _restartDebounce?.cancel();
+      _restartDebounce = null;
+      _iceGiveUp?.cancel();
+      _iceGiveUp = null;
+      _restartBudget?.cancel();
+      _restartBudget = null;
+      _iceRestarts = 0;
+      _connectedAt = null;
+      // The diagnostic overlay is a per-CALL decision, and the call screen —
+      // the only thing that used to reset it — is not mounted when a call ends
+      // while minimised, which is every call ended from the PiP.
+      resetCallOverlays?.call();
       _statsMonitor.stop();
       stats = null;
       await CallForegroundService.stop();

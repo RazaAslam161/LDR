@@ -20,9 +20,10 @@ void main() {
     tmp = Directory.systemTemp.createTempSync('batch');
     photo = File('${tmp.path}/a.jpg')..writeAsBytesSync([1]);
     clip = File('${tmp.path}/b.mp4')..writeAsBytesSync([2]);
-    for (final s in q.pending.toList()) {
-      q.discard(s.id);
-    }
+    // clear(), not a discard loop: discard only removes a send the queue has
+    // GIVEN UP on, and a send parked on a backoff rung is not one of those —
+    // it would survive into the next test carrying a live timer.
+    q.clear();
   });
 
   tearDown(() {
@@ -118,7 +119,11 @@ void main() {
 
     expect(q.pending.map((s) => s.id), [ids[1]],
         reason: 'the nine that worked are gone; the one that failed is kept',);
-    expect(q.pending.single.status, SendStatus.failed);
+    // Kept, and BOOKED IN. It used to be pinned as `failed`, which was the
+    // whole defect: a dead route is not a reason to stop, and the bubble sat
+    // behind a retry button nobody was in the room to press.
+    expect(q.pending.single.status, SendStatus.sending);
+    expect(q.pending.single.nextAttempt, isNotNull);
     expect(q.pending.single.file.existsSync(), isTrue,
         reason: 'the file has to survive, or there is nothing to retry',);
   });
@@ -136,7 +141,10 @@ void main() {
     expect(q.pending.single.id, ids[1]);
 
     q.uploader = (_) async {};
-    q.retry(ids[1]);
+    // retry() only wakes a send the queue GAVE UP on. This one is merely
+    // parked, so the kick — what a resume or a reconnect does — is the verb
+    // that applies to it.
+    q.kick();
     await settle();
     expect(q.pending, isEmpty);
   });

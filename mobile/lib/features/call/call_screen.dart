@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -19,6 +21,17 @@ import 'package:miles/features/chat/camera/camera_filters.dart';
 /// the call screen being minimised to the pill and reopened.
 final ValueNotifier<bool> _showStats = ValueNotifier<bool>(false);
 
+/// Long-pressed open on one call, the stats overlay stayed open over every call
+/// after it — it is a top-level notifier and nothing ever reset it.
+///
+/// Cleared from the CONTROLLER's teardown rather than from this screen, because
+/// a call ended while minimised has no screen mounted: the PiP has no hang-up,
+/// so every call the partner ends that way used to keep it. Registered once, at
+/// import time, by the first build.
+void _registerOverlayReset() {
+  CallController.resetCallOverlays ??= () => _showStats.value = false;
+}
+
 /// Where the face strip floats after the user drags it (global dy of its
 /// top), or null while it is docked above the controls. File-scope like
 /// [_showStats], so a strip parked next to the shared content survives the
@@ -37,6 +50,7 @@ class CallScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _registerOverlayReset();
     final call = ref.watch(callControllerProvider);
     final partner = ref.watch(sessionProvider).partner;
 
@@ -178,6 +192,21 @@ class CallScreen extends ConsumerWidget {
                 child: ColoredBox(color: MilesColors.night),
               ),
 
+            // The same clock for a connected VIDEO call, which drops the
+            // centrepiece entirely and had nowhere else to carry it.
+            if (video && connected)
+              Positioned(
+                key: const ValueKey('call-clock-pill'),
+                top: MediaQuery.paddingOf(context).top + 8,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: _ClockPill(elapsed: () => call.connectedFor),
+                  ),
+                ),
+              ),
+
             // The numbers that tell a capture problem from an encoder problem
             // from a network problem — they look identical on screen otherwise.
             ValueListenableBuilder<bool>(
@@ -278,19 +307,29 @@ class CallScreen extends ConsumerWidget {
                             fontSize: 24,
                             fontWeight: FontWeight.w600,),),
                     const SizedBox(height: 8),
-                    Text(
-                      ringing
-                          ? (video
-                              ? 'Incoming video call…'
-                              : 'Incoming voice call…')
-                          : calling
-                              ? 'Calling…'
-                              : connected
-                                  ? 'Voice call · connected'
-                                  : '',
-                      style: const TextStyle(
-                          color: MilesColors.taupe, fontSize: 15,),
-                    ),
+                    if (connected)
+                      // "connected" was the whole readout, for the length of
+                      // the call. Nothing on this screen said how long you had
+                      // been talking, and nothing anywhere said it afterwards
+                      // either — so a call that had silently dropped minutes
+                      // ago looked exactly like one still running.
+                      CallClock(
+                        elapsed: () => call.connectedFor,
+                        style: const TextStyle(
+                            color: MilesColors.taupe, fontSize: 15,),
+                      )
+                    else
+                      Text(
+                        ringing
+                            ? (video
+                                ? 'Incoming video call…'
+                                : 'Incoming voice call…')
+                            : calling
+                                ? 'Calling…'
+                                : '',
+                        style: const TextStyle(
+                            color: MilesColors.taupe, fontSize: 15,),
+                      ),
                   ],
                 ),
               ),
@@ -789,4 +828,80 @@ Future<void> _openLook(BuildContext context, CallController call) async {
     BeautyPrefs.useInCalls = true;
   }
   await BeautyPrefs.save();
+}
+
+
+/// How long this call has been connected, ticking once a second.
+///
+/// [elapsed] is asked on every tick rather than counted here, so a screen
+/// rebuilt mid-call — minimised and reopened, rotated, a share starting —
+/// resumes at the real time instead of restarting at zero.
+class CallClock extends StatefulWidget {
+  const CallClock({required this.elapsed, super.key, this.style});
+
+  final Duration? Function() elapsed;
+  final TextStyle? style;
+
+  /// h:mm:ss past the hour, m:ss below it. Never a leading zero on the
+  /// minutes: that reads as a stopwatch, and this is a phone call.
+  static String format(Duration d) {
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    if (d.inHours == 0) return '${d.inMinutes}:$s';
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    return '${d.inHours}:$m:$s';
+  }
+
+  @override
+  State<CallClock> createState() => _CallClockState();
+}
+
+class _CallClockState extends State<CallClock> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.elapsed();
+    return Text(d == null ? '' : CallClock.format(d), style: widget.style);
+  }
+}
+
+/// The clock over a video call, which has no centrepiece to put it in.
+class _ClockPill extends StatelessWidget {
+  const _ClockPill({required this.elapsed});
+
+  final Duration? Function() elapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        // A scrim over the far camera, for the reason the stats readout has
+        // one: this has to stay legible against whatever is in the frame.
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: CallClock(
+        elapsed: elapsed,
+        style: const TextStyle(
+            color: MilesColors.cream50,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,),
+      ),
+    );
+  }
 }

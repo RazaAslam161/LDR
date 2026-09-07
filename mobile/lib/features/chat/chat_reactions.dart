@@ -848,9 +848,18 @@ class ChatReactionOutbox extends ChangeNotifier {
     }
   }
 
+  /// Attempt [attempt] (1-based) waits this long before the next try.
+  ///
+  /// Public because the send queue climbs the same ladder: a reaction and a
+  /// message that will not land are the same outage, and two ladders that drift
+  /// apart would retry the same dead connection on two schedules.
+  static Duration backoffFor(int attempt) {
+    final i = attempt - 1;
+    return _backoff[i < 0 ? 0 : (i < _backoff.length ? i : _backoff.length - 1)];
+  }
+
   /// Whether retrying could ever help. Everything not named here — no network,
   /// a timeout, a 5xx — stays in the queue.
-  @visibleForTesting
   static bool permanent(Object e) => _permanent(e);
 
   static bool _permanent(Object e) {

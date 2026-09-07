@@ -872,6 +872,18 @@ class ChatRepository {
   /// message row of kind='image'. Returns the storage path (so callers can
   /// broadcast the fast-path 'msg'), or null if the row this [id] names was
   /// already written by an earlier attempt.
+  /// A caption is sent as its own text message, never as the media row's body.
+  ///
+  /// The first cut put it in `body` and rendered it under the frame. It is
+  /// invisible on build 73: that build's `_Content` never reads a body in the
+  /// image or video arm, and its `previewText()` hard-returns '📷 Photo', so
+  /// the sentence decrypted there and was then discarded by every surface it
+  /// has. Two handsets in the field run it and can never be made to update —
+  /// and the composer DELETES the draft when it hands a caption over, so the
+  /// sentence was destroyed on the sender's phone as well.
+  ///
+  /// A text row is the shape both builds already render. See
+  /// [ChatSendQueue._enqueue].
   static Future<String?> sendImage(String coupleId, File file,
       {String? replyToId, String? id, String? albumId,}) async {
     final uid = SupabaseService.currentUserId;
@@ -886,10 +898,14 @@ class ChatRepository {
     final pending = Thumbnails.forImage(file);
     await _c.storage.from(chatBucket).upload(path, file);
     final hasThumb = await _putThumb(chatBucket, path, await pending);
+    // Always minted now, never left to the server: it gives the three callers
+    // that used to omit it the 23505 dedupe on a retry, which is what stops a
+    // re-attempt writing the photo a second time.
+    final rowId = id ?? const Uuid().v4();
     final sw = Stopwatch()..start();
     try {
       await _c.from('messages').insert({
-        if (id != null) 'id': id,
+        'id': rowId,
         'couple_id': coupleId,
         'sender_id': uid,
         'image_path': path,
@@ -898,14 +914,14 @@ class ChatRepository {
         if (albumId != null) 'album_id': albumId,
         'has_thumb': hasThumb,
       });
-      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: rowId, fields: {
         'kind': 'image',
         'ok': true,
         'latency_ms': sw.elapsedMilliseconds,
       },);
     } catch (e) {
       final landed = _alreadyLanded(e);
-      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: id, fields: {
+      Diag.record(DiagArea.receipt, 'msg_insert_result', corr: rowId, fields: {
         'kind': 'image',
         'ok': landed,
         'dedupe': landed,
@@ -951,9 +967,10 @@ class ChatRepository {
     final pending = Thumbnails.forVideo(file);
     await _c.storage.from(privateBucket).upload(path, file);
     final hasThumb = await _putThumb(privateBucket, path, await pending);
+    final rowId = id ?? const Uuid().v4();
     try {
       await _c.from('messages').insert({
-        if (id != null) 'id': id,
+        'id': rowId,
         'couple_id': coupleId,
         'sender_id': uid,
         'video_path': path,
@@ -1086,10 +1103,17 @@ class ChatRepository {
   /// Live stream of new messages for this couple (both partners' sends).
   /// [onDelete] is called on any DELETE event (e.g. clear-for-everyone) so the
   /// partner's screen can reload without processing individual row payloads.
+  /// [onJoined] is called when the server confirms the join.
+  ///
+  /// The status was reported to Diag (inert in a shipped build) and to
+  /// ErrorReporter (which only hears about a failure), so nothing anywhere
+  /// could answer "did the message channel actually land?" — and a refused
+  /// join means no live message arrives on this phone at all.
   static RealtimeChannel subscribe(
     String coupleId,
     void Function(Message) onInsert, {
     VoidCallback? onDelete,
+    VoidCallback? onJoined,
   }) {
     return _c
         .channel('messages:$coupleId', opts: const RealtimeChannelConfig(private: true))
@@ -1186,6 +1210,7 @@ class ChatRepository {
           kind: 'realtime-subscribe',
         );
       }
+      if (status == RealtimeSubscribeStatus.subscribed) onJoined?.call();
       if (kRtChatDebug) {
         debugPrint('[rt] messages:$coupleId join=$status err=${error ?? ''}');
       }

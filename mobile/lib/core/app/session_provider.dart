@@ -23,6 +23,7 @@ import 'package:miles/core/services/unread_tally.dart';
 import 'package:miles/core/time/tz_helper.dart';
 import 'package:miles/features/chat/chat_draft_store.dart';
 import 'package:miles/features/chat/chat_reactions.dart';
+import 'package:miles/core/realtime/realtime_service.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/voice_note_cache.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
@@ -616,6 +617,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // unsent would retry minutes after the user walked away, delivering it to
     // a couple they have just ended.
     ChatSendQueue.instance.clear();
+    // Keyed by couple topic. A `dead` left by this couple's channels would
+    // otherwise show the next account a permanent "live updates paused".
+    RealtimeStatus.reset();
     // Same reason, and one more: the reaction outbox keeps an armed backoff
     // timer, so a reaction left unsent would have retried later under
     // whichever session came next. Its disk copy survives on purpose — it is

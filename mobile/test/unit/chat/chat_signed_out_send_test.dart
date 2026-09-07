@@ -39,21 +39,38 @@ void main() {
     Future<void> settle() =>
         Future<void>.delayed(const Duration(milliseconds: 50));
 
-    test('a text send whose insert throws is kept as failed', () async {
+    test('a text send whose insert throws is KEPT, and still trying',
+        () async {
       final id = ChatSendQueue.instance.enqueueText('couple-1', 'hello');
       await settle();
       final s =
           ChatSendQueue.instance.pendingText.where((t) => t.id == id).single;
-      expect(s.status, SendStatus.failed,
+      // This pinned `failed`. Being signed out is the most recoverable
+      // failure there is — the session comes back, on a token refresh or the
+      // next sign-in — so parking the message and waiting for a human to press
+      // retry was the wrong shape. What the law protects is unchanged and now
+      // stronger: the body is the only copy left anywhere, so it is KEPT.
+      expect(s.status, SendStatus.sending,
           reason: 'the body is the only copy of the message left anywhere',);
+      expect(s.attempts, greaterThan(0));
+      expect(s.nextAttempt, isNotNull, reason: 'and it is booked in to go');
     });
 
-    test('retryText puts the failed text back in flight', () async {
-      final id = ChatSendQueue.instance.enqueueText('couple-1', 'hello');
+    test('a resume tries it again rather than waiting out the rung', () async {
+      // retryText is the wrong verb for this now: it only wakes a send the
+      // queue GAVE UP on, and being signed out is recoverable, so this one is
+      // merely parked. What actually recovers it is the kick a resume or a
+      // socket reconnect fires — which is also when the session is most likely
+      // to have come back.
+      ChatSendQueue.instance.enqueueText('couple-1', 'hello');
       await settle();
-      ChatSendQueue.instance.retryText(id);
-      expect(ChatSendQueue.instance.pendingText.single.status,
-          SendStatus.sending,);
+      final before = ChatSendQueue.instance.pendingText.single.attempts;
+      expect(before, greaterThan(0));
+
+      ChatSendQueue.instance.kick();
+      await settle();
+      expect(ChatSendQueue.instance.pendingText.single.attempts,
+          greaterThan(before),);
     });
   });
 

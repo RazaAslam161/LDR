@@ -46,10 +46,20 @@ void main() {
       // Its id exists only on this device until the upload finishes, so the
       // delete hits no row and the upload lands it anyway — the message
       // reappears seconds after the user deleted it.
-      final s = ChatSelection()
-        ..toggle(msg('a', status: SendStatus.sending))
-        ..toggle(msg('b', status: SendStatus.failed));
+      final s = ChatSelection()..toggle(msg('a', status: SendStatus.sending));
       expect(s.isActive, isFalse);
+    });
+
+    test('a send the queue gave up on CAN', () {
+      // This used to be bundled with the line above, on the same reasoning.
+      // That reasoning expired when the queue grew a backoff ladder: anything
+      // recoverable now stays `sending` and keeps trying, so `failed` no
+      // longer means "not yet" — it means nothing is ever coming. A message
+      // that can neither be sent nor removed is one the user is stuck looking
+      // at. The chat drains these through ChatSendQueue.discard, never the
+      // server, which has no row for them (chat_send_durability_test).
+      final s = ChatSelection()..toggle(msg('b', status: SendStatus.failed));
+      expect(s.isActive, isTrue);
     });
 
     test('a tombstone cannot', () {

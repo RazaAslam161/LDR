@@ -29,8 +29,17 @@ class ChatSelection {
   /// already deleted for everyone has nothing left to delete — the RPC would
   /// update no rows and report success, leaving the placeholder on screen
   /// looking ignored.
+  ///
+  /// A FAILED send is selectable, and that is a change. It used not to be, on
+  /// the same reasoning as an uploading one — but the queue climbs a backoff
+  /// ladder now, so `failed` no longer means "not yet": it means the ladder
+  /// gave up, and nothing will ever land. A message the user cannot send and
+  /// cannot remove is one they are stuck looking at. The chat drains those
+  /// through ChatSendQueue.discard rather than the server, which has no row.
   static bool canSelect(Message m) =>
-      m.sendStatus == SendStatus.sent && !m.deletedForEveryone;
+      (m.sendStatus == SendStatus.sent ||
+          m.sendStatus == SendStatus.failed) &&
+      !m.deletedForEveryone;
 
   void toggle(Message m) {
     if (!canSelect(m)) return;

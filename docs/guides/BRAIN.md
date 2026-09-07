@@ -26552,3 +26552,584 @@ not built); the round-2 adversarial workflow over the fixes was killed by the
 session exit and never reported (`wf_6be100e3-19c`, resumable); C1, C2, C3, C5,
 C7 and C11 of Phase 2 remain; `care_nudges` still carries the full-column UPDATE
 grant.
+
+## §298 — 2026-09-07 — the smoothing was the basic tier; a guided filter replaces it
+
+The owner, plainly: "I want Beauty Filters as Snapchat have. not basic one's... extremely
+smooth, silky smooth, highest quality possible. available to apply on video call to."
+
+They were right, and the fault was one shader block — not the plumbing, which was already
+proven on the handset in §292/§294.
+
+### What was actually wrong
+
+    vec3 hi = a - b;                    // a = sharp, b = 9-tap GAUSSIAN
+    vec3 sm = b + hi * (0.35 * uDetail);
+    vec3 c  = mix(a, sm, uSmooth * m);
+
+Textbook frequency separation on a Gaussian low-pass. Three defects, all visible:
+
+1. **The Gaussian is not edge-aware.** It blurs ACROSS the nose edge, the lip border and the
+   jaw silhouette, so `b` is contaminated by whatever is on the other side and `hi` carries
+   ringing. Turned up, that is exactly the haloed, waxy, plastic look.
+2. **`hi * 0.35 * uDetail` restores detail UNIFORMLY** — putting back the blemish it just
+   removed while still flattening pores. Wrong at both ends simultaneously.
+3. **One radius.** Pores, blemishes and blotches are different scales and all got the same
+   treatment.
+
+### What replaced it — a self-guided filter (He, Sun & Tang)
+
+    q = a*Y + b,   a = var/(var + eps),   b = mean*(1 - a)
+
+Flat skin has var << eps, so a→0 and q→mean: fully smoothed. A real edge has var >> eps, so
+a→1 and q→Y: untouched. **`eps` IS the skin-or-edge decision**, and unlike a bilateral filter
+this produces no gradient reversal — which is why production retouch pipelines use it.
+
+Detail is then restored SELECTIVELY: `keep = 1 - smoothstep(poreT, blemishT, |Y - q|)`. Small
+deviations are pore and hair texture and come back; large ones are the blemish and stay gone.
+That single change is the difference between skin and airbrush.
+
+Luminance only — chroma is bit-exact, so no colour shift on the cheek.
+
+### PRECISION IS THE LOAD-BEARING DETAIL
+
+`var = E[Y²] - E[Y]²` is a catastrophic cancellation: skin variance is ~1e-4 against means of
+~0.25. In mediump (fp16, 10-bit mantissa) the subtraction is destroyed, and storing the two
+moments in an 8-bit texture destroys it a second time. So **the moments never leave the
+shader** — accumulated and differenced in highp registers, with only (a, b), both well
+conditioned in 0..1, written out. That is also why there is no half-float render target and no
+extension dependency: it works on the ES2 fallback too.
+
+A `glGetShaderPrecisionFormat` probe logs the fragment highp bit depth at GL setup and warns
+below 16. Without highp the filter degrades toward a=0 everywhere — the old flat look, no
+crash — and now that is readable off a log instead of a mystery.
+
+### Cost, and why both engines get it free
+
+Three added half-res draws (statistics, then the two box passes that smooth (a, b) — the
+existing BLUR does that, with a and b riding r and g). At 960x540 that is ~1.5 MP of extra
+fill per frame; an Adreno 650 does gigapixels. `runPasses` is shared, so **the camera and the
+video call get the identical look from one code path** — which is what "available on video
+call too" required, and it needed no new plumbing because §294 already proved that seam.
+
+### Verified
+
+    ./gradlew :app:compileSideloadDebugKotlin        BUILD SUCCESSFUL in 12m 7s
+    flutter test test/unit/camera/beauty_effect_law_test.dart   26 passed
+
+Five new laws pin what no gate can compile: GLSL is read by nothing here — not flutter test,
+not the analyzer, not CI, only a handset. They pin that `a = var/(var+eps)` exists, that the
+composite applies the model, that GUIDED declares highp and emits only (a, b), that the
+selective detail restore is present and `vec3 hi = a - b;` is gone, that the guided pass runs
+BEFORE the blur clobbers the sharp half, and that eps follows the slider on BOTH engines.
+
+### Open — and it is the whole question
+
+**Nobody has seen this.** The Kotlin compiles; the GLSL does not compile until a device runs
+it, and how it LOOKS is not something any gate here can answer. The presets were tuned for the
+old Gaussian and have not been re-tuned for a filter with completely different character —
+expect to want that after the first look. eps, poreT and blemishT are first-principles values
+(0.0008 + smooth*0.004; 0.012; 0.055), not measured against a face.
+
+Next step: a build through `tool/release.sh` — NOT `flutter build apk`, which bypasses the
+stale-snapshot defences (§291) — then look at a face and tune the three constants.
+
+### §298 addendum — build 77 cut and installed; and release.sh's clean only runs on --bump
+
+Build 77 is on the handset: `versionCode=77`, installed in place at 06:14:48, no uninstall.
+The tester artifact carries the feature — checked, not assumed:
+
+    Miles.apk  libapp.so   Retouch=2  miles/beauty=1  beauty_kill=2  "In video calls"=1
+               dex         MilesCameraEffectHook=2  MilesBeautyGl=1
+               stamp       miles-build-77
+    release.sh checked 1 libapp.so, all stamped miles-build-77
+               ABIs in the APK: ['arm64-v8a']
+               CN=Miles, O=R&D Dev, C=PK — certificate matches the installed base
+
+**The first attempt was REFUSED, and that is the story worth keeping.** release.sh printed
+
+    STALE SNAPSHOT: lib/arm64-v8a/libapp.so has no miles-build-77
+    REFUSING THIS ARTIFACT — the Dart inside is NOT build 77
+
+The guard caught the §291 packaging bug live. The cause: **the verified-clean block is gated
+`if $bump` (tool/release.sh:226)** — it runs only when release.sh performs the bump itself. I
+had bumped pubspec and ReleaseGate by hand, so `$bump` was false, the clean was skipped, and
+Gradle reused an eleven-hour-old `merged_jni_libs`. Exactly the documented failure, exactly the
+guard that exists for it.
+
+Remedy applied: daemon stopped, `flutter clean` retried, `build/` ASSERTED gone (never trusting
+its exit code), then release.sh again — 812s of genuine rebuild, and the stamp check passed.
+
+Worth the owner's attention, not changed here because it is a gate: **a hand-bumped version
+silently skips release.sh's clean.** The guard turns that into a refusal rather than a bad
+release, so nothing ships wrong — but the first build of every hand-bump is wasted. Making the
+clean unconditional, or keying it on "pubspec build != last built build", would remove the
+waste.
+
+Still open, and it is the whole point: **nobody has seen the guided filter.** The GLSL compiles
+only on the device that now has it. eps/poreT/blemishT are first-principles values.
+
+## §299 — 2026-09-07 — "just a little difference, and Evening did nothing": the numbers were the bug
+
+Owner on build 77: "i just a little bit difference, not much... i tried evening too nothing
+changed. none of it enhancing the beauty."
+
+Both symptoms are one arithmetic fault, and the second one names it precisely — Evening carries
+berry lipstick, which is the least subtle thing in the whole feature. If THAT is invisible, the
+face-dependent path is contributing nothing and the rest is running at a fraction of nominal.
+
+### The chain, measured
+
+Every axis is attenuated THREE times between the preset and the pixel:
+
+    preset value  ×  BeautySettings.amount  ×  the skin mask (m or fa)
+
+    "Natural" smoothing:  0.45 × 0.50 = 0.225, then × m≈0.4  →  a 9% blend.
+    "Evening" lipstick:   0.50 × 0.60 = 0.30,  then × 0.85 × fa
+                                                → 0 with no face; a faint 25% tint with one.
+
+Nine percent is below the threshold of noticing on a phone screen. The engine was working
+exactly as built; it was built far too timid. `amount` defaulted to 0.5, which is a silent
+halving of a feature whose whole job is to be visible.
+
+Compounding it, the shader carried a second set of taxes nobody had totalled:
+
+    float geo = 0.5;                      // no-face floor — halves colour-only work again
+    c += vec3(uBrighten * m * 0.10);      // brighten capped at a tenth of a stop
+    aL * uLipsAmount * 0.85 * fa          // and a further 0.5-0.85 on each makeup channel
+
+### Fixed
+
+- `amount` is a TRIM, not a halving: default 1.0. The slider still pulls back.
+- Presets re-authored STRONG, and expanded from 6 looks to **12** — the owner has now asked
+  twice for more filters, and 6 slider-nudges was not a strip.
+  off / natural / smooth / bright / fresh / glow / porcelain / defined / polished / rose /
+  evening / bold. Smoothing now runs 0.65–1.0 where it used to run 0.35–0.7, and makeup
+  0.45–1.0 where it used to run 0.3–0.5.
+- Shader gains: no-face floor 0.5 → 0.82 (the YCbCr skin term already gates this; 0.5 on top
+  was an invisible second tax), brighten 0.10 → 0.22, lips ×0.85 → ×1.0, blush 0.5 → 0.8,
+  brows 0.7 → 0.9, eyeshadow 0.6 → 0.85.
+
+### The unknown this build finally answers
+
+Makeup and reshape are multiplied by `fa` — face presence — so if ML Kit is not finding a face
+on the camera path, they are exactly zero no matter how strong the preset is. Nothing in the
+log said either way. `FaceTracker` now logs the TRANSITION, not every frame:
+
+    face acquired: 468 points — makeup and reshape are live
+    no face in frame — makeup and reshape are inert until one returns
+
+If Evening still shows no lipstick after this build, that line is the answer, and the fault is
+in the analyzer feed rather than in the numbers.
+
+### Verified
+
+    flutter test test/unit/camera/ test/unit/core/beauty_kill_gate_test.dart   99 passed
+    ./gradlew :app:compileSideloadDebugKotlin                                  BUILD SUCCESSFUL
+
+Two tests pinned `amount == 0.5` as the shipped default and now pin 1.0, with the reason in the
+comment so the next reader does not "restore" the halving.
+
+### Still open
+
+The guided filter (§298) has STILL never been seen — build 77 was on the phone but the owner's
+report is consistent with the old numbers, not with any judgement of the new smoother. Build 78
+is the first that can be judged: strong presets, twelve looks, and a log that says whether a
+face is found.
+
+### §299 addendum — build 78 cut and verified; not installed, phone unplugged
+
+    release.sh   checked 1 libapp.so, all stamped miles-build-78
+                 ABIs in the APK: ['arm64-v8a']
+                 CN=Miles, O=R&D Dev, C=PK — certificate matches the installed base
+                 sha256 3b917a62351cfbd95f9619a90878e3bca06e07aedbfbca8e426a5f153da16d98
+
+    packaged snapshot carries all twelve labels:
+      Natural Smooth Bright Fresh Glow Porcelain Defined Polished Rose Evening Bold
+
+`adb devices` was empty at install time, so build 78 is on disk (`Miles.apk`, and
+`build/app/outputs/flutter-apk/app-play-release.apk`) but not on the handset. One command when
+it is plugged back in:
+
+    adb install -r build/app/outputs/flutter-apk/app-play-release.apk
+
+Note for the next session: the first release.sh run this turn died mid-`flutter analyze` when
+the process was interrupted, leaving no artifact — the log's last line was `gate: flutter
+analyze`. Checked rather than assumed before re-cutting; a half-finished release leaves no APK
+at all, which is the safe failure.
+
+
+## §300 — 2026-09-07 — Phase 2's last six: a message that survives the process, a call that survives the network, a subscription that stops dying quietly
+
+The six items §296 left open — C1 send-queue durability, C2 voice cancel, C3 captions, C5
+ICE restart, C7 call duration, C11 realtime health. All six are mechanisms, not patches,
+and four of them close a hole where the app was silent about its own failure.
+
+### C1 — a message the user sent must survive the process
+
+`ChatSendQueue.enqueueText` carried a written refusal to persist bodies:
+
+> Deliberately NOT persisted across a process kill, unlike `_pending`: the bodies would sit
+> in plain SharedPreferences, which is the one place the app's disguise cannot cover. A text
+> send is a single insert — it lands in seconds or the sender is looking at a bubble they
+> can retry.
+
+Right objection, wrong conclusion, and the second sentence is only true while the process
+lives. **Android kills this app whenever it is backgrounded, and backgrounding is when the
+cover goes up — the kill is the ordinary case here, not a rare one.** A message typed and
+sent as the phone went into a pocket was gone: no row, no bubble, no copy anywhere, and
+nothing said.
+
+`ChatTextOutbox` (new) keeps it in the store the DRAFT of the same sentence already uses:
+FlutterSecureStorage, `encryptedSharedPreferences: true`, one key per send, prefix-filtered,
+never `deleteAll()` — that storage also holds CryptoCore's X25519 private key, and wiping it
+would take every past message with it. Rows are stamped with the uid and `restore(uid)`
+SKIPS a foreign one rather than deleting it: two accounts share one handset, and the other
+person's message is still theirs when they sign back in.
+
+One place where it deliberately differs from `ChatReactionOutbox`, which keeps its disk copy
+across a sign-out: **`ChatSendQueue.clear()` wipes the outbox**, because that call runs from
+`SessionNotifier.endCouple` — "everything that must not outlive a COUPLE, however the couple
+ended". A message typed during the argument must not be resurrected and delivered to a couple
+the user has walked away from.
+
+**The second half of C1 is the bigger defect.** Every failure, of any kind, went straight to
+`failed`:
+
+```
+} catch (e) {
+  debugPrint('[send] ${send.kind} ${send.id} failed: $e');
+  send.status = SendStatus.failed;
+```
+
+One dead second of network parked a message behind a retry button nobody was in the room to
+press — and `debugPrint` is inert in a release build, so there was no record it had ever been
+attempted. Now: `attempts` / `nextAttempt` on both `PendingSend` and `PendingText`, the ladder
+climbing `ChatReactionOutbox.backoffFor` (promoted from private — one ladder, because a
+reaction and a message that will not land are the same outage), and `permanent(e)` deciding
+whether to park or re-arm. Postgrest classification is delegated to the reaction outbox's
+existing table; storage is this queue's own, because a reaction never uploads anything —
+413 (bigger than the bucket will ever accept) and 403 (an RLS decision, including the one a
+full account produces) are both final, and climbing a ladder against either is a spinner
+that never resolves.
+
+`kick()` collapses the ladder on app resume and on every socket open, floored at 3 seconds so
+a flapping socket cannot fire every parked send at a connection that is still broken. Failures
+reach `ErrorReporter` as a typed `DeliveryFailure(what, attempt, permanent, code)` on the
+FIRST attempt and on the giving-up, never on every rung — the run's report budget is five.
+
+Two more holes closed while in there:
+
+- A restored send whose temp file the OS had emptied was `continue`d in silence. That is the
+  queue losing a photo the user believes they sent; it now files `chat-send-restore`.
+- A `failed` send could not be selected, so it could not be removed — `canSelect` refused it
+  on the same reasoning as one still uploading. That reasoning expired with the ladder:
+  `failed` now means nothing is ever coming, and a message that can neither be sent nor
+  removed is one the user is stuck looking at. The chat drains those through
+  `ChatSendQueue.discard`/`discardText` BEFORE the RPC, which has no row to delete and would
+  report success over a bubble that stayed on screen.
+
+### C2 — the composer promised a gesture that did not exist
+
+The recording banner has said **"Slide up to cancel · release to send"** since voice notes
+shipped. There was no cancel: `onLongPressEnd: (_) => _stopRecording()` sent unconditionally.
+The only way out of a recording you regretted was to send it and then delete it from both
+phones — and the `.m4a` stayed in the cache either way, where the data export writes it out.
+
+Now `onLongPressMoveUpdate` arms at −56px (one finger-width; further than a held thumb
+drifts), the banner flips to "Release to cancel" with a selection haptic, `onLongPressEnd`
+reads the flag, `onLongPressCancel` treats an arena steal as a cancel rather than leaving the
+microphone open with no finger on it, and a cancelled file is **deleted** — a failed delete
+reports `voice-cancel-delete`. `onLongPressStart` is null while there is text: with a message
+in the box that button is a SEND button, and holding it opened the microphone underneath.
+
+### C3 — captions
+
+`sendImage`/`sendVideo` take one, sealed by a shared `_captionColumns(caption, rowId)` under
+sendText's exact rules: plaintext omitted only when the fleet is cipher-only AND the seal
+actually succeeded, because a picture whose caption nobody — including its author — can read
+is strictly worse than one the server can. Both now mint the row id up front rather than
+leaving it to the server: **the seal is bound to the row id**, so there has to be one before
+the encrypt. That also hands the callers that used to omit it the 23505 dedupe on a retry.
+
+The composer's text at pick time IS the caption (`_takeCaption()`), and the bar clears itself
+and the stored draft when it hands one over — a sentence cannot be both the caption of this
+photo and the draft of the next message. One render site in `_Bubble` covers image, video and
+album; a document keeps drawing its file name, which is what its body has always been.
+
+**What build 73 does with a captioned photo — checked, not assumed.** Its chat screen
+(`3238b5f`, the commit that set `buildNumber = 73`) never reads a message body in the image
+or video arm at all: `awk "/case 'image':/,/case 'video':/" | grep -c body` answers **0**,
+against 8 body references elsewhere in the same file, so the matcher is not the reason for
+the zero. The caption is therefore simply invisible there — the photo renders exactly as it
+always did. The one place it does surface is `_copyableText`, so a long-press copy on that
+bubble yields the caption, which is harmless and arguably right.
+
+### C5 — a call had no arm for a lost network
+
+`onConnectionState` handled Connected, Failed and Closed. **`Disconnected` — which is what a
+wifi-to-mobile handover, a lift or a tunnel produces — was not handled at all**, so the call
+sat mute until ICE gave up on its own and reached Failed, and the teardown that followed said
+nothing. From the user's side that is indistinguishable from the partner hanging up.
+
+`_armRestart` / `_restartIce` are lifted from `ScreenShareSession`, which has run this exact
+shape in the field since §220. One number differs: a share can be abandoned, a call cannot,
+so the give-up clock is 20s rather than 12. 2s debounce, max 2 restarts, and **caller-only
+re-offering** — both sides re-offering is glare on a live connection and the tie-break only
+runs from idle, so `isCaller` is the asymmetry that already exists and is guaranteed opposite.
+The give-up clock is armed on BOTH sides, because it is what ends a call the restart cannot
+save.
+
+The restart offer had to be routed BEFORE the glare gate: that gate reads `connected` as busy
+and drops the offer, and `connected` is the only state a restart ever arrives in. A build-73
+peer does not know the `restart` key, drops the offer as busy, and the give-up clock ends the
+call at 20s with a sentence — bounded, explained, no worse than today.
+
+Also: `Failed` now leaves `_lastError ??=` (never overwriting the invite outcome or the relay
+error, which say more); `accept()`'s catch reports to the PERSON as well as the server, since
+answering a call and having the screen close with nothing said is what gets reported as "it
+just hung up on me"; and `_lastError` is cleared where the ATTEMPT BEGINS, not in `_teardown`
+— the call screen consumes it as it pops, so a call whose screen never mounted (minimised, or
+a ring that timed out in the background) left its sentence standing to surface over the next,
+unrelated call.
+
+### C7 — "Voice call · connected" was the whole readout
+
+For the length of the call. Nothing said how long you had been talking, and nothing said it
+afterwards either, so a call that had silently dropped minutes ago looked exactly like one
+still running. `_connectedAt` is set in the Connected arm, `connectedFor` exposes it, and
+`CallClock` ticks it once a second — asking the controller each tick rather than counting, so
+a screen rebuilt mid-call resumes at the real elapsed time instead of restarting at zero. A
+connected video call drops the centrepiece entirely, so it gets a pill. `_showStats` is a
+top-level notifier that nothing ever reset: long-pressed open on one call it stayed open over
+every call after it, and now the idle branch clears it.
+
+### C11 — a subscription that ran out of attempts stopped for good
+
+```
+if (_attempt >= _maxAttempts) {
+  Diag.record(DiagArea.app, 'rt_join_dead', ...);
+  return;              // <- and that was the end of it
+}
+```
+
+Diag is inert in shipped builds, so this was silence; and the channel then stayed silent
+until the socket happened to cycle, which on a phone left alone can be hours. `RealtimeHealth`
++ `RealtimeStatus` (a registry carrying the WORST of every live subscription — a receipt
+channel dead while the message channel is fine is still a broken chat), the parked 60s
+jittered retry instead of the `return`, and `forget()` on dispose so a closed screen leaves no
+permanent warning. `RealtimeStatus.reset()` joins `endCouple`, because the keys are
+couple-scoped.
+
+The chat's four channels do not go through `ManagedSubscription`, and **nothing ever checked
+whether their joins landed** — which matters more there than anywhere, because a refused join
+is not retried by the client library at all (the rate limiter answers with a plain `error`
+reply, which schedules nothing) and `subscribe()` throws on a second call for the same
+channel, so recovery has to be a fresh channel. `_armJoinCheck` verifies at 12s (longer than
+the client's own 10s join timeout), retries with equal jitter, then parks at 60s.
+
+The join is read off the status callbacks the screen ALREADY passes to `subscribe()` — which
+is public API and better evidence than the channel's internal `isJoined`: `subscribed` is the
+SERVER saying it joined. `ChatRepository.subscribe` gained an `onJoined` for the messages
+channel, whose status previously reached only Diag and ErrorReporter, so nothing could answer
+"did the message channel actually land?". **This also kept the analyzer-suppression gate
+green** — the first cut used `// ignore: invalid_use_of_internal_member` twice and pushed the
+repo's bound from 4 to 6; the gate is a wall, so the mechanism changed rather than the bound.
+
+A strip above the composer and a Settings row read the registry, and only on `dead` —
+`retrying` is what a tunnel produces several times a day and a banner for it is noise.
+
+### Four laws written, and proven red at HEAD first
+
+`chat_send_durability_test.dart` (15), `voice_cancel_test.dart` (5), `call_recovery_test.dart`
+(10), `realtime_health_test.dart` (15). A worktree at `ce6fd04` with the four files copied in:
+three died at LOAD on symbols HEAD does not have, so the SOURCE assertions were lifted into a
+throwaway probe that runs against HEAD's files — **19 of its 20 assertions failed**. The one
+that passed (`_lastError = null;` exists somewhere in call_controller) is the probe's loose
+paraphrase; the real law scopes it to `startCall`'s body, where HEAD has none.
+
+### Five existing laws amended, with the reason written in
+
+The ladder invalidated the MECHANICS of four assertions whose INTENT it strengthens:
+
+- `chat_send_queue_test.dart` — the bench threw a `StateError`, which the queue now reads as
+  transient and retries. Every test in that file is about what happens once the queue has
+  GIVEN UP, so the bench now throws 42501. The transient half is pinned in the new file.
+- `chat_batch_send_test.dart` — pinned `status == failed` on a `SocketException`. A dead
+  route is not a reason to stop; now `sending` with `nextAttempt` booked. Its `retry()` became
+  `kick()`, the verb that applies to a parked send.
+- `chat_signed_out_send_test.dart` — pinned `failed` on "not signed in", which is the most
+  recoverable failure there is: the session comes back on a token refresh. Now asserts KEPT
+  and still trying.
+- `chat_selection_test.dart` — bundled `sending` and `failed` as unselectable. Split, with the
+  failed half inverted and the reason written above it.
+- Both setUps switched from a discard loop to `clear()`: discard only removes a send the queue
+  gave up on, and a parked send would otherwise survive into the next test carrying a live
+  timer. That was the actual cause of "a batch of fifty is accepted whole" failing at 51.
+
+### Verified
+
+    flutter analyze --no-pub lib/       0 errors, 0 warnings, 160 infos
+      matcher probed the SAME turn:     '^ *(error|warning) - ' matched 2/2 synthetic
+                                        (error + warning), rejected the info line (0)
+                                        — `^ +` cannot match a warning: the analyzer
+                                        right-aligns severity to width 7, so `warning`
+                                        carries ZERO leading spaces
+    flutter test --no-pub (full)        03:07 +1763 ~3: All tests passed!
+                                        FULL_TEST_EXIT=0   (was 1717 before this work)
+
+### Still open — and the first one is the headline
+
+- **Nothing has run on a handset.** Build 78 is cut but not installed (§299 addendum: the
+  phone was unplugged). Every item here is client code and NONE of it has been exercised on a
+  device. The two that can only be proven there: the ICE restart needs a real network
+  handover mid-call, and the outbox needs a real process death (`adb shell am force-stop`)
+  between the send and the landing.
+- The round-2 adversarial read of §297's seven fixes still never reported. A read of THIS
+  diff is running as this is written; its findings are not in this section.
+- `care_nudges` still carries the full-column UPDATE grant, the hole 20260906140000 closed on
+  `reach_events`.
+- Phase 3 onward: RC-B (history), RC-D/RC-F (time and availability), RC-G/RC-H (consent and
+  the privacy costs), RC-E/RC-J (future tense and rituals), RC-I (fit).
+
+### Next step
+
+Read the adversarial findings and act on them. Then, when the handset is plugged in: install
+build 78 or cut 79, and run the two device checks above — a call across a network handover,
+and a force-stop between a send and its landing.
+
+### §300 addendum — the adversarial round on §300, and the eight defects in it that would have reached a phone
+
+43 agents (5 attackers, 38 refutation passes, 5.4M tokens). **22 findings survived
+refutation, 16 were refuted.** Seven were high. Every one of them was in code that had
+passed the full suite, the analyzer and the four new laws — which is the whole reason this
+round exists, for the third section running.
+
+Written before the list, because it is the lesson: **three of the seven high findings were
+created by this session's own fixes.** Not pre-existing debt — new.
+
+#### The one that would have been worst on a real phone
+
+**A restart offer made a build-73 handset ring with a phantom incoming call.**
+`_restartIce` broadcast `kind: 'offer'` with `restart: true`. Build 73 has never heard of
+that key: its `_onSignal` skips the foreign-id gate for offers and, from idle, falls
+straight into `_ring` — full-screen incoming call, ringtone, Accept/Decline, for a call that
+was already up. So a couple whose call went through a tunnel would have had the partner's
+phone ring at them mid-conversation.
+
+Fixed by giving the restart its own kind. Checked, not assumed: build 73's switch
+(`3238b5f`) has **nine cases and no `default:` arm**, so `kind: 'reoffer'` is silently
+ignored there. That is the right degradation — it does not recover, and the give-up clock
+ends the call at 20s with a sentence.
+
+#### The caption was invisible on the phones that matter, and the draft was already gone
+
+§300 above recorded, on my own reading, that build 73 would render a captioned photo as a
+photo with the caption merely absent. True, and I filed it as acceptable. It is not
+acceptable, because I had missed the other half: **`_takeCaption()` DELETES the composer
+text and the stored draft** when it hands the caption over. So on the two handsets in the
+field the sentence decrypted, was discarded by every surface build 73 has, and had already
+been erased on the sender's phone. Nobody would ever have been told.
+
+The mechanism changed rather than the copy: **a caption is now an ordinary text message**,
+enqueued right behind the media. Both builds render one. `_captionColumns`, `PendingSend.caption`,
+the `_caption` getter and its render site are all gone — and with them three more findings
+that only existed because the caption rode the media row (the album bubble reads
+`row.newest`, which is `items.last`, so an album caption on `items[0]` could never render;
+and a restored media send was pumped before the outbox re-attached its caption, sending the
+photo captionless and then deleting the only copy of the sentence).
+
+#### The rest, by what they cost
+
+- **The ladder re-uploaded the whole file on every rung, forever, with no way out.** Lifted
+  from `ChatReactionOutbox`, whose payload is a few bytes. On a 40 MB video: up again at 1s,
+  3s, 8s, 20s, 45s, 90s, then every three minutes for the life of the process, each attempt
+  minting a fresh object name and orphaning the last. And while it read `sending` there was
+  no gesture anywhere that could stop it — no Retry chip, no selection, no discard. Capped at
+  six rungs, which is also what gives the person the escape back.
+  **Not fixed, recorded:** the upload and the insert are still one unit, so a rung that fails
+  after a successful upload re-pushes the bytes. Splitting them needs `PendingSend` to carry
+  the uploaded path and the three `send*` methods to accept it.
+- **The outbox restore was skipped on exactly the launch that needed it.** Both halves were
+  one method with an early `return` on a null prefs blob — and a text-only queue writes no
+  prefs blob at all. The whole feature, silently off. Split into `_restoreMedia` /
+  `_restoreText`.
+- **One failed keystore read lost the bodies permanently.** `restore()` returned `const []`
+  on any throw, indistinguishable from an empty outbox, and the caller latches. One transient
+  fault meant no restore for the life of the process — and the next sign-out calls
+  `clearAll()`. Now returns null, unlatches, reports `chat-outbox-read`, and decodes row by
+  row so one bad entry does not discard the others.
+- **A permanently failed text came back as `sending`.** The media half persists its `failed`
+  flag; the body half did not, so a send the ladder had given up on resurrected on every
+  launch and ground against the same refusal forever. `'f': true` on disk.
+- **Restored bodies came back shuffled.** The outbox is keyed by uuid and `readAll()` returns
+  hash order. Three messages written offline were reinserted in that order — permanently,
+  since the server stamps `created_at` at insert. A monotonic `'n'` is written and sorted on.
+- **The send button stopped sending.** Nulling only `onLongPressStart` when text is present
+  left the `LongPressGestureRecognizer` in the arena — it is built if ANY of its callbacks is
+  non-null — so it won at 500ms and REJECTED the tap: a half-second press on Send did
+  nothing at all. All four callbacks are gated now, and gated on `_muteHold`
+  (`_hasText && !_recording`) rather than `_hasText`, because RawGestureDetector re-uses the
+  LIVE recognizer across a rebuild: text arriving while the finger is down (a slow draft load
+  on a cold start) would otherwise null the release handler and leave the microphone open.
+- **`onLongPressCancel` destroyed recordings nobody discarded.** Once a long press is accepted
+  the arena cannot take it back; the only thing that reaches that handler is a synthesized
+  `PointerCancelEvent`, and the app's own Navigator sends one on **every route push and pop**.
+  It now stops and sends, rather than deleting.
+- **The ICE restart budget was per call, not per incident.** Two recovered handovers spent it,
+  so the third — the one that needed it — got none. Given back after the link holds 30s;
+  an unconditional reset would let a flapping link re-offer forever.
+- **The give-up clock killed calls it was meant to explain.** Armed on both peers, it ended
+  the CALLEE's call at 20s inside the window where libwebrtc's own ICE was still probing and
+  would have recovered — and the callee cannot re-offer anyway. Now below the `!isCaller`
+  return; the callee keeps the Failed arm, which leaves a sentence of its own.
+- **One `chat-send` report per run, ever.** ErrorReporter dedupes on kind + runtimeType +
+  first frame, and the new typed failures funnel through one call site — so the first send
+  failure silenced every other for the process. `detail` (a bounded machine code, already
+  capped at 64 chars) joined the key.
+- **`dead` un-latched on every park cycle**, so the banner hid for twelve seconds out of every
+  seventy-five — and that gap is when a person looks up. A key that has reported dead now
+  stays dead until a join actually lands.
+- **The chat's strip spoke for the whole app.** It read `RealtimeStatus.worst`, so a refused
+  channel on a screen the user was not on announced that THIS conversation had stopped
+  updating. `_healthKey` was already computed and published, and never read. `RealtimeStatus.of(key)`
+  now backs the strip; Settings keeps `worst`, which is the app-wide question it asks.
+- **The receipt channel was not counted.** `_expectedTopics` was a const 2 and its comment
+  claimed receipts were included. Nothing counted them — so the one channel this file calls
+  "the only live path by which the sender's tick ever advances" could be refused with the chat
+  reporting itself healthy. `_requiredTopics` is now 3 when there is a partner id to filter on.
+- **The stats overlay outlived every call ended from the PiP.** The reset lived in the call
+  screen, which is not mounted when a call ends while minimised — and the PiP has no hang-up,
+  so that is every call the partner ends. Reset from the controller's teardown.
+
+#### Refuted, and worth recording as such
+
+16 findings did not survive. Notable: that a second account could read the first's unsent
+bodies (every session-end path already runs the wipe); that `_restore`'s await could race a
+`kick` (SharedPreferences resolves synchronously after the first call); and that the parked
+retry could stack timers (`_schedule` cancels).
+
+#### Still open from this round, not fixed
+
+- The media ladder re-uploads the bytes on a rung whose upload had already succeeded (above).
+- **A channel that dies AFTER a successful join is never demoted.** `_joinedTopics` is
+  additive and both status callbacks file a post-join `channelError` to ErrorReporter and drop
+  it, so `RealtimeStatus` still reads `joined` and no ladder is armed. Rated low by the
+  verifier; the fix is to make the set subtractive on `channelError`/`closed`/`timedOut` and
+  re-arm the check.
+
+#### Verified after the fixes
+
+    flutter analyze --no-pub lib/    0 errors, 0 warnings, 160 infos
+      matcher probed the same turn:  '^ *(error|warning) - ' -> 2 of 2 synthetic, 0 on info
+      160 is the pre-existing count; the diff introduces no new info either
+    flutter test --no-pub (full)     03:01 +1771 ~3: All tests passed!
+                                     FULL_TEST_EXIT=0
+
+Six laws amended a second time, each with the superseded belief written above it — the
+give-up clock's position, the restart's wire shape, the pointer-cancel's meaning, the strip's
+scope, the caption's home, and the outbox's failure mode.
+
+**Nothing here has run on a handset.** Build 78 is cut and uninstalled. The two checks that
+can only be made there are unchanged: a call across a real network handover, and a
+force-stop between a send and its landing.
