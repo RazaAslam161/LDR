@@ -27133,3 +27133,45 @@ scope, the caption's home, and the outbox's failure mode.
 **Nothing here has run on a handset.** Build 78 is cut and uninstalled. The two checks that
 can only be made there are unchanged: a call across a real network handover, and a
 force-stop between a send and its landing.
+
+### §300 addendum — 763d474 pushed; the gate was run on the STAGED tree, not the working one
+
+    763d474  24 files, +2745 / -95      ce6fd04..763d474  fix-sprint -> fix-sprint
+    local  763d474a7abf47d587945fde5222381ce304ee3b
+    remote 763d474a7abf47d587945fde5222381ce304ee3b   MATCH
+
+**The gate ran on what was actually committed.** `git checkout-index -a -f --prefix=` into a
+scratch directory materialises the INDEX — so the beauty session's files sat at their HEAD
+state there, exactly as they do in the commit. That is the difference between "the suite
+passed on some tree" and "the suite passed on this commit":
+
+    flutter analyze --no-pub lib/   0 errors, 0 warnings, 164 infos
+      matcher probed the same turn: '^ *(error|warning) - ' -> 2 of 2 synthetic, 0 on info
+    flutter test --no-pub           03:08 +1766 ~3: All tests passed!   exit 0
+
+1766, not the working tree's 1771: the five extra are the beauty session's own new tests,
+which are correctly absent from this commit.
+
+**A trap worth keeping.** The first staged-tree run came back RED — two `repo_hygiene_test`
+failures. Neither was about the code: `git checkout-index` writes files, not a repository, so
+`git ls-files` answered nothing and the tests said so out loud — *"git ls-files returned almost
+nothing; these checks are blind"*. A gate that cannot see is not a gate that passed, and it is
+not a gate that failed either. Fixed by `git init` + `add -A` in the scratch directory (1424
+files visible), after which both went green. Anyone re-running a staged-tree gate here needs
+that step, or those two tests are noise.
+
+**Left uncommitted on purpose, for the concurrent beauty session:** the four Kotlin/resource
+files, `beauty_settings.dart`, the two camera tests, and — deliberately — the `76 -> 78`
+version pair in `release_gate.dart` + `pubspec.yaml`. Committing 78 without the beauty code it
+names would put two different builds behind one number, which is the one thing CLAUDE.md says
+never to do to an update channel.
+
+`docs/guides/BRAIN.md` is one contiguous 581-line append that no non-interactive git can split,
+so 763d474 also carries **§298 and §299**, which are the beauty session's. Their code is not in
+it. Those two sections therefore describe a build 78 whose code and version number are still
+sitting in the working tree — read them with that in mind until that session commits.
+
+Unchanged and still the headline: **nothing in 763d474 has run on a handset.**
+
+Next step: unchanged from §300 — build, then a call across a real network handover and an
+`adb shell am force-stop` between a send and its landing.
