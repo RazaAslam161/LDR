@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miles/features/chat/chat_repository.dart';
@@ -131,5 +132,46 @@ void main() {
   test('a video is queued as a video', () {
     ChatSendQueue.instance.enqueueVideo('couple-1', photo);
     expect(ChatSendQueue.instance.pending.single.kind, 'video');
+  });
+
+  // The ceiling is the free plan's global storage limit, which takes
+  // precedence over couple_intimate's own 100 MiB and is the reason build 80
+  // logged `video n=1 gave-up storage.413`. A 413 is permanent, so a file past
+  // it becomes a bubble that can never be retried into working — it has to be
+  // refused before it is a bubble.
+  group('the upload ceiling', () {
+    test('a file under it is sendable', () {
+      expect(ChatSendQueue.tooBig(photo), isFalse);
+    });
+
+    test('a file over it is not', () {
+      final big = File('${tmp.path}/big.mp4')
+        ..writeAsBytesSync(
+            Uint8List(ChatSendQueue.maxUploadBytes + 1),);
+      expect(ChatSendQueue.tooBig(big), isTrue);
+    });
+
+    test('a file exactly at it is still sendable — the bound is inclusive', () {
+      final edge = File('${tmp.path}/edge.mp4')
+        ..writeAsBytesSync(Uint8List(ChatSendQueue.maxUploadBytes));
+      expect(ChatSendQueue.tooBig(edge), isFalse);
+    });
+
+    // The upload is the authority on what Storage accepts. Refusing on a
+    // failed stat would drop sends this ceiling was never about.
+    test('a file that cannot be measured is allowed through', () {
+      expect(ChatSendQueue.tooBig(File('${tmp.path}/not-there.mp4')), isFalse);
+    });
+
+    // The in-app camera and the system camera are both capped by DURATION,
+    // and this is the size they are capped against: 1080p at the AOSP
+    // QUALITY_1080P profile is ~17 Mbps, so 20 seconds is ~42 MB. If either
+    // cap is raised without raising this, a recording made inside the app
+    // becomes unsendable again — which is the bug this pair exists to close.
+    test('20s of 1080p at 17 Mbps fits under the ceiling', () {
+      const bytesPerSecond = 17000000 ~/ 8;
+      expect(20 * bytesPerSecond, lessThan(ChatSendQueue.maxUploadBytes));
+      expect(60 * bytesPerSecond, greaterThan(ChatSendQueue.maxUploadBytes));
+    });
   });
 }

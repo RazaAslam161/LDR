@@ -27559,3 +27559,152 @@ A note for whoever automates this next: `adb devices` reported zero for a full 3
 loop and then listed the OnePlus 8 immediately afterwards — the daemon had been killed and the
 device enumerated a beat after the loop gave up. `adb devices -l` is the check worth trusting,
 and "no devices" is worth re-reading once before it is reported as unplugged.
+
+## §304 — 2026-09-08 — three field defects on build 80: one fixed, one instrumented, one waiting on a decision
+
+Reported by the owner against build 80: (1) long voice notes will not send, (2) voice-note
+playback ignores the volume rocker, (3) long videos will not send — from the gallery and from
+the in-app camera — and chat media takes a long time and then fails.
+
+**§304.1 — the rocker. Root cause found and fixed.**
+
+`JustAudioEngine._ensureSession()` (`lib/core/services/sound/just_audio_engine.dart:50`)
+configures the app's ONE `AudioSession` as
+`usage: AndroidAudioUsage.assistanceSonification` — deliberate, so a 200ms cue ducks the
+user's music instead of seizing permanent focus. just_audio then pushes that session's
+`androidAudioAttributes` onto **every** `AudioPlayer` it builds
+(`just_audio-0.10.6/lib/just_audio.dart:359-368` subscribes each player to
+`configurationStream`; `:1683-1692` applies them again on activation). AOSP's
+`AudioAttributes.toVolumeStreamType` maps `USAGE_ASSISTANCE_SONIFICATION` to
+`STREAM_SYSTEM`, which the media volume rocker does not move. So the voice-note player
+inherited the cue engine's stream and played deaf to the rocker.
+
+Fixed in `lib/features/chat/widgets/voice_note_bubble.dart`: the player is built with
+`androidApplyAudioAttributes: false` (so the cue session cannot overwrite it) and sets its
+own `AndroidAudioAttributes(contentType: speech, usage: media)` in the constructor.
+`_IdleAudioPlayer.setAndroidAudioAttributes` (`just_audio.dart:4175`) just stores the
+request, so the call is safe on a player with no source loaded and under `flutter test`.
+
+`found, not fixed` — `lib/features/capsule/capsule_detail_screen.dart:52` and
+`lib/features/disguise/covers/recorder_cover.dart:43` build bare `AudioPlayer()`s for the
+same kind of recorded human audio and carry the identical defect. Same one-line fix; left
+out of this diff because the owner reported voice notes.
+
+**§304.2 — long videos. Root cause found, fix is an owner decision.**
+
+Proven from production telemetry, `client_errors` on build 80:
+
+    2026-09-07 17:37:49  chat-send  DeliveryFailure  "video n=1 gave-up storage.413"
+    2026-09-08 05:10:27  chat-send  DeliveryFailure  "video n=6 gave-up "
+    2026-09-08 03:57:40  chat-send  DeliveryFailure  "video n=1 retrying"
+
+Miles uploads the camera/gallery **original**, untranscoded. `rapid_camera_screen.dart:196`
+records at `ResolutionPreset.veryHigh` (1080p, ~17 Mbps ≈ 2.1 MB/s) and caps itself at 60s
+(`:111`) — about 128 MB. `photo_picker_service.dart:200` allows `maxDuration: 5 minutes`
+— about 640 MB. The effective Storage ceiling is **50 MB**: the org is on the **free** plan
+(`get_organization` → `"plan":"free"`), and Supabase docs (`storage/uploads/file-limits`)
+state the free global file size limit cannot exceed 50 MB and that the global limit takes
+precedence over a bucket's. `couple_intimate.file_size_limit` is set to 100 MiB and is
+therefore unreachable. A 1080p clip crosses 50 MB at roughly **24 seconds**.
+
+413 is classified permanent by `ChatSendQueue.permanent` — correctly — so the send dies at
+the first attempt. The `n=6 gave-up` row with no status is the second mode: under the size
+limit but large, the single-shot multipart upload must finish inside
+`TimeoutHttpClient.uploadTimeout` (5 min, `lib/core/net/timeout_http_client.dart:18`) and
+each retry restarts at byte zero.
+
+Also load-bearing for "takes long times": `storage_client-2.8.0/lib/src/fetch.dart:108` does
+`file.readAsBytesSync()` — the whole file, synchronously, on the UI isolate, before the
+multipart request is built.
+
+No fix applied. Every messenger transcodes before upload and this app does not; the fix is
+either a native compression dependency, a paid plan, or a hard client-side cap with an
+honest message. That is a cost decision, so it went to the owner rather than into the diff.
+
+**§304.3 — long voice notes. Not reproduced; the reason it could not be is now fixed.**
+
+`client_errors` holds **zero** voice rows, ever, while every other send kind is in there.
+Cause: `chat_input_bar.dart::_sendVoice` caught with a bare `catch (_)`, showed a snackbar
+and reported nothing. Voice is also the only send in the app that does not go through
+`ChatSendQueue` — no retry ladder, no persistence, no network-resume kick.
+
+Measured, so the obvious size theory can be ruled out: joining `messages` to
+`storage.objects` gives ~99 kbps actual (300279 bytes for 24311 ms), so `couple_media`'s
+25 MiB limit is about **35 minutes** of audio. The longest voice note that has ever landed
+is 24 seconds.
+
+`chat_input_bar.dart::_sendVoice` now reports the failure with `kind: 'voice-send'`.
+`ErrorReporter._detail` turns the cause into a machine code, so the next failed note names
+itself: `storage.413`, `errno.<n>`, or a bare `ClientException` for the 5-minute ceiling.
+
+**Verified:** `flutter analyze` — 0 errors, 0 warnings, 225 pre-existing infos (matcher
+`^ *(error|warning) - ` probed in the same run against synthetic `  error - `,
+`warning - ` and `   info - ` lines: 2 then 0). `flutter test` — 1807 passed, 3 skipped,
+0 failed. **Not verified:** the rocker itself. No handset was attached this session
+(`adb devices` listed none), so §304.1 is unproven on hardware — that check is the headline,
+not a footnote. **Still open:** §304.2 in full, and §304.3's actual cause.
+**Next step:** owner picks the video approach; then install a build and press volume-down
+during a voice note, and record one long voice note and read `client_errors` for
+`voice-send`.
+
+### §304 addendum — 2026-09-08 — owner picked, both fixes landed
+
+Owner's two calls, taken in the same session:
+
+- **Video: cap and say so.** No transcoder, no plan change.
+- **Voice: "the note is lost before sending"** — no snackbar, no failed bubble, it vanishes.
+  That answer named the root cause, and the code proves it.
+
+**Voice — root cause.** `ChatInputBar` is the only holder of an in-progress recording, and
+its `dispose()` called `_recorder.dispose()` and stopped. Every teardown mid-hold destroyed
+the note in silence. Teardown mid-hold is routine: `main.dart:433` raises the cover on
+`paused`, which swaps the MaterialApp out from under the bar, and the screen timing out
+produces exactly that. Android pokes the screen-off timer on input EVENTS; a thumb held
+still on the mic button emits none after the initial down, so a long note times the screen
+out from under itself. Short notes finish first. **The production data says the same thing:
+the longest voice note that has ever landed is 24311 ms, against a 30-second default
+timeout.**
+
+Two halves, both in `chat_input_bar.dart`:
+- `_holdScreenAwake` — `WakelockPlus.toggle` for the length of a recording (already a direct
+  dependency, `call_controller.dart:2952`; no new package). This is the prevention.
+- `_rescueRecording` — a static that finishes the recorder and sends via `ChatRepository`
+  directly, touching nothing on the disposed State. `widget.onSendVoice` could not be used:
+  it closes over ChatScreen's `_takeReplyId`, which calls `setState`. A rescued note loses
+  its reply target and keeps the note.
+
+**Two races found by the adversarial pass over those fixes, both closed in the same diff:**
+- `_stopRecording` left `_recording` true across `await _recorder.stop()`. A release
+  followed immediately by a teardown had BOTH paths finish the same file and send it under
+  two ids — the note arriving twice on both phones. `_recording` is now dropped
+  synchronously before the first await.
+- `_sendVoice`'s first `setState` was unguarded while the two below it were. On that same
+  window it throws on a disposed State and takes the send with it. Now `if (mounted)`.
+
+**Video — the cap.** `ChatSendQueue.maxUploadBytes` = 45 MB with `tooBig(File)` beside it;
+all three enqueue call sites filter through it and say so
+(`chat_screen._tooBigSnack`, `rapid_camera_screen`). Both cameras are capped by DURATION so
+a recording made inside the app can never reach it: `rapid_camera_screen._maxRecord`
+60s → **20s**, `PhotoPickerService.pickVideo maxDuration` 5min → **20s**. 1080p at the AOSP
+QUALITY_1080P profile is ~17 Mbps ≈ 2.1 MB/s, so 20s ≈ 42 MB and 60s ≈ 128 MB — the old cap
+could only ever produce a 413. A gallery pick of an existing file cannot be trimmed by
+`image_picker`, so those are caught by size at the composer.
+
+`found, not fixed` — `storage_client-2.8.0/lib/src/fetch.dart:108` reads the whole file with
+`readAsBytesSync()` on the UI isolate before building the multipart request. Under the new
+45 MB cap that is a survivable freeze rather than an OOM, so it was left alone; it is the
+reason a large send still janks.
+
+**Verified:** `flutter analyze` — 0 errors, 0 warnings, 225 infos, unchanged from the
+baseline before this session's edits (matcher `^ *(error|warning) - ` probed in the same run
+against synthetic `  error - `, `warning - ` and `   info - ` lines: 2 then 0).
+`flutter test` — **1812 passed**, 3 skipped, 0 failed (1807 before; five new ceiling tests in
+`test/unit/chat/chat_send_queue_test.dart`, one of which asserts 20s of 1080p fits and 60s
+does not, so raising either camera cap without raising the ceiling reds the suite).
+
+**Not verified:** every one of these on hardware. No handset was attached (`adb devices`
+empty), so the rocker, the screen-timeout rescue and the 20s caps are all unproven in the
+field. **Next step:** build, install, and in one pass — press volume-down during a voice
+note; hold a voice note past the screen timeout and check it arrives ONCE; record 20s on
+both cameras and send; pick a >45 MB video from the gallery and read the snackbar. Then
+`select * from client_errors where kind in ('voice-send','voice-rescue')`.

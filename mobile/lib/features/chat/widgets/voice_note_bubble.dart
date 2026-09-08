@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
@@ -69,9 +70,28 @@ class VoiceNotePlayer extends ChangeNotifier {
       if (_disposed) return;
       notifyListeners();
     });
+    // A voice note is CONTENT, and content plays on the media stream — the one
+    // the volume rocker moves while it is playing.
+    //
+    // It did not. This app configures exactly ONE AudioSession, and
+    // JustAudioEngine sets it to sonification so a 200ms cue ducks the user's
+    // music instead of killing it (just_audio_engine.dart:50). just_audio then
+    // pushes THAT session's attributes onto every player it builds
+    // (just_audio.dart:359 and :1686), and USAGE_ASSISTANCE_SONIFICATION maps
+    // to STREAM_SYSTEM in AudioAttributes.toVolumeStreamType — a stream the
+    // media rocker does not touch. So a note played at whatever the system
+    // stream was set to and ignored the listener pressing volume down.
+    //
+    // The pair is the fix: attributes of our own, and
+    // androidApplyAudioAttributes:false so the cue session cannot overwrite
+    // them the next time it is configured.
+    unawaited(_player.setAndroidAudioAttributes(const AndroidAudioAttributes(
+      contentType: AndroidAudioContentType.speech,
+      usage: AndroidAudioUsage.media,
+    ),),);
   }
 
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player = AudioPlayer(androidApplyAudioAttributes: false);
   StreamSubscription<PlayerState>? _sub;
   StreamSubscription<Duration?>? _durationSub;
   bool _disposed = false;

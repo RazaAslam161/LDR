@@ -394,9 +394,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void _sendMediaBatch(
       String coupleId, List<PickedMedia> items, String? caption,) {
     if (items.isEmpty) return;
-    ChatSendQueue.instance.enqueueAll(coupleId, items,
+    // Anything Storage will refuse is refused HERE, where there is a sentence
+    // to put it in. Enqueued, it becomes a bubble that fails on its first
+    // attempt with a 413 and can never be retried into working — see
+    // ChatSendQueue.maxUploadBytes.
+    final sendable = [
+      for (final item in items)
+        if (!ChatSendQueue.tooBig(item.file)) item,
+    ];
+    final refused = items.length - sendable.length;
+    if (refused > 0) _tooBigSnack(refused);
+    if (sendable.isEmpty) return;
+    ChatSendQueue.instance.enqueueAll(coupleId, sendable,
         replyToId: _takeReplyId(), caption: caption,);
     _adoptPending();
+  }
+
+  /// Say which items were left behind and why, in the one unit a person picks
+  /// media in. The megabyte number is the app's, not the server's, so it stays
+  /// true if the plan changes and this constant does not.
+  void _tooBigSnack(int count) {
+    if (!mounted) return;
+    const mb = ChatSendQueue.maxUploadBytes ~/ (1024 * 1024);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(count == 1
+            ? 'That one is too big to send — the limit is ${mb}MB. '
+                'Trim it and try again.'
+            : '$count of those are too big to send — the limit is ${mb}MB '
+                'each.',),
+      ),
+    );
   }
 
   /// A video recorded from the composer, through the queue like every other
@@ -406,6 +434,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// bar's spinner: no optimistic bubble, no retry, and on a dropped connection
   /// the recording was gone with one snackbar.
   void _sendVideoFast(String coupleId, File f, String? caption) {
+    if (ChatSendQueue.tooBig(f)) {
+      _tooBigSnack(1);
+      return;
+    }
     ChatSendQueue.instance
         .enqueueVideo(coupleId, f, replyToId: _takeReplyId(), caption: caption);
     _adoptPending();

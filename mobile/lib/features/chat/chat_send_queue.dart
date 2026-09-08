@@ -178,6 +178,39 @@ class ChatSendQueue extends ChangeNotifier {
   /// Text sends still in flight or failed, oldest first.
   List<PendingText> get pendingText => List.unmodifiable(_text);
 
+  /// The largest file Storage will actually take, with headroom.
+  ///
+  /// This org is on Supabase's FREE plan (`get_organization` → `"plan":"free"`),
+  /// where the GLOBAL file size limit cannot exceed 50 MB and takes precedence
+  /// over any bucket's own (storage/uploads/file-limits). `couple_intimate` is
+  /// set to 100 MiB and that number is unreachable — the effective ceiling is
+  /// the global one.
+  ///
+  /// Past it Storage answers 413, and [permanent] refuses to retry a 413 —
+  /// correctly, because no number of attempts makes the file smaller. So an
+  /// oversized video became a bubble that failed once, could never be made to
+  /// send, and said nothing about why. Production, build 80:
+  /// `chat-send DeliveryFailure "video n=1 gave-up storage.413"`.
+  ///
+  /// Nothing here shrinks a file — this app has no transcoder — so the honest
+  /// move is to refuse it before it is a bubble and say so. The camera's own
+  /// caps (rapid_camera_screen `_maxRecord`, PhotoPickerService `maxDuration`)
+  /// are set so a recording made INSIDE the app can never reach this.
+  static const int maxUploadBytes = 45 * 1024 * 1024;
+
+  /// Whether [file] is past [maxUploadBytes] and cannot be sent.
+  ///
+  /// A file that cannot be measured is allowed through: the upload is the
+  /// authority on what Storage accepts, and refusing on a failed stat would
+  /// drop sends this ceiling was never about.
+  static bool tooBig(File file) {
+    try {
+      return file.lengthSync() > maxUploadBytes;
+    } on FileSystemException {
+      return false;
+    }
+  }
+
   /// Accept a photo and start uploading. Returns immediately — the caller is
   /// expected to dismiss its screen on the next line.
   String enqueueImage(String coupleId, File file,

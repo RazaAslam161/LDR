@@ -195,9 +195,18 @@ class PhotoPickerService {
     _useSystemGallery();
     MilesApp.systemOverlayActive = true;
     try {
+      // Five minutes was the old value and it could only end one way: at 1080p
+      // that is roughly 640 MB, and Supabase refuses anything past 45 MB with a
+      // 413 the send queue will not retry (ChatSendQueue.maxUploadBytes). The
+      // system camera is capped at the same 20 seconds as the in-app one so a
+      // recording made through EITHER door is sendable by construction.
+      //
+      // maxDuration only binds `source: camera` — image_picker cannot trim a
+      // file already on the phone — so a gallery pick is still checked by size
+      // at the composer.
       final x = await _picker.pickVideo(
         source: source,
-        maxDuration: const Duration(minutes: 5),
+        maxDuration: const Duration(seconds: 20),
       );
       return x == null ? null : File(x.path);
     } finally {

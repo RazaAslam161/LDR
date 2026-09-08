@@ -108,7 +108,18 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
   Duration _recordElapsed = Duration.zero;
   bool _recording = false; // guards start/stop re-entrancy
   bool _micGranted = false; // gates enableAudio so a denied mic can't fail init
-  static const _maxRecord = Duration(seconds: 60);
+  /// Sized against the UPLOAD ceiling, not against what feels like a long clip.
+  ///
+  /// This screen records at [ResolutionPreset.veryHigh] — 1080p, and the AOSP
+  /// QUALITY_1080P profile is ~17 Mbps, so about 2.1 MB per second. Against
+  /// [ChatSendQueue.maxUploadBytes] (45 MB) that is roughly 21 seconds, and the
+  /// old 60 could only ever produce a file Storage refuses with a 413. Every
+  /// clip this camera made past ~24s was unsendable, which is what the field
+  /// reported and what build 80's `video n=1 gave-up storage.413` recorded.
+  ///
+  /// A clip refused after it is recorded is worse than one that was never
+  /// allowed to run long, so the cap moved rather than the message.
+  static const _maxRecord = Duration(seconds: 20);
 
   // The retouch look this screen opened with. Off by default, so for anyone who
   // has not opted in the engine is never armed and the camera is byte-identical
@@ -611,6 +622,22 @@ class _RapidCameraScreenState extends State<RapidCameraScreen>
     // lost the photo outright. The queue owns it from here, so it survives this
     // screen closing — and the chat shows the bubble immediately either way.
     if (_capturedIsVideo) {
+      // _maxRecord is set so this cannot fire for anything recorded here. It
+      // stays because the cap is a duration and the ceiling is a size: a future
+      // resolution change, or an OEM that encodes richer than the AOSP 1080p
+      // profile, moves one without moving the other. Storage answers 413 past
+      // the ceiling and the queue will not retry a 413, so the alternative is a
+      // bubble that fails silently and forever.
+      if (ChatSendQueue.tooBig(file)) {
+        const mb = ChatSendQueue.maxUploadBytes ~/ (1024 * 1024);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('That clip is too big to send — the limit is '
+                '${mb}MB. Record a shorter one.',),
+          ),
+        );
+        return;
+      }
       // Video → private couple_intimate bucket + kind:'video'. The partner's
       // chat renders it from the postgres echo (no image fast-path broadcast).
       ChatSendQueue.instance.enqueueVideo(widget.coupleId, file);

@@ -16,6 +16,7 @@ import 'package:miles/features/chat/voice_peaks.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 /// Chat input bar with three actions: text, image attach, hold-to-record voice.
 class ChatInputBar extends StatefulWidget {
@@ -234,8 +235,85 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // subscription outlives this State and would pour the next recording's
     // samples into a buffer belonging to a bar that no longer exists.
     unawaited(_cancelAmplitude());
-    _recorder.dispose();
+    unawaited(_holdScreenAwake(false));
+    // THIS is where long voice notes were going.
+    //
+    // A recording in progress exists in exactly one place — a temp file this
+    // State is the only holder of — and this method used to call
+    // `_recorder.dispose()` and stop there. Every teardown mid-hold therefore
+    // destroyed the note, with no snackbar, no failed bubble and nothing in
+    // client_errors: the note the user was still speaking simply stopped
+    // existing.
+    //
+    // Mid-hold teardown is not rare. main.dart's didChangeAppLifecycleState
+    // (:433) raises the cover on `paused`, which swaps the MaterialApp and
+    // takes this bar with it — and the screen timing out produces exactly that
+    // transition. Android pokes the screen-off timer on input EVENTS, and a
+    // thumb held still on the mic button sends none after the initial down, so
+    // a long note times the screen out from under itself. Short notes finish
+    // first, which is why only long ones vanished, and why the longest note in
+    // production is 24 seconds against a 30-second default timeout.
+    //
+    // [_holdScreenAwake] is the prevention. This is the survival: the recorder
+    // is finished and the note sent by a static that touches nothing on a
+    // disposed State.
+    if (_recording) {
+      unawaited(_rescueRecording(
+        _recorder,
+        _currentRecordingPath,
+        VoicePeaks.encode(_levels),
+        widget.coupleId,
+      ),);
+    } else {
+      _recorder.dispose();
+    }
     super.dispose();
+  }
+
+  /// Finish and send a note whose composer was torn down mid-hold.
+  ///
+  /// Static, and it goes straight to [ChatRepository] rather than through
+  /// `widget.onSendVoice`: that callback closes over ChatScreen's State, whose
+  /// `_takeReplyId` calls setState — and by the time this runs the whole tree
+  /// is usually gone, so calling it would throw instead of saving the note.
+  /// A rescued note loses the message it was replying to. It keeps the note.
+  static Future<void> _rescueRecording(
+    AudioRecorder recorder,
+    String? path,
+    String? peaks,
+    String coupleId,
+  ) async {
+    try {
+      await recorder.stop();
+      if (path == null) return;
+      final file = File(path);
+      if (!file.existsSync()) return;
+      await ChatRepository.sendVoice(coupleId, file,
+          id: const Uuid().v4(), peaks: peaks,);
+    } catch (e, st) {
+      // The upload runs while the app is backgrounded and Android may kill it
+      // outright. That is a real outcome, not a tidy one, and it belongs in
+      // client_errors rather than in a debugPrint nobody in the field can read.
+      ErrorReporter.report(e, st, kind: 'voice-rescue');
+    } finally {
+      await recorder.dispose();
+    }
+  }
+
+  /// Keep the screen on for the length of a recording.
+  ///
+  /// See dispose(): a motionless thumb generates no input events, so without
+  /// this the screen times out mid-note, the app pauses, the cover goes up and
+  /// the composer holding the recording is destroyed. wakelock_plus is already
+  /// a direct dependency (call_controller.dart:2952) — no new package.
+  Future<void> _holdScreenAwake(bool on) async {
+    try {
+      await WakelockPlus.toggle(enable: on);
+    } catch (e) {
+      // Never fatal to a recording: the note still records and still sends,
+      // it is only the screen-timeout race that comes back.
+      debugPrint('[voice] wakelock failed: $e');
+    }
   }
 
   /// A GIF/sticker/image inserted from the phone's keyboard (Gboard GIF panel).
@@ -569,6 +647,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
         _currentRecordingPath = path;
       });
       ChatInputBar.recording.value = true;
+      // Only from here, and only on the path that actually left a recorder
+      // running: an early return or a throw above must not leave the screen
+      // pinned awake for the life of the process.
+      unawaited(_holdScreenAwake(true));
     } catch (_) {
       // Leave nothing running. A recorder that started and then threw on the
       // way out keeps the microphone open, and a raised `recording` flag makes
@@ -598,6 +680,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // at the end of _startRecording even though _recording is still false here.
     _wantRecording = false;
     if (!_recording) return;
+    // Dropped synchronously, before the first await, and set again under
+    // setState further down for the repaint.
+    //
+    // dispose() rescues a note whenever `_recording` is still true (see there).
+    // Without this line the two overlap: a release followed immediately by a
+    // teardown — let go and the screen sleeps, let go and background the app —
+    // finds `_recording` still true for the length of `_recorder.stop()`, and
+    // BOTH paths finish the same file and send it, under two different ids.
+    // The note arrives twice on both phones and neither copy can be told from
+    // the other.
+    _recording = false;
     final path = _currentRecordingPath;
     await _cancelAmplitude();
     try {
@@ -615,6 +708,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _cancelArmed = false;
     });
     ChatInputBar.recording.value = false;
+    unawaited(_holdScreenAwake(false));
     if (path == null) return;
     final file = File(path);
     if (cancel) {
@@ -652,10 +746,26 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// re-sent carrying note B's waveform, permanently and silently.
   Future<void> _sendVoice(File file, String? peaks, {String? id}) async {
     final sendId = id ?? _uuid.v4();
-    setState(() => _sending = true);
+    // Guarded, where the two below already were. _stopRecording awaits the
+    // recorder before it reaches here, and a teardown inside that window
+    // (release, then the screen sleeps) puts this setState on a disposed State
+    // — which throws, and takes the send it was decorating with it. The spinner
+    // is the only thing lost when the bar is already gone; the note still goes.
+    if (mounted) setState(() => _sending = true);
     try {
       await widget.onSendVoice(file, sendId, peaks);
-    } catch (_) {
+    } catch (e, st) {
+      // Reported, not merely shown. Voice is the only send in this app that
+      // does not go through ChatSendQueue, so it was also the only one whose
+      // failures never reached client_errors: a snackbar the user dismisses,
+      // and nothing on the server to say a note was ever lost. Every other
+      // kind of send is in that table; this one has no rows at all, which
+      // reads as "voice always works" rather than as "voice is not wired".
+      // ErrorReporter's _detail turns the cause into a machine code —
+      // storage.413 for a file the bucket refuses, ClientException for the
+      // upload ceiling in TimeoutHttpClient — so the next failed note names
+      // its own reason instead of being argued about.
+      ErrorReporter.report(e, st, kind: 'voice-send');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
