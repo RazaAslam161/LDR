@@ -27809,3 +27809,13 @@ is a 404), so this was never the wheel — it was a request per tile, per visit,
 can never change. Now `'31536000'`, the same year the gallery has always used. Only objects
 written from this build forward carry it; anything already in `personal_vault` keeps the old
 header until it is re-uploaded.
+
+**§305 addendum 2 — pushed.** `10de9fb` on `fix-sprint`, fast-forward over `13ac932`
+(`origin/fix-sprint` and `HEAD` both at `10de9fb`, 0 ahead / 0 behind). 14 files, +474/−20,
+one of them new (`mobile/lib/core/media/plain_media_cache.dart`). Staged file by file, never
+`-A`: BRAIN.md was written into the index as HEAD-plus-§305 only, so the §303 iOS audit
+another session is still writing stayed unstaged, along with `docs/guides/IOS-BRINGUP.md` and
+`values-night/styles.xml`. Gates at the moment of the commit: analyze 0 errors / 0 warnings /
+225 infos, `flutter test` 1812 passed / 3 skipped / 0 failed. **Still no device pass** — the
+six steps in §305 are unchanged and still the only thing that can settle whether the wheel is
+actually gone. Nothing has been built or installed; the owner has not asked for an APK.
