@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:miles/core/data/media_urls.dart';
+import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/widgets/net_image.dart';
+import 'package:miles/core/widgets/save_media_button.dart';
 import 'package:miles/features/chat/widgets/video_surface.dart';
 import 'package:miles/features/gallery/gallery_repository.dart';
 
@@ -57,6 +59,26 @@ class _GalleryViewerState extends State<GalleryViewer> {
     unawaited(GalleryRepository.warmOriginals(widget.items, i));
   }
 
+  /// Copies the picture being looked at into the owner's Private Vault.
+  ///
+  /// The shared gallery is the couple's — both of them see it, either of them
+  /// can ask for it to be deleted, and the refusal cap means a picture can be
+  /// argued away. A vault copy is the one place a keeper is only yours, and
+  /// this screen was the only media surface in the app with no way to make
+  /// one: chat bubbles, the chat pager and Touch all carry this button.
+  ///
+  /// Both branches are SaveMediaService's existing ones — the gallery lives in
+  /// couple_intimate, which is exactly the bucket saveIntimatePhotoToVault and
+  /// saveVideoToVault already sign against.
+  Future<bool> _save() {
+    final item = widget.items[_index];
+    return item.isVideo
+        ? SaveMediaService.saveVideoToVault(
+            path: item.storagePath, senderName: 'your shared gallery',)
+        : SaveMediaService.saveIntimatePhotoToVault(
+            path: item.storagePath, senderName: 'your shared gallery',);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -95,11 +117,28 @@ class _GalleryViewerState extends State<GalleryViewer> {
               ),
             ),
             Positioned(
-              top: 16,
-              right: 16,
-              child: Text(
-                '${_index + 1} / ${widget.items.length}',
-                style: const TextStyle(color: Color(0x99FBF8F4), fontSize: 12),
+              top: 8,
+              right: 8,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${_index + 1} / ${widget.items.length}',
+                    style:
+                        const TextStyle(color: Color(0x99FBF8F4), fontSize: 12),
+                  ),
+                  // Padded rather than wrapped in an IconButton: the button
+                  // carries its own tap target, busy state and snackbar, and a
+                  // disabled IconButton around it is a second, dead one.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                    child: SaveMediaButton(
+                      size: 24,
+                      color: const Color(0xCCFBF8F4),
+                      onSave: _save,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:intl/intl.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/media_decode.dart';
 import 'package:miles/core/media/media_source.dart';
+import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/media/thumb_backfill.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/widgets/save_media_button.dart';
@@ -253,7 +253,7 @@ class _MediaViewerState extends State<MediaViewer>
         try {
           await precacheImage(
             ResizeImage(
-              CachedNetworkImageProvider(url, cacheKey: item.cacheKey),
+              PlainMediaCache.provider(item.bucket, item.path, url),
               width: w,
             ),
             context,
@@ -277,7 +277,8 @@ class _MediaViewerState extends State<MediaViewer>
           if (!mounted) return;
           if (url == null) continue;
           try {
-            await DefaultCacheManager().getSingleFile(url, key: item.cacheKey);
+            await PlainMediaCache.manager
+                .getSingleFile(url, key: item.cacheKey);
           } catch (_) {
             // A warm that misses costs a spinner when the page arrives. It is
             // never worth surfacing and never worth failing the swipe for.
@@ -578,6 +579,7 @@ class _PhotoPageState extends State<_PhotoPage> {
             CachedNetworkImage(
               imageUrl: thumbUrl,
               cacheKey: widget.item.tileCacheKey,
+              cacheManager: PlainMediaCache.manager,
               fit: BoxFit.contain,
               // Unbounded on purpose: a thumbnail IS its own bound, and this
               // is the exact key/bounds pair the grid tile decoded, so the
@@ -590,6 +592,7 @@ class _PhotoPageState extends State<_PhotoPage> {
           CachedNetworkImage(
             imageUrl: url,
             cacheKey: widget.item.cacheKey,
+            cacheManager: PlainMediaCache.manager,
             fit: BoxFit.contain,
             memCacheWidth: decodePx,
             fadeInDuration: Duration.zero,
@@ -617,6 +620,7 @@ class _PhotoPageState extends State<_PhotoPage> {
             CachedNetworkImage(
               imageUrl: url,
               cacheKey: widget.item.cacheKey,
+              cacheManager: PlainMediaCache.manager,
               fit: BoxFit.contain,
               fadeInDuration: Duration.zero,
               fadeOutDuration: Duration.zero,

@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/data/supabase_service.dart';
+import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/media/thumbnails.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -72,8 +72,8 @@ class ThumbBackfill {
 
       // getFileFromCache, never getSingleFile: this must use bytes that are
       // already here. The whole justification is that healing is free.
-      final cached = await DefaultCacheManager()
-          .getFileFromCache('$bucket/$path');
+      final cached = await PlainMediaCache.manager
+          .getFileFromCache(PlainMediaCache.keyFor(bucket, path));
       if (cached == null) return false;
 
       final bytes = await Thumbnails.forImage(cached.file);

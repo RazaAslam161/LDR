@@ -7,6 +7,7 @@ import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
+import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/services/storage_quota.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/net_image.dart';
@@ -300,6 +301,49 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     }
   }
 
+  /// Copies the selection into the owner's Private Vault, one at a time.
+  ///
+  /// Sequential rather than a Future.wait: each save downloads the original and
+  /// re-uploads it, and firing eleven of those at once on a phone uplink is how
+  /// the whole batch times out instead of the last one.
+  ///
+  /// Read from the remembered snapshot rather than from a field the builder
+  /// writes: the app bar is built outside the StreamBuilder and has no list of
+  /// its own, and this is the same list the grid is painting.
+  Future<void> _saveSelected() async {
+    final coupleId = ref.read(sessionProvider).couple?.id;
+    final all = coupleId == null
+        ? const <GalleryItem>[]
+        : GalleryRepository.lastSnapshot(coupleId) ?? const <GalleryItem>[];
+    final picked = all.where((i) => _selected.contains(i.id)).toList();
+    if (picked.isEmpty) return;
+    setState(() => _busy = true);
+    var saved = 0;
+    for (final i in picked) {
+      final ok = i.isVideo
+          ? await SaveMediaService.saveVideoToVault(
+              path: i.storagePath, senderName: 'your shared gallery',)
+          : await SaveMediaService.saveIntimatePhotoToVault(
+              path: i.storagePath, senderName: 'your shared gallery',);
+      if (ok) saved++;
+    }
+    if (!mounted) return;
+    setState(() {
+      _selected.clear();
+      _busy = false;
+    });
+    final missed = picked.length - saved;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          missed == 0
+              ? '$saved saved to your vault 🔒'
+              : '$saved saved · $missed could not be copied',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -313,6 +357,16 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
             : null,
         title: Text(_selecting ? '${_selected.length} selected' : 'Gallery'),
         actions: [
+          if (_selecting)
+            IconButton(
+              tooltip: 'Save to vault',
+              onPressed: _busy ? null : _saveSelected,
+              // The same glyph SaveMediaButton paints in chat, the chat pager
+              // and Touch, because it is the same action. NOT lock_outline —
+              // this screen already uses that on a tile to mean "settled, kept
+              // permanently", and one glyph cannot mean both.
+              icon: const Icon(Icons.download_rounded),
+            ),
           if (_selecting)
             IconButton(
               tooltip: 'Ask to delete',
@@ -348,6 +402,12 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
       ),
       body: SafeArea(
         child: StreamBuilder<List<GalleryItem>>(
+          // What this couple's grid painted last, so coming back in paints on
+          // frame one instead of behind a full-screen spinner over pictures
+          // the phone still holds. Null until a fetch has ever succeeded, so
+          // the first run and the failed run keep the spinner and the card.
+          initialData: GalleryRepository.lastSnapshot(
+              ref.read(sessionProvider).couple?.id ?? '',),
           // Keyed by the stream OBJECT, and that key IS the retry.
           //
           // StreamBuilder carries its snapshot across a stream swap:

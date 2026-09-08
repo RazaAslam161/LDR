@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
+import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/vault/vault_repository.dart';
@@ -86,6 +87,40 @@ class _PageState extends State<_Page> {
   VideoPlayerController? _vp;
   ChewieController? _chewie;
 
+  /// Seeds [_provider] with whatever this process has already resolved, before
+  /// [_load] gets a chance to await anything.
+  ///
+  /// Every path through `_load` is a Future, so opening a photograph the vault
+  /// grid decoded a second ago still painted the wheel for a frame or more —
+  /// which is the loading wheel on media that has already been seen. Nothing
+  /// here fetches, signs or decrypts: a null simply means there was nothing to
+  /// paint yet and `_load` does the real work either way.
+  void _paintWarm() {
+    final legacy = widget.item.legacyIntimatePath;
+    if (widget.item.isVideo || widget.item.isAudio) return;
+    if (legacy != null) {
+      if (legacy.toLowerCase().endsWith('.mp4')) return;
+      _provider = PlainMediaCache.warm(
+          privateBucket, MediaUrls.toPath(privateBucket, legacy),);
+      return;
+    }
+    final path = widget.item.storagePath;
+    if (path == null) return;
+    // The TILE, not the original — for the same reason the `.enc` branch below
+    // reaches for one. The grid downloaded and decoded the thumbnail; the
+    // original may never have been fetched, and seeding a provider for bytes
+    // that are not here yet paints a black frame with no wheel over it, which
+    // is exactly the silent blank build() already refuses to show.
+    // `_loadPlainImage` swaps the original in over it, gaplessly.
+    final grid = widget.item.gridPath ?? path;
+    if (!path.endsWith('.enc')) {
+      _provider = PlainMediaCache.warm(VaultRepository.bucket, grid);
+      return;
+    }
+    _provider = EncryptedMediaCache.warmTileProvider(
+        bucket: VaultRepository.bucket, path: grid,);
+  }
+
   /// Legacy rows are PLAINTEXT in the couple's bucket, so they are fetched by
   /// signed URL rather than decrypted. Read-only by design: nothing re-writes
   /// them, and re-saving is what moves an item into the vault's own storage.
@@ -116,7 +151,10 @@ class _PageState extends State<_Page> {
         });
         return;
       }
-      if (mounted) setState(() => _provider = NetworkImage(url));
+      if (mounted) {
+        setState(() => _provider = PlainMediaCache.provider(
+              privateBucket, MediaUrls.toPath(privateBucket, path), url,),);
+      }
     } catch (e) {
       if (mounted) setState(() => _error = "This one couldn't be opened.");
     }
@@ -131,7 +169,10 @@ class _PageState extends State<_Page> {
         setState(() => _error = "This one couldn't be opened.");
         return;
       }
-      setState(() => _provider = NetworkImage(url));
+      // NOT NetworkImage: no disk cache, and keyed on a token that rotates
+      // daily, so re-opening the same photograph downloaded it again.
+      setState(() => _provider =
+          PlainMediaCache.provider(VaultRepository.bucket, path, url),);
     } catch (e) {
       if (mounted) setState(() => _error = "This one couldn't be opened.");
     }
@@ -229,6 +270,7 @@ class _PageState extends State<_Page> {
   @override
   void initState() {
     super.initState();
+    _paintWarm();
     _load();
   }
 

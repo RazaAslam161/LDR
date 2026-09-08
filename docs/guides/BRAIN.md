@@ -27708,3 +27708,104 @@ field. **Next step:** build, install, and in one pass — press volume-down duri
 note; hold a voice note past the screen timeout and check it arrives ONCE; record 20s on
 both cameras and send; pick a >45 MB video from the gallery and read the snackbar. Then
 `select * from client_errors where kind in ('voice-send','voice-rescue')`.
+
+## §305 — 2026-09-08 — the media layer stops re-downloading, and the shared gallery can save to the vault
+
+Owner, on build 80: *"shared gallery option has no option to save in vault. also every media
+like in vault, chat, gallery ... if i saw media, it should not render again whenever i go to
+see them again. but right now, a little loading wheel appears, gives laggy experience."*
+
+Nothing here is a new mechanism. Every fix is an existing one that a surface had been left
+off.
+
+**Root causes, four, each with the line that proves it:**
+
+1. **No save affordance in the shared gallery.** `GalleryViewer` built a close button and a
+   counter and nothing else. `SaveMediaButton` + `SaveMediaService` have been wired into chat
+   bubbles, the chat pager and Touch since they were written; the gallery was the one media
+   surface with no way into the vault.
+2. **Every plaintext object in the app shared `DefaultCacheManager`.** That singleton is
+   `Config('libCachedImageData')` — **200 objects, 30 days** (proven from
+   `flutter_cache_manager-3.4.2/lib/src/config/_config_io.dart:13`). Chat photos, gallery
+   thumbnails, gallery originals, avatars, cover art and the thumbnail backfill all competed
+   for those 200 slots, so a couple with a few hundred pictures evicted their own gallery by
+   scrolling it and every later visit re-downloaded it. `EncryptedMediaCache`'s L1 and
+   `VoiceNoteCache` each documented this hazard and took their own store; the layer that
+   paints almost everything never did.
+3. **The vault's plaintext read path used `NetworkImage(url)`** — `vault_screen.dart` (tile)
+   and `vault_viewer.dart` (page and legacy). Flutter's built-in provider has **no disk cache
+   at all**, and its ImageCache key is the URL, which rotates every 24h. Since the vault went
+   plaintext (2026-08-28, owner's ruling) that is every vault photo, every visit.
+4. **A guaranteed placeholder frame even on a RAM hit.** Vault tiles and the vault viewer
+   start with `_provider == null` and reach the provider through an `async` `_load` — the URL
+   is a map lookup and the provider is a constructor, but the await costs a frame. Chat's
+   pager had already solved exactly this with a synchronous `MediaUrls.cached` peek before
+   `MediaUrls.sign` (`media_viewer.dart`, `_PageState.initState`, "the first of the TWO
+   spinners every page used to show"); the vault never got it.
+5. **Re-entering the gallery refetched the list behind a full-screen wheel.** The State,
+   window and stream are rebuilt per push, so `!snap.hasData` was true on every return.
+
+**What changed**
+
+- **NEW `mobile/lib/core/media/plain_media_cache.dart`** — one store, `milesPlainMedia`,
+  1500 objects / 90 days, matching L1. `PlainMediaCache.manager` for the widgets,
+  `.provider(bucket, path, url)` for a signed object, `.warm(bucket, path)` for the
+  synchronous peek, `.clearAll()` for teardown. `extends CacheManager with ImageCacheManager`
+  because `cached_network_image` **throws** rather than degrades if a caller ever passes
+  `maxWidthDiskCache` to a manager without the mixin.
+- Routed onto it: `NetImage` (so gallery grid, avatars and `SignedImage` follow), the chat
+  pager's three `CachedNetworkImage`s, its `precacheImage` provider and its distance-2
+  prefetch, and `ThumbBackfill`'s `getFileFromCache` — that last one is not cosmetic, since
+  leaving it on the singleton would have made the heal path miss forever.
+- Vault tile and vault viewer: `PlainMediaCache.provider(...)` instead of `NetworkImage`, so
+  the key is the PATH and a re-sign costs nothing.
+- `_paintWarm()` on both, called before `_load()`. The viewer seeds from the **tile**, not
+  the original — the grid downloaded the thumbnail and may never have fetched the original,
+  and seeding a provider for bytes that are not here paints a black frame with no wheel over
+  it, which is the silent blank `build()` already refuses to show.
+- `EncryptedMediaCache.warmTileProvider()` — the same synchronous peek for legacy `.enc`
+  rows. Its `_provider` now registers each provider **once** (`contains` before `add`):
+  `MemoryImage` compares bytes by reference, so the list was growing duplicates that all
+  named one ImageCache entry, and the warm peek raised the call rate.
+- `GalleryRepository._remembered` + `lastSnapshot()` + `forgetSnapshots()`, fed by
+  `GalleryWindow._snapshot()` and handed to the grid's `StreamBuilder` as `initialData`. Null
+  until a fetch has ever succeeded, so the first run and the failed run keep their spinner
+  and their retry card.
+- `GalleryViewer` gets `SaveMediaButton` beside the counter; the grid's selection bar gets a
+  batch **Save to vault**, sequential (each save downloads the original and re-uploads it —
+  eleven at once on a phone uplink times out the batch, not the last one). Both call
+  `SaveMediaService.saveIntimatePhotoToVault` / `saveVideoToVault` verbatim: the gallery
+  lives in `couple_intimate`, which is the bucket both already sign against. Label reads
+  "Photo from your shared gallery · <date>". The app-bar glyph is `download_rounded`, the one
+  `SaveMediaButton` paints everywhere else — NOT `lock_outline`, which this screen already
+  uses on a tile to mean "settled, kept permanently".
+- Teardown: `PlainMediaCache.clearAll()` and `GalleryRepository.forgetSnapshots()` in
+  `endCouple`, and both added to `severance_teardown_test.dart`'s `mustClear` — that test
+  exists for precisely this drift ("someone adds a store to _endSession and not to
+  endCouple").
+
+**One-time cost, stated rather than hidden:** the new store has a new cache key, so the first
+launch after this update re-downloads what was already on disk under `libCachedImageData`.
+There is no way to inherit the old store without two `CacheManager` instances over one
+sqflite database.
+
+**Not verified — and this is the headline, not a footnote.** No handset pass. Everything
+above is a claim about what a *second* visit looks like, and the only instrument that can
+settle it is a phone: open the gallery, back out, open it again, and watch whether a wheel
+appears. The gates cannot see a frame. **Next step:** build, install, then in one pass —
+(1) gallery in, out, in: no full-screen wheel the second time; (2) scroll ~50 pictures, leave,
+come back: no re-download; (3) open a photo in the pager, tap the new save icon, unlock the
+vault and confirm it is there with the label above; (4) select five in the grid, Save to
+vault, read the snackbar count; (5) vault in, out, in: tiles paint with no glyph flash; (6)
+open a vault photo twice: no wheel the second time. Then
+`select * from client_errors where kind in ('vault-tile','vault-tile-decode','vault')`.
+
+**§305 addendum, same session — the vault's own uploads were telling the cache to forget
+them.** `VaultRepository._uploadPlain` set no `cacheControl`, so Supabase answered
+`max-age=3600` and every vault object went stale an hour after it was written. The picture
+still paints from disk while a stale entry revalidates (`flutter_cache_manager`'s
+`_pushFileToStream` emits the cached file first and SWALLOWS a failed revalidation unless it
+is a 404), so this was never the wheel — it was a request per tile, per visit, for bytes that
+can never change. Now `'31536000'`, the same year the gallery has always used. Only objects
+written from this build forward carry it; anything already in `personal_vault` keeps the old
+header until it is re-uploaded.

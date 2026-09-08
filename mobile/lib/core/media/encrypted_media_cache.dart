@@ -167,6 +167,30 @@ class EncryptedMediaCache {
     return _provider(bucket, path, raw, null);
   }
 
+  /// The tile provider for [path] if its plaintext is ALREADY in L2, built
+  /// synchronously — or null.
+  ///
+  /// [tileProvider] cannot answer this question without a `Future`, and a
+  /// `Future` costs a frame with `_provider == null` even when the answer was
+  /// a map lookup away. That frame is the placeholder flashing over a picture
+  /// this process is holding in RAM, which is what "it loads again every time
+  /// I go back" actually is. Chat's pager removed the same frame the same way,
+  /// with `MediaUrls.cached` before `MediaUrls.sign`.
+  ///
+  /// No associated data and no key: nothing is decrypted here. A hit means the
+  /// decrypt already happened under whatever key was current, and the key
+  /// epoch is part of [_key], so a rewrap misses rather than mispaints.
+  static ImageProvider? warmTileProvider({
+    required String path,
+    String bucket = privateBucket,
+  }) {
+    final k = _key(bucket, path);
+    final hit = _l2.remove(k);
+    if (hit == null) return null;
+    _l2[k] = hit; // re-insert: most recently used
+    return _provider(bucket, path, hit.bytes, null);
+  }
+
   /// A provider for the original. [decodeWidth] null mounts it unbounded, which
   /// is what the zoom layer wants and what nothing else should ask for.
   static Future<ImageProvider> fullProvider({
@@ -211,7 +235,13 @@ class EncryptedMediaCache {
     } else {
       provider = ResizeImage(memory, width: decodeWidth);
     }
-    entry?.providers.add(provider);
+    // contains, not a bare add: MemoryImage compares its bytes by REFERENCE,
+    // so every provider built over one L2 entry at one width is EQUAL to the
+    // last, and appending on every rebuild grows a list of duplicates that all
+    // name the SAME ImageCache entry. One is what eviction needs.
+    if (entry != null && !entry.providers.contains(provider)) {
+      entry.providers.add(provider);
+    }
     return provider;
   }
 

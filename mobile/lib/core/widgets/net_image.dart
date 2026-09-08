@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/ui/theme.dart';
 
 /// A disk-cached network image for avatars / photos so they don't re-download
@@ -68,6 +69,10 @@ class NetImage extends StatelessWidget {
     return CachedNetworkImage(
       imageUrl: url,
       cacheKey: cacheKey,
+      // Not DefaultCacheManager. Its 200 objects are shared with every other
+      // CachedNetworkImage in the app, so a couple's own gallery evicts itself
+      // by being scrolled and every later visit re-downloads it.
+      cacheManager: PlainMediaCache.manager,
       fit: fit,
       width: width,
       height: height,

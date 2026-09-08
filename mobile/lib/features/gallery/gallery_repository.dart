@@ -106,6 +106,25 @@ class GalleryRepository {
       'width,height,created_at,delete_requested,delete_requested_by,'
       'delete_refused_count';
 
+  /// The last list this couple's grid painted, for the life of the process.
+  ///
+  /// Leaving the gallery disposes the window, so coming back built a new one,
+  /// a new stream and a new fetch — and the first thing anyone saw on the way
+  /// back in was a full-screen spinner over pictures the phone still had
+  /// signed, decoded and on disk. The grid takes this as its initialData and
+  /// paints on frame one; the fetch still runs underneath and replaces it, so
+  /// nothing here is ever the last word on what exists.
+  static final Map<String, List<GalleryItem>> _remembered = {};
+
+  static List<GalleryItem>? lastSnapshot(String coupleId) =>
+      _remembered[coupleId];
+
+  /// Sign-out and unpair. These rows name the couple's storage paths, and
+  /// MediaUrls still holds live 24-hour URLs for them — repainting them for
+  /// whoever signs in next is the same leak GalleryScreen.clearFailedUploads
+  /// exists to stop.
+  static void forgetSnapshots() => _remembered.clear();
+
   static String _originalPath(String coupleId, String id, String ext) =>
       '$coupleId/gallery/$id.$ext';
   static String _thumbPath(String coupleId, String id) =>
@@ -467,7 +486,9 @@ class GalleryWindow {
   List<GalleryItem> _snapshot() {
     final live = _byId.values.toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return List.unmodifiable(live);
+    final snap = List<GalleryItem>.unmodifiable(live);
+    GalleryRepository._remembered[coupleId] = snap;
+    return snap;
   }
 
   void _emit() {

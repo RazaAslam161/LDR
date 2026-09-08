@@ -10,6 +10,7 @@ import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/media_normalize.dart';
+import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/features/auth/auth_errors.dart';
@@ -654,7 +655,42 @@ class _VaultTileState extends State<_VaultTile> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (!_paintWarm()) _load();
+  }
+
+  /// Paints an item this process has already resolved, WITHOUT an await.
+  ///
+  /// `_load` is a Future even when nothing has to be fetched — the URL is a map
+  /// lookup and the provider is a constructor — and an await anywhere on that
+  /// path costs one frame with `_provider == null`. That frame is the glyph
+  /// flashing over a photograph the phone is already holding, on every scroll
+  /// that recycles the cell and every time the vault is opened again. Chat's
+  /// pager removed the identical frame the identical way, by reading
+  /// MediaUrls.cached before reaching for MediaUrls.sign.
+  ///
+  /// True means the tile is finished and [_load] has nothing left to do.
+  bool _paintWarm() {
+    final legacy = widget.item.legacyIntimatePath;
+    if (legacy != null) {
+      if (widget.item.isVideo || legacy.toLowerCase().endsWith('.mp4')) {
+        return false;
+      }
+      // The same path signedVideoUrl would sign, so the same cache entry.
+      final p = PlainMediaCache.warm(
+          privateBucket, MediaUrls.toPath(privateBucket, legacy),);
+      if (p == null) return false;
+      _provider = p;
+      return true;
+    }
+    final path = widget.item.gridPath;
+    if (path == null) return false;
+    final p = path.endsWith('.enc')
+        ? EncryptedMediaCache.warmTileProvider(
+            bucket: VaultRepository.bucket, path: path,)
+        : PlainMediaCache.warm(VaultRepository.bucket, path);
+    if (p == null) return false;
+    _provider = p;
+    return true;
   }
 
   @override
@@ -665,7 +701,7 @@ class _VaultTileState extends State<_VaultTile> {
     if (old.item.id != widget.item.id) {
       _provider = null;
       _failed = false;
-      _load();
+      if (!_paintWarm()) _load();
     }
   }
 
@@ -685,7 +721,8 @@ class _VaultTileState extends State<_VaultTile> {
       try {
         final url = await ChatRepository.signedVideoUrl(legacy);
         if (url != null && _mounted) {
-          setState(() => _provider = NetworkImage(url));
+          setState(() => _provider = PlainMediaCache.provider(
+                privateBucket, MediaUrls.toPath(privateBucket, legacy), url,),);
         }
       } catch (e) {
         if (_mounted) setState(() => _failed = true);
@@ -702,7 +739,11 @@ class _VaultTileState extends State<_VaultTile> {
             await MediaUrls.sign(VaultRepository.bucket, path);
         if (!_mounted) return;
         if (url != null) {
-          setState(() => _provider = NetworkImage(url));
+          // NOT NetworkImage. That one has no disk cache at all and is keyed on
+          // a URL whose token rotates daily, so every eviction and every
+          // morning was a fresh download of a picture already on the phone.
+          setState(() => _provider =
+              PlainMediaCache.provider(VaultRepository.bucket, path, url),);
         } else {
           setState(() => _failed = true);
         }

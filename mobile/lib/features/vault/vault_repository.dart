@@ -249,7 +249,18 @@ class VaultRepository {
     await _c.storage.from(bucket).uploadBinary(
           path,
           bytes,
-          fileOptions: FileOptions(contentType: mime, upsert: true),
+          // A year, the same as every gallery upload. Without it Supabase
+          // answers max-age=3600, so the disk cache treats a vault object as
+          // stale an hour after it was written and revalidates it on every
+          // open — a request per tile, per visit, for bytes that can never
+          // change. The picture still paints from disk while that happens;
+          // this is the traffic, not the wheel. Objects written before this
+          // keep their old header until they are re-uploaded.
+          fileOptions: FileOptions(
+            contentType: mime,
+            upsert: true,
+            cacheControl: '31536000',
+          ),
         );
   }
 

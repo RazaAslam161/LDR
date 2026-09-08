@@ -56,6 +56,13 @@ void main() {
       'ChatDraftStore.clearAll()',
       'EncryptedMediaCache.clearAll()',
       'DefaultCacheManager().emptyCache()',
+      // The store chat and the gallery actually paint from since they moved
+      // off the 200-object singleton. Emptying only the singleton would leave
+      // every photograph on disk under a stable key.
+      'PlainMediaCache.clearAll()',
+      // The grid's remembered list: the couple's storage paths, with live
+      // 24-hour URLs still in MediaUrls for every one of them.
+      'GalleryRepository.forgetSnapshots()',
       'VoiceNoteCache.clearAll()',
       'imageCache',
       'pendingMemory.value = null',

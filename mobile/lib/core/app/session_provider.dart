@@ -16,6 +16,7 @@ import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
 import 'package:miles/core/media/encrypted_media_cache.dart';
 import 'package:miles/core/media/map_token.dart';
+import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/services/fcm_service.dart';
 import 'package:miles/core/services/presence_service.dart';
 import 'package:miles/core/services/session_scope.dart';
@@ -28,6 +29,7 @@ import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/voice_note_cache.dart';
 import 'package:miles/features/cycle/love_notes_pool.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/features/gallery/gallery_repository.dart';
 import 'package:miles/features/gallery/gallery_screen.dart';
 import 'package:miles/features/legal/terms_gate.dart';
 import 'package:miles/features/safety/contact_pause.dart';
@@ -643,6 +645,14 @@ class SessionNotifier extends StateNotifier<SessionState> {
     // decrypted bytes sit in flutter_cache_manager's store under stable keys —
     // readable at the filesystem level long after the couple is gone.
     unawaited(DefaultCacheManager().emptyCache());
+    // And the store those photos actually live in now. Chat and gallery moved
+    // off the 200-object singleton — that cap was evicting a couple's own
+    // gallery while they scrolled it — so emptying only the singleton would
+    // leave every picture on disk under a stable key.
+    unawaited(PlainMediaCache.clearAll());
+    // The grid's remembered list beside them: it names the couple's storage
+    // paths, and MediaUrls still holds live 24-hour URLs for every one.
+    GalleryRepository.forgetSnapshots();
     // And the third store beside those two. Voice notes are audio of the two of
     // them talking, kept on disk so the waveform can be scrubbed without a
     // range request per drag.
