@@ -23,10 +23,7 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
@@ -65,5 +62,26 @@ class DefaultFirebaseOptions {
     messagingSenderId: '188998306037',
     projectId: 'ldrc-120a2',
     storageBucket: 'ldrc-120a2.firebasestorage.app',
+  );
+
+  // Registered 2026-09-09 in the SAME Firebase project as Android (ldrc-120a2)
+  // for bundle com.miles.miles, so the two platforms share one sender id and
+  // one storage bucket. Values transcribed from ios/Runner/
+  // GoogleService-Info.plist, which is the file the native SDK actually reads
+  // at runtime; this class is what firebase_core uses from Dart. If they ever
+  // disagree the plist wins on iOS, so regenerate BOTH from the console rather
+  // than editing one.
+  //
+  // apiKey here is the iOS client key. Like the Android one it ships in the
+  // build by design and is scoped by bundle id - it is an identifier, not a
+  // credential. No Firestore, RTDB, Firebase Storage or Firebase Auth runs in
+  // this app; only firebase_core and firebase_messaging.
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyAUIfiCJU4GyCsCOPXPuu9YwJyG72QqOoU',
+    appId: '1:188998306037:ios:99847ecfc0e9a2930dddbc',
+    messagingSenderId: '188998306037',
+    projectId: 'ldrc-120a2',
+    storageBucket: 'ldrc-120a2.firebasestorage.app',
+    iosBundleId: 'com.miles.miles',
   );
 }
