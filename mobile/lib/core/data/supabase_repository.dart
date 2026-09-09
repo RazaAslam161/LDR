@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/key_escrow.dart';
@@ -986,8 +984,13 @@ class SupabaseRepository {
         // :97). Hardcoding 'android' was fine while one platform shipped; on
         // iOS it would file every APNs token as an FCM/Android one, and the
         // sender has no other way to tell which transport a row belongs to.
-        // kIsWeb is checked first because dart:io Platform throws on web.
-        'p_platform': !kIsWeb && Platform.isIOS ? 'ios' : 'android',
+        // defaultTargetPlatform rather than Platform.isIOS: dart:io reports the
+        // HOST under `flutter test`, so a Platform.isIOS branch is unreachable
+        // by any test here, and this one decides which transport a row claims.
+        'p_platform':
+            !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
+                ? 'ios'
+                : 'android',
       },
     );
     if (res is Map && res['dead'] == true) return true;
