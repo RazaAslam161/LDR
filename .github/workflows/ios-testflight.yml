@@ -1,0 +1,206 @@
+# Miles -> TestFlight, without a Mac.
+#
+# The development machine is a 2020 Intel MacBook Air on macOS 15.7.9 and it
+# cannot build Miles for iOS at all — see docs/guides/IOS-PORT-STATE.md for the
+# closed chain (Mapbox forces Xcode 26, Xcode 26 forces an iOS 26 runtime for
+# EVERY destination including a cabled device, iOS 26 runtimes force macOS 26,
+# which Software Update does not offer that Mac). A physically connected iPad on
+# iPadOS 26.6.1 was tested and refused for the same reason.
+#
+# So the build happens here instead, and TestFlight carries it to a phone that
+# is not in the room — which is the point, because the partner this app is for
+# is remote by definition.
+#
+# MANUAL TRIGGER ONLY. macOS runners bill at 10x against a private repo's
+# metered minutes; gates.yml's header explains what happens to a gate that
+# bills for every push.
+
+name: ios testflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "branch or SHA to ship (default: the branch you launch from)"
+        required: false
+        type: string
+      whats_new:
+        description: "What to Test note for this build"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: "3.44.2"
+  MIN_XCODE_MAJOR: "26"
+
+jobs:
+  testflight:
+    name: archive + upload
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Fail here, loudly, rather than 40 minutes in at the upload step with a
+      # cryptic auth error. Every one of these is required and none has a
+      # sensible default.
+      - name: check the secrets exist before spending a runner
+        working-directory: .
+        env:
+          ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          KEYID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          PKEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          ENVFILE: ${{ secrets.MILES_ENV }}
+        run: |
+          set -euo pipefail
+          miss=0
+          for n in ISSUER KEYID PKEY TEAM ENVFILE; do
+            if [ -z "${!n:-}" ]; then echo "::error title=Missing secret::$n is not set"; miss=1; fi
+          done
+          [ "$miss" -eq 0 ] || { echo "See docs/guides/IOS-TESTFLIGHT-SETUP.md"; exit 1; }
+          echo "all five secrets present"
+
+      - name: select the newest xcode >= ${{ env.MIN_XCODE_MAJOR }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null); do
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null || continue)
+            major=${v%%.*}; case "$major" in ''|*[!0-9]*) continue;; esac
+            [ "$major" -ge "${MIN_XCODE_MAJOR}" ] || continue
+            printf '%s\t%s\n' "$v" "$app"
+          done | sort -V | tail -1 > /tmp/xc || true
+          [ -s /tmp/xc ] || { echo "::error title=No Xcode >= ${MIN_XCODE_MAJOR}::Mapbox ships Swift 6.2.4 binaries an older compiler cannot consume"; exit 1; }
+          sudo xcode-select -s "$(cut -f2 /tmp/xc)/Contents/Developer"
+          xcodebuild -version
+
+      - name: set up flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          pub-cache: "false"
+
+      # Per-machine state that does not travel with the repo. Without it the
+      # graph cannot resolve: image_cropper wants tocropviewcontroller 3.1.2+,
+      # file_picker's DKImagePickerController pins 2.6.x, and SPM calls that
+      # fatal where CocoaPods does not.
+      - name: use CocoaPods, not Swift Package Manager
+        working-directory: .
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # The REAL .env, not the placeholder ios-build.yml writes. main.dart:99
+      # throws a StateError before the first frame when either key is empty, and
+      # a TestFlight build that dies on launch is worse than no build.
+      - name: write .env from the secret
+        env:
+          MILES_ENV: ${{ secrets.MILES_ENV }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$MILES_ENV" | base64 --decode > .env
+          # Assert the SHAPE without ever echoing the values.
+          grep -q '^NEXT_PUBLIC_SUPABASE_URL=.\+' .env || { echo "::error title=.env::NEXT_PUBLIC_SUPABASE_URL is empty or missing"; exit 1; }
+          grep -q '^NEXT_PUBLIC_SUPABASE_ANON_KEY=.\+' .env || { echo "::error title=.env::NEXT_PUBLIC_SUPABASE_ANON_KEY is empty or missing"; exit 1; }
+          echo ".env written, $(wc -l < .env) lines, both keys non-empty"
+
+      # -allowProvisioningUpdates talks to Apple with THIS key and creates the
+      # certificate and profile itself. No .p12 to juggle, no fastlane match, no
+      # Apple ID password — which Apple deprecated for automation anyway.
+      - name: install the App Store Connect API key
+        env:
+          KEYID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          PKEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/private_keys
+          printf '%s' "$PKEY" | base64 --decode > ~/private_keys/AuthKey_${KEYID}.p8
+          chmod 600 ~/private_keys/AuthKey_${KEYID}.p8
+          head -c 27 ~/private_keys/AuthKey_${KEYID}.p8 | grep -q "BEGIN PRIVATE KEY" \
+            || { echo "::error title=API key::not a PEM private key after base64 decode — re-encode the .p8 with: base64 -i AuthKey_XXX.p8 | pbcopy"; exit 1; }
+          echo "key installed as AuthKey_${KEYID}.p8"
+
+      - name: pod install
+        working-directory: mobile/ios
+        run: pod install --repo-update
+
+      # DELIBERATELY NOT auto-incremented. CLAUDE.md: "Bump pubspec.yaml and
+      # ReleaseGate.buildNumber together; a test and tool/release.sh both
+      # enforce the pair", and version_lockstep_test.dart asserts it. Injecting
+      # a build number here would ship an artifact whose ReleaseGate.buildNumber
+      # disagrees with its CFBundleVersion — the gate would then check a build
+      # number that does not exist. App Store Connect rejects a duplicate build
+      # number, and that rejection is the correct outcome: bump the pair in a
+      # commit, like every other release.
+      - name: version pair, as committed
+        run: |
+          set -euo pipefail
+          v=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
+          g=$(grep -oE 'buildNumber = [0-9]+' lib/core/app/release_gate.dart | grep -oE '[0-9]+')
+          echo "pubspec: $v    ReleaseGate.buildNumber: $g"
+          [ "${v##*+}" = "$g" ] || { echo "::error title=Version drift::pubspec +${v##*+} and ReleaseGate.buildNumber $g disagree"; exit 1; }
+
+      - name: build signed ipa
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          KEYID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM}</string>
+            <key>uploadSymbols</key><true/>
+            <key>signingStyle</key><string>automatic</string>
+            <key>destination</key><string>export</string>
+          </dict></plist>
+          PLIST
+          flutter build ipa --release \
+            --export-options-plist=/tmp/ExportOptions.plist \
+            || { echo "::error title=Archive failed::see the log above"; exit 1; }
+          ls -la build/ios/ipa/*.ipa
+
+      - name: upload to TestFlight
+        env:
+          ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          KEYID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          set -euo pipefail
+          ipa=$(ls build/ios/ipa/*.ipa | head -1)
+          echo "uploading $(basename "$ipa") ($(du -h "$ipa" | cut -f1))"
+          xcrun altool --upload-app -f "$ipa" -t ios \
+            --apiKey "$KEYID" --apiIssuer "$ISSUER" 2>&1 | tail -20
+          echo "uploaded. Processing on App Store Connect takes 5-15 minutes before"
+          echo "the build appears in TestFlight."
+
+      - name: keep the ipa and the symbols
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: miles-ios-ipa
+          path: |
+            mobile/build/ios/ipa/*.ipa
+            mobile/build/ios/archive/*.xcarchive/dSYMs
+          retention-days: 14
+          if-no-files-found: warn
