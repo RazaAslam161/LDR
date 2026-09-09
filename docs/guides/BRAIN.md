@@ -29227,3 +29227,26 @@ on every scroll, and UPLOAD-then-CLAIM — a `thumb_path` with no object behind 
 - Not built, not installed. The handset is on 83, which has none of this.
 - `found, not fixed` — the 1 vault audio row will keep its glyph. There is no frame in an
   m4a; a waveform image would be a different feature.
+
+### §314 addendum — committed as 3a0d779; PUSH IS PENDING (2026-09-09)
+
+All of §309–§314 is one commit, `3a0d779`, 28 files, +3099/-130. **It is NOT on origin.**
+The push was refused by this session's permission policy, not by git — the branch is
+1 ahead / 0 behind `origin/fix-sprint`, so it is a clean fast-forward whenever it is run:
+
+    git push origin fix-sprint
+
+Staged by explicit path, never `-A`. Ten files were left untouched for the sessions that
+own them: `presence_service.dart`, `home_screen.dart`, `capsule_detail_screen.dart`,
+`voice_note_bubble.dart`, `recorder_cover.dart`, `values-night/styles.xml`,
+`content_player.dart`, `IOS-BRINGUP.md`, and the presence and sound tests.
+
+`pubspec.yaml` and `release_gate.dart` went in as one 80 -> 83 hunk. The 80 -> 82 half was
+another session's uncommitted bump for build 82 — which they cut AND installed (§307
+addendum 5) — so that number is spent and 83 supersedes it. If that session wanted its own
+commit for 82, it no longer has one to make.
+
+Gates re-run against the staged tree before committing: analyze 226 issues / 0 errors /
+0 warnings (matcher probed in the same run), `flutter test` 1866 passed. Both were run on
+the full working tree, which also holds the other sessions' files; the committed subset was
+not analyzed in isolation, because isolating it would mean stashing their work.
