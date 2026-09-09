@@ -198,13 +198,32 @@ jobs:
           app="build/ios/iphonesimulator/Runner.app"
           test -d "$app" || { echo "::error title=No app bundle::$app missing after a successful build"; exit 1; }
           du -sh "$app"
-          # The two things that were silently absent on iOS before this port and
-          # would be again if someone drops them: Firebase's config, without
-          # which main() throws before the first frame, and the AAC audio, which
-          # replaced Ogg because AVFoundation cannot decode Vorbis.
-          test -f "$app/GoogleService-Info.plist" && echo "GoogleService-Info.plist: present" || { echo "::error title=Missing Firebase config::GoogleService-Info.plist is not in the bundle; the app would throw UnsupportedError in main()"; exit 1; }
-          n=$(ls "$app/flutter_assets/assets/sound/" 2>/dev/null | grep -c '\.m4a$' || true)
-          echo "AAC cues bundled: $n"
-          [ "$n" -eq 15 ] || { echo "::error title=Sound assets::expected 15 .m4a cues, found $n"; exit 1; }
-          ogg=$(ls "$app/flutter_assets/assets/sound/" 2>/dev/null | grep -c '\.ogg$' || true)
-          [ "$ogg" -eq 0 ] || { echo "::error title=Ogg in bundle::$ogg .ogg file(s) shipped; AVFoundation cannot decode them"; exit 1; }
+
+          # Firebase's config has to be IN THE BUNDLE, not merely in the repo.
+          # The native SDK reads it from there at launch, and without it main()
+          # throws UnsupportedError before the first frame.
+          test -f "$app/GoogleService-Info.plist" \
+            && echo "GoogleService-Info.plist: present" \
+            || { echo "::error title=Missing Firebase config::not in the bundle; the app would throw UnsupportedError in main()"; exit 1; }
+
+          # Found by `find`, not by a hardcoded path. On iOS the assets live in
+          # Runner.app/Frameworks/App.framework/flutter_assets/, NOT at the
+          # bundle root the way they sit on Android - the first version of this
+          # check looked at the root, found nothing, and reported zero cues on a
+          # build that had shipped all fifteen.
+          snd=$(find "$app" -type d -path '*flutter_assets/assets/sound' | head -1)
+          test -n "$snd" || { echo "::error title=No sound assets::assets/sound is not in the bundle at all"; exit 1; }
+          echo "sound assets at: ${snd#$app/}"
+          n=$(ls "$snd" | grep -c '\.m4a$' || true)
+          ogg=$(ls "$snd" | grep -c '\.ogg$' || true)
+          echo "AAC cues: $n    Ogg files: $ogg"
+          [ "$n" -eq 15 ] || { ls "$snd"; echo "::error title=Sound assets::expected 15 .m4a cues, found $n"; exit 1; }
+          # The one that would ship silently: AVFoundation has no Vorbis decoder,
+          # so an .ogg here plays on Android and is mute on iOS with no error.
+          [ "$ogg" -eq 0 ] || { echo "::error title=Ogg in bundle::$ogg .ogg file(s) shipped; iOS cannot decode them"; exit 1; }
+
+          # The WebRTC framework, because the fork shipped android-only until
+          # this port and the failure mode was a runtime MissingPluginException
+          # on the first call, not a build error.
+          find "$app/Frameworks" -maxdepth 1 -name 'WebRTC*' -o -maxdepth 1 -name 'webrtc*' | head -3
+          echo "frameworks bundled: $(ls "$app/Frameworks" 2>/dev/null | wc -l | tr -d ' ')"
