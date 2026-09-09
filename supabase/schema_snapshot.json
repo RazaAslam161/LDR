@@ -755,6 +755,7 @@
         "ack_delivered",
         "ack_read",
         "archived_couple_id",
+        "archived_gallery",
         "call_cooldown_seconds",
         "capsule_seal_summary",
         "change_vault_pin",

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:miles/core/app/session_provider.dart';
 import 'package:miles/core/data/media_urls.dart';
 import 'package:miles/core/diag/diag.dart';
@@ -169,6 +170,14 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
   /// network error and an empty past must never paint the same sentence.
   bool _archiveFailed = false;
 
+  /// The day the archive closes and the couple's records are erased.
+  ///
+  /// Painted, not merely held. An album that ends silently is exactly the harm
+  /// the thirty-day window exists to prevent: somebody who is never told loses
+  /// the photographs they meant to keep, and finds out on the day it is too
+  /// late to do anything about it.
+  DateTime? _archiveExpires;
+
   void _openAlbum(String albumId, {required bool archived}) {
     _albumId = albumId;
     _archived = archived;
@@ -198,9 +207,10 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
 
   Future<void> _resolveArchive() async {
     try {
-      final id = await GalleryRepository.archivedCoupleId();
-      if (!mounted || _stream != null || id == null) return;
-      setState(() => _openAlbum(id, archived: true));
+      final found = await GalleryRepository.archivedGallery();
+      if (!mounted || _stream != null || found == null) return;
+      _archiveExpires = found.expiresAt;
+      setState(() => _openAlbum(found.coupleId, archived: true));
     } catch (e, st) {
       ErrorReporter.report(e, st, kind: 'gallery-archive');
       if (mounted) setState(() => _archiveFailed = true);
@@ -665,6 +675,8 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                         )
                       : const SizedBox.shrink(),
                 ),
+                if (_archived && _archiveExpires != null && !_selecting)
+                  _ClosingBand(expiresAt: _archiveExpires!),
                 // Not on an archive: Keep and Delete both call RPCs that
                 // resolve the live couple, so the band would offer two buttons
                 // the server refuses.
@@ -777,6 +789,33 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
 /// A band rather than a full-screen card: the rows ARE there, the dates are
 /// there, and replacing all of it with an error would throw away more than the
 /// failure cost.
+/// What is left of the thirty days, and the one thing to do about it.
+///
+/// Names the action rather than only the deadline: the way out is a long press
+/// and then Save to vault, which nothing on this screen would otherwise teach,
+/// and a countdown with no instruction is just a worry.
+class _ClosingBand extends StatelessWidget {
+  const _ClosingBand({required this.expiresAt});
+
+  final DateTime expiresAt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      color: MilesColors.surface1,
+      child: Text(
+        'This gallery closes on ${DateFormat.MMMMd().format(expiresAt.toLocal())}. '
+        'Press and hold a picture to save it to your vault, which is yours to '
+        'keep.',
+        style: const TextStyle(fontSize: 13, color: Color(0xCCF5EFE6),
+            height: 1.4,),
+      ),
+    );
+  }
+}
+
 class _SigningBand extends StatelessWidget {
   const _SigningBand({required this.busy, required this.onRetry});
 

@@ -295,7 +295,7 @@ void main() {
       // would be the omission this test exists to prevent, in reverse. What
       // the non-initiator must still be told is that ending it does not take
       // their own things with it.
-      expect(find.textContaining('your gallery stays'), findsOneWidget);
+      expect(find.textContaining('kept safe 30 days'), findsOneWidget);
     });
 
     testWidgets('is offered no chat door — the note is the channel',

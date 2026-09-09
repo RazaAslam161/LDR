@@ -420,17 +420,27 @@ class GalleryRepository {
     return (n as num?)?.toInt() ?? 0;
   }
 
-  /// The couple whose album this account may still open after unlinking, or
-  /// null.
+  /// The couple whose album this account may still open after unlinking, and
+  /// the day it closes — or null.
   ///
-  /// Asked of the server every time and never cached: the same three events
-  /// that end the archive — pairing with somebody new, either of them ending
-  /// it permanently, the couple being collected — are all decided there, and a
-  /// remembered id would paint a grid whose signed URLs have already stopped
-  /// being issued. `archived_couple_id()` returns one uuid or NULL for every
-  /// negative case, so there is nothing here to interpret.
-  static Future<String?> archivedCoupleId() async =>
-      await _c.rpc<dynamic>('archived_couple_id') as String?;
+  /// Asked of the server every time and never cached: every event that ends
+  /// this — the thirty days running out, pairing with somebody new, either of
+  /// them ending it permanently, the couple being collected — is decided
+  /// there, and a remembered id would paint a grid whose signed URLs have
+  /// already stopped being issued.
+  ///
+  /// `archived_gallery()` answers one object or NULL, the same NULL for every
+  /// negative case, so there is nothing here to interpret and nothing a caller
+  /// can learn from which negative it was.
+  static Future<({String coupleId, DateTime expiresAt})?>
+      archivedGallery() async {
+    final row = await _c.rpc<dynamic>('archived_gallery');
+    if (row is! Map) return null;
+    return (
+      coupleId: row['couple_id'] as String,
+      expiresAt: DateTime.parse(row['expires_at'] as String).toUtc(),
+    );
+  }
 
   static Future<void> _remove(List<String> paths) async {
     try {
