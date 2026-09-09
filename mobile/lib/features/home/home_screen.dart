@@ -448,11 +448,14 @@ class _PartnerStatusCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 6),
                         Text(
+                          // The hour, not the age — chat's AppBar carries the
+                          // age. Off app_last_active_at rather than the
+                          // `last_seen` column this used to read, which moves
+                          // only on an online claim and so printed the wrong
+                          // moment. See Presence.lastSeenClock.
                           online
                               ? 'Online'
-                              : presence?.lastSeen == null
-                                  ? 'Offline'
-                                  : 'Last seen ${DateFormat('h:mm a').format(presence!.lastSeen!)}',
+                              : presence?.lastSeenClock() ?? 'Offline',
                           style: const TextStyle(
                               color: MilesColors.taupe, fontSize: 12,),
                         ),

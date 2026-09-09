@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:miles/core/app/providers.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
@@ -227,6 +228,46 @@ class Presence {
     if (age.inHours < 24) return '${age.inHours}h ago';
     if (age.inDays < 7) return '${age.inDays}d ago';
     return 'A while ago';
+  }
+
+  /// GETTER 4 — the same moment as [lastSeenText], written as a CLOCK TIME.
+  ///
+  /// Home asks a different question from chat. A conversation wants "how stale
+  /// is this" and gets the age; the home card wants "when was she last here"
+  /// and gets the hour. Returns the whole line, "Online" excepted, so the two
+  /// callers cannot drift into two spellings of it.
+  ///
+  /// Source is app_last_active_at, NEVER `last_seen`, and that is the defect
+  /// this exists for rather than a preference: `last_seen` moves only on a real
+  /// online CLAIM, so the clock time Home printed was the moment she last came
+  /// online — hours out on any day the app was simply left open.
+  ///
+  /// The DAY rides along whenever it is not today. A bare "10:12 AM" on a stamp
+  /// from last Tuesday reads as this morning, which is the same lie wearing a
+  /// friendlier format, and it is half of what made the old line wrong.
+  ///
+  /// [now] is injectable so the day boundaries can be tested without waiting
+  /// for one — the same reason partnerSentence takes one.
+  String? lastSeenClock({DateTime? now}) {
+    if (isTrulyOnline) return null;
+    final ts = appLastActiveAt?.toLocal();
+    if (ts == null) return 'Offline';
+    // Local on both sides: "yesterday" is a question about the reader's
+    // calendar, and comparing a local stamp against a UTC today moves the
+    // boundary by the zone offset — five hours, here.
+    final at = (now ?? DateTime.now()).toLocal();
+    final clock = DateFormat('h:mm a').format(ts);
+    // Whole calendar days apart, not elapsed hours: 23:50 -> 00:10 is
+    // yesterday even though twenty minutes passed.
+    final days = DateTime(at.year, at.month, at.day)
+        .difference(DateTime(ts.year, ts.month, ts.day))
+        .inDays;
+    // Negative means a stamp ahead of this device's clock, which is skew
+    // rather than the future; today is the honest answer for it.
+    if (days <= 0) return 'Last seen $clock';
+    if (days == 1) return 'Last seen yesterday $clock';
+    if (days < 7) return 'Last seen ${DateFormat('EEE').format(ts)} $clock';
+    return 'Last seen ${DateFormat('d MMM').format(ts)} $clock';
   }
 
   bool get isSharingLive =>
