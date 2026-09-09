@@ -28703,3 +28703,23 @@ carry the header. Nothing was changed this session.
 
 **Next step:** ask the owner which of the three, then apply it to `showReachNotification`
 only — the call, call-service and Timer paths are separate decisions with different stakes.
+
+### §311 addendum — pushed as 84244de (2026-09-09)
+
+Fast-forward, no merge needed: `git fetch` then
+`git rev-list --left-right --count origin/fix-sprint...HEAD` → `0	1`, so the
+`de968ac` merge that §310's addendum describes was already the server's head.
+`git push origin fix-sprint` → `de968ac..84244de`, and `git ls-remote origin
+refs/heads/fix-sprint` → `84244dec07c9456...` — the SERVER's answer, not the
+tracking ref.
+
+**Only §311 went up.** BRAIN's working copy still carries 231 uncommitted lines
+belonging to three other sessions — the §310 addendum, the §310 deferrals
+section, and a second §311 about a selectable single photograph. They were not
+staged and not touched. Staging the whole file would have committed all three
+under this session's message, so the 43 lines of §311 were staged alone through
+`git apply --cached` with a hand-built patch; `git diff --stat` on the file
+still reports the 231 that are theirs to commit.
+
+Nothing in `mobile/` was changed this session, and nothing in `mobile/` was
+staged.
