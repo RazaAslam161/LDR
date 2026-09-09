@@ -80,6 +80,37 @@ class DisguiseService {
   /// Reads [enabled] from the native BuildConfig, once. Must complete before
   /// runApp — see main().
   static Future<void> loadEnabled() async {
+    // iOS answers for itself, because there is nothing to ask. `miles/disguise`
+    // is MainActivity's channel and the iOS side of the launcher swap is not
+    // written yet, so the invoke below throws MissingPluginException, the catch
+    // swallows it, and BOTH defaults stand — enabled true, plainDefault false.
+    //
+    // That pair is the bug. DisguiseCoverHost resolves
+    // `plainDefault ? kPlainProfile : kDefaultDisguise`, and kDefaultDisguise
+    // is `kDisguises.first` — News. So the app opened on iOS wearing the fake
+    // news reader, with the two-finger ten-second hold as the only way in. The
+    // exact inverse of what ships: both Android manifests set PLAIN_DEFAULT
+    // true and every cover `enabled="false"` (BRAIN §32/§34, 2026-08-16), so
+    // the app installs as itself and a cover is something the owner switches ON.
+    //
+    // enabled stays TRUE because the covers are real on iOS: the cover screens,
+    // the picker, the entry gesture and the persisted choice are all pure
+    // Flutter and all work. Only the LAUNCHER swap is missing — iOS changes an
+    // icon through setAlternateIconName, never a label — so a cover chosen here
+    // dresses the app without renaming it in the home screen. plainDefault TRUE
+    // is what makes the app its own front door until someone chooses otherwise:
+    // kPlainProfile carries DisguiseCover.none, and the host opens the gate
+    // directly on that rather than drawing an empty cover.
+    // defaultTargetPlatform, not Platform.isIOS. dart:io reports the HOST
+    // under `flutter test` — macOS — so a Platform.isIOS branch is one no test
+    // in this repo can ever reach, and an unreachable branch is how the
+    // original defaults survived unnoticed in the first place.
+    // debugDefaultTargetPlatformOverride drives this one.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      enabled = true;
+      plainDefault = true;
+      return;
+    }
     try {
       // Same hard timeout as reconcile(), for the same reason: this is on the
       // cold-start path and nothing may block the first frame on it.
