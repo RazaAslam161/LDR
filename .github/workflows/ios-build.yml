@@ -68,27 +68,28 @@ jobs:
       # "file not found", which reads like a repo problem. Picks the highest
       # installed Xcode and refuses outright below MIN_XCODE_MAJOR, so the
       # failure names its own cause.
-      - name: select xcode >= ${{ env.MIN_XCODE_MAJOR }}
+      # Chosen at runtime, because the runner image's Xcode set moves without
+      # notice. Sorted by FULL version with sort -V, not by major: this image
+      # carries Xcode_26.0, 26.0.1, 26.1 and 26.1.1, and comparing majors alone
+      # made every one of them equal, so the first iterated won. That picked
+      # 26.0.1, whose SDK is iOS 26.0, while every runtime on the image is 26.2
+      # or newer - and the build died with no destination at all.
+      - name: select the newest xcode >= ${{ env.MIN_XCODE_MAJOR }}
         working-directory: .
         run: |
           set -euo pipefail
-          ls -1 /Applications | grep -E '^Xcode' || true
-          best=""; bestv=0
-          for app in /Applications/Xcode*.app; do
-            [ -e "$app" ] || continue
-            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null || echo 0)
+          best=""
+          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null); do
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null || continue)
             major=${v%%.*}
             case "$major" in ''|*[!0-9]*) continue;; esac
-            if [ "$major" -gt "$bestv" ]; then bestv=$major; best=$app; fi
-          done
-          if [ -z "$best" ] || [ "$bestv" -lt "${MIN_XCODE_MAJOR}" ]; then
-            echo "::error title=No suitable Xcode::need >= ${MIN_XCODE_MAJOR}, best found was ${bestv:-none}. Mapbox's XCFrameworks are built with Swift 6.2.4 and cannot be consumed by an older compiler."
-            exit 1
-          fi
-          echo "using $best (major $bestv)"
+            [ "$major" -ge "${MIN_XCODE_MAJOR}" ] || continue
+            printf '%s\t%s\n' "$v" "$app"
+          done | sort -V | tail -1 > /tmp/xc || true
+          [ -s /tmp/xc ] || { echo "::error title=No suitable Xcode::need >= ${MIN_XCODE_MAJOR}. Mapbox's XCFrameworks are built with Swift 6.2.4 and cannot be consumed by an older compiler."; exit 1; }
+          best=$(cut -f2 /tmp/xc); echo "selected $(cat /tmp/xc)"
           sudo xcode-select -s "$best/Contents/Developer"
-          xcodebuild -version
-          xcrun swift --version
+          xcodebuild -version; xcrun swift --version
 
       - name: set up flutter ${{ env.FLUTTER_VERSION }}
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
@@ -135,17 +136,29 @@ jobs:
       # downloader on a matching macOS, which is the configuration it works in —
       # the local failure ("not having an extractor") was a macOS 15 / iOS 26.3
       # asset mismatch, not a fault in the command.
-      - name: install an iOS platform if the image has none
+      # A runtime is not a destination. This image ships iOS 26.2/26.4/26.5
+      # runtimes and ZERO instantiated devices, and `xcodebuild` needs a device
+      # to target - "Unable to find a destination matching { generic:1,
+      # platform:iOS Simulator }" is what that looks like. Create one from the
+      # newest runtime present; only download a platform if there is no runtime
+      # at all.
+      - name: make sure a simulator device exists
         working-directory: .
         run: |
           set -euo pipefail
-          if xcrun simctl list runtimes 2>/dev/null | grep -qE '^iOS '; then
-            echo "runtime already present, skipping the download"
-          else
-            echo "no iOS runtime on this image; downloading (this is several GB)"
+          if ! xcrun simctl list runtimes 2>/dev/null | grep -qE '^iOS '; then
+            echo "no iOS runtime at all; downloading a platform (several GB)"
             sudo xcodebuild -downloadPlatform iOS -quiet || xcodebuild -downloadPlatform iOS
-            xcrun simctl list runtimes
           fi
+          if [ -n "$(xcrun simctl list devices available 2>/dev/null | grep -E '^\s+iPhone' || true)" ]; then
+            echo "an iPhone simulator already exists"
+          else
+            rt=$(xcrun simctl list runtimes 2>/dev/null | grep -E '^iOS ' | tail -1 | sed -E 's/.*(com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+).*/\1/')
+            dt=$(xcrun simctl list devicetypes 2>/dev/null | grep -E 'iPhone' | tail -1 | sed -E 's/.*\((com\.apple[^)]*)\)/\1/')
+            echo "creating a device: devicetype=$dt runtime=$rt"
+            xcrun simctl create "ci-iphone" "$dt" "$rt"
+          fi
+          xcrun simctl list devices available | grep -E '^\s+|^--' | head -10
 
       - name: flutter pub get
         run: flutter pub get
