@@ -43,7 +43,7 @@ Settings → Sounds is ON by default. Then:
 
 - **2.1 Latency.** Send a message, press a capsule seal, tap a primary
   button. Does the sound feel attached to the finger, or late? On the
-  slowest handset you have, if a cue trails visibly, say so — `tap.ogg` is
+  slowest handset you have, if a cue trails visibly, say so — `tap.m4a` is
   the first candidate to drop to silence.
 - **2.2 Your music survives.** Start Spotify/YouTube Music. Return to Miles
   and fire several cues. PASS: your music keeps playing (it may duck
@@ -51,7 +51,7 @@ Settings → Sounds is ON by default. Then:
   needs another pass. *(This was a real bug found in review: every cue used
   to seize permanent audio focus.)*
 - **2.3 The bed loops seamlessly.** Breath Sync, let it run two full minutes.
-  Any audible click or gap at the loop point? (`bed_air.ogg` is 28s with a
+  Any audible click or gap at the loop point? (`bed_air.m4a` is 28s with a
   2s crossfade.)
 - **2.4 Discretion.** Mid-capsule-ceremony (the long cue), raise the stealth
   cover (long-press) and separately trigger the panic gesture. PASS: audio
