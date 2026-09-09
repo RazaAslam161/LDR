@@ -1008,6 +1008,65 @@ class _MilesAppState extends ConsumerState<MilesApp>
                                   fontSize: 16, fontWeight: FontWeight.w600,),),
                         ),
                       ],
+                      // The iOS half of the same exit. ReleaseGate answers
+                      // 'appstore' for itself on iOS, so channelKnown is true
+                      // here and this is the branch a blocked App Store install
+                      // takes.
+                      //
+                      // Gated on kAppStoreAppId being set because an iOS app can
+                      // only open its own store page by NUMERIC id, and that id
+                      // does not exist until the App Store Connect record does.
+                      // While it is empty this screen falls through to 'Check
+                      // again' alone - the same dead end the Play branch above
+                      // exists to avoid, so FILL IT IN before raising
+                      // min_build_play. There is no bundle-id URL form to use
+                      // instead; itms-apps requires the id.
+                      if (ReleaseGate.channelKnown &&
+                          ReleaseGate.channel == 'appstore' &&
+                          kAppStoreAppId.isNotEmpty) ...[
+                        const SizedBox(height: 28),
+                        ElevatedButton(
+                          onPressed: () async {
+                            // itms-apps opens the App Store app directly; the
+                            // https form is the fallback a browser renders.
+                            // Both failures are logged - this is the only exit.
+                            try {
+                              if (await launchUrl(
+                                Uri.parse(
+                                  'itms-apps://apps.apple.com/app/id$kAppStoreAppId',
+                                ),
+                              )) {
+                                return;
+                              }
+                            } catch (e) {
+                              debugPrint('[release] itms-apps launch failed: '
+                                  '${e.runtimeType}');
+                            }
+                            try {
+                              await launchUrl(
+                                Uri.parse(
+                                  'https://apps.apple.com/app/id$kAppStoreAppId',
+                                ),
+                                mode: LaunchMode.externalApplication,
+                              );
+                            } catch (e) {
+                              debugPrint('[release] app store listing failed: '
+                                  '${e.runtimeType}');
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: MilesColors.ember,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 32, vertical: 14,),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),),
+                          ),
+                          child: const Text('Update on the App Store',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w600,),),
+                        ),
+                      ],
                       // UNCONDITIONAL, and that is the point: the store button
                       // above is conditional and a sideload install never earns
                       // it, so this screen could otherwise render as an icon

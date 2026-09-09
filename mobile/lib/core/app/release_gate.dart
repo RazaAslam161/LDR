@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -115,8 +116,9 @@ class ReleaseGate {
   /// way back has to be one UPDATE, not a release waiting on installs.
   static bool beautyKilled = false;
 
-  /// Which channel this install is — 'sideload' or 'play', as the Android
-  /// side's BuildConfig reports it. The two fleets need separate floors:
+  /// Which channel this install is — 'sideload' or 'play' as the Android side's
+  /// BuildConfig reports it, or 'appstore', which iOS answers for itself in
+  /// [_loadChannel] because it has no native host to ask. The two fleets need separate floors:
   /// raising min_build tells sideload clients to install the published APK
   /// over themselves, an instruction a Play install must never receive, and
   /// the Play rollout will trail the sideload one anyway.
@@ -151,6 +153,26 @@ class ReleaseGate {
 
   static Future<void> _loadChannel() async {
     if (_channelKnown) return;
+    // iOS has exactly one distribution channel and no 'miles/updater' host to
+    // ask — that channel lives in MainActivity.kt and has no iOS counterpart.
+    // Answering it here, rather than letting the invoke throw, fixes two things
+    // at once:
+    //   * the block screen stops being a DEAD END. It only draws an exit when
+    //     channelKnown is true, so every blocked iOS user would have seen a
+    //     screen with nothing but 'Check again' - the exact failure the
+    //     channelKnown doc above exists to prevent.
+    //   * applyRow stops reading the SIDELOAD floor for App Store installs.
+    //     'sideload' is the safe default for an unknown ANDROID client; for iOS
+    //     it is simply wrong, and it means raising min_build for the sideload
+    //     testers would block the entire App Store fleet in the same statement.
+    // 'appstore' is store-distributed, so applyRow reads min_build_play with
+    // it - see the fleet comment there.
+    if (!kIsWeb && Platform.isIOS) {
+      channel = 'appstore';
+      _channelKnown = true;
+      revision.value++;
+      return;
+    }
     try {
       channel = await _updater
               .invokeMethod<String>('channel')
@@ -250,7 +272,15 @@ class ReleaseGate {
     // absent or null min_build_play means 0 — play never blocks by default,
     // because blocking is only useful where the way out (a newer build on the
     // store) actually exists yet.
-    final min = channel == 'play'
+    // 'appstore' rides min_build_play rather than a column of its own: the
+    // backend is unchanged for this port, and the two share one build-number
+    // space (pubspec `version: x.y.z+N` feeds both), so a single store floor is
+    // coherent. It is also the conservative direction - the alternative,
+    // falling through to min_build, is the SIDELOAD floor, and that one is
+    // raised to push testers onto a hand-installed APK, an instruction no App
+    // Store install can act on. If the two stores ever need to roll out
+    // independently, this needs its own column, not a different default.
+    final min = channel == 'play' || channel == 'appstore'
         ? ((row['min_build_play'] as num?)?.toInt() ?? 0)
         : ((row['min_build'] as num?)?.toInt() ?? 1);
     final wasBlocked = _blocked;
@@ -301,3 +331,12 @@ class ReleaseGate {
 
   static const _recheckAfter = Duration(minutes: 15);
 }
+
+/// The App Store's numeric id for this app, used to build the only URL form
+/// that opens an iOS app's own store page (`itms-apps://apps.apple.com/app/idN`).
+///
+/// EMPTY UNTIL THE APP STORE CONNECT RECORD EXISTS. There is no bundle-id URL
+/// to use instead, so while this is empty a blocked iOS install has no exit
+/// button - see the branch in main.dart. Set it BEFORE raising
+/// `app_release.min_build_play`, or the first block strands the iOS fleet.
+const String kAppStoreAppId = '';
