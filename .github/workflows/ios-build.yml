@@ -101,6 +101,24 @@ jobs:
           # pubspec.lock, so that hash is the empty string forever.
           pub-cache: "false"
 
+      # NOT optional, and not a preference. Flutter 3.44 enables Swift Package
+      # Manager by default, and this dependency graph CANNOT resolve under it:
+      #
+      #   image_cropper 12.2.1        -> tocropviewcontroller 3.1.2 ..< 4.0.0
+      #   file_picker's DKImagePicker -> tocropviewcontroller 2.6.0 ..< 3.0.0
+      #
+      # SPM treats that as fatal; CocoaPods resolves it. The local fix
+      # (`flutter config --no-enable-swift-package-manager`) writes to
+      # ~/.config/flutter and is per-MACHINE, so it does not travel with the
+      # repo — which is why this job caught a break that had been invisible on
+      # the machine the port was written on. Every fresh checkout needs this
+      # until one of those two packages moves.
+      - name: use CocoaPods, not Swift Package Manager
+        working-directory: .
+        run: |
+          flutter config --no-enable-swift-package-manager
+          flutter config | grep -i swift-package || true
+
       - name: flutter pub get
         run: flutter pub get
 
