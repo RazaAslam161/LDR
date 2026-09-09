@@ -227,3 +227,39 @@ jobs:
           # on the first call, not a build error.
           find "$app/Frameworks" -maxdepth 1 -name 'WebRTC*' -o -maxdepth 1 -name 'webrtc*' | head -3
           echo "frameworks bundled: $(ls "$app/Frameworks" 2>/dev/null | wc -l | tr -d ' ')"
+
+          # ---- Info.plist, read from the BUILT bundle, not the source tree ----
+          # The source file can be right while the bundle is wrong: a key can be
+          # stripped by a build setting, and the difference is only visible here.
+          plist="$app/Info.plist"
+          fail=0
+          # Every usage string iOS renders VERBATIM before granting a permission.
+          # A missing one is not a warning: the API traps and the feature dies.
+          for k in NSCameraUsageDescription NSMicrophoneUsageDescription \
+                   NSPhotoLibraryUsageDescription NSLocationWhenInUseUsageDescription \
+                   NSFaceIDUsageDescription NSMotionUsageDescription; do
+            v=$(/usr/libexec/PlistBuddy -c "Print :$k" "$plist" 2>/dev/null || true)
+            if [ -z "$v" ]; then echo "::error title=Missing $k::iOS traps the API without it"; fail=1
+            else echo "  $k: ok"; fi
+          done
+          # NSLocationAlwaysAndWhenInUse must NOT be here. The Android manifest
+          # deliberately omits ACCESS_BACKGROUND_LOCATION, and asking for the
+          # always-on variant on iOS would silently widen that decision.
+          if /usr/libexec/PlistBuddy -c "Print :NSLocationAlwaysAndWhenInUseUsageDescription" "$plist" >/dev/null 2>&1; then
+            echo "::error title=Background location::the Android manifest omits ACCESS_BACKGROUND_LOCATION on purpose; iOS must match"; fail=1
+          else echo "  no always-on location key: ok"; fi
+
+          modes=$(/usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$plist" 2>/dev/null || true)
+          echo "$modes" | grep -q remote-notification || { echo "::error title=UIBackgroundModes::remote-notification missing; FCM cannot wake the app"; fail=1; }
+          echo "$modes" | grep -q audio || { echo "::error title=UIBackgroundModes::audio missing; a call dies when the app backgrounds"; fail=1; }
+          # voip belongs here ONLY once PushKit is actually adopted - Apple
+          # checks that a declared mode is used, and an unused one is a rejection.
+          echo "$modes" | grep -q voip && { echo "::error title=UIBackgroundModes::voip declared without PushKit; Apple rejects unused background modes"; fail=1; } || true
+
+          bid=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist" 2>/dev/null || true)
+          [ "$bid" = "com.miles.miles" ] || { echo "::error title=Bundle id::got '$bid', expected com.miles.miles - it must match the Android applicationId, or Firebase and the App Store record point at a different app"; fail=1; }
+          echo "  CFBundleIdentifier: $bid"
+          echo "  CFBundleDisplayName: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist" 2>/dev/null || echo MISSING)"
+          echo "  MinimumOSVersion: $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$plist" 2>/dev/null || echo unset)"
+
+          [ "$fail" -eq 0 ] || exit 1
