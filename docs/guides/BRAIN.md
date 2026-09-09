@@ -29933,3 +29933,93 @@ was diffed hunk by hunk first, and it had already survived one repair by somebod
   the owner's call and nobody should build one unasked.
 - BRAIN.md is being appended to by several sessions at once; §315 and §317 each exist twice, and
   this section was numbered after reading the tail at §318.
+
+## §320 — 2026-09-09 — build 84 cut: the first artifact that contains §309–§319
+
+Owner re-authorised the build once the tree went coherent. `bash tool/release.sh` from
+`mobile/`, play flavour, no `--bump` — the number was already spent (see below).
+
+### The first attempt did not fail; it was killed
+
+`release.sh --bump` exited 4 and left `pubspec.yaml` and `release_gate.dart` modified, which
+reads like a build failure and is not one. 2967 lines of log contain **no** `FAILURE`, no
+`BUILD FAILED`, no `Execution failed`, no `What went wrong` — it simply stops mid-javac. The
+Claude Code process that owned the background shell exited while Gradle was compiling, and
+took it with it. The sibling notification for the review's wait-loop says the same thing in
+words: "it may have been running when the previous Claude Code process exited".
+
+**So the re-run dropped `--bump`.** The bump had already landed and was coherent —
+`0.1.0+84` in pubspec and `buildNumber = 84` in `release_gate.dart`, moved together, with
+`versionName = '0.1.0'` checked by eye because nothing enforces it. Running `--bump` a second
+time would have burnt 84 and cut 85 for no reason. The cache wipe that `--bump` performs had
+also already run, and everything compiled since was post-bump, so there was no staleness to
+clean away.
+
+### The artifact, verified twice
+
+The script's own assertions, from the full log (teed this time — §312's rule about never
+piping it through `tail`):
+
+    √ Built build\app\outputs\flutter-apk\app-play-release.apk (86.3MB)
+    sha256 d107aca9b150b448bfc6e1552dfb2d649a750318d853ad75099b495ae0642fa1
+    checked 1 libapp.so, all stamped miles-build-84
+    ABIs in the APK: ['arm64-v8a']
+    the snapshot really is build 84
+    Signer #1 certificate DN: CN=Miles, O=R&D Dev, C=PK
+    certificate matches the installed base — this APK updates in place
+
+Then re-verified independently against the ROOT `Miles.apk`, because the root copy is what
+gets installed and a copy is a step that can fail:
+
+    Miles.apk  90,447,375 bytes  mtime 2026-09-09 22:41:46
+    stamp inside its own lib/arm64-v8a/libapp.so : miles-build-84
+    ABI directories present                      : lib/arm64-v8a/  (only)
+    libapp.so count                              : 1
+    apksigner --print-certs on the ROOT copy     : CN=Miles, O=R&D Dev, C=PK
+      SHA-256 a37c59a5f3801b5a52ca1654ec088cc90d4ee4602ec7cdde50c58b515fbe9bb2
+    sha256(root) == sha256(build output)         : d107aca9… on both
+
+**83 and 84 are provably different artifacts**, which is the check that catches a rebuild
+that reused everything: 83 was 90,447,119 bytes / `19a57fa8…`, 84 is 90,447,375 bytes /
+`d107aca9…`.
+
+### Gates, all post-bump
+
+- The script's own `flutter test` inside the build run: `03:48 +1872 ~3: All tests passed!`
+  That run also passed `repo_hygiene_test.dart: the analyzer reports no errors and no
+  warnings`, and the version-pair test, both against the bumped tree.
+- The script prints `gate: flutter analyze` as a header and runs it silently, so its exit
+  code is the only signal — inference, not output. **Re-run by hand on the post-bump tree**:
+  CI matcher `grep -cE '^ *(error|warning) (-|•) '` counts **0**, verdict line
+  `231 issues found. (ran in 129.9s)` present, and the matcher **probed in the same run** —
+  3 hits on a fixture of indented `error`, indented `warning` and a ZERO-INDENT `warning`,
+  0 on the `info` control.
+
+### What is in this build that was not in 83
+
+Everything from §309 to §319: the media work, the audio content player, the last-seen clock,
+the launch theme, the post-unlink archive with its 30-day window, and the copy that now
+matches production.
+
+### Still open — and the first item is the headline
+
+- **Nothing here has been on a handset.** The phone is on build 83. Not installed: the rule
+  is never to install unprompted, and the owner asked for a build. It updates in place —
+  the certificate matches — so no uninstall and the X25519 seed is not at risk:
+
+      adb install -r D:/Miles/Miles.apk
+
+- **R8 startup is unproven and is the first thing that could fail.** The play channel
+  shrinks and minifies; R8 is what strips the reflection and JNI entry points in WebRTC and
+  ML Kit that fail only on a device. If 84 dies at launch, look there first.
+- **The seven confirmed review findings are all still in this build** (§317 addendum). The
+  two HIGH ones, in the order they should be fixed: "Create & get a code" on /couple mints a
+  couple of one and silently destroys the gallery archive that same screen advertises; and
+  `couple_intimate_read_archived` scopes on `foldername[1]`, so it opens `<couple>/body/`
+  as well as `<couple>/gallery/`. Neither is reachable while both accounts stay paired.
+- `app_release.min_build` deliberately NOT raised — 84 is built, not proven.
+
+**Next step:** owner decides whether 84 goes on the phone. If it does, the device pass in
+priority order is the couple-of-one trap (unlink, then look at /couple before pressing
+anything), then a voice note played with the phone in vibrate, then the Home card's last-seen
+line, then a cold launch in OS dark mode to see whether the splash flashes white.
