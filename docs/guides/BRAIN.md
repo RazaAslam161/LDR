@@ -27559,3 +27559,120 @@ A note for whoever automates this next: `adb devices` reported zero for a full 3
 loop and then listed the OnePlus 8 immediately afterwards — the daemon had been killed and the
 device enumerated a beat after the loop gave up. `adb devices -l` is the check worth trusting,
 and "no devices" is worth re-reading once before it is reported as unplugged.
+
+## §303 — 2026-09-09 — the iOS port: platform added, and the four things that were silently dead on it
+
+Owner, on a different machine: *"now get ready to make a IOS version of miles. get everything
+ready, don't skip any step, just make app fully functional"*, taken to App Store
+submission-ready. Branch `ios-port` off `fix-sprint` at `b30d1dd` (build 80). Nothing committed
+yet at the time of writing.
+
+**The machine is not the Windows box.** A 2020 **Intel** MacBook Air, i5-1030NG7 @ 1.10 GHz,
+8 GB, macOS 15.7.9. Every path in this file that starts `D:\` or `C:\src\flutter` is dead here.
+Flutter lives at `~/development/flutter`, pinned by `git checkout 3.44.2` in the SDK's own repo
+to match `gates.yml`'s `FLUTTER_VERSION`. That pin was not optional: latest stable (3.47.2)
+ships a newer analyzer whose `unawaited_return_in_try_block` fires three times in
+`core/media/encrypted_media_cache.dart` and `core/media/thumbnails.dart`, and those three
+warnings fail `repo_hygiene_test.dart`, which gates `release.sh`. **The code was never wrong.**
+Do not "fix" those three warnings; they do not exist on the SDK this project builds with.
+
+### Xcode 16.4 cannot ship this app, and that is not a preference
+
+Apple, effective **2026-04-28**: *"Apps uploaded to App Store Connect must be built with Xcode 26
+or later using an SDK for iOS 26."* That deadline is four months past. It is also the only fix
+for a hard build failure — Mapbox ships **precompiled** XCFrameworks built with
+`swiftlang-6.2.4.1.4 clang-1700.6.4.2`, and a Swift binary framework cannot be consumed by an
+older compiler. Xcode 16.4 is Swift 6.1.2.
+
+**Xcode 26.3 is the ceiling on this machine**: 26.0–26.3 want macOS Sequoia 15.6; **26.4 raises
+the floor to macOS Tahoe 26.2**. Xcode 27 is Apple-Silicon-only. Installed
+`Xcode_26.3_Universal.xip` (2.67 GB, Apple-signed, verified `lipo -archs` = `x86_64 arm64`) as
+`/Applications/Xcode-26.3.app`, **alongside** 16.4 rather than over it — the App Store copy is
+SIP-protected and cannot be renamed without sudo anyway, so both exist and rollback is one
+`xcode-select`. Its Swift is **6.2.4, character-identical to what Mapbox demands**, and its SDK
+is iOS 26.2. `pod install` went from 568 s and failing to **31.7 s clean**.
+
+Xcode 26 no longer bundles simulator runtimes. `iOS 26.3.1 Universal Simulator` is a separate
+**10.47 GB** download and it gates **both** simulator and device builds — a device build fails
+with the same `iOS 26.2 is not installed`, so there is no shortcut around it. `xcodebuild
+-downloadPlatform iOS` is throttled hard (0.26–1.15 MB/s against ~1.9 MB/s for the same host in
+a browser). Run it under `nohup`: it dies with the shell otherwise, and 1.76 GB was lost that
+way once.
+
+### Four things that were dead on iOS and silent about it
+
+None of these fail the build. All of them fail the app.
+
+- **Every sound.** All 15 cues and the bed are **Ogg Vorbis**; AVFoundation has no Ogg decoder
+  and just_audio's iOS path is AVFoundation. Transcoded to 48 kHz AAC/`.m4a` (`oggdec` →
+  `afconvert`; AAC-LC cannot hold the 192 kHz source, and nothing above 24 kHz is audible).
+  Every duration verified identical, 744K → 764K. Stems unchanged — `cue.dart`'s generic-UI-noun
+  rule still holds.
+- **Every notification.** All three `initialize()` sites passed Android settings only, and
+  `flutter_local_notifications_plugin.dart:144` throws `ArgumentError` when `settings.iOS` is
+  null on iOS. Added `DarwinInitializationSettings` with **every `request*` false** — their
+  defaults are true and would raise the permission prompt at startup, stealing the single
+  deliberate moment `FcmService.requestPermission()` owns.
+- **Every call.** `third_party/flutter_webrtc` had its whole Darwin tree deleted on 2026-09-02
+  and declares `platforms: android` only. As a global `dependency_overrides` that does not fail
+  the build — the Dart layer still compiles and still calls `MethodChannel('FlutterWebRTC.
+  Method')` with nothing behind it. Restored upstream 1.6.0's `ios/` (58 files, **unpatched** —
+  every "Miles patch" marker is in `android/`, so this is purely additive) and declared the
+  `ios:` platform.
+- **The release floor.** `_loadChannel()` asks `miles/updater`, which lives in MainActivity and
+  has no iOS host, so the invoke threw and left `channel='sideload'`, `channelKnown=false`.
+  `applyRow` then reads **`min_build`** — the sideload floor — for App Store installs. Raising
+  it to push testers onto a hand-installed APK would have blocked the entire iOS fleet with an
+  instruction no store install can act on, and the block screen would have had no exit at all,
+  which is the exact failure `channelKnown`'s own doc comment exists to prevent. iOS now answers
+  `'appstore'` for itself and rides `min_build_play`. `kAppStoreAppId` is empty and **must be
+  filled before `min_build_play` is ever raised** — an iOS app can only open its own listing by
+  numeric id, and that id does not exist until the App Store Connect record does.
+
+### Also fixed
+
+`p_platform` was hardcoded `'android'` (`supabase_repository.dart:990`). The schema already
+allows ios — `check (platform in ('android','ios'))`, migration `20260906140300…:68` — so this
+was **client-side only, no backend change**. Keychain: all seven `FlutterSecureStorage` sites
+passed `aOptions` and nothing else, so iOS silently took `accessibility: unlocked` — unreadable
+while the phone is locked, and it **migrates to a new device in an encrypted iCloud backup**,
+which contradicts THREAT-MODEL's "keys that never leave their devices". Now one shared
+`kMilesKeychain` = `first_unlock_this_device`. Export now fails honestly: `pickFolder()` caught
+only `PlatformException`, and `MissingPluginException` does not extend it, so the button did
+nothing at all.
+
+### Facts worth not rediscovering
+
+- `mobile/pubspec.lock` **is gitignored** (`mobile/.gitignore:12`, and `gates.yml:63-67`
+  documents the consequence). Any "the lockfile is unchanged" check is vacuous. Pins belong in
+  `pubspec.yaml`.
+- `device_info_plus` 12.4.0 calls `-[NSProcessInfo isiOSAppOnVision]` behind
+  `if (@available(iOS 26.1, *))`. An `@available` guard gates the *call*, never the *compile*, so
+  it needs the iOS 26 SDK to build at all. It was the **only** such package in the tree. Pin
+  removed once Xcode 26.3 was in.
+- Flutter's **SPM** resolver is fatal where CocoaPods is not: `image_cropper` wants
+  `TOCropViewController ~> 3.1.2`, `file_picker`'s DKImagePickerController pins 2.6.x.
+  `flutter config --no-enable-swift-package-manager`.
+- **`google_mlkit_subject_segmentation` does nothing on iOS.** Its entire iOS plugin is 16 lines
+  whose only statement is `result(FlutterMethodNotImplemented)`. For that it forces the iOS
+  **15.5** deployment floor (its podspec is the only thing setting it), drags in MLKitVision/
+  MLKitCommon/MLImage, and **has no arm64 slice** — so on any Apple Silicon Mac the app cannot
+  run in the Simulator at all. Used in one place, `touch_map/reaction_segment_service.dart`.
+- The comment at `disguise_service.dart:38-44` says the play channel declares no
+  `<activity-alias>`. **It is stale.** Both manifests declare all ten (nine covers +
+  `.AliasMiles`), disabled by default — the 2026-08-16 reversal this file already records. It
+  nearly cost the wrong call on whether covers can ship on iOS.
+
+### Open
+
+- iOS Keychain **survives app deletion**, so "a reinstall wipes the key" — true on Android — is
+  false on iOS. That breaks the unlink ceremony's invariant and makes
+  `web/privacy-policy.html:233` factually wrong on iOS. Deliberately **not** attempted in
+  passing: done wrong it destroys the X25519 seed. Needs a first-run wipe keyed off an
+  NSUserDefaults marker, plus a copy correction.
+- `GoogleService-Info.plist` does not exist. `firebase_options.dart` throws `UnsupportedError`
+  for iOS inside `main()`, so the app cannot reach its first frame. Needs an iOS app registered
+  in Firebase project `ldrc-120a2` for bundle `com.miles.miles`, and an APNs `.p8`.
+- Nothing has been verified running. Analyzer is **0 errors / 0 warnings / 225 info — exactly
+  the pre-port baseline** — and `flutter test` is **1,807 passed / 3 skipped / 0 failed**, but a
+  test suite that forces `defaultTargetPlatform` to android cannot see any of this.
