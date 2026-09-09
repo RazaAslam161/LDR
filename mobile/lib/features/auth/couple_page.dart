@@ -292,6 +292,38 @@ class _ConnectView extends StatelessWidget {
           ],
 
           const SizedBox(height: 28),
+          // The two things on this screen that were never the couple's, and so
+          // do not leave with them. Drawn on the SAME law as the row below:
+          // ALWAYS, whether or not there is anything behind them. A door that
+          // appeared only when a past couple existed would announce the unpair
+          // to whoever is holding the phone — the property
+          // couple_restore_state()'s uniform null is built to protect. The
+          // vault is this account's own either way, and the gallery says the
+          // same neutral thing to a first-run account as to somebody who has
+          // moved on.
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextButton(
+                onPressed: loading ? null : () => context.push('/app/vault'),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  foregroundColor: MilesColors.taupe,
+                ),
+                child: const Text('Your vault'),
+              ),
+              const Text('·', style: TextStyle(color: MilesColors.faint)),
+              TextButton(
+                onPressed: loading ? null : () => context.push('/app/gallery'),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  foregroundColor: MilesColors.taupe,
+                ),
+                child: const Text('Your gallery'),
+              ),
+            ],
+          ),
+
           // ALWAYS drawn, whether or not anything is recoverable. That is the
           // whole disclosure argument: a row that appears only when a window
           // is open announces the window to anyone holding the phone, and

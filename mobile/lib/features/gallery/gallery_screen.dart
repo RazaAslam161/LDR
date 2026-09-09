@@ -139,15 +139,102 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     if (mounted) setState(() => _resigning = false);
   }
 
+  /// The couple whose album this screen is painting.
+  ///
+  /// Normally the live one. After an unlink it is whatever
+  /// `archived_couple_id()` resolves — the same rows and the same bytes,
+  /// admitted by the archive SELECT policy instead of the member one, which is
+  /// why every path below can go on treating it as an ordinary couple id
+  /// rather than growing a second code path.
+  String? _albumId;
+
+  /// The album on screen belongs to a couple that has ended.
+  ///
+  /// Read-only, and not by asking nicely: the server's insert, update and
+  /// delete policies all still resolve the LIVE couple, so every write here
+  /// would be refused. The buttons come off because a control that cannot work
+  /// is worse than no control, not because this flag is the guard.
+  bool _archived = false;
+
+  /// The archive has been asked about once. Null is a real answer — moved on,
+  /// ended permanently, never linked — and asking again cannot change it.
+  bool _archiveAsked = false;
+
+  /// The ask is in flight. Separate from [_archiveAsked] because "still
+  /// asking" and "asked, and the answer was nothing" are different screens,
+  /// and one flag would paint a spinner over the second one forever.
+  bool _archiveResolving = false;
+
+  /// The ask itself failed. Kept apart from "there is nothing", because a
+  /// network error and an empty past must never paint the same sentence.
+  bool _archiveFailed = false;
+
+  void _openAlbum(String albumId, {required bool archived}) {
+    _albumId = albumId;
+    _archived = archived;
+    _window = GalleryRepository.window(albumId, archived: archived);
+    _stream = _window!.stream;
+    _grid.addListener(_onGridScroll);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_stream != null) return;
     final coupleId = ref.read(sessionProvider).couple?.id;
-    if (coupleId != null && _stream == null) {
-      _window = GalleryRepository.window(coupleId);
-      _stream = _window!.stream;
-      _grid.addListener(_onGridScroll);
+    if (coupleId != null) {
+      _openAlbum(coupleId, archived: false);
+      return;
     }
+    // Unpaired, which is no longer the same thing as having nothing. The
+    // server is the only thing that can say whether this album is still theirs
+    // to read, and it answers with one uuid or NULL — the same NULL for every
+    // negative case, so nothing this screen paints can reveal which one it was.
+    if (_archiveAsked) return;
+    _archiveAsked = true;
+    _archiveResolving = true;
+    unawaited(_resolveArchive());
+  }
+
+  Future<void> _resolveArchive() async {
+    try {
+      final id = await GalleryRepository.archivedCoupleId();
+      if (!mounted || _stream != null || id == null) return;
+      setState(() => _openAlbum(id, archived: true));
+    } catch (e, st) {
+      ErrorReporter.report(e, st, kind: 'gallery-archive');
+      if (mounted) setState(() => _archiveFailed = true);
+    } finally {
+      if (mounted) setState(() => _archiveResolving = false);
+    }
+  }
+
+  /// There is no stream to build from: still asking, the ask failed, or this
+  /// account genuinely has no album.
+  ///
+  /// A StreamBuilder over a null stream never gets data, so without this the
+  /// screen is a spinner that never stops — the empty frame every other note
+  /// in this file exists to avoid.
+  Widget _noAlbum() {
+    if (_archiveResolving) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_archiveFailed) {
+      return _Message(
+        "Couldn't check for your gallery.",
+        onRetry: () {
+          setState(() {
+            _archiveFailed = false;
+            _archiveResolving = true;
+          });
+          unawaited(_resolveArchive());
+        },
+      );
+    }
+    // Says the same thing to an account that never linked and to one that has
+    // moved on. That uniformity is the point: the screen is reachable from a
+    // pairing page anybody can be holding.
+    return const _Message('Nothing here.');
   }
 
   /// The live grid, and the handle that can page behind its 500-item seed.
@@ -184,7 +271,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
   /// left a routine backend failure (a paused project, a phone off the
   /// network) as a dead end with a gesture that does not exist.
   void _retry() {
-    final coupleId = ref.read(sessionProvider).couple?.id;
+    final coupleId = _albumId;
     if (coupleId == null) {
       // Unlinked between the failure and the tap — there is no gallery left to
       // build a stream for. Returning quietly was the dead button all over
@@ -201,7 +288,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
     setState(() {
       _retrying = true;
       _window?.dispose();
-      _window = GalleryRepository.window(coupleId);
+      _window = GalleryRepository.window(coupleId, archived: _archived);
       _stream = _window!.stream;
     });
   }
@@ -383,7 +470,7 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
   /// writes: the app bar is built outside the StreamBuilder and has no list of
   /// its own, and this is the same list the grid is painting.
   Future<void> _saveSelected() async {
-    final coupleId = ref.read(sessionProvider).couple?.id;
+    final coupleId = _albumId;
     final all = coupleId == null
         ? const <GalleryItem>[]
         : GalleryRepository.lastSnapshot(coupleId) ?? const <GalleryItem>[];
@@ -456,13 +543,20 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
               // permanently", and one glyph cannot mean both.
               icon: const Icon(Icons.download_rounded),
             ),
-          if (_selecting)
+          // Both of these need the couple that is gone. Asking to delete is a
+          // two-person move and gallery_confirm_delete refuses a request its
+          // own caller raised, so on an archive there is nobody left to answer;
+          // the report RPC resolves the live couple and would refuse outright.
+          // Save to vault stays, and is the only one of the four that still
+          // means anything here: it writes to personal_vault under this
+          // account's own uid, which is exactly where a keepsake belongs now.
+          if (_selecting && !_archived)
             IconButton(
               tooltip: 'Ask to delete',
               onPressed: _busy ? null : _askToDelete,
               icon: const Icon(Icons.delete_outline),
             ),
-          if (_selecting)
+          if (_selecting && !_archived)
             IconButton(
               tooltip: 'Report',
               // One id even when several are picked. The report is about a
@@ -491,20 +585,22 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                     style: const TextStyle(fontSize: 12),),
               ),
             ),
-          IconButton(
-            onPressed: _uploading > 0 ? null : _add,
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-          ),
+          if (!_archived)
+            IconButton(
+              onPressed: _uploading > 0 ? null : _add,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+            ),
         ],
       ),
       body: SafeArea(
-        child: StreamBuilder<List<GalleryItem>>(
+        child: _stream == null
+            ? _noAlbum()
+            : StreamBuilder<List<GalleryItem>>(
           // What this couple's grid painted last, so coming back in paints on
           // frame one instead of behind a full-screen spinner over pictures
           // the phone still holds. Null until a fetch has ever succeeded, so
           // the first run and the failed run keep the spinner and the card.
-          initialData: GalleryRepository.lastSnapshot(
-              ref.read(sessionProvider).couple?.id ?? '',),
+          initialData: GalleryRepository.lastSnapshot(_albumId ?? ''),
           // Keyed by the stream OBJECT, and that key IS the retry.
           //
           // StreamBuilder carries its snapshot across a stream swap:
@@ -545,8 +641,10 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
               _selected.removeWhere((id) => !live.contains(id));
             }
             if (items.isEmpty && _failed.isEmpty) {
-              return const _Message(
-                'Nothing here yet.\nAdd the first one.',
+              return _Message(
+                // There is no Add on an archive, so inviting a first one would
+                // point at a button that is not on the screen.
+                _archived ? 'Nothing here.' : 'Nothing here yet.\nAdd the first one.',
               );
             }
             final me = ref.read(sessionProvider).profile?.id ?? '';
@@ -567,7 +665,10 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                         )
                       : const SizedBox.shrink(),
                 ),
-                if (awaiting.isNotEmpty && !_selecting)
+                // Not on an archive: Keep and Delete both call RPCs that
+                // resolve the live couple, so the band would offer two buttons
+                // the server refuses.
+                if (awaiting.isNotEmpty && !_selecting && !_archived)
                   _ConsentBand(
                     count: awaiting.length,
                     busy: _busy,

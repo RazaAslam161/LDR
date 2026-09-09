@@ -325,9 +325,9 @@ class _CeremonySheetState extends State<_CeremonySheet> {
             const SizedBox(height: 10),
             const Text(
               'If the day passes with nothing changed, the unlink completes: '
-              'what the two of you made together is kept for 30 days and then '
-              'erased for good. Your own account and your private vault are '
-              'untouched.',
+              'your gallery stays with both of you, read-only, and the rest is '
+              'kept but can no longer be opened. Your own account and your '
+              'private vault are untouched.',
               style: TextStyle(
                 color: MilesColors.taupe,
                 fontSize: 13,

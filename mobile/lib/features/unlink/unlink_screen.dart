@@ -713,7 +713,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
       ),
       if (!mine)
         const Text(
-          'kept safe 30 days',
+          'your gallery stays',
           style: TextStyle(color: MilesColors.faint, fontSize: 9.5),
         ),
     ];
@@ -1617,7 +1617,7 @@ class _UnlinkScreenState extends ConsumerState<UnlinkScreen> {
                 // moment the screen is left open.
                 _quiet(
                   'If nothing changes by ${_deadlineClock(row)}, Miles will '
-                  'close your shared space — and keep it safe for 30 days.',
+                  'close your shared space. Your gallery stays with you.',
                 ),
                 const SizedBox(height: 14),
                 if (row.partnerGateOpen)

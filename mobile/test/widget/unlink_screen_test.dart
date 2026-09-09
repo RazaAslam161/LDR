@@ -290,7 +290,12 @@ void main() {
       // lying by omission at its highest-stakes moment.
       await pump(tester, row: ceremony(initiator: themId));
       expect(find.textContaining('Ends '), findsOneWidget);
-      expect(find.textContaining('kept safe 30 days'), findsOneWidget);
+      // The sentence changed with the rule (20260909170000): the couple's
+      // records are no longer erased on a 30-day timer, so promising that
+      // would be the omission this test exists to prevent, in reverse. What
+      // the non-initiator must still be told is that ending it does not take
+      // their own things with it.
+      expect(find.textContaining('your gallery stays'), findsOneWidget);
     });
 
     testWidgets('is offered no chat door — the note is the channel',

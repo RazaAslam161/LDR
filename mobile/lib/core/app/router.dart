@@ -211,6 +211,20 @@ GoRouter buildRouter(Ref ref) {
             SeveranceState.held.value != null) {
           return null;
         }
+        // Two routes an unpaired account keeps, because neither of them is the
+        // couple's. The vault is owner_id-keyed, stored under auth.uid() in its
+        // own bucket, sealed with a key derived from this account's own seed,
+        // and purge_couple() names four buckets and deliberately excludes it.
+        // The gallery archive resolves server-side through archived_couple_id()
+        // and returns nothing for anyone who has moved on. Neither has ever
+        // needed a partner; sending a person who had just unlinked to a pairing
+        // screen and calling their own things gone was the whole of the report.
+        // The data never moved. This line did.
+        //
+        // ALLOWED, never redirected TO, exactly like /rewrap above: the doors
+        // are on /couple, which is also where sign-out and the permanent erase
+        // live, so neither ends up behind a photo grid.
+        if (path == '/app/vault' || path == '/app/gallery') return null;
         // Stay on /couple while linking (Create shows the invite code there).
         return path == '/couple' ? null : '/couple';
       }

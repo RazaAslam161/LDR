@@ -229,7 +229,13 @@ class GalleryRepository {
   /// one: busy while a page is in flight, atEnd once a short page has proved
   /// there is nothing behind it, failed so the screen can offer a retry rather
   /// than a silence.
-  static GalleryWindow window(String coupleId) => GalleryWindow._(coupleId);
+  /// [archived] means the couple has ended, so nothing will ever be written to
+  /// this album again. It suppresses the realtime subscription: the topic
+  /// policy resolves the LIVE couple, so the channel could only ever fail, and
+  /// a failed channel paints "live updates paused" over a grid that is not
+  /// waiting for anything.
+  static GalleryWindow window(String coupleId, {bool archived = false}) =>
+      GalleryWindow._(coupleId, archived: archived);
 
   static Stream<List<GalleryItem>> stream(String coupleId) {
     final byId = <String, GalleryItem>{};
@@ -414,6 +420,18 @@ class GalleryRepository {
     return (n as num?)?.toInt() ?? 0;
   }
 
+  /// The couple whose album this account may still open after unlinking, or
+  /// null.
+  ///
+  /// Asked of the server every time and never cached: the same three events
+  /// that end the archive — pairing with somebody new, either of them ending
+  /// it permanently, the couple being collected — are all decided there, and a
+  /// remembered id would paint a grid whose signed URLs have already stopped
+  /// being issued. `archived_couple_id()` returns one uuid or NULL for every
+  /// negative case, so there is nothing here to interpret.
+  static Future<String?> archivedCoupleId() async =>
+      await _c.rpc<dynamic>('archived_couple_id') as String?;
+
   static Future<void> _remove(List<String> paths) async {
     try {
       await _c.storage.from(_bucket).remove(paths);
@@ -472,9 +490,13 @@ class GalleryTooLarge implements Exception {
 /// the map the realtime deltas patch — two maps would let a deleted picture
 /// come back through the older page.
 class GalleryWindow {
-  GalleryWindow._(this.coupleId);
+  GalleryWindow._(this.coupleId, {this.archived = false});
 
   final String coupleId;
+
+  /// The couple this album belonged to has ended. Paging still works — the
+  /// archive SELECT policy admits the rows — but nothing subscribes.
+  final bool archived;
 
   final Map<String, GalleryItem> _byId = {};
   ManagedSubscription? _sub;
@@ -547,14 +569,16 @@ class GalleryWindow {
     if (existing != null) return existing.stream;
     final c = _controller = StreamController<List<GalleryItem>>.broadcast(
       onListen: () async {
-        _sub = ManagedSubscription.start(
-          () => RealtimeService.coupleTable(
-            channelName: 'gallery:$coupleId',
-            table: 'gallery_items',
-            coupleId: coupleId,
-            onChange: (p) => unawaited(_apply(p)),
-          ),
-        );
+        if (!archived) {
+          _sub = ManagedSubscription.start(
+            () => RealtimeService.coupleTable(
+              channelName: 'gallery:$coupleId',
+              table: 'gallery_items',
+              coupleId: coupleId,
+              onChange: (p) => unawaited(_apply(p)),
+            ),
+          );
+        }
         try {
           for (final i in await GalleryRepository.fetch(coupleId)) {
             _byId.putIfAbsent(i.id, () => i);

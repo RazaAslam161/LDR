@@ -503,7 +503,7 @@ Future<void> showUnlinkNotification({
   final body = switch (kind) {
     'unlink_lastcall' => 'They are ready to let go. A few minutes left.',
     'unlink_relinked' => 'They came back.',
-    'unlink_ended' => 'Your shared space is closed. Kept safe for 30 days.',
+    'unlink_ended' => 'Your shared space is closed. Your gallery stays with you.',
     _ => style.body,
   };
   final android = AndroidNotificationDetails(

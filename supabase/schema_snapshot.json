@@ -470,6 +470,7 @@
             "couple_id",
             "joined_at",
             "left_at",
+            "released_at",
             "severed_at",
             "user_id"
         ],
@@ -753,6 +754,7 @@
         "_memory_photo_reap",
         "ack_delivered",
         "ack_read",
+        "archived_couple_id",
         "call_cooldown_seconds",
         "capsule_seal_summary",
         "change_vault_pin",
