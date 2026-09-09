@@ -28660,3 +28660,46 @@ change on BOTH within a second and show "edited". Then background and re-open th
 behind the cover and confirm the NEW text repaints (that is the §309 cache path). Then
 drop the sender's network and confirm the edit still shows instantly on its own bubble.
 
+
+## §311 — The §286 Reach leak, confirmed in the field (2026-09-09)
+
+Owner sent a shade screenshot from the Calculator cover, 02:03: header **Miles**, title
+**Calculator**, body **Tap to open**, sitting under *Silent notifications*. Asked whether it
+was a Reach or a care reminder.
+
+**It is a Reach.** Nothing else in the tree can produce that entry:
+- `showCareNotification`, `showMessageNotification`, `showRitualNotification`,
+  `showMemoryNotification`, `showClosenessNotification`, `showUnlinkNotification` all open
+  with `if (profile.cover != DisguiseCover.none) return;`
+  (`reach_notifications.dart:307,347,403,431,461,501`). Under any cover they post nothing.
+- `showReachNotification` (`:60`) has no such guard. On a `NotificationBudget.none` cover it
+  swaps to `kQuietChannelId` / `Importance.low` (`:80-90`) — which is precisely the *Silent
+  notifications* group in the screenshot — and posts `style.title` / `style.body`, which for
+  `DisguiseCover.calculator` are `'Calculator'` / `'Tap to open'`
+  (`disguise_notification.dart:134-141`).
+- `showCallNotification` is `Importance.max` + `category: call` + `fullScreenIntent`, so it
+  cannot land in the silent group. No local scheduler exists (`zonedSchedule` /
+  `periodicallyShow` grep: zero hits), so it arrived over FCM — partner-initiated.
+
+**The "Miles" header is not a new defect and is not fixable in code.** It is exactly the
+open item §286 named three days ago: notification header = `ApplicationInfo` label =
+`<application android:label="Miles">` (`src/play/AndroidManifest.xml:26`), alias labels never
+consulted, `EXTRA_SUBSTITUTE_APP_NAME` gated behind `SUBSTITUTE_NOTIFICATION_APP_NAME`
+(signature|privileged). §286 listed the four paths that still post under a cover headed
+"Miles": Reach, incoming-call, call-service, Timer countdown. This is the first of the four
+observed on a handset.
+
+**Verified:** the code path, by reading it — every guard and channel cited above.
+**Not verified:** no device attached this session (`adb devices` → empty list), so the live
+notification was not dumped; the identification rests on the source, not on
+`dumpsys notification`.
+
+**Still open — an owner decision, not a bug fix.** Reach is the one alerting path
+deliberately exempted from cover-silence (`:71-79` argues the case). Closing the leak means
+adding the same early return to `showReachNotification`, and that trades the leak for a Reach
+that produces nothing at all on a silent cover until the phone is picked up. The three
+options are: silence Reach under silent covers like everything else; leave it; or keep it and
+carry the header. Nothing was changed this session.
+
+**Next step:** ask the owner which of the three, then apply it to `showReachNotification`
+only — the call, call-service and Timer paths are separate decisions with different stakes.
