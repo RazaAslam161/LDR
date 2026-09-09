@@ -119,6 +119,34 @@ jobs:
           flutter config --no-enable-swift-package-manager
           flutter config | grep -i swift-package || true
 
+      # What this image actually has. Apple unbundled simulator runtimes from
+      # Xcode 26, so "Xcode is installed" no longer implies "an iOS platform is
+      # installed" — the first run of this gate died on exactly that, with
+      # "iOS 26.0 is not installed", the same failure seen locally. Printed
+      # rather than assumed, because the runner image changes without notice.
+      - name: what iOS platforms does this runner have
+        working-directory: .
+        run: |
+          echo "--- runtimes ---"; xcrun simctl list runtimes || true
+          echo "--- sdks ---"; xcodebuild -showsdks 2>/dev/null | grep -i ios || true
+          echo "--- devices ---"; xcrun simctl list devices available 2>/dev/null | head -20 || true
+
+      # Only if the image has none. On a GitHub runner this is Apple's own
+      # downloader on a matching macOS, which is the configuration it works in —
+      # the local failure ("not having an extractor") was a macOS 15 / iOS 26.3
+      # asset mismatch, not a fault in the command.
+      - name: install an iOS platform if the image has none
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if xcrun simctl list runtimes 2>/dev/null | grep -qE '^iOS '; then
+            echo "runtime already present, skipping the download"
+          else
+            echo "no iOS runtime on this image; downloading (this is several GB)"
+            sudo xcodebuild -downloadPlatform iOS -quiet || xcodebuild -downloadPlatform iOS
+            xcrun simctl list runtimes
+          fi
+
       - name: flutter pub get
         run: flutter pub get
 
