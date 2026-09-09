@@ -1,0 +1,151 @@
+# Does the iOS app actually build?
+#
+# gates.yml answers "does the Dart analyze and test", and it runs on Linux,
+# where there is no Xcode and no iOS SDK. That gate is structurally incapable
+# of noticing that the iOS half is broken: `flutter test` forces
+# defaultTargetPlatform to android, so every iOS branch in lib/ is invisible to
+# it, and nothing there ever links a pod. The whole iOS port could be rubble and
+# gates.yml would stay green.
+#
+# This is the other half. It compiles and links the real thing.
+#
+# MANUAL TRIGGER ONLY, and that is a cost decision, not an oversight. GitHub
+# bills macOS runners at TEN TIMES the Linux rate against a private repo's
+# minutes. gates.yml's own header explains that a gate which quietly bills for
+# every scratch branch is one that gets switched off — a ~20 minute iOS build on
+# every push would burn ~200 billable minutes a time and meet exactly that fate.
+# Run it when the iOS side changes: Actions -> ios build -> Run workflow.
+
+name: ios build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "branch or SHA to build (default: the branch you launch from)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same pin as gates.yml, for the same reason: a gate on a different SDK than
+  # the one that produces the artifact is a gate on a different program.
+  FLUTTER_VERSION: "3.44.2"
+  # Mapbox is why this floor exists, and it is not negotiable. MapboxCommon and
+  # MapboxCoreMaps ship PRECOMPILED XCFrameworks stamped
+  # "Apple Swift version 6.2.4 (swiftlang-6.2.4.1.4)", and a Swift binary
+  # framework cannot be consumed by an older compiler — Xcode 16.4 (Swift 6.1.2)
+  # fails with "this SDK is not supported by the compiler". Verified on
+  # 2026-09-09 down to mapbox_maps_flutter 2.28.1, this pubspec's floor, whose
+  # MapboxCommon 24.28.1 carries the same stamp. Xcode 26 is a hard requirement
+  # of the dependency graph, quite apart from Apple's App Store SDK rule.
+  MIN_XCODE_MAJOR: "26"
+
+jobs:
+  ios:
+    name: build ios (simulator, unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      # SHA-pinned, matching gates.yml. A tag is a mutable pointer.
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Chosen at runtime rather than hardcoded, because the runner image's
+      # Xcode set moves without notice and a stale hardcoded path fails as
+      # "file not found", which reads like a repo problem. Picks the highest
+      # installed Xcode and refuses outright below MIN_XCODE_MAJOR, so the
+      # failure names its own cause.
+      - name: select xcode >= ${{ env.MIN_XCODE_MAJOR }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          ls -1 /Applications | grep -E '^Xcode' || true
+          best=""; bestv=0
+          for app in /Applications/Xcode*.app; do
+            [ -e "$app" ] || continue
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null || echo 0)
+            major=${v%%.*}
+            case "$major" in ''|*[!0-9]*) continue;; esac
+            if [ "$major" -gt "$bestv" ]; then bestv=$major; best=$app; fi
+          done
+          if [ -z "$best" ] || [ "$bestv" -lt "${MIN_XCODE_MAJOR}" ]; then
+            echo "::error title=No suitable Xcode::need >= ${MIN_XCODE_MAJOR}, best found was ${bestv:-none}. Mapbox's XCFrameworks are built with Swift 6.2.4 and cannot be consumed by an older compiler."
+            exit 1
+          fi
+          echo "using $best (major $bestv)"
+          sudo xcode-select -s "$best/Contents/Developer"
+          xcodebuild -version
+          xcrun swift --version
+
+      - name: set up flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          # OFF for the same reason as gates.yml: the action keys its pub cache
+          # on hashFiles('**/pubspec.lock'), and mobile/.gitignore ignores
+          # pubspec.lock, so that hash is the empty string forever.
+          pub-cache: "false"
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # Same reasoning as gates.yml: pubspec.yaml declares .env as an asset and
+      # .gitignore keeps it out of the repo, so a fresh runner cannot build an
+      # asset bundle without one. This carries no credentials and grants no
+      # access — the app would throw a StateError at RUNTIME reading it, which
+      # is fine, because this job compiles and links and never launches.
+      - name: placeholder .env so the asset bundle can build
+        run: |
+          set -euo pipefail
+          if [ -f .env ]; then echo ".env already present"; else
+            printf 'NEXT_PUBLIC_SUPABASE_URL=\nNEXT_PUBLIC_SUPABASE_ANON_KEY=\n' > .env
+            echo "wrote placeholder .env"
+          fi
+          test -f .env
+
+      # Not cached. Pods are keyed to the Xcode and Swift version that built
+      # them, and this job picks its Xcode at runtime — a cache restored across
+      # an image bump is the "this SDK is not supported by the compiler" class
+      # of failure with none of the signal.
+      - name: pod install
+        working-directory: mobile/ios
+        run: pod install --repo-update
+
+      # --simulator, so no signing identity, no provisioning profile and no
+      # Apple Developer account are involved. This proves the dependency graph
+      # compiles and links against the iOS SDK, which is the question Linux
+      # cannot answer. It does NOT prove the app runs.
+      - name: flutter build ios --simulator
+        run: flutter build ios --simulator --no-codesign
+
+      - name: what got built
+        run: |
+          set -euo pipefail
+          app="build/ios/iphonesimulator/Runner.app"
+          test -d "$app" || { echo "::error title=No app bundle::$app missing after a successful build"; exit 1; }
+          du -sh "$app"
+          # The two things that were silently absent on iOS before this port and
+          # would be again if someone drops them: Firebase's config, without
+          # which main() throws before the first frame, and the AAC audio, which
+          # replaced Ogg because AVFoundation cannot decode Vorbis.
+          test -f "$app/GoogleService-Info.plist" && echo "GoogleService-Info.plist: present" || { echo "::error title=Missing Firebase config::GoogleService-Info.plist is not in the bundle; the app would throw UnsupportedError in main()"; exit 1; }
+          n=$(ls "$app/flutter_assets/assets/sound/" 2>/dev/null | grep -c '\.m4a$' || true)
+          echo "AAC cues bundled: $n"
+          [ "$n" -eq 15 ] || { echo "::error title=Sound assets::expected 15 .m4a cues, found $n"; exit 1; }
+          ogg=$(ls "$app/flutter_assets/assets/sound/" 2>/dev/null | grep -c '\.ogg$' || true)
+          [ "$ogg" -eq 0 ] || { echo "::error title=Ogg in bundle::$ogg .ogg file(s) shipped; AVFoundation cannot decode them"; exit 1; }
