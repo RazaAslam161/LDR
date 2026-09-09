@@ -4,6 +4,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:miles/core/data/key_escrow.dart' show KeyEscrow;
+import 'package:miles/core/data/secure_storage_options.dart';
 import 'package:miles/core/services/server_clock.dart';
 
 /// Couple-shared authenticated encryption for the Closer module.
@@ -28,6 +29,7 @@ class CryptoCore {
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
   static const _privKeyStoreKey = 'miles_x25519_priv_v1';
 

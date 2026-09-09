@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:miles/core/data/secure_storage_options.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// App-wide biometric + PIN lock.
@@ -35,6 +36,7 @@ class AppLock {
   static const _pinKey = 'app_lock_pin_v2';
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
 
   static final _auth = LocalAuthentication();

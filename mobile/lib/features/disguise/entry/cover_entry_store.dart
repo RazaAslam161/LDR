@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:miles/core/data/secure_storage_options.dart';
 import 'package:miles/features/disguise/cover_gate.dart';
 import 'package:miles/features/disguise/disguise_profile.dart';
 import 'package:miles/features/disguise/entry/cover_entry_trigger.dart';
@@ -26,6 +27,7 @@ class CoverEntryStore {
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
 
   static String keyFor(DisguiseCover cover) =>

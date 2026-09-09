@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:miles/core/data/secure_storage_options.dart';
 
 /// Trust-on-first-use for the partner's published X25519 key.
 ///
@@ -23,6 +24,7 @@ class PartnerKeyPin {
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
 
   /// Scoped by BOTH ids: the pin is one account's memory of one partner, and

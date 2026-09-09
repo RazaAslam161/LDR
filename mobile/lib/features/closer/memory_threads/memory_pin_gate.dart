@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:miles/core/data/secure_storage_options.dart';
 import 'package:miles/core/services/app_lock.dart' show AppLock;
 import 'package:miles/main.dart' show MilesApp;
 
@@ -31,6 +32,7 @@ class MemoryPinGate {
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
   static const _pinKey = 'miles_memory_pin_hash';
   static const _pinLength = 4;

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:miles/core/data/secure_storage_options.dart';
 import 'package:miles/core/diag/diag.dart';
 
 /// Message bodies the user has sent that the server has not accepted yet.
@@ -24,6 +25,7 @@ class ChatTextOutbox {
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
 
   /// One key per send, not one key holding the list. A list would be

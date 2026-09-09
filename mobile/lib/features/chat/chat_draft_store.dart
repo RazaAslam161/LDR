@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:miles/core/data/secure_storage_options.dart';
 
 /// Text the user has typed and not sent, kept per couple.
 ///
@@ -18,6 +19,7 @@ class ChatDraftStore {
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: kMilesKeychain,
   );
 
   static const _prefix = 'miles_chat_draft_';
