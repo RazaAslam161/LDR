@@ -29874,3 +29874,62 @@ gate "Create & get a code" behind a confirmation that names what it costs (or cl
 `released_at` when a couple of one is abandoned); add the `[2] = 'gallery'` conjunct;
 `_stream != null && !_archived` on the add button; `DateTime.utc` midnights; revert
 `14a5cee`; correct the delete-account sentence.
+
+## §319 — 2026-09-09 — The copy caught up with production, committed and pushed as 4e2e3d4
+
+§318 applied the thirty-day window to production; `81c41f8` had already shipped the copy for the
+ruling BEFORE it. Between those two facts, HEAD told users a rule the server had stopped
+following — which is exactly why §317 refused to cut an APK. This closes it.
+
+### Pushed
+
+    4e2e3d4  fix(unlink): the app now says what production actually does
+
+`git push origin fix-sprint` → `9e0f3c3..4e2e3d4` (carrying §317's own `7c8d1bd` up with it), and
+`git ls-remote origin refs/heads/fix-sprint` answers
+`4e2e3d412e1fdf2b2e1a1e9daf01816e945add22` — the SERVER's answer, matching local HEAD. Ten files
+staged by name, the staged list counted at 10 before committing. Never `-A`.
+
+### A defect of mine, found by the pre-commit diff read rather than by a test
+
+`schema_snapshot.json` came back from my edit carrying the mojibake em-dashes that §317 had just
+repaired with perl — `â€”`, the CP1252 misreading of a UTF-8 em dash, written back
+as JSON escapes on lines 736 and 743.
+
+**Root cause, one sentence:** `json.load(open(p))` uses the platform default encoding, which on
+this machine is cp1252, so the UTF-8 em dash was read as three characters and `json.dumps`'s
+default `ensure_ascii=True` then wrote that misreading back as escapes.
+
+Fixed by `git checkout HEAD -- supabase/schema_snapshot.json` and re-applying the single addition
+with `io.open(..., encoding='utf-8')` on both ends plus `ensure_ascii=False`. The file's diff is
+now exactly one line, `+ "archived_gallery",`, and the em dash is `M-bM-^@M-^T` (E2 80 94) again
+under `cat -A`.
+
+**The rule this earns, and it is not about JSON:** on Windows, never read or write a repo file
+from a script without naming the encoding. The default is cp1252, the repo is UTF-8, and a
+round-trip through the default silently rewrites every non-ASCII character in the file — a
+corruption no gate here can see, because `flutter analyze`, `flutter test` and
+`schema_drift_test` all passed over the broken file twice. It was caught only because the commit
+was diffed hunk by hunk first, and it had already survived one repair by somebody else.
+
+### Gates, run against the tree that was committed
+
+- `flutter analyze --no-pub` — CI matcher counts **0**, verdict `231 issues found.` present.
+  Probed in the same run: a fixture of indented `error`, indented `warning` and a ZERO-INDENT
+  `warning` matched 3; the `info` control matched 0.
+- `flutter test --no-pub` — **1872 passed, 3 skipped, 0 failed, exit 0.**
+- Copy-vs-server consistency checked directly: `30 days` appears 4× in `faq_text.dart`, 1× in
+  `severance_sheet.dart`, 5× in `privacy-policy.html`, 3× in `delete-account.html`, and no
+  "gallery stays with you" claim survives anywhere in `mobile/lib` or `web/`.
+- Production re-read the same minute: `archive_has_window true, pruner_still_guarded false,
+  archived_gallery present, archive_policies 2`.
+
+### Still open
+
+- **No device pass, unchanged since §316.** `_ClosingBand` and its `DateFormat.MMMMd()` date have
+  never been rendered on a handset. The riskiest path — a real unlink, then vault and gallery from
+  a cold start on both phones — is still unexercised.
+- §317's APK refusal is now answerable on the copy ground it was refused on. Whether to build is
+  the owner's call and nobody should build one unasked.
+- BRAIN.md is being appended to by several sessions at once; §315 and §317 each exist twice, and
+  this section was numbered after reading the tail at §318.
