@@ -17,6 +17,7 @@ import 'package:miles/core/widgets/drag_select.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
+import 'package:miles/features/vault/change_pin_screen.dart';
 import 'package:miles/features/vault/vault_repository.dart';
 import 'package:miles/features/vault/vault_thumb_backfill.dart';
 import 'package:miles/features/vault/vault_viewer.dart';
@@ -220,6 +221,20 @@ class _VaultScreenState extends State<VaultScreen> {
           : "$failed of ${ids.length} couldn't be deleted.");
     }
     await _load();
+  }
+
+  /// Opens the change-PIN flow and reports the outcome.
+  ///
+  /// Nothing about the vault's contents changes, so nothing here re-locks or
+  /// re-reads: the PIN is a gate and the encryption key is derived from the
+  /// device seed, not from it. The snackbar exists because a silent success on
+  /// a security control is indistinguishable from a button that did nothing.
+  Future<void> _changePin() async {
+    final changed = await ChangePinScreen.open(context);
+    if (changed != true || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Vault PIN changed')),
+    );
   }
 
   Future<void> _addSheet() async {
@@ -619,6 +634,15 @@ class _VaultScreenState extends State<VaultScreen> {
           onPressed: () => Navigator.of(context).maybePop(),
         ),
         actions: [
+          // Here rather than in Settings: the user is already past the gate,
+          // which is the only place they can be to change the PIN at all, and
+          // a control for a vault that lives outside the vault is one nobody
+          // finds.
+          IconButton(
+            tooltip: 'Change PIN',
+            icon: const Icon(Icons.password_rounded, color: MilesColors.gilt),
+            onPressed: _changePin,
+          ),
           IconButton(
             tooltip: 'Lock',
             icon: const Icon(Icons.lock_outline, color: MilesColors.gilt),

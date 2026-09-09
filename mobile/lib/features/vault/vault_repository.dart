@@ -94,6 +94,24 @@ class VaultRepository {
     return res?.toString() ?? 'wrong';
   }
 
+  /// Re-keys the vault. Returns 'ok' | 'wrong' | 'locked' | 'no_pin'.
+  ///
+  /// ONE round trip, deliberately: the old PIN is proved and the new one
+  /// written inside a single server call. Verifying first and setting second
+  /// would spend a lockout attempt on the check, leave a window where the
+  /// vault has been proved but not re-keyed, and — because `set_vault_pin` is
+  /// now first-time-only — could not complete the second half anyway.
+  ///
+  /// The server does the same 5-try accounting as [verifyPin], against the same
+  /// counters, so guessing the current PIN through this door is bounded by the
+  /// same lockout as guessing it through the gate. Nothing is re-encrypted: the
+  /// vault key is HKDF-derived from the device seed, never from the PIN.
+  static Future<String> changePin(String oldPin, String newPin) async {
+    final res = await _c.rpc<dynamic>('change_vault_pin',
+        params: {'p_old': oldPin, 'p_new': newPin},);
+    return res?.toString() ?? 'wrong';
+  }
+
   static const _pageSize = 200;
 
   /// Everything in the personal vault, newest first, read a page at a time.

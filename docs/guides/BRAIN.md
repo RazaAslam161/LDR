@@ -29265,3 +29265,110 @@ the concurrent sessions in this repo, in the interval between the refusal and th
 
 Recorded because the difference matters to whoever reads this next: nothing here should be
 taken as evidence that the blocked action succeeded on a retry. It did not run.
+
+## §315 — 2026-09-09 — the vault PIN can be changed, and the lockout is real for the first time
+
+Owner: "there is no option of changing passcode of vault." True — `VaultRepository` had
+`hasPin`, `setPin`, `verifyPin` and nothing else.
+
+### Two corrections to claims made earlier in this session
+
+1. **"set_vault_pin lets anyone clear a lockout" — WRONG, and I said it before checking.**
+   `20260818090100_vault_pin_reset_cannot_clear_a_lockout.sql` already added a `locked`
+   guard, and both projects carry it. I read `20260601001100_private_vault.sql`, saw the
+   unguarded body, and asserted from it. The rule that would have caught this is already
+   in the rulebook — verify before asserting, and production runs ahead of this tree — and
+   the specific miss was not grepping `supabase/migrations/` for LATER files touching the
+   same function. A migration file is not the definition; `pg_get_functiondef` is.
+2. **"The repo's migration file is the stale one" — also wrong.** Both files are in the
+   repo. Nothing was stale; I had only read one of them.
+
+What IS true, and is the reason a change screen could not just call `setPin`:
+`set_vault_pin` re-keyed an existing vault with **no proof of the old PIN**. Not a route to
+data the caller could not already read (an authenticated session can select
+`personal_vault_items` directly), but a silent **re-key** — someone with a borrowed session
+locks the owner out of their own vault, and the owner discovers it at a PIN that has always
+worked.
+
+### A third defect, found by the audit and not by me
+
+`verify_vault_pin` read the row with a plain `select`, tested `locked_until` against that
+snapshot, ran bcrypt, and only then wrote the counter. **No `FOR UPDATE`.** Every request
+arriving before the first one commits sees `locked_until = null` and gets its guess
+evaluated, so the ceiling was never "5 attempts per 15 minutes" — it was however many
+requests fit in the window. The 4-digit space is 10,000. The lockout was theatre against
+a concurrent attacker.
+
+Fixed on both doors. Not scope creep: `change_vault_pin` writes the same counters and its
+doc claims the two doors share one lockout, which is only true if both are serialised.
+
+### Shipped
+
+- `supabase/migrations/20260909160000_a_vault_pin_can_be_changed_by_someone_who_knows_it.sql`
+  — `change_vault_pin(p_old, p_new)` returning 'ok' | 'wrong' | 'locked' | 'no_pin', with
+  `FOR UPDATE` and the same failure accounting as the gate; `set_vault_pin` becomes
+  first-set-only (`raise 'pin_exists'`); `verify_vault_pin` gains `FOR UPDATE`. Exact
+  rollback is in the file header. Every statement is `create or replace` — re-runnable.
+- `mobile/lib/features/vault/vault_repository.dart` — `changePin`, ONE round trip.
+- `mobile/lib/features/vault/change_pin_screen.dart` (**new**) — current → new → confirm,
+  reusing `PinPad`. All three are collected before anything is sent, so a mistyped
+  CONFIRMATION costs no lockout attempt; only the final submit spends one.
+- `mobile/lib/features/vault/vault_screen.dart` — "Change PIN" in the app bar, beside Lock.
+  In the vault rather than Settings: past the gate is the only place you can be to change
+  it, and a vault control living outside the vault is one nobody finds.
+- `supabase/schema_snapshot.json` — `change_vault_pin` added, regenerated against prod.
+
+### Verified — against staging, with real output
+
+A throwaway `_vault_pin_selftest()` impersonating a profile via `request.jwt.claims`,
+**12 of 12 passing**, then dropped (`harness_left: 0`, the pre-existing pin row untouched):
+
+    1  change with no pin          no_pin  ✓      6  new pin verifies      ok     ✓
+    2  first set                   ok      ✓      7  old pin rejected      wrong  ✓
+    3  second set refused          pin_exists ✓   8  locked out of change  locked ✓
+    4  wrong old pin               wrong   ✓      8b lockout shared w/gate locked ✓
+    4b attempt counted             1       ✓      9  set cannot unlock     locked ✓
+    5  change succeeds             ok      ✓      10 row is lockable       t      ✓
+
+Production applied and confirmed by reading it back: `change_vault_pin` present with the
+row lock and granted to `authenticated`; `set_vault_pin` carries `pin_exists`;
+`verify_vault_pin` carries the row lock. **The couple's data is untouched** — 3 pin rows,
+3 hashes intact, 0 locked, max failed_attempts 0. The destructive self-test was NOT run on
+production.
+
+Snapshot proven rather than assumed: the file's function list and production's agree on
+count (120) and on md5 fingerprint (`f28e85f8eef3e949ec35cdc25b63da1d`).
+
+Gates: `flutter analyze lib test` 226 issues, **0 errors / 0 warnings** (matcher probed in
+the same run); `flutter test` **1872 passed**, up from 1866.
+`test/widget/change_vault_pin_test.dart` is new: six cases over the paths that never reach
+the server, including that a mistyped confirmation returns to "choose a new PIN" rather
+than to the current one.
+
+**`schema_drift_test` caught this before I could ship it.** Adding the client call turned
+that gate red — "rpc(change_vault_pin) does not exist" — because production did not have
+the function yet. That is the gate doing exactly its job: build 84 would have shipped a
+button that throws PGRST202. It went green only after the production apply.
+
+### Still open
+
+- **Nothing has been exercised through the CLIENT.** Every server behaviour is proved on
+  staging by direct SQL; what is unproven is the Dart calling it — `changePin` has never
+  made a real RPC. The riskiest step is the plainest: does the screen's one call actually
+  reach `change_vault_pin` and get 'ok'? First thing to try on a device.
+- Not built, not installed. The handset is on 83, which has neither the screen nor §314.
+- Step 10 proves the row is *lockable*, not that a second session blocks. `FOR UPDATE`
+  blocking a concurrent writer is Postgres semantics being relied on, not demonstrated —
+  one SQL session cannot show it.
+- **No forgotten-PIN recovery, and now there is provably none.** `set_vault_pin` is
+  first-set-only, so a user who forgets the PIN has no path back. There was no UI path
+  before either, so nothing a user could do was removed — but if recovery is ever wanted
+  it must be gated on something other than the PIN, and never on this function.
+- `found, not fixed` — the vault's contents are readable by any holder of an authenticated
+  session, without the PIN: `personal_vault_items` grants SELECT to `authenticated` under
+  owner-only RLS, notes are stored as plaintext `content`, and media bytes sit plaintext in
+  a private bucket. The PIN is a gate on the SCREEN, not on the data. That is a larger and
+  separate decision than this ticket.
+- `found, not fixed` — `vault_pin.biometric_enabled` is written by nothing and read by
+  nothing.
+
