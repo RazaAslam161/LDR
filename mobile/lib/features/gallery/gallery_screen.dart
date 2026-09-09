@@ -10,6 +10,7 @@ import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/services/save_media_service.dart';
 import 'package:miles/core/services/storage_quota.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/drag_select.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/features/gallery/gallery_repository.dart';
 import 'package:miles/features/gallery/gallery_viewer.dart';
@@ -63,9 +64,80 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
 
   bool get _selecting => _selected.isNotEmpty;
 
+  /// The list the grid is currently painting, assigned in build().
+  ///
+  /// The drag has an INDEX and needs an id, and the only list that can answer
+  /// is the one on screen — the same reasoning as `_saveSelected`, which reads
+  /// the snapshot rather than a field the builder writes.
+  List<GalleryItem> _painted = const [];
+
+  /// What was selected when the current drag began, and whether the drag adds
+  /// or removes. Re-derived from these on every move, so sliding back over a
+  /// tile undoes it instead of toggling it a second time.
+  Set<String>? _dragBase;
+  bool _dragAdds = true;
+
   void _toggle(String id) => setState(() {
         if (!_selected.remove(id)) _selected.add(id);
       });
+
+  /// The long press landed. This is where selection starts now — the tiles
+  /// have no long press of their own, because a per-cell recognizer wins the
+  /// arena against the one that has to see the whole drag.
+  void _dragAnchor(int index) {
+    if (index < 0 || index >= _painted.length) return;
+    final id = _painted[index].id;
+    setState(() {
+      _dragBase = {..._selected};
+      _dragAdds = !_selected.contains(id);
+      if (_dragAdds) {
+        _selected.add(id);
+      } else {
+        _selected.remove(id);
+      }
+    });
+  }
+
+  void _dragExtend(int anchor, int extent) {
+    final base = _dragBase;
+    if (base == null) return;
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(base);
+      for (final i in dragSelectSpan(anchor, extent)) {
+        if (i < 0 || i >= _painted.length) continue;
+        final id = _painted[i].id;
+        if (_dragAdds) {
+          _selected.add(id);
+        } else {
+          _selected.remove(id);
+        }
+      }
+    });
+  }
+
+  void _dragEnd() => _dragBase = null;
+
+  bool _resigning = false;
+
+  /// Items still to copy into the vault in the current batch.
+  int _savingLeft = 0;
+
+  /// Re-runs the ONE batch sign for the page on screen.
+  ///
+  /// A failed batch leaves every tile reading `MediaUrls.cached` and getting
+  /// null, which paints a grid of flat grey squares — no spinner, no error,
+  /// nothing to tap. The fetch itself succeeded, so `snap.hasError` is false
+  /// and the screen's own retry card cannot be reached.
+  Future<void> _resign(List<GalleryItem> items) async {
+    if (_resigning) return;
+    setState(() => _resigning = true);
+    await GalleryRepository.resign(items);
+    // setState either way: on success the notifier drops the band AND this
+    // repaints the tiles, which is what actually puts the pictures back.
+    if (mounted) setState(() => _resigning = false);
+  }
 
   @override
   void didChangeDependencies() {
@@ -317,20 +389,37 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
         : GalleryRepository.lastSnapshot(coupleId) ?? const <GalleryItem>[];
     final picked = all.where((i) => _selected.contains(i.id)).toList();
     if (picked.isEmpty) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      // Counted DOWN and shown, because the loop is sequential by design and
+      // eleven saves is eleven round trips: without a number the app bar just
+      // greys out and the screen looks stuck for the whole batch, which is
+      // most of what "saving takes a long time" is.
+      _savingLeft = picked.length;
+    });
     var saved = 0;
     for (final i in picked) {
+      // thumbPath, NOT gridPath: gridPath falls back to the ORIGINAL when a
+      // row has no thumbnail, and handing an mp4 over as a poster would file a
+      // video as its own preview.
       final ok = i.isVideo
           ? await SaveMediaService.saveVideoToVault(
-              path: i.storagePath, senderName: 'your shared gallery',)
+              path: i.storagePath,
+              senderName: 'your shared gallery',
+              thumbPath: i.thumbPath,)
           : await SaveMediaService.saveIntimatePhotoToVault(
-              path: i.storagePath, senderName: 'your shared gallery',);
+              path: i.storagePath,
+              senderName: 'your shared gallery',
+              thumbPath: i.thumbPath,);
       if (ok) saved++;
+      if (!mounted) return;
+      setState(() => _savingLeft--);
     }
     if (!mounted) return;
     setState(() {
       _selected.clear();
       _busy = false;
+      _savingLeft = 0;
     });
     final missed = picked.length - saved;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -386,6 +475,14 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                       targetRef: _selected.first,),
               icon: const Icon(Icons.flag_outlined),
             ),
+          if (_savingLeft > 0)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text('saving $_savingLeft…',
+                    style: const TextStyle(fontSize: 12),),
+              ),
+            ),
           if (_uploading > 0)
             Center(
               child: Padding(
@@ -439,6 +536,14 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
               return const Center(child: CircularProgressIndicator());
             }
             final items = snap.data!;
+            _painted = items;
+            // A partner's delete can take a selected row out from under an
+            // open selection. Left in, the id inflates the count and is sent
+            // to the delete RPC, which reports it as blocked.
+            if (_selected.isNotEmpty) {
+              final live = {for (final i in items) i.id};
+              _selected.removeWhere((id) => !live.contains(id));
+            }
             if (items.isEmpty && _failed.isEmpty) {
               return const _Message(
                 'Nothing here yet.\nAdd the first one.',
@@ -453,6 +558,15 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                 // person who asked sees nothing here — there is nothing for
                 // them to do but wait, and a banner they cannot act on is
                 // noise.
+                ValueListenableBuilder<bool>(
+                  valueListenable: GalleryRepository.signingFailed,
+                  builder: (context, failed, _) => failed
+                      ? _SigningBand(
+                          busy: _resigning,
+                          onRetry: () => unawaited(_resign(items)),
+                        )
+                      : const SizedBox.shrink(),
+                ),
                 if (awaiting.isNotEmpty && !_selecting)
                   _ConsentBand(
                     count: awaiting.length,
@@ -463,7 +577,12 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                         awaiting, GalleryRepository.confirmDelete, 'deleted',),
                   ),
                 Expanded(
-                  child: GridView.builder(
+                  child: DragSelect(
+                    scroll: _grid,
+                    onAnchor: _dragAnchor,
+                    onExtend: _dragExtend,
+                    onEnd: _dragEnd,
+                    child: GridView.builder(
                     controller: _grid,
                     padding: const EdgeInsets.all(2),
                     gridDelegate:
@@ -489,16 +608,23 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
                         );
                       }
                       final at = i - _failed.length;
-                      return _Tile(
-                        item: items[at],
-                        selected: _selected.contains(items[at].id),
-                        selecting: _selecting,
-                        onTap: () => _selecting
-                            ? _toggle(items[at].id)
-                            : _open(items, at),
-                        onLongPress: () => _toggle(items[at].id),
+                      // Tagged with the index into `items`, not into the grid:
+                      // the failed-upload tiles lead the grid and are not
+                      // selectable, so they carry no tag and a finger over one
+                      // resolves to nothing.
+                      return DragSelectItem(
+                        index: at,
+                        child: _Tile(
+                          item: items[at],
+                          selected: _selected.contains(items[at].id),
+                          selecting: _selecting,
+                          onTap: () => _selecting
+                              ? _toggle(items[at].id)
+                              : _open(items, at),
+                        ),
                       );
                     },
+                  ),
                   ),
                 ),
               ],
@@ -545,6 +671,48 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen> {
 
 /// The band the OTHER partner sees. Deliberately not a dialog: the request may
 /// cover eleven pictures, and the answer is one decision about the set.
+/// The batch sign failed and the grid has rows it cannot paint.
+///
+/// A band rather than a full-screen card: the rows ARE there, the dates are
+/// there, and replacing all of it with an error would throw away more than the
+/// failure cost.
+class _SigningBand extends StatelessWidget {
+  const _SigningBand({required this.busy, required this.onRetry});
+
+  final bool busy;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      color: MilesColors.surface1,
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text(
+              "The pictures couldn't be loaded.",
+              style: TextStyle(fontSize: 13, color: Color(0xCCF5EFE6)),
+            ),
+          ),
+          if (busy)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            TextButton(onPressed: onRetry, child: const Text('Try again')),
+        ],
+      ),
+    );
+  }
+}
+
 class _ConsentBand extends StatelessWidget {
   const _ConsentBand({
     required this.count,
@@ -690,14 +858,12 @@ class _Tile extends StatelessWidget {
   const _Tile({
     required this.item,
     required this.onTap,
-    required this.onLongPress,
     this.selected = false,
     this.selecting = false,
   });
 
   final GalleryItem item;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
   final bool selected;
   final bool selecting;
 
@@ -706,7 +872,6 @@ class _Tile extends StatelessWidget {
     final url = MediaUrls.cached(privateBucket, item.gridPath);
     return GestureDetector(
       onTap: onTap,
-      onLongPress: onLongPress,
       child: Hero(
         tag: 'gallery-${item.id}',
         child: Stack(

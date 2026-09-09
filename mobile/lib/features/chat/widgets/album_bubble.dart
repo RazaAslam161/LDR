@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:miles/core/media/media_decode.dart';
+import 'package:miles/core/widgets/drag_select.dart';
 import 'package:miles/core/ui/theme.dart';
 import 'package:miles/core/widgets/net_image.dart';
 import 'package:miles/features/chat/chat_repository.dart';
@@ -20,6 +22,10 @@ class AlbumBubble extends StatelessWidget {
   const AlbumBubble({
     required this.row,
     required this.onOpen,
+    required this.baseIndex,
+    required this.selecting,
+    required this.isSelected,
+    required this.onToggleOne,
     super.key,
   });
 
@@ -28,9 +34,38 @@ class AlbumBubble extends StatelessWidget {
   /// Index within [ChatRow.items] — the pager opens on the tile that was hit.
   final void Function(int index) onOpen;
 
+  /// Where this row's FIRST message sits in the conversation's flat drag
+  /// order, so a tile can tag itself with a conversation-wide index.
+  ///
+  /// The drag index space is messages, not rows. It has to be: a row-indexed
+  /// drag can only ever resolve a finger to a whole send, which is precisely
+  /// the limitation this parameter removes.
+  final int baseIndex;
+
+  /// A selection is open somewhere in the conversation.
+  final bool selecting;
+
+  /// Whether the item at [ChatRow.items]`[index]` is in it.
+  final bool Function(int index) isSelected;
+
+  /// Toggle just that photograph.
+  ///
+  /// Distinct from tapping the bubble's own padding, which still takes the
+  /// whole send — an album is one thing in the conversation and deleting
+  /// nineteen of twenty reads as a delete that failed, so the row-level
+  /// gesture keeps that meaning and this is the narrower one.
+  final void Function(int index) onToggleOne;
+
   /// Never more than four tiles regardless of how many were sent; the fourth
   /// carries the count of everything it stands for.
-  static const _maxTiles = 4;
+  ///
+  /// Public because the screen's per-photo toggle has to agree with it: the
+  /// last DRAWN tile stands for the remainder, so picking it takes the
+  /// remainder too. Read there rather than copied, or the day this changes the
+  /// selection quietly starts missing photographs.
+  static const maxTiles = 4;
+
+  static const _maxTiles = maxTiles;
 
   static const _gap = 2.0;
 
@@ -90,10 +125,18 @@ class AlbumBubble extends StatelessWidget {
   Widget _tile(Message m, int index, {required int flex, int moreCount = 0}) =>
       Expanded(
         flex: flex,
-        child: _AlbumTile(
-          message: m,
-          moreCount: moreCount,
-          onTap: () => onOpen(index),
+        child: DragSelectItem(
+          // Conversation-wide, not row-local: this is what a drag resolves a
+          // finger to, and it has to be comparable across rows.
+          index: baseIndex + index,
+          child: _AlbumTile(
+            message: m,
+            moreCount: moreCount,
+            selecting: selecting,
+            selected: isSelected(index),
+            onTap: () =>
+                selecting ? onToggleOne(index) : onOpen(index),
+          ),
         ),
       );
 }
@@ -103,9 +146,15 @@ class _AlbumTile extends StatelessWidget {
     required this.message,
     required this.moreCount,
     required this.onTap,
+    required this.selecting,
+    required this.selected,
   });
 
   final Message message;
+
+  /// A selection is open, so every tile shows its own state.
+  final bool selecting;
+  final bool selected;
 
   /// How many further items the grid is not showing. Only ever non-zero on the
   /// last tile.
@@ -138,6 +187,7 @@ class _AlbumTile extends StatelessWidget {
         : url != null
             ? NetImage(url,
                 width: tileEdge,
+                decodeWidth: m.hasThumb ? kThumbDecodePx : null,
                 height: tileEdge,
                 cacheKey: m.tileCacheKey,
                 thumb: m.hasThumb,)
@@ -206,6 +256,26 @@ class _AlbumTile extends StatelessWidget {
                 ),
               ),
             ),
+          // Per-tile, and drawn LAST so it reads over the count and the
+          // upload scrims. The row's own tint still marks a whole-album
+          // selection; this marks the photographs picked one at a time. Same
+          // glyphs and same scrim as the gallery grid, because it is the same
+          // question being answered.
+          if (selecting)
+            Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  size: 18,
+                  color: selected
+                      ? const Color(0xFFEF6F58)
+                      : const Color(0xCCFBF8F4),
+                ),
+              ),
+            ),
+          if (selected) const ColoredBox(color: Color(0x552B1B12)),
         ],
       ),
     );

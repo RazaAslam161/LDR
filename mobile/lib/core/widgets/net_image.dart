@@ -17,6 +17,8 @@ class NetImage extends StatelessWidget {
     this.cacheKey,
     this.thumb = false,
     this.decodeWidth,
+    this.placeholder,
+    this.fadeIn,
   });
 
   final String url;
@@ -52,6 +54,26 @@ class NetImage extends StatelessWidget {
   /// opening a photo instant silently does not happen.
   final int? decodeWidth;
 
+  /// What to paint while the bytes are being read, INSTEAD of the default
+  /// opaque block.
+  ///
+  /// The default is right for a tile with nothing behind it — a grid cell that
+  /// paints nothing reads as a hole. It is wrong, and badly so, for a layer
+  /// stacked over another picture: `MilesColors.surface2` is fully opaque, so
+  /// a viewer that draws its original over an already-decoded thumbnail was
+  /// covering that thumbnail with a maroon rectangle for the length of a disk
+  /// read and a decode, and then cross-fading out of it. That block is what a
+  /// swipe looks like when the photograph underneath was ready the whole time.
+  /// Pass `SizedBox.shrink()` from any layered call site.
+  final Widget? placeholder;
+
+  /// Overrides the 150ms cross-fade.
+  ///
+  /// Zero belongs anywhere something correct is already on screen: fading in
+  /// over a good thumbnail is 150ms of two images composited to arrive at the
+  /// picture that was there at the start.
+  final Duration? fadeIn;
+
   @override
   Widget build(BuildContext context) {
     // Decode at display size, not source size. `width`/`height` are layout-only
@@ -80,12 +102,13 @@ class NetImage extends StatelessWidget {
       // memCacheHeight is deliberately never set. It joins the resize key, so
       // a square tile passing both dimensions cannot share a decode with any
       // surface that passes width alone — which is every other surface.
-      fadeInDuration: const Duration(milliseconds: 150),
+      fadeInDuration: fadeIn ?? const Duration(milliseconds: 150),
       // The default is 1000ms of cross-fading the OLD image out. On a grid
       // that recycles cells while scrolling that is a second of two frames
       // composited per cell, for no visual gain.
       fadeOutDuration: Duration.zero,
-      placeholder: (_, __) => const ColoredBox(color: MilesColors.surface2),
+      placeholder: (_, __) =>
+          placeholder ?? const ColoredBox(color: MilesColors.surface2),
       errorWidget: (_, __, ___) =>
           error ?? const ColoredBox(color: MilesColors.surface2),
     );

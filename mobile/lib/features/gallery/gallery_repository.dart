@@ -176,10 +176,35 @@ class GalleryRepository {
     ];
   }
 
+  /// True while the last batch sign left tiles without a URL.
+  ///
+  /// The grid has its rows and cannot paint them: every `_Tile` reads
+  /// `MediaUrls.cached` and falls back to a flat `ColoredBox`, so a failed
+  /// batch looked exactly like a gallery of grey squares that was working as
+  /// intended. `snap.hasError` never fires for it — the fetch SUCCEEDED — so
+  /// the screen's retry card is unreachable and the only recovery is leaving
+  /// the screen. A notifier rather than a field: the band that offers the
+  /// retry is built outside the StreamBuilder.
+  static final ValueNotifier<bool> signingFailed = ValueNotifier<bool>(false);
+
   /// One createSignedUrls call for every path the grid is about to ask for.
   /// Signing per tile is a network round trip behind every picture.
-  static Future<void> _warm(List<GalleryItem> items) =>
-      MediaUrls.warm(_bucket, items.map((i) => i.gridPath));
+  static Future<bool> _warm(List<GalleryItem> items) async {
+    final ok = await MediaUrls.warm(_bucket, items.map((i) => i.gridPath));
+    // Only ever RAISED by a partial page. A single row patched in by a
+    // realtime insert failing to sign should not clear a banner the whole
+    // grid still needs, and should not raise one either when the grid is fine
+    // — so a one-item warm reports nothing and the next full page decides.
+    if (items.length > 1 || !ok) signingFailed.value = !ok;
+    return ok;
+  }
+
+  /// Re-runs the batch for what the grid is currently showing.
+  ///
+  /// ONE call, not one per tile. Giving each grey tile its own sign would turn
+  /// a single failure into N round trips, fired hardest during exactly the
+  /// network blip that caused it.
+  static Future<bool> resign(List<GalleryItem> items) => _warm(items);
 
   /// Warms the ORIGINALS around [index] so opening the pager is instant.
   static Future<void> warmOriginals(List<GalleryItem> items, int index) {

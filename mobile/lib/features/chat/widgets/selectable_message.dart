@@ -17,7 +17,7 @@ import 'package:miles/core/ui/theme.dart';
 /// mid-selection should add it to the selection, not open it full screen.
 class SelectableMessage extends StatelessWidget {
   const SelectableMessage({
-    required this.selecting, required this.selected, required this.onToggle, required this.child, this.onLongPressAt, super.key,
+    required this.selecting, required this.selected, required this.onToggle, required this.child, this.onLongPressAt, this.blockChildPointers, super.key,
   });
 
   /// Whether a selection is open anywhere in the conversation — not whether
@@ -38,13 +38,33 @@ class SelectableMessage extends StatelessWidget {
   /// message would be in the way of the very gesture they are repeating.
   final void Function(Rect anchor)? onLongPressAt;
 
+  /// Whether the bubble underneath stops receiving pointers. Defaults to
+  /// [selecting], which is what it has always been.
+  ///
+  /// False for an ALBUM row, and that is the whole of what makes a single
+  /// photograph in a send selectable. Blocking pointers is what stops a
+  /// bubble's own gestures — a video tap, a voice scrub — firing mid-selection,
+  /// but `IgnorePointer` removes the subtree from HIT TESTING as well, so the
+  /// per-tile tags the conversation's drag-select resolves a finger against
+  /// were invisible for exactly as long as a selection was open. An album
+  /// keeps its pointers and routes its own tile taps to the selection instead;
+  /// every other row is untouched.
+  final bool? blockChildPointers;
+
   @override
   Widget build(BuildContext context) => GestureDetector(
         // While selecting there is no hittable child, so say outright that
         // this detector is the target rather than leaning on the tint layer
         // underneath happening to be opaque.
         behavior: HitTestBehavior.opaque,
-        onLongPress: () {
+        // Null WHILE SELECTING, and that is not a feature being removed. A
+        // per-row long press is deeper in the tree than the conversation's
+        // drag-select recognizer and wins the arena against it every time, so
+        // leaving it live means press-and-slide can never start. Outside a
+        // selection this is still the gesture that opens the reaction bar and
+        // starts the selection, exactly as before; inside one, the parent
+        // takes it and reports the same toggle through `onToggle`.
+        onLongPress: selecting ? null : () {
           final opensBar = !selecting && onLongPressAt != null;
           // The firmer tap belongs to the affordance that opens something.
           // Extending a selection keeps the lighter one it has always had.
@@ -66,7 +86,10 @@ class SelectableMessage extends StatelessWidget {
               ? MilesColors.tint(MilesColors.ember, 0.22,
                   over: MilesColors.night,)
               : Colors.transparent,
-          child: IgnorePointer(ignoring: selecting, child: child),
+          child: IgnorePointer(
+            ignoring: blockChildPointers ?? selecting,
+            child: child,
+          ),
         ),
       );
 }

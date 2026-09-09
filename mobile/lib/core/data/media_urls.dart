@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/supabase_service.dart';
 import 'package:miles/core/diag/diag.dart';
@@ -49,14 +51,51 @@ class MediaUrls {
 
   static String _key(String bucket, String path) => '$bucket/$path';
 
-  /// The signed URL if one is cached and still good, else null.
+  /// A URL that still works, or null.
   ///
   /// Synchronous on purpose — this is called from build().
+  ///
+  /// **"Still works", not "does not need renewing".** These are two different
+  /// questions and answering them both with `null` cost the app an hour a day:
+  /// inside the last hour of a 24h token this returned null, so every
+  /// synchronous warm path in the app — the chat pager's first paint, the
+  /// vault tile's `_paintWarm`, `PlainMediaCache.warm` — reported a miss for a
+  /// URL that had up to sixty minutes left on it, and fell back to a signing
+  /// round trip with a placeholder on screen while it ran. The renewal is
+  /// still made; it is made in the BACKGROUND, and the caller paints in the
+  /// meantime.
+  ///
+  /// [_expiryGuard] rather than zero: a phone whose clock is a little slow
+  /// would otherwise hand out a URL the server has already retired.
   static String? cached(String bucket, String path) {
     final hit = _cache[_key(bucket, path)];
     if (hit == null) return null;
-    if (hit.expires.difference(DateTime.now()) < _renewWithin) return null;
+    final left = hit.expires.difference(DateTime.now());
+    if (left < _expiryGuard) return null;
+    if (left < _renewWithin) _renewInBackground(bucket, path);
     return hit.url;
+  }
+
+  /// Below this a cached URL is treated as gone rather than as renewable.
+  static const _expiryGuard = Duration(minutes: 2);
+
+  /// Paths with a renewal already in flight, so a grid of fifty tiles calling
+  /// [cached] in one frame starts ONE re-sign rather than fifty.
+  static final Set<String> _renewing = {};
+
+  static void _renewInBackground(String bucket, String path) {
+    final k = _key(bucket, path);
+    if (!_renewing.add(k)) return;
+    unawaited(sign(bucket, path).whenComplete(() => _renewing.remove(k)));
+  }
+
+  /// Whether the cached URL is fresh enough that re-signing would be waste.
+  ///
+  /// What [sign] and [warm] ask, and deliberately NOT what [cached] asks.
+  static bool _fresh(String bucket, String path) {
+    final hit = _cache[_key(bucket, path)];
+    return hit != null &&
+        hit.expires.difference(DateTime.now()) >= _renewWithin;
   }
 
   /// Sign a page of objects in ONE request.
@@ -64,21 +103,40 @@ class MediaUrls {
   /// Called by the repository as messages load, so the cache is warm before the
   /// list paints. Signing per bubble instead would put a network round trip
   /// behind every image in the conversation.
-  static Future<void> warm(String bucket, Iterable<String> paths) async {
-    final need = paths.toSet().where((p) => cached(bucket, p) == null).toList();
-    if (need.isEmpty) return;
+  /// Returns whether every path asked for now has a URL.
+  ///
+  /// **A bool, because "best-effort" was hiding a dead end.** This used to
+  /// swallow the failure and return normally, so a network blip during the
+  /// batch left the caller believing it was warm; the gallery then painted a
+  /// grid of grey squares with no spinner, no error and no retry, and the only
+  /// way out was to leave the screen and come back. It still never throws —
+  /// callers fire it un-awaited — but a caller that can offer a retry now has
+  /// something to test.
+  static Future<bool> warm(String bucket, Iterable<String> paths) async {
+    // _fresh, not cached: cached now hands back a URL that is inside its
+    // renewal window, and warming must still renew it.
+    final need = paths.toSet().where((p) => !_fresh(bucket, p)).toList();
+    if (need.isEmpty) return true;
     try {
       final signed = await SupabaseService.client.storage
           .from(bucket)
           .createSignedUrlsResult(need, _ttl.inSeconds);
       final expires = DateTime.now().add(_ttl);
+      var ok = 0;
       for (final s in signed.whereType<SignedUrlSuccess>()) {
         _cache[_key(bucket, s.path)] = _Signed(s.signedUrl, expires);
+        ok++;
       }
+      // Partial counts as failed. A page that signed 40 of 60 leaves twenty
+      // grey tiles, which is the same dead end as signing none of them.
+      if (ok < need.length) {
+        debugPrint('[media] warm signed $ok of ${need.length} in $bucket');
+        return false;
+      }
+      return true;
     } catch (e) {
-      // Best-effort. A failure here costs a placeholder, never a frame and
-      // never a send.
       debugPrint('[media] warm failed for $bucket: ${e.runtimeType}');
+      return false;
     }
   }
 
@@ -92,8 +150,11 @@ class MediaUrls {
 
   /// Sign one object, for the paths that arrive outside a page load.
   static Future<String?> sign(String bucket, String path) async {
-    final hit = cached(bucket, path);
-    if (hit != null) return hit;
+    // _fresh, not cached, and this is what makes the background renewal in
+    // [cached] actually renew: asking `cached` here would get the still-usable
+    // URL back and return it, so the token would coast to expiry and the first
+    // thing to notice would be a 403 on a photograph.
+    if (_fresh(bucket, path)) return _cache[_key(bucket, path)]!.url;
     final seam = signForTest;
     if (seam != null) return seam(bucket, path);
     try {

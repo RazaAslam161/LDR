@@ -48,6 +48,19 @@ class ChatSelection {
 
   void clear() => _ids.clear();
 
+  /// Replaces the whole selection.
+  ///
+  /// Drag-select re-derives its entire span on every move rather than toggling
+  /// each row it crosses — that is what makes sliding back over a message undo
+  /// it instead of selecting it a second time — so it needs to set the set,
+  /// not nudge it. [canSelect] is still the gate: an uploading message cannot
+  /// be dragged into a selection any more than it can be tapped into one.
+  void replaceWith(Iterable<Message> messages) {
+    _ids
+      ..clear()
+      ..addAll(messages.where(canSelect).map((m) => m.id));
+  }
+
   /// Messages can vanish under an open selection — the partner deletes one for
   /// everyone while it is picked. A stale id would inflate the count and make
   /// [allMine] vacuously true.

@@ -231,6 +231,110 @@ class VaultRepository {
     }
   }
 
+  /// Save an object the couple's buckets ALREADY hold, WITHOUT moving its
+  /// bytes through this phone.
+  ///
+  /// This is what "saving should be instant" actually needs. [saveMedia] is
+  /// handed bytes and uploads them, so copying a 12MB video out of the gallery
+  /// meant a 12MB upload over a phone uplink — and reading those bytes from the
+  /// disk cache first, which is what a previous pass fixed, removed the
+  /// DOWNLOAD and left the upload untouched. The upload was always the cost.
+  /// Storage can duplicate the object server-side, so nothing crosses the
+  /// network but two small POSTs and a row insert.
+  ///
+  /// The vault still gets its OWN copy, which is the whole point of the
+  /// feature: a pointer into `couple_intimate` is a file the partner can read
+  /// and delete, and a signed URL dies within the day. `copy` produces a real
+  /// object under `owner_id/vault/`, protected by the same owner-only RLS as
+  /// anything uploaded here.
+  ///
+  /// [sourceThumbPath] is copied beside it when the source has one, and that is
+  /// how a saved VIDEO finally gets a preview: [saveMedia] derives a tile only
+  /// for images (there is no image in an mp4 to decode), so every video saved
+  /// to this vault has had `thumb_path` null and `gridPath` therefore null, and
+  /// the grid has been painting a play glyph where a poster belongs. The
+  /// gallery already holds a poster object for every one of its videos —
+  /// 146 of 146 rows on production carry `thumb_path` — so the poster does not
+  /// need deriving, only copying.
+  ///
+  /// Throws [VaultCopyUnavailable] when Storage will not do the copy, so the
+  /// caller can fall back to the byte path rather than fail the save. That
+  /// fallback is required, not optional: cross-bucket copy is a server
+  /// capability this client cannot prove from here.
+  static Future<VaultItem?> saveMediaByCopy({
+    required String sourceBucket,
+    required String sourcePath,
+    required String mimeType,
+    required String label,
+    String? sourceThumbPath,
+    String type = 'saved_photo',
+  }) async {
+    final uid = SupabaseService.currentUserId;
+    if (uid == null) throw StateError('not signed in');
+
+    final id = _uuid();
+    final ext = _plainExt(mimeType);
+    final fullPath = '$uid/vault/$id$ext';
+    final thumbPath =
+        sourceThumbPath == null ? null : '$uid/vault/thumb/$id.jpg';
+
+    try {
+      final from = _c.storage.from(sourceBucket);
+      await from.copy(sourcePath, fullPath, destinationBucket: bucket);
+      if (sourceThumbPath != null && thumbPath != null) {
+        await from.copy(sourceThumbPath, thumbPath, destinationBucket: bucket);
+      }
+    } catch (e) {
+      // A partial copy is an orphan nobody can see or delete, exactly as a
+      // failed insert would be — so it is cleaned up on the way out.
+      await _removeObjects([fullPath, if (thumbPath != null) thumbPath]);
+      debugPrint('[vault] server-side copy unavailable: ${e.runtimeType}');
+      throw const VaultCopyUnavailable();
+    }
+
+    try {
+      final row = await _c
+          .from('personal_vault_items')
+          .insert({
+            'id': id,
+            'owner_id': uid,
+            'type': type,
+            'media_url': label,
+            'storage_path': fullPath,
+            'thumb_path': thumbPath,
+            'mime_type': mimeType,
+            // width/height/byte_size are left null. All three are nullable
+            // (verified against production's information_schema), and the
+            // point of this path is that the bytes are never held here to
+            // measure. The grid reserves its shape from a square delegate, not
+            // from these.
+          })
+          .select()
+          .single();
+      return VaultItem.fromJson(row);
+    } catch (e) {
+      await _removeObjects([fullPath, if (thumbPath != null) thumbPath]);
+      rethrow;
+    }
+  }
+
+  /// Points an existing row at a thumbnail that has just been uploaded for it.
+  ///
+  /// UPLOAD, THEN CLAIM, never the reverse — the same ordering rule
+  /// `ThumbBackfill` states for chat: a `thumb_path` with no object behind it
+  /// makes `gridPath` non-null and the tile 404s permanently, with no way back
+  /// because the null branch is never entered again.
+  static Future<void> attachThumb(String itemId, String thumbPath) async {
+    await _c
+        .from('personal_vault_items')
+        .update({'thumb_path': thumbPath})
+        .eq('id', itemId);
+  }
+
+  /// Uploads a derived poster for an existing item. Public for the backfill.
+  static Future<void> uploadThumb(String path, Uint8List bytes) =>
+      _uploadPlain(path, bytes, 'image/jpeg');
+
   /// The bucket's allow-list already carries these (verified live:
   /// image/jpeg|png|webp, video/mp4|quicktime, audio/mp4|aac|mpeg).
   static String _plainExt(String mime) => switch (mime) {
@@ -304,6 +408,17 @@ class VaultRepository {
     return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}'
         '-${h.substring(16, 20)}-${h.substring(20)}';
   }
+}
+
+/// Storage would not duplicate the object server-side.
+///
+/// Not a failure to report to the user — the caller falls back to uploading the
+/// bytes, which is what every build before this one did. It exists so that
+/// "copy is unavailable" cannot be confused with "the save failed".
+class VaultCopyUnavailable implements Exception {
+  const VaultCopyUnavailable();
+  @override
+  String toString() => 'Storage could not copy this object server-side.';
 }
 
 /// The picked file could not be decoded into a thumbnail.

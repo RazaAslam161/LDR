@@ -124,10 +124,21 @@ class EncryptedMediaCache {
     final flying = _inFlight[k];
     if (flying != null) return flying;
 
-    final job = _load(bucket, path, associatedData, keyOverride).then((plain) {
-      _admit(k, plain);
+    final gen = _generation;
+    late final Future<Uint8List> job;
+    job = _load(bucket, path, associatedData, keyOverride).then((plain) {
+      // The caller asked for these bytes and gets them either way — it is the
+      // CACHE that must not be repopulated across a clear. See [clear].
+      if (gen == _generation) _admit(k, plain);
       return plain;
-    }).whenComplete(() => _inFlight.remove(k));
+      // identical, not a bare remove: `clear()` empties this map, so a request
+      // arriving after it installs a SECOND job under the same key — and the
+      // first job finishing would otherwise delete the second one's entry,
+      // leaving a third request to start the identical download all over
+      // again.
+    }).whenComplete(() {
+      if (identical(_inFlight[k], job)) _inFlight.remove(k);
+    });
     _inFlight[k] = job;
     return job;
   }
@@ -180,15 +191,21 @@ class EncryptedMediaCache {
   /// No associated data and no key: nothing is decrypted here. A hit means the
   /// decrypt already happened under whatever key was current, and the key
   /// epoch is part of [_key], so a rewrap misses rather than mispaints.
+  ///
+  /// [decodeWidth] must be the SAME expression the async path passes for this
+  /// object, or the synchronous answer carries a different `ResizeImageKey`
+  /// and buys a second decode of bytes already decoded. Null — the tile case —
+  /// is unbounded, which is its own shared key.
   static ImageProvider? warmTileProvider({
     required String path,
     String bucket = privateBucket,
+    int? decodeWidth,
   }) {
     final k = _key(bucket, path);
     final hit = _l2.remove(k);
     if (hit == null) return null;
     _l2[k] = hit; // re-insert: most recently used
-    return _provider(bucket, path, hit.bytes, null);
+    return _provider(bucket, path, hit.bytes, decodeWidth);
   }
 
   /// A provider for the original. [decodeWidth] null mounts it unbounded, which
@@ -239,11 +256,35 @@ class EncryptedMediaCache {
     // so every provider built over one L2 entry at one width is EQUAL to the
     // last, and appending on every rebuild grows a list of duplicates that all
     // name the SAME ImageCache entry. One is what eviction needs.
-    if (entry != null && !entry.providers.contains(provider)) {
-      entry.providers.add(provider);
+    if (entry != null) {
+      if (!entry.providers.contains(provider)) {
+        entry.providers.add(provider);
+        // And the key it is FILED UNDER, which is not the provider itself for
+        // every provider — see [_Plain.cacheKeys]. Synchronous in practice:
+        // MemoryImage.obtainKey returns a SynchronousFuture and ResizeImage
+        // passes that straight through, so the key is recorded before this
+        // method returns.
+        provider
+            .obtainKey(ImageConfiguration.empty)
+            .then(entry.cacheKeys.add);
+      }
+    } else {
+      // No entry owns these bytes. Either a [clear] landed between the admit
+      // and the caller resuming, or the load was fenced out by one — and a
+      // decoded frame that nothing tracks is a frame no later `clear()` can
+      // ever reach, which is a worse leak than the one the fence closes.
+      // Remembered here so the next clear takes it.
+      provider.obtainKey(ImageConfiguration.empty).then(_orphanKeys.add);
     }
     return provider;
   }
+
+  /// ImageCache keys for providers built over bytes no L2 entry owns.
+  ///
+  /// Small and bounded in practice — it takes a cover raise landing inside the
+  /// microtask between a decrypt finishing and its caller resuming — but
+  /// unbounded in principle, so [clear] empties it as well as draining it.
+  static final List<Object> _orphanKeys = [];
 
   static Future<Uint8List> _load(
     String bucket,
@@ -300,6 +341,13 @@ class EncryptedMediaCache {
   }
 
   static void _admit(String key, Uint8List plain) {
+    // Whatever was there first, properly. A bare overwrite dropped the old
+    // entry's byte count and its providers on the floor: `_l2Bytes` then only
+    // ever grew, so the ceiling was reached early and permanently, and the
+    // decoded frames of the replaced entry stayed resident with nothing left
+    // pointing at them to evict. `clear()` emptying `_inFlight` while a load
+    // is still running is the ordinary way two admits land on one key.
+    _evict(key);
     _l2[key] = _Plain(plain);
     _l2Bytes += plain.lengthInBytes;
     while (_l2Bytes > _l2MaxBytes && _l2.length > 1) {
@@ -312,8 +360,25 @@ class EncryptedMediaCache {
     final gone = _l2.remove(key);
     if (gone == null) return;
     _l2Bytes -= gone.bytes.lengthInBytes;
-    for (final p in gone.providers) {
-      PaintingBinding.instance.imageCache.evict(p);
+    _dropDecodes(gone);
+  }
+
+  /// Takes the decoded frames of [entry] out of Flutter's ImageCache.
+  ///
+  /// By KEY, not by provider, and that distinction is the whole reason this is
+  /// a method. `evict` matches on the object a provider's `obtainKey` returns:
+  /// `MemoryImage` returns `this`, so passing the provider worked for the
+  /// unbounded tiles — but `ResizeImage` returns a `ResizeImageKey`, so
+  /// passing the `ResizeImage` matched nothing, returned false, and said
+  /// nothing about it. Every bounded decode this class has ever built — every
+  /// timeline cover, every zoomed original — therefore survived the clear that
+  /// exists to drop it, and only the global `imageCache.clear()` underneath was
+  /// really doing the work.
+  static void _dropDecodes(_Plain entry) {
+    for (final key in entry.cacheKeys) {
+      // includeLive defaults to true: a frame still on screen goes too, which
+      // is the case that matters behind the cover.
+      PaintingBinding.instance.imageCache.evict(key);
     }
   }
 
@@ -340,23 +405,53 @@ class EncryptedMediaCache {
   /// photo that has been PAINTED is still strongly held by Flutter's ImageCache
   /// and its live-image set, so clearing only the map leaves the couple's
   /// photographs in RAM behind the disguise cover — which is precisely the
-  /// moment the design claims they are gone.
+  /// moment the design claims they are gone. `evict` takes both: its
+  /// `includeLive` defaults to true, so the provider goes from the cache AND
+  /// from the live-image set in one call.
+  ///
+  /// **Targeted, not global.** This used to finish with
+  /// `imageCache..clear()..clearLiveImages()`, which is every decoded frame in
+  /// the PROCESS — chat photographs, gallery tiles, avatars, none of which are
+  /// encrypted and all of which sit in plaintext on disk under
+  /// `PlainMediaCache` regardless. The cover rises on any focus loss, a glance
+  /// at the notification shade included, so that line threw away the whole
+  /// app's decode cache several times an hour and bought nothing for the media
+  /// it was emptying: the bytes it "protected" were readable at the filesystem
+  /// level either way. Re-decoding all of it on the way back in IS the loading
+  /// wheel on media the phone already has. The providers this file built are
+  /// the ones holding decrypted pixels, and evicting exactly those keeps the
+  /// promise this method actually makes.
+  ///
+  /// Sign-out is a different question and answers it in its own place:
+  /// `_endSession` empties every plaintext store and then clears the image
+  /// cache globally, which is correct there because the couple is ending.
   ///
   /// L1 is left alone. It is ciphertext, and re-downloading it on every cover
   /// raise would be a great deal of traffic to protect nothing.
   static void clear() {
     for (final e in _l2.values) {
-      for (final p in e.providers) {
-        PaintingBinding.instance.imageCache.evict(p);
-      }
+      _dropDecodes(e);
     }
+    // The frames that belong to no entry, for the reason [_orphanKeys] gives.
+    for (final key in _orphanKeys) {
+      PaintingBinding.instance.imageCache.evict(key);
+    }
+    _orphanKeys.clear();
     _l2.clear();
     _l2Bytes = 0;
     _inFlight.clear();
-    PaintingBinding.instance.imageCache
-      ..clear()
-      ..clearLiveImages();
+    // A load already running cannot be cancelled, and its continuation calls
+    // _admit — so without this the cover rises, the clear runs, and a decrypt
+    // that was in flight puts plaintext BACK into L2 a moment later, behind
+    // the cover, which is the one moment the design promises there is none.
+    // The generation it started under no longer matches, so the continuation
+    // returns the bytes to its own caller and admits nothing.
+    _generation++;
   }
+
+  /// Bumped by [clear]. A decrypt that started before it does not get to
+  /// populate the cache after it.
+  static int _generation = 0;
 
   /// Ciphertext too — sign-out, not a cover raise.
   static Future<void> clearAll() async {
@@ -374,7 +469,16 @@ class EncryptedMediaCache {
 class _Plain {
   _Plain(this.bytes);
   final Uint8List bytes;
+
+  /// Providers built over [bytes]. The dedup set, not the eviction set.
   final List<ImageProvider> providers = [];
+
+  /// What those providers are FILED UNDER in Flutter's ImageCache, which is a
+  /// different object for the bounded ones: `MemoryImage.obtainKey` returns
+  /// `this`, `ResizeImage.obtainKey` returns a `ResizeImageKey`. Evicting is
+  /// key-matched, so this list — not [providers] — is what `_dropDecodes`
+  /// walks.
+  final List<Object> cacheKeys = [];
 }
 
 /// Why a piece of media could not be shown.

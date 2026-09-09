@@ -51,6 +51,77 @@ class ThumbBackfill {
     _seen.clear();
   }
 
+  /// Re-derives a thumbnail that already exists but was made too small.
+  ///
+  /// [Thumbnails.maxEdge] was 400 for the life of the pipeline, chosen for a
+  /// 150dp album tile; the 220dp chat bubble it missed is ~605px, so every
+  /// thumbnail written before the raise is UPSCALED in the surface a couple
+  /// looks at most. Raising the constant only helps pictures sent after it,
+  /// and nothing else re-derives: [heal] fires on rows with no thumbnail at
+  /// all and would skip these forever.
+  ///
+  /// Recognised without a schema column: the object is on disk, and its header
+  /// says how big it is. Free in the same sense the rest of this class is —
+  /// both the thumbnail and the original are already local, or it declines.
+  static Future<bool> resize({
+    required String messageId,
+    required String bucket,
+    required String path,
+    required String thumbPath,
+  }) async {
+    final mark = '$messageId:resize';
+    if (_busy || _seen.contains(mark)) return false;
+    _busy = true;
+    _seen.add(mark);
+    try {
+      final small = await PlainMediaCache.manager
+          .getFileFromCache(PlainMediaCache.keyFor(bucket, thumbPath));
+      // Not downloaded means this surface has not painted it, so there is
+      // nothing to be too small on screen yet.
+      if (small == null) return false;
+      final edge = Thumbnails.longestEdge(await small.file.readAsBytes());
+      // Null is "not a picture I can read the header of" — never a reason to
+      // re-derive, which would upload over a perfectly good object.
+      if (edge == null || edge >= Thumbnails.maxEdge) return false;
+
+      final original = await PlainMediaCache.manager
+          .getFileFromCache(PlainMediaCache.keyFor(bucket, path));
+      // The original is what a re-derive needs and fetching one would turn a
+      // read-time optimisation into a download, which is the rule this whole
+      // class is built on.
+      if (original == null) return false;
+
+      final bytes = await Thumbnails.forImage(original.file);
+      if (bytes == null) return false;
+
+      await SupabaseService.client.storage.from(bucket).uploadBinary(
+            thumbPath,
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              upsert: true,
+            ),
+          );
+
+      // The row already claims a thumbnail and the path has not changed, so
+      // there is nothing to claim — but the DEVICE still holds the old small
+      // object under a key that never expires from its own point of view.
+      // Without this the app keeps painting the 400px copy it just replaced.
+      await PlainMediaCache.manager
+          .removeFile(PlainMediaCache.keyFor(bucket, thumbPath));
+      final url = MediaUrls.cached(bucket, thumbPath);
+      if (url != null) {
+        await PlainMediaCache.provider(bucket, thumbPath, url).evict();
+      }
+      return true;
+    } catch (e) {
+      debugPrint('[thumb-resize] ${e.runtimeType}');
+      return false;
+    } finally {
+      _busy = false;
+    }
+  }
+
   /// Heal one message, if it needs it and the bytes are already local.
   ///
   /// [messageId] is the row to claim; [bucket]/[path] locate the original.

@@ -13,10 +13,12 @@ import 'package:miles/core/media/media_normalize.dart';
 import 'package:miles/core/media/plain_media_cache.dart';
 import 'package:miles/core/services/photo_picker_service.dart';
 import 'package:miles/core/ui/theme.dart';
+import 'package:miles/core/widgets/drag_select.dart';
 import 'package:miles/features/auth/auth_errors.dart';
 import 'package:miles/features/chat/chat_repository.dart';
 import 'package:miles/features/closer/secure_screen.dart';
 import 'package:miles/features/vault/vault_repository.dart';
+import 'package:miles/features/vault/vault_thumb_backfill.dart';
 import 'package:miles/features/vault/vault_viewer.dart';
 import 'package:miles/main.dart';
 
@@ -53,6 +55,7 @@ class _VaultScreenState extends State<VaultScreen> {
 
   @override
   void dispose() {
+    _scroll.dispose();
     SecureScreen.release();
     super.dispose();
   }
@@ -67,11 +70,24 @@ class _VaultScreenState extends State<VaultScreen> {
       // glyphs filling in over many seconds — and each tap paid the same
       // round-trip again for the original. The gallery has always done this
       // (MediaUrls.warm); the vault never did.
-      unawaited(MediaUrls.warm(VaultRepository.bucket, [
-        for (final i in _items) ...[
+      //
+      // **Split, and only the first half is awaited.** It was one un-awaited
+      // call, so `_loading` went false on the next statement and the grid
+      // built before `createSignedUrls` landed — which is the whole benefit,
+      // thrown away: every visible tile missed `MediaUrls.cached` and signed
+      // its own path after all, exactly what the batch exists to prevent.
+      // Awaiting the WHOLE set would be the opposite mistake, putting up to
+      // 200 originals' signing in front of the first frame for pictures
+      // nobody has tapped.
+      await MediaUrls.warm(VaultRepository.bucket, [
+        for (final i in _items)
           if (i.thumbPath != null) i.thumbPath!,
+      ],);
+      // The originals follow, off the critical path. The viewer re-signs on
+      // its own if it beats this home.
+      unawaited(MediaUrls.warm(VaultRepository.bucket, [
+        for (final i in _items)
           if (i.storagePath != null) i.storagePath!,
-        ],
       ],),);
     } catch (e) {
       // Swallowing this rendered the "Your vault is empty" copy on a network
@@ -100,6 +116,51 @@ class _VaultScreenState extends State<VaultScreen> {
   void _toggle(String id) => setState(() {
         if (!_selected.remove(id)) _selected.add(id);
       });
+
+  /// Scrolls the vault while a drag-select runs past the bottom of the screen.
+  final ScrollController _scroll = ScrollController();
+
+  /// The media rows the grid is painting, assigned where the grid is built.
+  /// A drag reports an INDEX and the ids live here.
+  List<VaultItem> _paintedMedia = const [];
+
+  Set<String>? _dragBase;
+  bool _dragAdds = true;
+
+  void _dragAnchor(int index) {
+    if (index < 0 || index >= _paintedMedia.length) return;
+    final id = _paintedMedia[index].id;
+    setState(() {
+      _dragBase = {..._selected};
+      _dragAdds = !_selected.contains(id);
+      if (_dragAdds) {
+        _selected.add(id);
+      } else {
+        _selected.remove(id);
+      }
+    });
+  }
+
+  void _dragExtend(int anchor, int extent) {
+    final base = _dragBase;
+    if (base == null) return;
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(base);
+      for (final i in dragSelectSpan(anchor, extent)) {
+        if (i < 0 || i >= _paintedMedia.length) continue;
+        final id = _paintedMedia[i].id;
+        if (_dragAdds) {
+          _selected.add(id);
+        } else {
+          _selected.remove(id);
+        }
+      }
+    });
+  }
+
+  void _dragEnd() => _dragBase = null;
 
   /// Deletes everything selected, in one confirmation.
   ///
@@ -414,7 +475,14 @@ class _VaultScreenState extends State<VaultScreen> {
   Widget _buildList() {
     final media = _items.where(_isMedia).toList();
     final notes = _items.where((i) => !_isMedia(i)).toList();
-    return CustomScrollView(
+    _paintedMedia = media;
+    return DragSelect(
+      scroll: _scroll,
+      onAnchor: _dragAnchor,
+      onExtend: _dragExtend,
+      onEnd: _dragEnd,
+      child: CustomScrollView(
+      controller: _scroll,
       slivers: [
         if (media.isNotEmpty) ...[
           SliverPadding(
@@ -433,18 +501,20 @@ class _VaultScreenState extends State<VaultScreen> {
                 mainAxisSpacing: 3,
               ),
               delegate: SliverChildBuilderDelegate(
-                (_, i) => _VaultTile(
-                  // Keyed by id: the list re-sorts and re-filters on every
-                  // save and delete, and an index-matched element would hand
-                  // one item's decrypted tile to another's row.
-                  key: ValueKey(media[i].id),
-                  item: media[i],
-                  selected: _selected.contains(media[i].id),
-                  selecting: _selected.isNotEmpty,
-                  onTap: () => _selected.isEmpty
-                      ? _openMedia(media[i])
-                      : _toggle(media[i].id),
-                  onLongPress: () => _toggle(media[i].id),
+                (_, i) => DragSelectItem(
+                  index: i,
+                  child: _VaultTile(
+                    // Keyed by id: the list re-sorts and re-filters on every
+                    // save and delete, and an index-matched element would hand
+                    // one item's decrypted tile to another's row.
+                    key: ValueKey(media[i].id),
+                    item: media[i],
+                    selected: _selected.contains(media[i].id),
+                    selecting: _selected.isNotEmpty,
+                    onTap: () => _selected.isEmpty
+                        ? _openMedia(media[i])
+                        : _toggle(media[i].id),
+                  ),
                 ),
                 childCount: media.length,
               ),
@@ -472,6 +542,7 @@ class _VaultScreenState extends State<VaultScreen> {
         ],
         const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
+      ),
     );
   }
 
@@ -633,7 +704,6 @@ class _VaultTile extends StatefulWidget {
     required this.selected,
     required this.selecting,
     required this.onTap,
-    required this.onLongPress,
     super.key,
   });
 
@@ -641,7 +711,6 @@ class _VaultTile extends StatefulWidget {
   final bool selected;
   final bool selecting;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   @override
   State<_VaultTile> createState() => _VaultTileState();
@@ -730,7 +799,21 @@ class _VaultTileState extends State<_VaultTile> {
       return;
     }
     final path = widget.item.gridPath;
-    if (path == null) return; // video/audio: the glyph is the preview
+    if (path == null) {
+      // A saved VIDEO with no poster. Every one of them is in this state —
+      // the save path only ever derived a tile for images — so the glyph was
+      // not a fallback, it was the only thing this branch could ever paint.
+      // Heal it once from the video the vault already owns, then repaint.
+      if (VaultThumbBackfill.wants(widget.item)) {
+        final healed = await VaultThumbBackfill.heal(widget.item);
+        if (healed == null || !_mounted) return;
+        final url = await MediaUrls.sign(VaultRepository.bucket, healed);
+        if (url == null || !_mounted) return;
+        setState(() => _provider =
+            PlainMediaCache.provider(VaultRepository.bucket, healed, url),);
+      }
+      return; // audio: the glyph IS the preview, and always was
+    }
     if (!path.endsWith('.enc')) {
       // The gallery mechanism verbatim: the screen's _load already
       // batch-signed every path, so this is a cache hit, not a round trip.
@@ -789,7 +872,6 @@ class _VaultTileState extends State<_VaultTile> {
     final provider = _provider;
     return GestureDetector(
       onTap: widget.onTap,
-      onLongPress: widget.onLongPress,
       child: DecoratedBox(
         decoration: const BoxDecoration(color: MilesColors.surface2),
         child: Stack(

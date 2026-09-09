@@ -48,6 +48,8 @@ import 'package:miles/features/chat/chat_media_source.dart';
 import 'package:miles/features/chat/chat_reactions.dart';
 import 'package:miles/features/chat/chat_receipts.dart';
 import 'package:miles/features/chat/chat_repository.dart';
+import 'package:miles/core/media/media_decode.dart';
+import 'package:miles/core/widgets/drag_select.dart';
 import 'package:miles/features/chat/chat_selection.dart';
 import 'package:miles/features/chat/chat_send_queue.dart';
 import 'package:miles/features/chat/media_album.dart';
@@ -146,6 +148,93 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   final _selection = ChatSelection();
   bool get _selecting => _selection.isActive;
+
+  /// Every painted message, flattened in row order — the drag index space.
+  ///
+  /// MESSAGES, not rows, and that is what makes a single photograph of a send
+  /// selectable. A row-indexed drag can only ever resolve a finger to a whole
+  /// album, because a row is the smallest thing it can name.
+  List<Message> _dragOrder = const [];
+
+  /// Where each row's first message sits in [_dragOrder].
+  List<int> _rowBase = const [];
+
+  /// Recomputed with the rows, in the same pass, so an index can never point
+  /// into a list the screen is no longer painting.
+  void _indexDragOrder(List<ChatRow> rows) {
+    final order = <Message>[];
+    final base = <int>[];
+    for (final r in rows) {
+      base.add(order.length);
+      order.addAll(r.items);
+    }
+    _dragOrder = order;
+    _rowBase = base;
+  }
+
+  /// The message ids held when the current drag began, and whether the drag is
+  /// adding or removing. See [DragSelect] — the span is re-derived from these
+  /// on every move, never toggled per row crossed.
+  Set<String>? _dragBase;
+  bool _dragAdds = true;
+
+  void _dragAnchor(int index) {
+    if (index < 0 || index >= _dragOrder.length) return;
+    setState(() {
+      _dragBase = {
+        for (final m in _dragOrder)
+          if (_selection.contains(m.id)) m.id,
+      };
+      _dragAdds = !_selection.contains(_dragOrder[index].id);
+      _applyDragSpan(index, index);
+    });
+  }
+
+  void _dragExtend(int anchor, int extent) {
+    if (_dragBase == null) return;
+    setState(() => _applyDragSpan(anchor, extent));
+  }
+
+  void _dragEnd() => _dragBase = null;
+
+  /// Rebuilds the selection as (what was held when the drag began) with the
+  /// dragged span added or removed, one MESSAGE at a time.
+  void _applyDragSpan(int anchor, int extent) {
+    final base = _dragBase;
+    if (base == null) return;
+    final held = {...base};
+    for (final i in dragSelectSpan(anchor, extent)) {
+      if (i < 0 || i >= _dragOrder.length) continue;
+      final id = _dragOrder[i].id;
+      if (_dragAdds) {
+        held.add(id);
+      } else {
+        held.remove(id);
+      }
+    }
+    _selection.replaceWith(_messages.where((m) => held.contains(m.id)));
+  }
+
+  /// One photograph of an album, by its row-local index.
+  ///
+  /// The last VISIBLE tile of a big send stands for everything behind it — the
+  /// grid shows four of twenty — so picking it takes the remainder with it.
+  /// Leaving sixteen photographs unselectable behind a "+16" badge would be a
+  /// selection the user cannot see the edges of.
+  void _toggleAlbumOne(ChatRow row, int index) {
+    if (index < 0 || index >= row.items.length) return;
+    // Read from the widget that draws them, never copied.
+    const shown = AlbumBubble.maxTiles;
+    final last = index == shown - 1 && row.items.length > shown;
+    final picked =
+        last ? row.items.sublist(index) : [row.items[index]];
+    final on = _selection.contains(row.items[index].id);
+    setState(() {
+      for (final m in picked) {
+        if (_selection.contains(m.id) == on) _selection.toggle(m);
+      }
+    });
+  }
 
   /// What the bubbles read. Written OPTIMISTICALLY: a tap paints here before
   /// anything touches the network, and nothing that comes back later can
@@ -2744,6 +2833,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                     // row here, so the list builds grids rather
                                     // than one full-width bubble per photo.
                                     final rows = _visibleRows(uid);
+                                    _indexDragOrder(rows);
                                     if (rows.isEmpty) {
                                       return const _EmptyChat();
                                     }
@@ -2757,6 +2847,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                           // already scrolling it.
                                           onPointerDown: (_) =>
                                               _jumpGeneration++,
+                                          child: DragSelect(
+                                          // Only while a selection is open.
+                                          // Outside one the long press belongs
+                                          // to the reaction bar, and a
+                                          // recognizer up here would race it
+                                          // for every press in the
+                                          // conversation.
+                                          enabled: _selecting,
+                                          scroll: _scroll,
+                                          onAnchor: _dragAnchor,
+                                          onExtend: _dragExtend,
+                                          onEnd: _dragEnd,
                                           child: ListView.builder(
                                           controller: _scroll,
                                           reverse: true,
@@ -2796,7 +2898,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                             // on or leaves a waveform, which is
                                             // twice per scrub and only for the
                                             // rows on screen.
-                                            return MeasuredRow(
+                                            return DragSelectItem(
+                                              // The row's FIRST message. Only
+                                              // reached where no tile answers
+                                              // — a text row, or the padding
+                                              // around an album's grid.
+                                              index: _rowBase[i],
+                                              child: MeasuredRow(
                                               // Layout is the only honest
                                               // source for a row height: a
                                               // bubble is one line or ten, a
@@ -2849,6 +2957,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                 ),
                                                 child: SelectableMessage(
                                                   selecting: _selecting,
+                                                  // An album keeps its
+                                                  // pointers so its own tiles
+                                                  // stay hit-testable and can
+                                                  // be picked one at a time;
+                                                  // every other row blocks
+                                                  // them exactly as before.
+                                                  blockChildPointers:
+                                                      _selecting &&
+                                                          !row.isAlbum,
                                                   selected:
                                                       _selection.contains(m.id),
                                                   onToggle: () =>
@@ -2866,6 +2983,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                         _react(m, emoji),
                                                     album:
                                                         row.isAlbum ? row : null,
+                                                    albumBaseIndex: _rowBase[i],
+                                                    albumSelecting: _selecting,
+                                                    albumSelected: (k) =>
+                                                        _selection.contains(
+                                                            row.items[k].id,),
+                                                    onToggleAlbumOne: (k) =>
+                                                        _toggleAlbumOne(row, k),
                                                     onOpenMedia: (t) =>
                                                         _openMedia(
                                                             t,
@@ -2905,9 +3029,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                         : null,
                                                   ),
                                                 ),),
-                                            ),),);
+                                            ),),),);
                                           },
-                                        ),),
+                                        ),),),
                                         if (_hasNewMessage)
                                           Positioned(
                                             bottom: 12,
@@ -3047,6 +3171,10 @@ class _Bubble extends StatelessWidget {
     required this.onOpenMedia,
     required this.onReact,
     this.album,
+    this.albumBaseIndex = 0,
+    this.albumSelecting = false,
+    this.albumSelected,
+    this.onToggleAlbumOne,
     this.repliedTo,
     this.replyAuthor,
     this.onTapReply,
@@ -3087,6 +3215,18 @@ class _Bubble extends StatelessWidget {
   /// grid replaces the single-photo body; everything around it — the reply
   /// quote, the timestamp, the tick — is the bubble's as usual.
   final ChatRow? album;
+
+  /// Where [album]'s first message sits in the conversation's flat drag order.
+  final int albumBaseIndex;
+
+  /// A selection is open, so the album's tiles show their own state.
+  final bool albumSelecting;
+
+  /// Whether the album's item at this row-local index is selected.
+  final bool Function(int index)? albumSelected;
+
+  /// Toggle one photograph of the album rather than the whole send.
+  final void Function(int index)? onToggleAlbumOne;
 
   /// Opens the pager on a specific message of the conversation's media.
   ///
@@ -3197,6 +3337,10 @@ class _Bubble extends StatelessWidget {
                       ) else if (album != null) AlbumBubble(
                         row: album!,
                         onOpen: (i) => onOpenMedia(album!.items[i]),
+                        baseIndex: albumBaseIndex,
+                        selecting: albumSelecting,
+                        isSelected: albumSelected ?? (_) => false,
+                        onToggleOne: onToggleAlbumOne ?? (_) {},
                       ) else _Content(
                         message: message,
                         voice: voice,
@@ -3698,6 +3842,10 @@ class _Content extends StatelessWidget {
                     tile ?? url!,
                     width: 220,
                     cacheKey: m.tileCacheKey,
+                    // The shared bound, not `thumb`. Every surface that paints
+                    // this object has to name the same width or Flutter keys a
+                    // second decode of it per surface.
+                    decodeWidth: m.hasThumb ? kThumbDecodePx : null,
                     thumb: m.hasThumb,
                   );
         return GestureDetector(
@@ -4051,6 +4199,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                       width: 220,
                       height: 140,
                       cacheKey: widget.message.tileCacheKey,
+                      decodeWidth: kThumbDecodePx,
                       thumb: true,
                     ),
                   ),

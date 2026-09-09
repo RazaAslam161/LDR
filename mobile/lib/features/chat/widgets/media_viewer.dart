@@ -179,16 +179,27 @@ class _MediaViewerState extends State<MediaViewer>
     _healTimer?.cancel();
     if (i < 0 || i >= widget.source.length) return;
     final item = widget.source.itemAt(i);
-    // A video's poster cannot be made from the video bytes on this path, and an
-    // item that already has one needs nothing.
-    if (item.isVideo || item.hasThumb || item.messageId == null) return;
+    // A video's poster cannot be made from the video bytes on this path.
+    if (item.isVideo || item.messageId == null) return;
     _healTimer = Timer(const Duration(milliseconds: 1500), () {
       if (!mounted) return;
-      unawaited(ThumbBackfill.heal(
-        messageId: item.messageId!,
-        bucket: item.bucket,
-        path: item.path,
-      ));
+      // Two different jobs behind one dwell. A row with no thumbnail gets one
+      // made and claimed; a row whose thumbnail predates the 640px edge gets
+      // it re-derived in place. The second used to be unreachable — the guard
+      // here returned early on `hasThumb`, so a raise of the constant would
+      // only ever have reached photographs sent after it.
+      unawaited(item.hasThumb
+          ? ThumbBackfill.resize(
+              messageId: item.messageId!,
+              bucket: item.bucket,
+              path: item.path,
+              thumbPath: item.thumbPath!,
+            )
+          : ThumbBackfill.heal(
+              messageId: item.messageId!,
+              bucket: item.bucket,
+              path: item.path,
+            ),);
     });
   }
 
@@ -234,7 +245,18 @@ class _MediaViewerState extends State<MediaViewer>
     // otherwise start ten of these, each holding four downloads open, and a
     // phone uplink spends the whole burst fetching photographs that were
     // already three swipes behind by the time they arrived.
-    if (_warming) return;
+    //
+    // Dropped, not ignored. The guard alone lost the last swipe of every
+    // burst: page 4's call returned instantly because page 2's loop was still
+    // awaiting, that loop then finished around page 2's neighbours, and
+    // nothing ever came back for page 4's — so the pager the user actually
+    // stopped on was the one page with cold neighbours, and the next swipe
+    // showed the black frame this whole method exists to prevent. The flag
+    // remembers the dropped call and the finally block honours it.
+    if (_warming) {
+      _warmAgain = true;
+      return;
+    }
     _warming = true;
     try {
       // The immediate neighbours, decoded. precacheImage puts the frame in
@@ -288,8 +310,21 @@ class _MediaViewerState extends State<MediaViewer>
       }
     } finally {
       _warming = false;
+      // Re-entered rather than looped: the index moved under the pass that
+      // just finished, so the neighbours it warmed are not the ones the user
+      // is sitting next to now. Guarded on mounted because a dispose during
+      // the awaits above is the common way out of this screen.
+      if (_warmAgain && mounted) {
+        _warmAgain = false;
+        unawaited(_warm());
+      } else {
+        _warmAgain = false;
+      }
     }
   }
+
+  /// A [_warm] arrived while one was already running. See [_warm].
+  bool _warmAgain = false;
 
   void _doubleTapAt(Offset point) {
     final zoomedIn = _transform.value.getMaxScaleOnAxis() > _zoomEpsilon;
@@ -325,12 +360,22 @@ class _MediaViewerState extends State<MediaViewer>
   Future<bool> _save(MediaItem item) async {
     if (item.isVideo) {
       return SaveMediaService.saveVideoToVault(
-          path: item.path, senderName: item.senderName,);
+        path: item.path,
+        senderName: item.senderName,
+        thumbPath: item.thumbPath,
+      );
     }
     final url = await MediaUrls.sign(item.bucket, item.path);
     if (url == null) return false;
     return SaveMediaService.savePhotoToVault(
-        url: url, senderName: item.senderName,);
+      url: url,
+      senderName: item.senderName,
+      // The page this button sits on downloaded the original under exactly
+      // this key. Without it the save re-fetched a file already on the disk
+      // beneath it.
+      cacheBucket: item.bucket,
+      cachePath: item.path,
+    );
   }
 
   @override
@@ -398,7 +443,7 @@ class _MediaViewerState extends State<MediaViewer>
       // Built for its neighbours as well, a run of videos would open three
       // platform decoders and three network sessions for the one being
       // watched, and playback would carry on over the photo after it.
-      return _VideoPage(item: item, active: i == index && _settled);
+      return _VideoPage(item: item, current: i == index, settled: _settled);
     }
     return _PhotoPage(
       item: item,
@@ -538,8 +583,39 @@ class _PhotoPageState extends State<_PhotoPage> {
     final url = _url;
     final Widget content;
     if (_resolving) {
-      content = const Center(
-        child: CircularProgressIndicator(color: Colors.white70),
+      // The thumbnail FIRST, and only then a wheel if there is no thumbnail.
+      //
+      // This arm used to be a bare full-bleed spinner, so while the original's
+      // URL was being signed the page painted a wheel on black over a
+      // thumbnail whose bytes were already on this phone — the exact thing the
+      // layer rule below forbids once resolving is over. And the arm is
+      // reached far more often than it looks: `MediaUrls.cached` returns null
+      // for the last hour of a 24-hour token as well as for an absent one, so
+      // a perfectly usable URL still costs a signing round trip with a wheel
+      // on top of it.
+      final thumbUrl = widget.item.hasThumb
+          ? MediaUrls.cached(widget.item.bucket, widget.item.tilePath)
+          : null;
+      content = Stack(
+        fit: StackFit.expand,
+        children: [
+          if (thumbUrl != null)
+            CachedNetworkImage(
+              imageUrl: thumbUrl,
+              cacheKey: widget.item.tileCacheKey,
+              cacheManager: PlainMediaCache.manager,
+              fit: BoxFit.contain,
+              // The shared bound the bubble and the album tile also name, so
+              // this is the frame they already decoded rather than a second
+              // one of the same object.
+              memCacheWidth: kThumbDecodePx,
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+              placeholder: (_, __) => const ColoredBox(color: Colors.black),
+              errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black),
+            ),
+          if (thumbUrl == null) const _DelayedSpinner(),
+        ],
       );
     } else if (url == null || _dead) {
       content = _Failed(onRetry: _retry);
@@ -581,9 +657,11 @@ class _PhotoPageState extends State<_PhotoPage> {
               cacheKey: widget.item.tileCacheKey,
               cacheManager: PlainMediaCache.manager,
               fit: BoxFit.contain,
-              // Unbounded on purpose: a thumbnail IS its own bound, and this
-              // is the exact key/bounds pair the grid tile decoded, so the
-              // frame is already resident and this paints without work.
+              // The exact key/bounds pair the grid tile decoded, so the frame
+              // is already resident and this paints without work. Bounded now
+              // rather than unbounded: the object itself grew to 640px, and
+              // every surface painting it has to name the same width.
+              memCacheWidth: kThumbDecodePx,
               fadeInDuration: Duration.zero,
               fadeOutDuration: Duration.zero,
               placeholder: (_, __) => const ColoredBox(color: Colors.black),
@@ -664,10 +742,20 @@ class _PhotoPageState extends State<_PhotoPage> {
 
 /// One video page. A poster until it is the page being looked at.
 class _VideoPage extends StatefulWidget {
-  const _VideoPage({required this.item, required this.active});
+  const _VideoPage({
+    required this.item,
+    required this.current,
+    required this.settled,
+  });
 
   final MediaItem item;
-  final bool active;
+
+  /// This is the page the pager is on.
+  final bool current;
+
+  /// The pager has stopped moving. Only ever a reason to START a player, never
+  /// a reason to tear a running one down — see [_VideoPageState._live].
+  final bool settled;
 
   @override
   State<_VideoPage> createState() => _VideoPageState();
@@ -677,34 +765,87 @@ class _VideoPageState extends State<_VideoPage> {
   String? _url;
   bool _resolving = true;
 
+  /// The player has been allowed to start on this page and may stay.
+  ///
+  /// The condition used to be `current && settled` evaluated fresh on every
+  /// build, and `settled` goes false on the first scroll update more than 2%
+  /// of a page from centre — so *touching* a playing video and moving a
+  /// fraction of a finger-width destroyed the platform decoder mid-playback
+  /// and replaced it with a play icon. Reset in [didUpdateWidget] when the
+  /// page stops being current, which is the moment a teardown IS wanted.
+  bool _started = false;
+
+  bool get _live => widget.current && (_started || widget.settled);
+
   @override
   void initState() {
     super.initState();
     unawaited(_resolve());
   }
 
+  @override
+  void didUpdateWidget(covariant _VideoPage old) {
+    super.didUpdateWidget(old);
+    if (!widget.current) {
+      _started = false;
+    } else if (widget.settled) {
+      _started = true;
+    }
+  }
+
   Future<void> _resolve() async {
+    // The poster in the same pass. A video page with no poster is a black
+    // rectangle for as long as the platform takes to open the stream, and the
+    // comment this replaces — "nothing in this app has ever generated a video
+    // thumbnail" — stopped being true when the thumbnail pipeline landed:
+    // every MediaItem the pager is built from carries `tilePath`, and it is
+    // signed by the same warm call as the original.
+    final poster = widget.item.hasThumb
+        ? MediaUrls.cached(widget.item.bucket, widget.item.tilePath) ??
+            await MediaUrls.sign(widget.item.bucket, widget.item.tilePath)
+        : null;
     final url = await MediaUrls.sign(widget.item.bucket, widget.item.path);
     if (!mounted) return;
     setState(() {
+      _poster = poster;
       _url = url;
       _resolving = false;
     });
   }
 
+  String? _poster;
+
   @override
   Widget build(BuildContext context) {
     final url = _url;
-    if (widget.active && url != null) {
-      // Keyed by the path: swiping from one video to the next must build a new
-      // surface rather than hand the old controller a different URL.
-      return VideoSurface(url: url, key: ValueKey(widget.item.cacheKey));
-    }
+    final poster = _poster;
     if (!_resolving && url == null) return _Failed(onRetry: _resolve);
-    // Nothing in this app has ever generated a video thumbnail, and fetching a
-    // 30MB file to draw one is the download this screen exists to avoid.
-    return const Center(
-      child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 64),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Colors.black),
+        if (poster != null)
+          CachedNetworkImage(
+            imageUrl: poster,
+            cacheKey: widget.item.tileCacheKey,
+            cacheManager: PlainMediaCache.manager,
+            fit: BoxFit.contain,
+            memCacheWidth: kThumbDecodePx,
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            placeholder: (_, __) => const SizedBox.shrink(),
+            errorWidget: (_, __, ___) => const SizedBox.shrink(),
+          ),
+        if (_live && url != null)
+          // Keyed by the path: swiping from one video to the next must build a
+          // new surface rather than hand the old controller a different URL.
+          VideoSurface(url: url, key: ValueKey(widget.item.cacheKey))
+        else
+          const Center(
+            child:
+                Icon(Icons.play_circle_outline, color: Colors.white70, size: 64),
+          ),
+      ],
     );
   }
 }

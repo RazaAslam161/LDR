@@ -1204,6 +1204,46 @@ class _MemoryCoverState extends State<_MemoryCover> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
+  /// Whether the synchronous attempt has already been made for this element.
+  bool _warmed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _paintWarm();
+  }
+
+  /// Paints from RAM before [_load] is allowed to await anything.
+  ///
+  /// Everything this card did was deferred to a post-frame callback and then
+  /// routed through a concurrency-2 queue and an `async` provider — so a cover
+  /// whose plaintext was already in L2 still showed a spinner and still queued
+  /// behind two other decrypts. These cards live in a ListView, so scrolling
+  /// away and back recycles the cell and pays it all again; that repeat is the
+  /// "it loads every time" on this screen.
+  ///
+  /// In didChangeDependencies rather than initState: the width comes from
+  /// MediaQuery, and reading an inherited widget in initState asserts.
+  void _paintWarm() {
+    if (_warmed || _provider != null) return;
+    _warmed = true;
+    final path = widget.thread.coverPath;
+    if (path == null) return;
+    final p = EncryptedMediaCache.warmTileProvider(
+      path: path,
+      // The IDENTICAL expression _load passes. A rounding difference here
+      // would mint a second ResizeImageKey and decode the same object twice.
+      decodeWidth: _decodeWidth,
+    );
+    if (p != null) _provider = p;
+  }
+
+  /// Computed from the SCREEN, so every card on it shares one decode.
+  int get _decodeWidth {
+    final media = MediaQuery.of(context);
+    return ((media.size.width - 48) * media.devicePixelRatio).round();
+  }
+
   @override
   void dispose() {
     _mounted = false;
@@ -1230,10 +1270,14 @@ class _MemoryCoverState extends State<_MemoryCover> {
 
     // Computed from the SCREEN, not from this card, and therefore identical for
     // every card on it. A width derived per-card gives each one its own
-    // ImageCache entry and its own decode of the same size.
-    final media = MediaQuery.of(context);
-    final width =
-        ((media.size.width - 48) * media.devicePixelRatio).round();
+    // ImageCache entry and its own decode of the same size. Shared with
+    // [_paintWarm] through [_decodeWidth] so the two paths cannot drift.
+    final width = _decodeWidth;
+
+    // Already painted from RAM. The bytes are the same instance and the
+    // provider is the same key, so re-running the queue would decode nothing
+    // new and only occupy a slot the covers below still need.
+    if (_provider != null) return;
 
     // Keyed on the storage object, not the thread: two items in one memory
     // share a thread id, so a per-thread key would make them dedupe each other

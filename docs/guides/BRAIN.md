@@ -28661,6 +28661,160 @@ behind the cover and confirm the NEW text repaints (that is the §309 cache path
 drop the sender's network and confirm the edit still shows instantly on its own bubble.
 
 
+### §310 addendum — pushed as de968ac (2026-09-09)
+
+The first push was rejected non-fast-forward: `origin/fix-sprint` had moved to `a51a048`
+(`ci(ios): a gate that can actually see the iOS half`) while this session was committing
+on top of `c0dfd7d`. One commit each side, same parent.
+
+**Merged rather than rebased, on purpose.** The working tree holds three other sessions'
+uncommitted work — drag-select, media/gallery/vault, iOS bring-up, sound — and `git
+rebase` refuses against unstaged changes, so the only way to rebase was `--autostash`.
+Stashing thirty-one dirty entries belonging to sessions that are still typing is the one
+outcome worse than a failed push. A merge writes only what the incoming commit adds.
+
+Checked before merging, not after: `a51a048` adds exactly one file
+(`.github/workflows/ios-build.yml`, 151 lines), that file did not exist locally, nothing
+was staged, and `git merge-tree --write-tree` reported clean. The merge then wrote that
+one file and nothing else; `git status` still showed all 31 foreign entries afterwards.
+
+- `git push origin fix-sprint` → `a51a048..de968ac  fix-sprint -> fix-sprint`
+- `git ls-remote origin refs/heads/fix-sprint` → `de968ac380d277c...` — the SERVER's
+  answer, not the local tracking ref that was stale enough to cause this in the first
+  place.
+- `git branch -r --contains c5fd5da` → `origin/fix-sprint`.
+
+Still open, unchanged and still the headline: **no two-handset run.** The exact check is
+at the end of §310.
+
+
+## §310 — 2026-09-09 — the §309 deferrals, closed (five of six)
+
+§309 logged six items as `found, not fixed`. Owner said "fix all". Five are closed; the
+sixth is named below with the reason it was not landed blind.
+
+### 1. A failed batch sign left the gallery grey with no way out
+
+`MediaUrls.warm` caught and returned normally, so the caller could not tell a signed page
+from an unsigned one. Every `_Tile` reads `MediaUrls.cached`, gets null and paints a flat
+`ColoredBox` — so a network blip during the batch produced a grid of grey squares with no
+spinner, no error and no retry. `snap.hasError` is false because the FETCH succeeded, so
+the screen's own retry card was unreachable; the only recovery was leaving the screen.
+
+- `warm` now returns `bool`, and a PARTIAL page counts as failed (40 of 60 signed leaves
+  twenty grey tiles, which is the same dead end).
+- `GalleryRepository.signingFailed` (a `ValueNotifier`) plus `resign(items)`.
+- `_SigningBand` above the grid offers one batched retry. **One call, not one per tile** —
+  per-tile signing would turn a single failure into N round trips fired hardest during
+  exactly the blip that caused it (verifier's caveat, honoured).
+- A one-item warm (a realtime insert patching one row) neither raises nor clears the band;
+  only a full page decides.
+
+### 2. The vault's batch sign was fire-and-forget
+
+`unawaited(MediaUrls.warm(...))` with `_loading = false` on the next statement, so the grid
+built before `createSignedUrls` landed and every visible tile signed its own path anyway —
+the batch bought nothing. Now SPLIT: the thumb paths are awaited before the first frame,
+the originals stay un-awaited behind it. Awaiting both would put up to 200 originals'
+signing in front of the first frame for pictures nobody has tapped (verifier's caveat).
+
+### 3. Memory-thread covers had no synchronous warm
+
+Everything was deferred to a post-frame callback and routed through a concurrency-2 queue
+and an `async` provider, so a cover whose plaintext was already in L2 still showed a
+spinner and still queued behind two other decrypts — and these cards are in a `ListView`,
+so scrolling away and back paid it again.
+
+- `EncryptedMediaCache.warmTileProvider` takes an optional `decodeWidth` (it hardcoded
+  null, which is why covers could not use it).
+- `_paintWarm()` in `didChangeDependencies` — not `initState`, because the width comes
+  from `MediaQuery` and reading an inherited widget there asserts.
+- The width is `_decodeWidth`, ONE getter now shared with `_load`. A rounding difference
+  between the two would mint a second `ResizeImageKey` and decode the same object twice
+  (verifier's caveat).
+- `_load` returns early when `_provider` is already painted, so the queue slot goes to a
+  cover that still needs it.
+
+### 4. The 400px thumbnail was upscaled into the 220dp chat bubble
+
+`Thumbnails._maxEdge = 400` was chosen for a ~150dp album tile; the doc never listed the
+220dp chat photo bubble, which is ~605px at dpr 2.75. Worse for portrait: a 400px LONG
+edge is a 300px width, so the most-looked-at surface in the app was blowing a soft JPEG up
+about twofold.
+
+All three of the verifier's caveats are honoured:
+
+- **Raised to 640** (`Thumbnails.maxEdge`, now public).
+- **Bounded, not `thumb: true`.** New `kThumbDecodePx = 640` in `media_decode.dart`, named
+  by the chat bubble, the album tile, the video poster and the pager's underlay. Left
+  unbounded, 640 costs 1.64MB of raster per tile against 0.64MB at 400 — a 2.5x rise on a
+  budget that is 32MiB on a small handset. Bounded, the object is sharper AND all four
+  surfaces share one decode. The gallery's own tiles come from `kMemoryTileMaxEdge`, a
+  DIFFERENT constant, and are untouched — the "these must stay equal" reasoning was wrong.
+- **Existing rows re-derive.** A raise that only helps new uploads would show the owner
+  nothing in the conversation they already have. `ThumbBackfill.resize` re-derives in
+  place, recognised WITHOUT a schema column: `Thumbnails.longestEdge` reads the dimensions
+  from the object's header (`startDecode`, no full decode), and anything under
+  `maxEdge` is re-derived from the original and upserted to the same path. Still free in
+  this class's sense — both the thumbnail and the original must already be on disk or it
+  declines. The stale cached copy is removed and its decode evicted, or the app would keep
+  painting the 400px object it had just replaced.
+- The pager's dwell gate (1.5s on a settled page) used to `return` on `hasThumb`, which is
+  why a raise could never have reached an existing row. It now routes: no thumb → `heal`,
+  thumb present → `resize`.
+
+### 5. Multi-item vault save had no progress
+
+`_busy` only nulled three app-bar callbacks, so an eleven-item save looked frozen for the
+whole batch. `_savingLeft` counts down beside the existing `_uploading` indicator. The
+loop stays sequential — the comment defending that against a phone uplink is right; the
+defect was the missing feedback, not the ordering.
+
+### 6. NOT fixed — album photos are still selected as a whole row
+
+Chat's drag-select works at ROW level; an album is one row, so its photos cannot be picked
+individually. This is not a small change and it is the one place a hasty edit is most
+likely to break something already relied on:
+
+- `SelectableMessage` wraps its child in `IgnorePointer(ignoring: selecting)`, which is
+  what stops a bubble's own gestures (video tap, voice scrub) firing during a selection.
+  It also makes everything inside the bubble invisible to a hit test, so per-tile
+  `DragSelectItem` tags placed inside `AlbumBubble` can never be found while selecting.
+- Reaching them means relaxing that pointer block for album rows AND flattening chat's
+  drag index space from rows to messages, in the largest file in the repo, under the same
+  subtree as the reaction bar and the reply swipe.
+- Landing it in the same pass as the five above would also make any regression
+  unattributable. Shape of the work when it is done on its own: give `SelectableMessage` a
+  `blockChildPointers` flag (default `selecting`), pass `false` for album rows, give
+  `AlbumBubble` `selecting` + `onToggleOne(index)`, and build a flat `List<Message>` in
+  visual order for `DragSelectItem` indices — tagging both the row and each tile, since
+  `_indexAt` walks the hit path innermost-first and the tile therefore wins.
+
+### Verified
+
+- `flutter analyze lib test` → **224 issues, 0 errors, 0 warnings**, counted with
+  `grep -cE '^ *(error|warning) - '` and probed in the same run against a synthetic
+  error+warning+info fixture (matched 2; the info control matched 1).
+- `flutter test` → **All tests passed, 1852 tests** (1845 before). New:
+  `test/unit/media/thumbnail_edge_test.dart` — the header probe on landscape, portrait and
+  PNG, a null on truncated bytes, and both sides of the resize gate (an object at the
+  current edge is NOT undersized; one at the old 400 is), plus an assertion that
+  `kThumbDecodePx == Thumbnails.maxEdge` so the two cannot drift apart.
+- `package:image` 4.9.2 confirmed as the pinned version and `findDecoderForData(...)
+  .startDecode(...)` confirmed to return a `DecodeInfo` carrying `width`/`height`
+  (`formats.dart:191`, `decoder.dart:38`, `decode_info.dart:4-9`) — so the probe really is
+  header-only.
+
+### Still open
+
+- **Nothing here has run on a device**, same as §309. The re-derive path is the riskiest
+  addition: it UPLOADS, and its trigger is a size comparison. The unit test pins the
+  comparison, but the upload-and-invalidate round trip has only ever run in analysis.
+  Next session: install, open a conversation with pre-raise photos, dwell 1.5s on one,
+  confirm exactly one upload and a sharper bubble on the next paint — and confirm it does
+  NOT fire a second time for the same message.
+- Item 6 above.
+
 ## §311 — The §286 Reach leak, confirmed in the field (2026-09-09)
 
 Owner sent a shade screenshot from the Calculator cover, 02:03: header **Miles**, title
@@ -28704,6 +28858,83 @@ carry the header. Nothing was changed this session.
 **Next step:** ask the owner which of the three, then apply it to `showReachNotification`
 only — the call, call-service and Timer paths are separate decisions with different stakes.
 
+## §311 — 2026-09-09 — a single photograph of a send is selectable
+
+The one deferral from §310, closed. Owner asked for it directly.
+
+### Why it could not be done by tagging tiles
+
+`SelectableMessage` wrapped its child in `IgnorePointer(ignoring: selecting)`. That is
+load-bearing — it stops a bubble's own gestures (a video tap, a voice scrub) firing while
+a selection is open — but `IgnorePointer` removes the subtree from HIT TESTING too, so any
+`DragSelectItem` tag placed inside `AlbumBubble` was invisible for exactly as long as a
+selection was open. The drag could only ever resolve a finger to the row.
+
+Second half of the problem: the drag index space was ROWS. A row is the smallest thing a
+row-indexed drag can name, so even with pointers restored there was nothing to select.
+
+### What changed
+
+- **`SelectableMessage.blockChildPointers`** — nullable, defaults to `selecting`, so every
+  non-album row behaves exactly as it did. Chat passes `_selecting && !row.isAlbum`, so an
+  album keeps its pointers and its tiles stay hit-testable.
+- **The drag index space is now MESSAGES.** `_indexDragOrder(rows)` builds `_dragOrder`
+  (every painted message, flattened in row order) and `_rowBase` (where each row starts) in
+  the same pass the rows are computed, so an index can never point into a list the screen
+  is no longer painting. `_dragAnchor` and `_applyDragSpan` work over `_dragOrder`, one
+  message at a time. `_paintedRows` is gone — the analyzer caught it as unused, which is
+  how the flattening was confirmed complete.
+- **`AlbumBubble`** takes `baseIndex`, `selecting`, `isSelected(int)` and
+  `onToggleOne(int)`. Each tile is a `DragSelectItem` tagged `baseIndex + i` — a
+  conversation-wide index, because it has to be comparable across rows. A tile's tap goes
+  to the selection while one is open and to the viewer otherwise.
+- **`_AlbumTile`** draws its own state: `check_circle` / `radio_button_unchecked` plus the
+  `0x552B1B12` scrim, the same glyphs and scrim the gallery grid uses, drawn last so it
+  reads over the "+N" badge and the upload scrims.
+- **Tags resolve innermost-first.** `DragSelect._indexAt` returns the first `RenderMetaData`
+  in the hit path, and children are added before their ancestors — so a tile beats the row
+  wrapper it sits inside without either needing to know about the other.
+- **The last drawn tile takes the remainder.** A send of twenty draws four; picking the
+  fourth selects items 3..19. Sixteen photographs unreachable behind a "+16" badge would be
+  a selection with edges the user cannot see. `AlbumBubble.maxTiles` is public and read by
+  `_toggleAlbumOne` rather than copied — a hard-coded 4 in the screen would silently start
+  missing photographs the day the grid changed.
+
+### What deliberately did NOT change
+
+- Tapping an album's padding or the gaps between its tiles still takes the WHOLE send.
+  That rule has its own reasoning in `_toggleSelectedRow` — deleting nineteen of twenty
+  reads as a delete that failed — and per-photo picking is the narrower gesture beside it,
+  not a replacement.
+- Non-album rows: identical. Same pointer blocking, same long press, same reaction bar,
+  same reply swipe.
+
+### Verified
+
+- `flutter analyze lib test` → **226 issues, 0 errors, 0 warnings**, counted with
+  `grep -cE '^ *(error|warning) - '` and probed in the same run (fixture matched 2; the
+  info control matched 1). The probe earned itself mid-change: the intermediate state left
+  `_paintedRows` unused and the analyzer reported it as `warning` with ZERO leading spaces
+  — the `^\s+` form used earlier in this session would have counted it as clean.
+- `flutter test` → **All tests passed, 1858 tests** (1852 before). New:
+  `test/widget/album_photo_select_test.dart` — a tap opens the viewer outside a selection
+  and toggles one photo inside one; tiles carry `baseIndex + i` (asserted at base 17, so a
+  row-local index would fail); a send of twenty draws four targets and a "+16"; selected
+  and unselected tiles are marked distinctly; no checkbox with no selection open.
+
+### Still open
+
+- **No device pass, same as §309 and §310.** The riskiest path here is the gesture arena
+  under a real thumb: with pointers restored on album rows, the tile's `GestureDetector`,
+  the row's `SelectableMessage`, the `Dismissible` reply swipe and the conversation's
+  long-press drag are all live in one subtree during a selection. The suite drives
+  `AlbumBubble` in isolation and cannot prove how they arbitrate together. Next session:
+  open a selection, then on an album row — tap one tile (expect one photo), tap the
+  padding (expect the whole send), swipe right (expect the reply slide, not a selection),
+  and long-press-drag across tiles (expect photo-by-photo).
+- Selecting a photograph inside a send only reaches the four DRAWN tiles; the fifth
+  onwards are reachable only via the fourth's remainder rule or by dragging past the row.
+
 ### §311 addendum — pushed as 84244de (2026-09-09)
 
 Fast-forward, no merge needed: `git fetch` then
@@ -28723,3 +28954,276 @@ still reports the 231 that are theirs to commit.
 
 Nothing in `mobile/` was changed this session, and nothing in `mobile/` was
 staged.
+
+## §312 — 2026-09-09 — build 83 cut: the media work (§309–§311) has an artifact
+
+Owner asked for the APK. `bash tool/release.sh --bump` from `mobile/`.
+
+### It is 83, not 82, and that mattered
+
+`Miles.apk` already existed at the repo root, dated 11:25 today. Rather than trust the
+filename I read the stamp out of it — `miles-build-82` in `lib/arm64-v8a/libapp.so` — and
+BRAIN §307 addendum 5 records that 82 was not only cut but INSTALLED on the handset. The
+working tree has moved a long way since (all of §309, §310 and §311), so building at the
+tree's current number would have put two different code trees behind one build number,
+which is the exact failure the project rules and this script both exist to prevent.
+
+The bump went through the script's `--bump` rather than by hand: it moves `pubspec.yaml`
+and `ReleaseGate.buildNumber` in one step and then wipes the pre-bump kernel cache. That
+cache is not paranoia — build 43 shipped as versionCode 43 with `miles-build-42` inside
+libapp.so because `flutter test` in the gate had already seeded `.dart_tool` from the
+pre-bump source.
+
+**Note for whoever owns the 82 bump:** 80 → 82 was somebody else's working-tree change and
+it was already consistent across both files when I found it. I moved it to 83. Nothing is
+committed.
+
+### What is in the artifact
+
+- `Miles.apk` at the repo root, **build 83**, play variant, 90,447,119 bytes, 15:11.
+  (The 82 it replaced was 90,315,974 bytes at 11:25 — a different size as well as a
+  different stamp, so this is genuinely a new artifact and not a stale copy.)
+- Independently re-verified after the script's own check, by unzipping the ROOT copy
+  rather than the build output: one `lib/arm64-v8a/libapp.so`, ABIs `['arm64-v8a']`,
+  stamps `[83]`. The script copies to `Miles.apk` and a copy is a step that can fail.
+- Script's own proofs, from its log: `checked 1 libapp.so, all stamped miles-build-83`;
+  `ABIs in the APK: ['arm64-v8a']`; `the snapshot really is build 83`;
+  `Signer #1 certificate DN: CN=Miles, O=R&D Dev, C=PK`;
+  `certificate matches the installed base — this APK updates in place`.
+- sha256 of the flutter-apk output: `19a57fa8a2dbf1e197c387d5e47985704448b9caff6ac50f415645f3a287f702`.
+- arm64-only by design (`-PmilesPlayApkArm64`): a partial APK installs on a 32-bit phone
+  and then dies on a missing engine (BRAIN §193). No bundle was built, so the property
+  never went near one.
+
+### Gates
+
+The build log in this session was piped through `tail -120`, which **truncated the gate
+output away** — so exit 0 and the script's `set -euo pipefail` are the only evidence from
+the run itself that analyze and test passed, and that is inference, not output. The bump
+also edited two files after the last hand-run of the gates. Both re-run against the
+post-bump tree, pasted in the session:
+
+- `flutter analyze lib test` → 226 issues, **0 errors, 0 warnings**, counted with
+  `grep -cE '^ *(error|warning) - '` and probed in the same run (fixture matched 2; info
+  control matched 1).
+- `flutter test` → **All tests passed, 1858 tests**.
+- Version pair confirmed by hand after the bump: `pubspec.yaml` `version: 0.1.0+83`,
+  `ReleaseGate.buildNumber = 83`, `ReleaseGate.versionName = '0.1.0'` — the last of those
+  is enforced nowhere and is checked by eye every time.
+
+**Next time: do not pipe release.sh through `tail`.** Let it write in full, or tee it.
+
+### Still open — nothing here has been on a handset
+
+The artifact exists and is provably build 83. **Not one line of §309–§311 has run on a
+phone.** The install was not done: the project rule is never to install unprompted, and
+the owner asked for a build, not a deployment.
+
+    adb install -r build/app/outputs/flutter-apk/app-play-release.apk
+
+It updates in place — the handset carries the same upload certificate — so no uninstall,
+and the X25519 seed is not at risk.
+
+The device pass this build exists for, in priority order:
+
+1. **`ThumbBackfill.resize` — the only path that WRITES.** Open a conversation with
+   pre-raise photos, dwell 1.5s on one in the pager. Expect exactly ONE upload, a sharper
+   bubble on next paint, and NO second fire for the same message. A wrong size comparison
+   here re-uploads in a loop.
+2. **The album-row gesture arena** (§311): with a selection open, tap a tile (one photo),
+   tap the padding (whole send), swipe right (reply slide), long-press-drag across tiles
+   (photo by photo).
+3. **Drag-select under a real thumb** in gallery and vault, including the edge auto-scroll.
+4. **The cover-raise fix** (§309): open the gallery, pull the notification shade, come
+   back — pictures should be there instantly rather than re-decoding.
+5. **Vault swipe** and **chat video touched while playing**.
+
+## §313 — 2026-09-09 — build 83 installed on the handset
+
+Owner asked for the install. Done, and read back off the device rather than inferred from
+adb's "Success".
+
+### The chain, end to end
+
+    adb devices -l
+      1896b4b3  device  product:OnePlus8 model:IN2015 device:OnePlus8
+
+    # before
+    versionCode=82  minSdk=24 targetSdk=36
+    lastUpdateTime=2026-09-09 12:05:50        (that is §307 addendum 5's install)
+
+    adb install -r D:/Miles/Miles.apk
+      Performing Streamed Install
+      Success                                  (11.1s)
+
+    # after
+    versionCode=83  minSdk=24 targetSdk=36
+    versionName=0.1.0
+    lastUpdateTime=2026-09-09 15:51:02
+
+The file installed is the one whose stamp was independently verified in §312 — the ROOT
+`Miles.apk`, unzipped and checked to contain one `lib/arm64-v8a/libapp.so` stamped
+`miles-build-83` and nothing else. So the Dart on the phone is 83, not merely the
+versionCode Gradle wrote on it. That distinction is the build-43 defect and it is the
+reason the root copy was installed rather than the flutter-apk copy: it is the artifact
+that was actually inspected.
+
+**Seed safety is proven by the Success line itself**, not by a separate check. `-r` over an
+existing package fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` when the signing
+certificate differs, so an install that succeeded IS the proof that the play flavour's
+upload key matches the installed base. No uninstall, so the X25519 seed is untouched
+(BRAIN §262 addendum 2).
+
+### The USB dropped immediately afterwards
+
+`adb devices` went empty seconds after the readback — the same recurring disconnect §307
+recorded twice. Two follow-up checks were lost to it: `firstInstallTime` and the on-device
+signature dump. Neither is load-bearing (see above), and both were corroborating rather
+than primary, so the install stands as proven.
+
+One trap worth recording because it nearly went into a report as evidence: the disconnect
+made `adb shell pidof` fail, and the `|| echo "(not running — I did not start it)"`
+fallback printed as though it were an answer. A failed command's fallback text is not a
+measurement. It was caught before it was reported.
+
+### What is NOT verified
+
+- **The app has never been launched on 83.** I did not start it, deliberately: this is a
+  private couples app on the owner's personal phone, and opening it could raise a cover or
+  put private content on a screen. Startup is the owner's first action.
+- **R8 startup is therefore unproven, and it is the first thing that could fail.** The play
+  channel shrinks and minifies; R8 is exactly what strips the reflection and JNI entry
+  points in WebRTC and ML Kit that fail only on a device. If 83 dies at launch, that is
+  the cause to look at first, and build 82 is still recoverable by reinstalling from the
+  archive rather than by uninstalling.
+- **Not one line of §309–§311 has been exercised.** The APK being on the phone is not the
+  media work being verified.
+- `app_release.min_build` deliberately NOT raised. The rule is to raise it only after the
+  build is installed AND proven; it is installed, it is not proven.
+
+### The device pass, in priority order
+
+1. **`ThumbBackfill.resize` — the only path in three sessions that WRITES.** Open a
+   conversation with pre-raise photos and dwell ~1.5s on one in the pager. Expect exactly
+   ONE upload, a sharper bubble on the next paint, and NO second fire for the same
+   message. Its trigger is a size comparison; a wrong answer re-uploads in a loop.
+2. **The album-row gesture arena** (§311). With a selection open: tap a tile → one photo;
+   tap the padding → the whole send; swipe right → the reply slide; long-press-drag across
+   tiles → photo by photo.
+3. **Drag-select under a real thumb** in gallery and vault, including the edge auto-scroll.
+4. **The cover-raise fix** (§309). Open the gallery, pull the notification shade down, come
+   back — the pictures should be there instantly instead of re-decoding.
+5. **Vault swipe**, and **a chat video touched while it is playing** (it used to unmount
+   the decoder on the first scroll update).
+
+## §314 — 2026-09-09 — the vault save stops moving bytes, and a saved video gets a poster
+
+Field report on build 83: saving gallery → vault is still slow, and vault video tiles show
+no preview.
+
+### §309's save fix was aimed at the wrong half. Correcting it.
+
+§309 made `SaveMediaService` read `PlainMediaCache` before downloading, and reported that
+as the fix for "saving takes a long time". It is not. A save is a download AND an upload,
+and `VaultRepository.saveMedia` uploads the FULL ORIGINAL:
+
+    await Future.wait([
+      _uploadPlain(fullPath, bytes, mimeType),      // ← tens of MB for a video
+      if (tile != null) _uploadPlain(thumbPath, tile, 'image/jpeg'),
+    ]);
+
+Removing the download from a cached item saved almost nothing, because the upload over the
+phone's uplink was always the dominant cost. The owner reporting it as still-slow on build
+83 is that mistake surfacing. The §309 cache-first read is kept — it is correct and it is
+still the right fallback — but it was never the answer.
+
+### The fix: Storage duplicates the object, the phone moves nothing
+
+`VaultRepository.saveMediaByCopy` uses the storage API's cross-bucket copy
+(`storage_client-2.8.0`, `copy(from, to, destinationBucket:)` — confirmed present in the
+pinned source at `storage_file_api.dart:341`). Nothing crosses the wire but two small
+POSTs and a row insert.
+
+The vault still gets its OWN object under `owner_id/vault/`, which is the whole point of
+the feature — a pointer into `couple_intimate` is a file the partner can read and delete,
+and a signed URL dies within a day. `copy` produces a real object under owner-only RLS.
+
+`width`, `height` and `byte_size` are left null; all three are nullable, verified against
+production's `information_schema` before writing, so this needs no schema change.
+
+**A designed fallback, not a shim.** Cross-bucket copy is a server capability this client
+cannot prove from here, so a failure throws `VaultCopyUnavailable` and `_save` falls
+through to the byte upload every previous build used. A save still succeeds; it is only
+slow again.
+
+### The video preview, and why the copy alone would not have fixed it
+
+`VaultItem.gridPath` is `thumbPath ?? (isVideo || isAudio ? null : storagePath)`, and
+`saveMedia` derives a tile only for images — there is no image in an mp4 to decode. So
+`thumb_path` has ALWAYS been null for a saved video, `gridPath` null by design, and the
+grid's `if (path == null) return; // video/audio: the glyph is the preview` was not a
+fallback, it was the only thing that branch could ever paint.
+
+Production, before touching anything:
+
+    gallery  image/jpeg  289 rows  289 with_thumb
+    gallery  video/mp4   146 rows  146 with_thumb     ← every gallery video HAS a poster
+    vault    image/jpeg   32 rows   32 with_thumb     ← photos render
+    vault    video/mp4     8 rows    0 with_thumb     ← the reported symptom, exactly
+    vault    audio/mp4     1 row     0 with_thumb
+
+Two consequences, and the second is the one that nearly got missed:
+
+1. The gallery already holds a poster for all 146 of its videos, so the save does not need
+   to DERIVE one — it copies it beside the video. Every future save is fixed for free.
+2. **That does nothing for the 8 rows the owner is actually looking at.** A vault row does
+   not record where its bytes came from, so nothing can copy their posters retroactively.
+   Shipping only the copy fix would have left the complaint exactly where it was.
+
+So `VaultThumbBackfill` heals them from the video the vault already owns:
+`Thumbnails.forVideoUrl` extracts a first frame from the SIGNED URL (the platform
+extractor range-reads the header rather than pulling the file), uploads it, then claims it
+on the row. Modelled on `ThumbBackfill`: one at a time, `_seen` so a failure is not retried
+on every scroll, and UPLOAD-then-CLAIM — a `thumb_path` with no object behind it makes
+`gridPath` non-null and the tile 404s permanently, with no way back.
+
+### Changed
+
+- `features/vault/vault_repository.dart` — `saveMediaByCopy`, `attachThumb`, `uploadThumb`,
+  `VaultCopyUnavailable`.
+- `core/services/save_media_service.dart` — copy first, byte upload as the fallback;
+  `sourceThumbPath` threaded through.
+- `core/media/thumbnails.dart` — `forVideoUrl`, sharing `_fromVideo` with `forVideo`.
+- `features/vault/vault_thumb_backfill.dart` (**new**).
+- `features/vault/vault_screen.dart` — the null-gridPath branch heals instead of returning.
+- `features/gallery/gallery_screen.dart`, `gallery_viewer.dart`,
+  `chat/widgets/media_viewer.dart` — pass `thumbPath`. **Not `gridPath`**: that falls back
+  to the ORIGINAL when a row has no thumbnail, so it would have filed an mp4 as its own
+  poster.
+
+### Verified
+
+- `flutter analyze lib test` → 226 issues, **0 errors, 0 warnings**, matcher probed in the
+  same run (fixture 2, info control 1).
+- `flutter test` → **All tests passed, 1866 tests** (1858 before).
+  `test/unit/vault/vault_video_poster_test.dart` is new: it pins the `gridPath` line the
+  symptom comes from, that a photo was never affected, and every case the backfill must
+  and must not touch (audio, legacy bookmark, photo, already-has-poster).
+- Production counts above are real query output, not inference.
+
+### Still open — and the riskiest thing here is NOT covered by any of that
+
+- **Cross-bucket copy is unproven against this project.** The API exists in the pinned
+  client; whether Storage's RLS lets this user read `couple_intimate` and insert into
+  `personal_vault` in one server-side call has NOT been tested. If it refuses, every save
+  silently takes the fallback and stays exactly as slow as it is today — the symptom would
+  be unchanged and the fix would look like it did nothing. **First thing to check on the
+  device: save a video and see whether it is instant.** If it is not, the next step is a
+  Storage log for a 4xx on `/object/copy`, not another client change.
+- **The backfill has never extracted a frame.** `VideoThumbnail.thumbnailData` from a URL
+  is a plugin path this app has never used — `forVideo` has only ever been handed a local
+  file. If it cannot read a signed URL it returns null and the tile keeps its glyph, which
+  is the current behaviour, so the failure is safe but silent.
+- Not built, not installed. The handset is on 83, which has none of this.
+- `found, not fixed` — the 1 vault audio row will keep its glyph. There is no frame in an
+  m4a; a waveform image would be a different feature.

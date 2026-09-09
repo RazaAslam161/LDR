@@ -19,6 +19,20 @@ library;
 /// against the ~48MB an unbounded 12MP decode costs.
 const int kTileDecodePx = 512;
 
+/// The ONE width every small surface decodes a CHAT thumbnail at.
+///
+/// The thumbnail object is 640px on its long edge ([Thumbnails.maxEdge]), and
+/// the largest surface that paints one is the 220dp chat bubble — ~605px at
+/// dpr 2.75. So this is the object's own size: landscape decodes 1:1, and
+/// portrait decodes at its native width because `ResizeImage` does not upscale.
+///
+/// Bounded rather than `thumb: true`, and that is the point. Left unbounded a
+/// 640px object costs 1.64MB of raster against 0.64MB at 400px — a 2.5x rise
+/// on a budget that is 32MiB on a small handset. One shared bound keeps the
+/// sharper object AND one decode across the bubble, the album tile and the
+/// pager's underlay.
+const int kThumbDecodePx = 640;
+
 /// Pinch past this and the full-resolution layer is mounted over the bounded
 /// one, so a zoom is crisp without every page paying for it.
 const double kZoomUpgradeScale = 1.5;

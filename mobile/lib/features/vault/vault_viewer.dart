@@ -39,10 +39,79 @@ class _VaultViewerState extends State<VaultViewer> {
       PageController(initialPage: widget.initialIndex);
   late int _index = widget.initialIndex;
 
+  /// Pages either side whose FILE is pulled down ahead of the swipe.
+  static const _warmRadius = 2;
+
+  bool _warming = false;
+
+  /// A [_warm] arrived while one was running. Without it the last swipe of a
+  /// burst is the one page whose neighbours never get warmed.
+  bool _warmAgain = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_warm());
+  }
+
   @override
   void dispose() {
     _pages.dispose();
     super.dispose();
+  }
+
+  /// Sign and download the neighbours before the finger reaches them.
+  ///
+  /// This screen had nothing of the kind: no `allowImplicitScrolling`, so
+  /// PageView's cache extent was zero and no neighbour page was ever built,
+  /// and no warm, so arriving on one started the whole sign-download-decode
+  /// chain from cold. Every swipe in the vault was a first open.
+  ///
+  /// Plaintext rows only. A legacy `.enc` object needs the vault key derived
+  /// and its associated data built per item, which is `_Page`'s job and not
+  /// worth duplicating here for a page nobody may reach.
+  Future<void> _warm() async {
+    if (_warming) {
+      _warmAgain = true;
+      return;
+    }
+    _warming = true;
+    try {
+      for (var d = 1; d <= _warmRadius; d++) {
+        for (final direction in const [1, -1]) {
+          final i = _index + d * direction;
+          if (i < 0 || i >= widget.items.length) continue;
+          final item = widget.items[i];
+          final path = item.storagePath;
+          // A video streams from its URL; pulling tens of megabytes down for
+          // a page nobody has swiped to is the opposite of this.
+          if (path == null || path.endsWith('.enc') ||
+              item.isVideo || item.isAudio) {
+            continue;
+          }
+          final url = MediaUrls.cached(VaultRepository.bucket, path) ??
+              await MediaUrls.sign(VaultRepository.bucket, path);
+          if (!mounted) return;
+          if (url == null) continue;
+          try {
+            await PlainMediaCache.manager.getSingleFile(url,
+                key: PlainMediaCache.keyFor(VaultRepository.bucket, path),);
+          } catch (_) {
+            // A warm that misses costs one wheel on one page. Never worth
+            // failing a swipe for.
+          }
+          if (!mounted) return;
+        }
+      }
+    } finally {
+      _warming = false;
+      if (_warmAgain && mounted) {
+        _warmAgain = false;
+        unawaited(_warm());
+      } else {
+        _warmAgain = false;
+      }
+    }
   }
 
   @override
@@ -64,8 +133,18 @@ class _VaultViewerState extends State<VaultViewer> {
       extendBodyBehindAppBar: true,
       body: PageView.builder(
         controller: _pages,
+        // Exactly one page either side is built ahead. Left at its `false`
+        // default, PageView's cache extent is ZERO — no neighbour page exists
+        // until the swipe has already landed on it, so every page in this
+        // vault mounted cold and ran its whole sign-download-decode chain
+        // while the user was looking at the result. The chat and gallery
+        // pagers have carried this flag for as long as they have swiped well.
+        allowImplicitScrolling: true,
         itemCount: widget.items.length,
-        onPageChanged: (i) => setState(() => _index = i),
+        onPageChanged: (i) {
+          setState(() => _index = i);
+          unawaited(_warm());
+        },
         itemBuilder: (_, i) => _Page(item: widget.items[i]),
       ),
     );

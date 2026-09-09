@@ -20,15 +20,43 @@ class Thumbnails {
 
   /// Longest edge, in pixels.
   ///
-  /// The two consumers are a 2×2 album tile (~150dp) and the profile grid's
-  /// 3-column tile (~120dp). At 3× that is 450px and 360px, so this covers the
-  /// larger of them without paying for the pager's full-screen case, which
-  /// loads the original anyway.
-  static const _maxEdge = 400;
+  /// The doc this replaces named two consumers — a 2×2 album tile (~150dp) and
+  /// the profile grid's 3-column tile (~120dp) — and missed the biggest one:
+  /// the 220dp chat photo bubble, which is ~605px at dpr 2.75. At 400 that
+  /// bubble was UPSCALING, and worse for a portrait photo, where a 400px long
+  /// edge is only a 300px width — a 2x blow-up of a soft JPEG in the most-seen
+  /// surface in the app. 640 covers the bubble at native size.
+  ///
+  /// Paired with [kThumbDecodePx], which bounds what the raise costs in RAM.
+  /// Raising the object without bounding the decode trades a sharper picture
+  /// for 2.5x the resident raster.
+  static const maxEdge = 640;
+
+  /// Backwards-compatible private alias, so the isolate entry points below
+  /// read the same as they did.
+  static const _maxEdge = maxEdge;
 
   /// Enough that a face is a face on a 2×2 tile; low enough that the object is
   /// tens of kilobytes rather than hundreds.
   static const _quality = 72;
+
+  /// The longest edge of an encoded image, from its HEADER alone.
+  ///
+  /// No full decode: every format's `startDecode` parses dimensions and stops.
+  /// That is what makes it cheap enough to ask about a thumbnail already on
+  /// disk, which is how a row written under the old 400px edge is recognised
+  /// and re-derived without a schema column recording what size it was made
+  /// at. Null when the bytes are not a picture this decoder knows.
+  static int? longestEdge(Uint8List bytes) {
+    try {
+      final info = img.findDecoderForData(bytes)?.startDecode(bytes);
+      if (info == null) return null;
+      return info.width > info.height ? info.width : info.height;
+    } catch (e) {
+      debugPrint('[thumb] header unreadable: ${e.runtimeType}');
+      return null;
+    }
+  }
 
   /// Where the thumbnail for [originalPath] lives.
   ///
@@ -64,10 +92,20 @@ class Thumbnails {
   /// A JPEG poster frame for a video, or null.
   ///
   /// Decoded natively, which is already off the UI thread — no isolate here.
-  static Future<Uint8List?> forVideo(File file) async {
+  static Future<Uint8List?> forVideo(File file) => _fromVideo(file.path);
+
+  /// The same extraction, from a signed URL rather than a local file.
+  ///
+  /// The plugin range-reads the header and the frame it needs instead of
+  /// pulling the whole object, which is what makes healing a vault video's
+  /// poster cost a poster rather than a 30MB download. Used by
+  /// `VaultThumbBackfill` for rows saved before the poster was carried across.
+  static Future<Uint8List?> forVideoUrl(String url) => _fromVideo(url);
+
+  static Future<Uint8List?> _fromVideo(String source) async {
     try {
       return await VideoThumbnail.thumbnailData(
-        video: file.path,
+        video: source,
         imageFormat: ImageFormat.JPEG,
         maxWidth: _maxEdge,
         quality: _quality,
