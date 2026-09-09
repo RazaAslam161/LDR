@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:miles/core/data/crypto_core.dart';
 import 'package:miles/core/data/key_escrow.dart';
@@ -978,7 +980,14 @@ class SupabaseRepository {
       params: {
         'p_token': token,
         'p_device_id': deviceId,
-        'p_platform': 'android',
+        // The column has always been a real one: push_tokens.platform is
+        // `check (platform in ('android','ios'))` and register_push_token takes
+        // p_platform (20260906140300_a_push_token_belongs_to_a_device...sql:68,
+        // :97). Hardcoding 'android' was fine while one platform shipped; on
+        // iOS it would file every APNs token as an FCM/Android one, and the
+        // sender has no other way to tell which transport a row belongs to.
+        // kIsWeb is checked first because dart:io Platform throws on web.
+        'p_platform': !kIsWeb && Platform.isIOS ? 'ios' : 'android',
       },
     );
     if (res is Map && res['dead'] == true) return true;
