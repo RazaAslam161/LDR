@@ -27734,3 +27734,50 @@ Notifications, App Groups or Associated Domains — so push, the incoming-call r
 screen-share extension and Universal Links cannot be exercised on hardware at all. Xcode 26
 remains mandatory regardless: MapboxCommon ships Swift 6.2.4 binaries down to 24.28.1, this
 pubspec's floor, and an older compiler cannot consume them.
+
+### §303 addendum 2 — this machine cannot run iOS, and that is settled
+
+Three attempts, ~24 GB, one answer. **A 2020 Intel MacBook Air on macOS 15.7.9 cannot build or run
+Miles for iOS locally**, and the chain is closed at both ends:
+
+    Mapbox ships PRECOMPILED XCFrameworks stamped Swift 6.2.4  (verified down to
+      mapbox_maps_flutter 2.28.1, this pubspec's FLOOR — MapboxCommon 24.28.1, same stamp)
+        -> a Swift binary framework cannot be consumed by an older compiler
+        -> Xcode 26 is MANDATORY. 16.4 is Swift 6.1.2 and cannot build this app at all.
+    Xcode 26.0-26.3 need macOS 15.6; 26.4+ need macOS Tahoe 26
+        -> 26.3 is the ceiling here. Installed at /Applications/Xcode-26.3.app, alongside
+           16.4, which is untouched and SIP-protected.
+    Xcode 26.3 needs an iOS 26 runtime for ANY destination — device builds included
+    iOS 26 runtimes need macOS 26
+        -> `softwareupdate --list-full-installers` offers NOTHING above Sequoia 15.7.9 here.
+
+So the iPad is blocked for the same reason the simulator is. It is not a signing problem and not the
+missing paid account; the platform component that gates device builds cannot be installed.
+
+The three failures, so nobody retries them:
+
+- `xcodebuild -downloadPlatform iOS` fetches all 10.47 GB and dies with
+  `Download failed due to not having an extractor` (AppleArchive, MobileAssetError.Download code 16).
+  The bytes are then discarded — nothing is cached, so a retry is a full re-download.
+- Pulling the asset by hand off `updates.cdn-apple.com` (public URL, HTTP 200, no auth) and
+  decrypting it with the `ArchiveDecryptionKey` the failure itself logged **does decrypt** — and the
+  payload turns out to be an asset PATCH descriptor, `YOP=manifest` / `YOP=extract` / `YOP=dst-fixup`,
+  not a file tree. `aa extract` yields 0 bytes. Applying it needs the extractor that is missing. The
+  error message was literal. This attempt is the 10 GB that was genuinely wasted, and it was
+  avoidable: the payload format was knowable before downloading, not after.
+- `xcodes runtimes install` delegates to `xcodebuild` for iOS 26 and returns
+  `iOS 23C54 is not available for download` — Apple declining to offer the asset to this OS, which is
+  a different and more final failure than the extractor one. Cost nothing; it fails in seconds.
+
+**docs/guides/IOS-PORT-STATE.md** is now the map: what is done, what is not, what each remaining item
+is waiting on, and the traps. Read it before touching iOS rather than rediscovering any of this.
+
+Owner has ruled out both an Apple Silicon Mac and a paid Apple Developer Program for now, so the
+port is CI-only: `.github/workflows/ios-build.yml` (workflow_dispatch, macOS bills at 10x) proves it
+compiles and links, and host-VM tests carry everything else. Deliberately NOT building more native
+iOS surface — CallKit, the ReplayKit extension, PiP, alternate icons — because none of it could be
+run, reviewed or debugged, and unverifiable native code is how a port rots.
+
+All three `defaultTargetPlatform` branches in lib/ now have tests confirmed to go RED without their
+fix. `SupabaseRepository.pushPlatform` was extracted as a getter for exactly that reason: the value
+decides how the sender routes, and asserting it inline would have meant standing up a Supabase client.
