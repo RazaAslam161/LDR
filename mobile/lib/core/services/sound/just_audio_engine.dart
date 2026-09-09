@@ -11,12 +11,21 @@ import 'package:miles/core/services/sound/sound_engine.dart';
 /// AUDIO FOCUS is the part that bit: an unconfigured just_audio player
 /// requests PERMANENT exclusive focus on play and nothing ever abandons it —
 /// one 200ms cue killed the user's Spotify for good, and a "News" app seizing
-/// the media session is its own tell. So the CUE POOL never touches the audio
-/// session at all (handleAudioSessionActivation: false — a murmur has no
-/// business owning focus), and the session itself is configured once as
+/// the media session is its own tell. So on ANDROID the CUE POOL never touches
+/// the audio session at all (handleAudioSessionActivation: false — a murmur has
+/// no business owning focus), and the session itself is configured once as
 /// sonification + transient-may-duck, so the BED (the one deliberate,
 /// minutes-long sound) ducks the user's music instead of pausing it, and
 /// gives it back on stop.
+///
+/// iOS inverts that one flag, because the platforms mean opposite things by it.
+/// There it is `AVAudioSession.setActive`, not a focus request, and an inactive
+/// session is silent — so `false` does not mean "polite", it means the cue plays
+/// into nothing. Every tap was mute on the first iPad build while the bed was
+/// audible, because the bed activates the session and the pool did not. The
+/// politeness is carried by the CATEGORY there instead: `ambient` mixes with
+/// other audio by definition, so an active ambient session never pauses or ducks
+/// what she is already listening to. See the comment at the pool below.
 ///
 /// A pool of three cue players, round-robin with a warm-slot scan: one player
 /// cannot overlap (a send colliding with a receive would cut itself off), one
@@ -65,9 +74,28 @@ class JustAudioEngine implements SoundEngine {
   Future<AudioPlayer> _player(int i) async {
     await _ensureSession();
     while (_pool.length <= i) {
-      // Cues never activate the audio session: no focus request, so the
-      // user's own music plays on untouched.
-      _pool.add(AudioPlayer(handleAudioSessionActivation: false));
+      // false on Android, true on iOS, and the platforms mean opposite things
+      // by it.
+      //
+      // On Android this is an AUDIO FOCUS request. Declining it is the whole
+      // point: a murmur has no business owning focus, and the user's music
+      // plays on untouched while the cue still sounds.
+      //
+      // On iOS it is `AVAudioSession.setActive`, and an INACTIVE session is
+      // simply silent — the cue plays into nothing. That is why every tap was
+      // mute on the first iPad build while the ambient bed was audible: the bed
+      // activates the session deliberately (see startBed below), and the cue
+      // pool did not.
+      //
+      // Activating here costs nothing that the Android comment was protecting.
+      // The session is configured `ambient` in _ensureSession, and ambient
+      // mixes with other audio by definition — activating it does not pause,
+      // duck or interrupt whatever she is listening to. The category carries
+      // the promise on iOS; the focus request carries it on Android.
+      _pool.add(AudioPlayer(
+        handleAudioSessionActivation:
+            !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS,
+      ),);
     }
     return _pool[i];
   }
