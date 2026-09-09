@@ -121,7 +121,22 @@ ever raising `min_build_play`**, or the first block strands the iOS fleet on a s
 - `mobile/pubspec.lock` **is gitignored** (`mobile/.gitignore:12`; `gates.yml:63-67` documents the
   consequence). Any "the lockfile is unchanged" check is vacuous. Pins belong in `pubspec.yaml`.
 - `google_mlkit_subject_segmentation` does **nothing** on iOS — its entire iOS plugin is 16 lines
-  returning `FlutterMethodNotImplemented`. For that it sets the **iOS 15.5 floor** (its podspec is the
-  only thing that does), drags in MLKitVision/MLKitCommon/MLImage, and has **no arm64-simulator
-  slice**, which forces `EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64` into the Pods config. Used in
-  one place: `touch_map/reaction_segment_service.dart`. A strong removal candidate.
+  returning `FlutterMethodNotImplemented`. For that it drags in MLKitVision/MLKitCommon/MLImage
+  (~14 MB of pods) and has **no arm64-simulator slice**, which forces
+  `EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64` into the Pods config — so the built `Runner.app` is
+  x86_64-only and **cannot run in a Simulator on any Apple Silicon Mac**. Used in one place,
+  `touch_map/reaction_segment_service.dart`, behind a call site that falls back to the original file
+  on null.
+
+  **Decision 2026-09-09: KEEP IT.** It is not dead weight — it works on ANDROID, where ML Kit really
+  does cut the subject out and the reaction ships as a transparent PNG. Removing it would take that
+  feature off the platform that actually ships, in exchange for an arm64 win that is theoretical
+  until there is a Mac to run a simulator on.
+
+  And correcting an earlier claim in this file's own history: removing it does **not** meaningfully
+  lower the deployment floor. `firebase_core`, `firebase_messaging` and friends already require
+  **iOS 15.0**, so the floor would go 15.5 -> 15.0 and exclude the same devices either way.
+
+  If background removal is ever wanted on BOTH platforms, the route is a replacement rather than a
+  deletion: iOS 17+ has `VNGenerateForegroundInstanceMaskRequest` in Vision, which does the same job
+  natively. That would give iOS the feature instead of taking it from Android.
