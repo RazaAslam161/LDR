@@ -1,0 +1,158 @@
+# An unsigned .ipa, for a phone reachable by neither a cable nor TestFlight.
+#
+# Miles is for one person, and she is remote — that is the premise of the app.
+# The development Mac cannot build for iOS at all (docs/guides/IOS-PORT-STATE.md
+# has the closed chain), and TestFlight needs the $99/yr programme, which is not
+# happening. What is left is an unsigned build that she re-signs herself with her
+# own FREE Apple ID, using Sideloadly or AltStore/SideStore.
+#
+# This job therefore signs NOTHING and needs no Apple account of any kind.
+# It emits a .ipa as a workflow artifact; the owner downloads it and sends it on.
+#
+# WHAT SHE LOSES, and it is not small: a free Apple ID cannot hold the Push
+# Notifications capability. No FCM token, no Reach, no message while the app is
+# closed, no ringing call. Miles becomes an app you open rather than one that
+# reaches you. The app survives this — main.dart:202 calls FcmService.init()
+# UNAWAITED, so the failure cannot block the first frame — but the feature is
+# gone, and no code here can bring it back. It is Apple's restriction.
+#
+# The build also expires after 7 DAYS and must be re-signed. SideStore can do
+# that over WiFi once set up.
+
+name: ios ipa (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "branch or SHA to build (default: the branch you launch from)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.44.2"
+  MIN_XCODE_MAJOR: "26"
+
+jobs:
+  ipa:
+    name: build unsigned ipa
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Fail in seconds if the one secret this needs is absent, rather than 30
+      # minutes later with an app that dies on her phone before the first frame.
+      - name: the .env secret must exist
+        working-directory: .
+        env:
+          ENVFILE: ${{ secrets.MILES_ENV }}
+        run: |
+          [ -n "${ENVFILE:-}" ] || { echo "::error title=Missing MILES_ENV::main.dart:99 throws a StateError before the first frame without real Supabase keys. See docs/guides/IOS-SIDELOAD.md"; exit 1; }
+          echo "MILES_ENV present"
+
+      - name: select the newest xcode >= ${{ env.MIN_XCODE_MAJOR }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null); do
+            v=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null || continue)
+            major=${v%%.*}; case "$major" in ''|*[!0-9]*) continue;; esac
+            [ "$major" -ge "${MIN_XCODE_MAJOR}" ] || continue
+            printf '%s\t%s\n' "$v" "$app"
+          done | sort -V | tail -1 > /tmp/xc || true
+          [ -s /tmp/xc ] || { echo "::error title=No Xcode >= ${MIN_XCODE_MAJOR}::Mapbox ships Swift 6.2.4 binaries an older compiler cannot consume"; exit 1; }
+          sudo xcode-select -s "$(cut -f2 /tmp/xc)/Contents/Developer"
+          xcodebuild -version
+
+      - name: set up flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          pub-cache: "false"
+
+      - name: use CocoaPods, not Swift Package Manager
+        working-directory: .
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # The REAL keys. A placeholder builds fine and then throws a StateError on
+      # her phone before the first frame, which looks like "the app is broken".
+      - name: write .env from the secret
+        env:
+          MILES_ENV: ${{ secrets.MILES_ENV }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$MILES_ENV" | base64 --decode > .env
+          grep -q '^NEXT_PUBLIC_SUPABASE_URL=.\+' .env || { echo "::error title=.env::SUPABASE_URL empty"; exit 1; }
+          grep -q '^NEXT_PUBLIC_SUPABASE_ANON_KEY=.\+' .env || { echo "::error title=.env::ANON_KEY empty"; exit 1; }
+          echo ".env written, both keys non-empty"
+
+      - name: pod install
+        working-directory: mobile/ios
+        run: pod install --repo-update
+
+      # --no-codesign, because there is no certificate and there is not meant to
+      # be one. Sideloadly / AltStore re-sign this with HER free Apple ID on her
+      # own machine, which is the whole point.
+      - name: build unsigned .app
+        run: flutter build ios --release --no-codesign
+
+      # An .ipa is just a zip with the .app inside a Payload/ directory. Doing it
+      # by hand rather than through `flutter build ipa` because that path wants an
+      # export options plist and a signing identity, and we have neither.
+      - name: package it as an .ipa
+        run: |
+          set -euo pipefail
+          app="build/ios/iphoneos/Runner.app"
+          test -d "$app" || { echo "::error title=No .app::$app missing after a successful build"; exit 1; }
+          rm -rf /tmp/Payload && mkdir -p /tmp/Payload
+          cp -R "$app" /tmp/Payload/
+          v=$(grep '^version:' pubspec.yaml | sed 's/version: *//;s/+/-build/')
+          (cd /tmp && zip -qry "Miles-$v-unsigned.ipa" Payload)
+          mkdir -p build/ios/ipa && mv "/tmp/Miles-$v-unsigned.ipa" build/ios/ipa/
+          ls -la build/ios/ipa/
+
+      # The same assertions the simulator gate makes, because this is the build
+      # that actually reaches a person and the failures are all silent ones.
+      - name: sanity-check what is in it
+        run: |
+          set -euo pipefail
+          app="build/ios/iphoneos/Runner.app"
+          test -f "$app/GoogleService-Info.plist" && echo "Firebase config: present" \
+            || { echo "::error title=Missing Firebase config::the app would throw UnsupportedError in main()"; exit 1; }
+          snd=$(find "$app" -type d -path '*flutter_assets/assets/sound' | head -1)
+          n=$(ls "$snd" 2>/dev/null | grep -c '\.m4a$' || true)
+          ogg=$(ls "$snd" 2>/dev/null | grep -c '\.ogg$' || true)
+          echo "AAC cues: $n   Ogg: $ogg"
+          [ "$n" -eq 15 ] && [ "$ogg" -eq 0 ] || { echo "::error title=Sound assets::expected 15 .m4a and 0 .ogg, got $n and $ogg"; exit 1; }
+          echo "arch: $(lipo -archs "$app/Runner" 2>/dev/null)"
+          # No entitlements file exists in this project, and that is deliberate
+          # here: a capability a free Apple ID cannot hold makes re-signing fail.
+          codesign -d --entitlements - "$app" 2>&1 | head -5 || true
+
+      - name: the ipa
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: miles-ios-unsigned-ipa
+          path: mobile/build/ios/ipa/*.ipa
+          retention-days: 30
+          if-no-files-found: error
