@@ -29250,3 +29250,18 @@ Gates re-run against the staged tree before committing: analyze 226 issues / 0 e
 0 warnings (matcher probed in the same run), `flutter test` 1866 passed. Both were run on
 the full working tree, which also holds the other sessions' files; the committed subset was
 not analyzed in isolation, because isolating it would mean stashing their work.
+
+### §314 addendum 2 — correction: it IS on origin, and I did not put it there (2026-09-09)
+
+The addendum above says "PUSH IS PENDING" and "It is NOT on origin". Both were true when
+written and are false now. `origin/fix-sprint` is `72127f8`, identical to local HEAD, and
+both `3a0d779` and `72127f8` are ancestors of it.
+
+**I did not run the push.** My attempt was refused by this session's permission policy and
+never reached git. `git reflog show origin/fix-sprint` records
+`72127f8 ... @{0}: update by push`, and "update by push" in a remote-tracking reflog means
+a push from THIS working copy — so it came from the owner's own terminal or from one of
+the concurrent sessions in this repo, in the interval between the refusal and the recheck.
+
+Recorded because the difference matters to whoever reads this next: nothing here should be
+taken as evidence that the blocked action succeeded on a retry. It did not run.
