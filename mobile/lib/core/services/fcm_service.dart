@@ -146,6 +146,23 @@ class FcmService {
     await _fln.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        // iOS settings are MANDATORY, not optional: initialize() throws
+        // ArgumentError('iOS settings must be set when targeting iOS platform.')
+        // when settings.iOS is null (flutter_local_notifications 22.3.0,
+        // flutter_local_notifications_plugin.dart:144). Android-only settings
+        // therefore killed every notification path on iOS before it started.
+        //
+        // Every request* is FALSE on purpose. Their defaults are true, which
+        // would raise the iOS permission prompt the first time this runs -
+        // at startup, before the user has done anything. This app asks
+        // deliberately and once, in FcmService.requestPermission()
+        // (fcm_service.dart:190), and that has to stay the only moment it is
+        // asked. The defaultPresent* values keep the plugin's own defaults.
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestSoundPermission: false,
+          requestBadgePermission: false,
+        ),
       ),
       onDidReceiveNotificationResponse: _onLocalTap,
     );

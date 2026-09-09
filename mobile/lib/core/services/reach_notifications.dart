@@ -596,6 +596,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // icon on a Calculator phone, so pass style.smallIcon when adding one.
     settings: const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      // iOS settings are MANDATORY: initialize() throws ArgumentError('iOS
+      // settings must be set when targeting iOS platform.') when settings.iOS
+      // is null (flutter_local_notifications 22.3.0,
+      // flutter_local_notifications_plugin.dart:144), so Android-only settings
+      // killed this path on iOS before it started.
+      //
+      // request* are all FALSE deliberately - their defaults are true and
+      // would raise the iOS permission prompt here. This app asks once, in
+      // FcmService.requestPermission(), and that stays the only moment.
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestSoundPermission: false,
+        requestBadgePermission: false,
+      ),
     ),
   );
   final androidPlugin = plugin.resolvePlatformSpecificImplementation<
