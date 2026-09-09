@@ -29266,6 +29266,86 @@ the concurrent sessions in this repo, in the interval between the refusal and th
 Recorded because the difference matters to whoever reads this next: nothing here should be
 taken as evidence that the blocked action succeeded on a retry. It did not run.
 
+## §315 — 2026-09-09 — Unlink must not take the vault and the gallery with it: ground truth + the mechanism (design only, no product file edited)
+
+Owner's rule, verbatim: "after un-linking with the partner, user should have access of it's
+account, like vault and gallery, it should not gone. it should be only gone when linked with
+other partner." This section records what is true today and the mechanism proposed. **No
+migration was applied and no Dart file was touched in this turn.**
+
+### Ground truth, verified live against prod `sopictusdonlvuezmfep` (2026-09-09)
+
+- `couples` 3 (1 dissolved 2026-09-02, 0 members, 0 gallery, 0 objects), `profiles` 4, all paired.
+  `gallery_items` 435 rows (431 on couple `6f521753`), `personal_vault_items` 121, `vault_items` 0.
+  Buckets: `couple_intimate` 677 objects / 1166 MB, `personal_vault` 217 / 492 MB, `couple_media` 3.
+- **The vault is already safe server-side.** `personal_vault_items` is keyed `owner_id`, policy
+  `pvi_owner_only`; storage policies `personal_vault_*_own` compare `(storage.foldername(name))[1]`
+  to `auth.uid()`; `purge_couple()` names four couple buckets and deliberately excludes
+  `personal_vault`; `delete_my_account` reaps it outside the couple block. `CryptoCore._vaultKey`
+  is derived from the account's own seed (`crypto_core.dart:212`), and `forgetPartner()` does not
+  touch it. Nothing about a breakup can reach it.
+- **What actually takes the vault away is the ROUTER.** `router.dart:187` — `if (needsCouple)
+  return path == '/couple' ? null : '/couple';` — sends an unpaired account to `/couple` from
+  every route. The data is intact; the door is shut. This is the whole of the owner's "vault is
+  gone" symptom.
+- **The gallery is a genuine loss, twice over.** `gallery_items` is `couple_id`-scoped with
+  `gallery_select_member using (couple_id = current_user_couple_id())`; the live
+  `current_user_couple_id()` is `select couple_id from profiles where id = auth.uid()`, which
+  `dissolve_couple()` nulls on both sides. Storage `closer_intimate_media_read` resolves the same
+  way. So 431 rows and ~1.1 GB go dark at the instant of unlink — and `prune-dissolved-couples`
+  (cron `7 5 * * *`, live) deletes them 30 days later.
+- Gallery bytes are **plaintext behind signed URLs** (20260601008000, a deliberate 2026-08-15
+  product decision). So post-unlink gallery access is an RLS + retention problem with **no key
+  problem at all**. Chat/capsules/threads are not: they are couple-key sealed, and after unlink
+  the ex-partner's public key is unreadable, so the couple key cannot be re-derived on a cold
+  start. Vault + gallery is exactly the half that is tractable without new crypto.
+- **The spine already exists.** `couple_members(couple_id, user_id, joined_at, left_at,
+  severed_at)` (20260826160000) is live and correctly populated (5 rows), maintained by the
+  SECURITY DEFINER trigger `sync_couple_members` on `profiles.couple_id`, own-rows-only SELECT,
+  no DML grant. `current_user_restorable_couple_id()` is already the right predicate SHAPE and
+  already contains the owner's rule as its last clause — *the caller currently has no couple*.
+  `dissolution_window()` centralises the 30 days. `GalleryRepository.fetch(coupleId)` already
+  takes the couple id as a parameter, so archive reads reuse the repository verbatim.
+
+### Two probes, because a zero is not evidence on its own
+
+- The naive archive predicate, run with a literal uid for the one real person who has left one
+  couple and joined another (`6076edae`), resolves to the OLD couple `5df6a383`. Adding either
+  the "currently unpaired" clause or a simulated `released_at` returns none. **`released_at` is
+  load-bearing**: without it, unlinking from partner 2 would resurrect partner 1's archive.
+- `prune_dissolved_couples()`'s WHERE clause returns `(none)` at the live 30-day window — and
+  names `5df6a383` at a 1-day probe window, so the matcher works and the zero is real. With the
+  proposed `couple_members` guard added, the 1-day probe returns `(none)`.
+
+### The mechanism (proposed, not built)
+
+One migration, additive only: add `couple_members.released_at`; extend `sync_couple_members` to
+stamp it on every OTHER membership when a user joins a different couple (never the couple being
+rejoined, so reconciliation is untouched); add `archived_couple_ids()` — membership, not severed,
+not released, couple dissolved, caller currently unpaired — and consume it in **new, additional**
+SELECT policies on `gallery_items` and on `storage.objects` for `couple_intimate`. Writes keep
+resolving on `current_user_couple_id()`, so the archive is read-only by construction with no new
+refusal code. Add the member guard to `prune_dissolved_couples()` so the 05:07 robot stops
+deleting what someone still holds — **without this the requirement passes on day 1 and fails
+silently on day 30.** Client: an `unlinkAllows`-shaped allow-list so an unpaired account reaches
+`/app/vault` (always) and `/app/gallery` (read-only, when an archive resolves); `endCouple()`'s
+plaintext cache purge stays exactly as it is and the archive re-warms from signed URLs.
+
+### Open — owner decisions, not assumptions
+
+1. Whole shared album to both ex-partners, or only each person's own uploads (`uploaded_by`
+   exists, so either is one clause)?
+2. "Erase" stays mutual? `leave_couple_permanently()` severs for BOTH by design (THREAT-MODEL §3
+   safety exit), so under the new rule one person erasing takes the other's album with it.
+3. Does the archive extend past vault + gallery to the other 46 couple-scoped tables? Chat needs
+   the retired-key ring, which is a separate design.
+4. Storage quota: archived objects still count against the uploader's per-user quota.
+
+### Next step
+
+Owner answers 1–3, then: staging migration with the rollback pasted first, a second apply as the
+no-op proof, a negative test as a third identity (must read 0 rows and 0 objects), then prod.
+
 ## §315 — 2026-09-09 — the vault PIN can be changed, and the lockout is real for the first time
 
 Owner: "there is no option of changing passcode of vault." True — `VaultRepository` had
@@ -29372,3 +29452,273 @@ button that throws PGRST202. It went green only after the production apply.
 - `found, not fixed` — `vault_pin.biometric_enabled` is written by nothing and read by
   nothing.
 
+### §315 addendum — what the 15-agent verification pass corrected (same turn, 2026-09-09)
+
+Seven mappers + seven adversarial probes + a completeness critic, read-only, 0 errors. Six
+corrections that change the design, each re-verified by hand before being written here:
+
+1. **The requirement contradicts a PUBLISHED promise.** `web/privacy-policy.html:440-452`:
+   "the couple's records — messages, gallery items, Closer content — are deleted 30 days after
+   the dissolution … **Pairing again with a fresh code does not cancel it; that is a new couple,
+   and these records are still deleted on schedule.**" That is the exact inverse of the owner's
+   rule on both halves. `mobile/test/widget/unlink_screen_test.dart:293` pins `'kept safe 30
+   days'` in the ceremony copy. BRAIN §108 already deleted a "re-pairing changes what is kept"
+   sentence as FALSE. So this is a policy + copy change (privacy policy, FAQ, delete-account
+   page, ceremony screen, severance sheet, one push string) as much as a migration, and both
+   handsets are pinned on build 83 carrying the current sentences.
+2. **The ceremony is 24 HOURS, not seven days.** Live `unlink_start()` inserts `now() + interval
+   '24 hours'` plus 15-minute relink/partner gates; `20260829120000_ending_takes_seven_days.sql`
+   is superseded by `20260830120000_the_window_is_one_day_wide.sql`. Only the initiator can
+   cancel; the partner's only moves are accept (shortens to 5 minutes) or wait.
+3. **A live booby trap for this exact requirement.** The only route an unpaired account can open
+   today is `/couple`, whose primary action mints a couple of ONE — that lifts the router gate
+   and gives the vault back, and simultaneously makes `current_user_restorable_couple_id()`
+   return NULL forever (its last clause requires `profiles.couple_id is null`), killing
+   `restore_couple()` and the rewrap ceremony permanently. There is no way back:
+   `guard_couple_id()` raises `'couple_id is not client-writable'`
+   (20260601003200_hardening_2026_08.sql:62). Any archive design must reach the vault WITHOUT
+   pairing, or it silently sells the user's reunion window for a photo grid.
+4. **Do not copy the bytes.** The obvious "give each ex their own copy" shape is blocked three
+   ways: `storage.protect_delete` raises 42501 on any direct delete of `storage.objects`, so
+   moves go through the Storage API (an edge function, not a migration); the per-user 5 GiB quota
+   is an RLS INSERT policy (`storage_quota_ok(owner)`) and the heavier live user is already at
+   ~1.2 GB, so duplicating ~1.1 GB to both exes can fail as a policy denial; and the
+   `gallery_items_reap` trigger queues BOTH `storage_path` and `thumb_path` to `storage_reap` on
+   any `deleted` false→true, so "copy then soft-delete" destroys the bytes both copies name.
+   **The proposed design copies nothing** — the objects stay at `<couple_id>/gallery/…` and only
+   the SELECT predicate widens. That is why it costs no storage and trips none of the three.
+5. **46 FKs point at `couples.id`** (45 CASCADE, only `profiles.couple_id` SET NULL), so the
+   single `delete from public.couples` in `purge_couple()` is the whole content fan-out — which
+   is exactly why the `couple_members` guard on the pruner is the one line that decides whether
+   this requirement survives day 30.
+6. **`set local role authenticated` + `set local request.jwt.claims` inside a rolled-back
+   transaction works through the Supabase MCP.** A probe agent ran real negative RLS tests that
+   way. The implementation turn has no excuse for an unproven policy: the third-identity negative
+   test can be run live before anything is committed.
+
+Also confirmed, unchanged: after unlink neither ex can DELETE a shared gallery item ever again
+(`gallery_confirm_delete` needs the current couple AND the other person's raised request), and
+there is no export path for an unpaired account — export is allowed during the ceremony only
+(`router.dart:98-107`).
+
+## §316 — 2026-09-09 — The archive: unlinking no longer takes the gallery, and the vault was never gone (server APPLIED to prod, client + copy in the tree)
+
+Owner's three rulings on §315, verbatim: "Whole shared album to both", "'erase' stay mutual",
+"Vault + gallery only". Built on that. **Migration is APPLIED to staging and production.** No
+commit, no APK.
+
+### What was wrong, restated in one line each
+
+- The vault was never deleted. `router.dart` sent an unpaired account to `/couple` from every
+  route, so 121 rows and 492 MB of owner-scoped data sat unreachable behind a pairing screen.
+- The gallery did die: `gallery_items` and `couple_intimate` both resolve
+  `current_user_couple_id()`, which `dissolve_couple()` nulls on both sides, and
+  `prune-dissolved-couples` (05:07 daily) deletes the lot at 30 days.
+
+### The mechanism, as applied
+
+`supabase/migrations/20260909170000_leaving_does_not_take_the_gallery_with_it.sql`. Reads widen,
+writes do not, and **nothing is copied** — the objects stay at `<couple_id>/gallery/…`.
+
+- `couple_members.released_at`, stamped by `sync_couple_members` on every OTHER membership when a
+  user joins a different couple. Reconciliation is excluded by `couple_id <> new.couple_id`.
+- `archived_couple_id()` — member, not severed, not released, couple dissolved, caller currently
+  unpaired. Same shape as `current_user_restorable_couple_id()`, minus the 30-day window: the
+  archive has no clock. The restore handshake keeps its own `dissolution_window()`, untouched.
+- Two ADDITIONAL SELECT policies: `gallery_select_archived` on `gallery_items`,
+  `couple_intimate_read_archived` on `storage.objects`. `gallery_select_member` and the live
+  bucket policy (which is named **`intimate_select`**, granted to `public` — NOT
+  `closer_intimate_media_read` as the migration files suggest) are untouched.
+- `prune_dissolved_couples()` gains a `couple_members` guard, so a couple somebody still holds is
+  not collected. Without this line the whole feature works on day 1 and fails at 05:07 on day 30.
+
+### Verified, on production, with output
+
+- **Dry run against real data, inside a self-aborting transaction** (`raise exception` at the end,
+  so it cannot commit): `[paired A] archive=NULL gallery_visible=431 | [unlinked A]
+  archive=6f521753 gallery=431 objects=677 | [unlinked B] gallery=431 objects=677 | [THIRD
+  IDENTITY c] archive=NULL gallery=4 objects=0 | [released A] archive=NULL gallery=0`. That is the
+  entire requirement — both keep the whole album, a third identity gets nothing, pairing again
+  ends it — proven before a single statement was committed. Production was then re-checked:
+  couple still `active=true`, `dissolved_at` null, 2 members, no policies, no column.
+- **Post-apply, live**: `[A paired] archive=NULL gallery=431 objects=677 | [C third identity]
+  archive=NULL gallery=4 objects=0 | [D released old couple] archive=NULL gallery=4`. No
+  regression for paired accounts; the negative test passes as a third identity.
+- **Backfill touched exactly 1 row**, as predicted: couple `5df6a383`, user `6076edae`,
+  `released_at = 2026-09-02 06:54:21` — the moment they joined `29b68a18`.
+- **Second apply is a no-op**: `second_apply_rows_touched 0`, count unchanged (staging and prod).
+- Staging took everything except the two gallery statements: **staging has no `gallery_items`
+  table at all**. That drift is worse than §65 records — staging cannot rehearse the gallery at
+  all, which is why the prod dry-run above was built.
+- Gates: `flutter analyze --no-pub` → CI matcher count **0**, matcher probed in the same run (2/2
+  on synthetic lines, `info` correctly ignored), verdict line present, 231 infos.
+  `flutter test --no-pub` → **1872 passed, 3 skipped, 0 failed, exit 0**.
+
+### Client and copy
+
+- `router.dart`: `/app/vault` and `/app/gallery` allowed for an unpaired account — allowed, never
+  redirected to, the same shape as the `/rewrap` carve-out above it.
+- `couple_page.dart`: two doors, drawn ALWAYS. That is not cosmetic — this file already carries
+  the law ("a row that appears only when a window is open announces the window"), so a door that
+  appeared only when a past couple existed would announce the unpair to whoever holds the phone.
+- `gallery_screen.dart`: resolves the archive when unpaired, paints read-only (no add, no ask-to-
+  delete, no report, no consent band — save-to-vault stays, and is the only one that still means
+  anything), and `_noAlbum()` replaces a StreamBuilder-over-null-stream that would have spun
+  forever. `_open` had to become `_openAlbum`: the class already had an `_open`.
+- `gallery_repository.dart`: `archivedCoupleId()`, never cached; `window(..., archived: true)`
+  skips the realtime subscription, whose topic policy resolves the live couple and could only
+  fail into a "live updates paused" band over an album that is not waiting for anything.
+- Copy, all six surfaces plus two web pages, because the old promise was the exact inverse:
+  `privacy-policy.html`, `delete-account.html`, `faq_text.dart`, `severance_sheet.dart`,
+  `unlink_screen.dart` (×2), `reach_notifications.dart`. `unlink_screen_test.dart:293` pinned
+  `'kept safe 30 days'` and now pins `'your gallery stays'` — the rule changed, so the assertion
+  changed with it.
+- `schema_snapshot.json`: `archived_couple_id` + `couple_members.released_at`, edited surgically
+  rather than regenerated, so a concurrent session's drift is not swept into this diff.
+
+### OPEN, and it is the headline
+
+**The couple's non-gallery content is now kept indefinitely, not for 30 days.** The prune guard
+protects the whole `couples` row, and 45 FKs cascade from it, so messages and Closer content
+survive as long as either ex-partner holds the archive — stored, unreadable (nobody holds the
+couple id, and the couple key cannot be re-derived), and no longer on a timer. That is a direct
+consequence of the owner's rule, not a defect in the code, but it is the opposite of what
+20260601005100 was written to achieve. The surgical version — purge everything EXCEPT
+`gallery_items` and its objects at the 30-day mark, keeping the couple row as the album's anchor —
+needs `gallery_items.couple_id` to stop being a NOT NULL cascade, which is a schema change to a
+shipped table and was not in scope. **Next step: owner decides whether the non-gallery content
+should still be purged at 30 days.**
+
+Also open: no device pass. Every client claim above is the gates only — nothing has been run on a
+handset, and the riskiest path (a real unlink, then opening the gallery on both phones from a cold
+start) has not been exercised.
+
+## §317 — 2026-09-09 — five sessions' work committed and pushed; the APK is REFUSED, and production is why
+
+Owner asked for three things: the picture of the app and all the sessions, everything
+uncommitted committed and pushed, then a clean play APK for real users. The first two are
+done. **The third is refused, and the reason is not caution — it is a measurement.**
+
+### The picture: 24 uncommitted paths, five sessions, one tree
+
+`git status` at 19:21 held 19 modified and 5 untracked paths. Read against the BRAIN tail
+and `list_sessions`, they were five separate pieces of work, none of them mine:
+
+- **§316's archive/unlink** — router, couple_page, gallery_screen, gallery_repository, six
+  copy surfaces, two web pages, `schema_snapshot.json`, and migration 20260909170000.
+- **The content player** — `newContentPlayer()` plus its three call sites and a
+  source-level gate. Recordings were playing on STREAM_SYSTEM, which Android mutes in
+  vibrate and silent.
+- **`Presence.lastSeenClock`** — Home was printing `last_seen` (an online CLAIM) instead of
+  `app_last_active_at`, and carried no day.
+- **`values-night/styles.xml`** — black splash to white cover flash, in OS dark mode.
+- **`IOS-BRINGUP.md`** — the MacBook Air guide.
+
+`§314 addendum 2` had already recorded that origin was level with local, so nothing was
+behind; the whole delta was working-tree.
+
+### Committed in five groups, staged by explicit path, pushed
+
+    81c41f8  feat(unlink): leaving no longer takes the gallery, and the vault was never gone
+    9f2a6b4  fix(audio): a recording plays on the media stream, everywhere it plays
+    c1c952b  fix(home): "last seen" prints the moment she was last here, and says which day
+    14a5cee  fix(android): no black splash flashing to a white cover in OS dark mode
+    417cbde  docs(ios): the bring-up guide for the MacBook Air
+
+Never `-A`; each group staged by name and the staged list counted before every commit.
+`git push origin fix-sprint` gave `b1ea6d0..417cbde`, and `git ls-remote origin
+refs/heads/fix-sprint` answers `417cbde9cc87a79afb22010f13a07421b14b6a30` — the SERVER's
+answer, matching local HEAD.
+
+Gates, run against the tree that was committed:
+
+- `flutter analyze --no-pub` — CI matcher `grep -cE '^ *(error|warning) (-|•) '` counts
+  **0**, verdict line `231 issues found.` present. **Probed in the same run**: a synthetic
+  fixture of three lines — indented `error`, indented `warning`, and a ZERO-INDENT
+  `warning` — matched 3; the `info` control matched 0.
+- `flutter test --no-pub` — **1872 passed, 3 skipped, 0 failed, exit 0.**
+
+One repair made in passing, inside the diff being committed rather than beside it:
+`schema_snapshot.json` carried two mojibake em-dashes an editor had left in its comment
+block (the CP1252 reading of a UTF-8 em dash, checked in as a literal `â€”`
+escape triple). Restored with perl; `schema_drift_test.dart` re-run alone, 4 passed, and
+the file's diff is now exactly its two real additions.
+
+### Why there is no APK: production moved out from under the copy, mid-session
+
+At 19:22 a concurrent session — `local_008dda49`, "Account access after partner
+unlinking", still marked running — wrote
+`supabase/migrations/20260909180000_the_album_is_open_for_thirty_days_not_forever.sql` into
+the tree. Its header records a SECOND owner ruling, narrowing the first by three hours: the
+gallery "is a mutual shared place", so the archive gets a thirty-day window rather than
+lasting until both partners re-pair.
+
+Production was checked twice, and the answer changed between the two checks:
+
+    19:24  archived_couple_id()  — no dissolution_window()      (§316's version)
+           prune_dissolved_couples() — couple_members guard present
+
+    19:29  archive_now_has_a_clock  = true
+           pruner_still_guarded     = false
+           dissolution_window()     = 30 days
+           schema_migrations head   = 20260909142425 the_album_is_open_for_thirty_days_not_forever
+
+**So the copy in 81c41f8 is now false against production.** Six surfaces plus two web pages
+promise "your gallery stays with you", "not on a timer", "erased once both of you have
+linked with somebody new". Production closes the album at thirty days as of 19:24. An APK
+cut from this tree would carry that promise into a privacy policy, an FAQ, a severance
+sheet, an unlink screen and an unlink notification, on a handset with no update channel.
+
+That commit was not wrong to make — it matched production at the instant it was made, and
+the owner asked for it. It is simply superseded, and the same session is rewriting those
+files right now: at 19:29 `reach_notifications`, `gallery_repository`, `gallery_screen`,
+`faq_text`, `severance_sheet`, `unlink_screen`, `unlink_screen_test`, `schema_snapshot` and
+both web pages were modified again in the working tree.
+
+**Building into that is the opposite of "final, clean, fully updated".** The build is one
+command once the tree settles; nothing else blocks it. `android/miles-upload.jks` is in
+place, `tool/release.sh` with no arguments is the play APK.
+
+### An adversarial review of what was committed found one confirmed defect
+
+Six read-only reviewers over the uncommitted diff, each finding then handed to an
+independent verifier prompted to REFUTE it. Confirmed, measured rather than argued:
+
+- **`presence_service.dart:262-264` — the day arithmetic breaks across a DST boundary.**
+  `DateTime(y,m,d).difference(DateTime(y,m,d)).inDays` on two LOCAL midnights is
+  instant-based, so on the day after a spring-forward the gap is 23h and `inDays` is 0. The
+  verifier ran dart against the repo's own tzdata: `Europe/London: midnight(30 Mar) minus
+  midnight(29 Mar) = 23h, inDays=0`, and the week case `167h -> inDays=6`. A stamp from
+  yesterday morning prints as the bare hour — precisely the lie the getter's own doc
+  comment says it exists to remove — and a seven-day-old stamp prints today's weekday name.
+  `config.dart:21-38` ships Europe/London, Berlin, Paris, four US zones, Sydney and
+  Auckland in the picker, so this is reachable for a long-distance couple. Fix is to build
+  both midnights with `DateTime.utc`, which has no DST hour to lose. **Not fixed — outside
+  what was asked, and the tree is being edited by another session.**
+
+Strongly suspected, premise independently confirmed but its verifier had not returned when
+this was written:
+
+- **`values-night/styles.xml` (14a5cee) may be backwards for the DEFAULT install.** Its
+  comment argues the light theme matches the first frame because the cover paints first.
+  But the play flavour sets `PLAIN_DEFAULT=true` (`build.gradle.kts:160`),
+  `kPlainProfile.cover` is `DisguiseCover.none` (`disguise_profile.dart:183`),
+  `buildCoverWidget(none)` is `SizedBox.shrink()` and `reconcile()` calls
+  `onAuthenticated()` immediately (`disguise_cover_host.dart:34,158-161`). A fresh install
+  has no cover chosen, so the first frame is the DARK Emberlight app — and this change
+  turns a matching black splash into a white flash on every cold start and resume in dark
+  mode. The premise in the comment is verifiable and appears false.
+
+### Still open
+
+- **The build.** Unblocks when the concurrent session lands its copy revert and the tree is
+  coherent. Re-run both gates first — any edit after a gate invalidates it.
+- The DST fix and the launch-theme question above; both are owner calls, neither was
+  applied.
+- **No device pass on anything here.** The handset is on build 83, which contains none of
+  these five commits.
+- `app_release.min_build` untouched.
+
+**Next step:** wait for `local_008dda49` to finish its copy revert, re-run
+`flutter analyze --no-pub` (with the probe) and `flutter test --no-pub`, then
+`bash tool/release.sh --bump` from `mobile/` for build 84.
