@@ -24,12 +24,19 @@ dev_dependencies:
   pedantic: ^1.11.1
   test: any
 
-# Vendored for Android only. The upstream iOS, macOS, Windows, Linux and
-# desktop C++ (common/, third_party/) trees were removed on 2026-09-02: this
-# app builds one platform, and a fork carries only what it patches and ships.
+# Vendored for Android and iOS. The Android tree carries the Miles patches
+# (GetUserMediaImpl.java, OrientationAwareScreenCapturer.java,
+# MilesVideoProcessorHook.java - all marked "Miles patch"). The upstream iOS
+# tree was removed on 2026-09-02 when this app shipped one platform, and was
+# RESTORED UNPATCHED from upstream 1.6.0 on 2026-09-08 for the iOS port: it is
+# byte-identical to pub.dev flutter_webrtc 1.6.0 and carries no Miles change.
+# macOS, Windows, Linux and the desktop C++ (common/, third_party/) trees stay
+# removed - this app does not build them.
 flutter:
   plugin:
     platforms:
       android:
         package: com.cloudwebrtc.webrtc
+        pluginClass: FlutterWebRTCPlugin
+      ios:
         pluginClass: FlutterWebRTCPlugin
