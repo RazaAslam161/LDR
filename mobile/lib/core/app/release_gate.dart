@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -151,6 +150,19 @@ class ReleaseGate {
   @visibleForTesting
   static Future<void> loadChannelForTest() => _loadChannel();
 
+  /// Forgets the answer, so a test can ask again.
+  ///
+  /// [_loadChannel] returns early once the channel is known — correct in
+  /// production, where the answer cannot change — but [_channelKnown] is a
+  /// process-wide static, so the first test to resolve it silently decides the
+  /// result for every test after it in the same file. That is a green suite
+  /// asserting nothing, which is worse than a red one.
+  @visibleForTesting
+  static void forgetChannelForTest() {
+    _channelKnown = false;
+    channel = 'sideload';
+  }
+
   static Future<void> _loadChannel() async {
     if (_channelKnown) return;
     // iOS has exactly one distribution channel and no 'miles/updater' host to
@@ -167,7 +179,12 @@ class ReleaseGate {
     //     testers would block the entire App Store fleet in the same statement.
     // 'appstore' is store-distributed, so applyRow reads min_build_play with
     // it - see the fleet comment there.
-    if (!kIsWeb && Platform.isIOS) {
+    // defaultTargetPlatform, not Platform.isIOS: dart:io reports the HOST under
+    // `flutter test`, so a Platform.isIOS branch is one no test in this repo can
+    // reach — and this branch decides which FLOOR an install is held to, which
+    // is the last thing that should go unchecked. debugDefaultTargetPlatform-
+    // Override drives it.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       channel = 'appstore';
       _channelKnown = true;
       revision.value++;
