@@ -29722,3 +29722,155 @@ this was written:
 **Next step:** wait for `local_008dda49` to finish its copy revert, re-run
 `flutter analyze --no-pub` (with the probe) and `flutter test --no-pub`, then
 `bash tool/release.sh --bump` from `mobile/` for build 84.
+
+## §318 — 2026-09-09 — The album is open for thirty days, not forever (owner narrowed §316; APPLIED to staging + prod)
+
+Owner read §316's copy and asked what "ends it permanently" meant, then ruled: **vault access
+permanent, gallery only for a window** — "gallery maybe not because it mutual shared place".
+Chosen option: the album stays readable to BOTH for the existing 30 days, during which either of
+them can save what they want into their own vault; after that the shared place goes.
+
+### The terminology question, answered with the live bodies
+
+- The automatic path the owner described — 15-minute gates, 24-hour clock, auto-unlink — is
+  `unlink_expire_due()` → `dissolve_couple()`. It **erases nothing**; it ends the couple and
+  leaves every row and file in place.
+- "Ends it permanently" is a **different, deliberate button**: "Hold to erase" in the reconnect
+  sheet (`reconnect_sheet.dart:250` → `leave_couple_permanently()`), whose own on-screen copy is
+  "This erases what the two of you made, for both of you, straight away." It severs both
+  memberships, backdates `dissolved_at` past the window and calls `purge_couple()`.
+- Anyone reading §316's phrase as the timer will make the same mistake; it means that button.
+
+### Vault: already permanent, nothing was owed
+
+- `personal_vault_items` is `owner_id`-keyed; the bucket compares folder 1 to `auth.uid()`;
+  `purge_couple()` excludes `personal_vault` by name (20260826170000:61). No couple path reaches it.
+- `_vaultKey` is cleared in exactly two places — `crypto_core.dart:255` (`bindAccount`, a different
+  ACCOUNT) and `:402` (an escrow seed restore). Never on unlink, never on re-pairing.
+- The only thing that ever removed it was the router, fixed in §316. So unlink, re-link, or link
+  with somebody new: the vault is untouched in all three.
+
+### Applied: 20260909180000_the_album_is_open_for_thirty_days_not_forever.sql
+
+- `archived_couple_id()` gains `c.dissolved_at > now() - public.dissolution_window()`.
+- New `archived_gallery()` → jsonb `{couple_id, expires_at}`, wrapping the predicate the way
+  `couple_restore_state()` wraps `current_user_restorable_couple_id()`. The grid needs a date and
+  a uuid cannot carry one.
+- **The §316 prune guard is REMOVED**, which closes §316's open item: messages and Closer content
+  go back on the 30-day clock instead of being kept indefinitely. One number now governs three
+  doors that close on the same instant — restore, album, pruner — and `dissolution_window()` is
+  still the only place it is written.
+- `released_at` stays, and is NOT made redundant by the window: unlink from A day 1, pair with B
+  day 5, unlink from B day 10 and A's album would otherwise come back inside its own 30 days.
+  Whichever comes first ends it.
+
+### Verified on production, with output
+
+- Boundary dry run, self-aborting: `[day 0] gallery=431 objects=677
+  expires_at=2026-10-09T14:23:04.932747+00:00 | [day 0 THIRD IDENTITY] gallery=4 objects=0 |
+  [day 31] gallery=0 objects=0 archived_gallery=NULL | [day 31] pruner_would_collect=1`. Both
+  directions of the window, the negative test, and the pruner regaining sight of the couple —
+  before anything was committed. Prod re-checked after: `still_active true, dissolved_at null,
+  members 2, gallery 431, archived_gallery null, window_applied false`.
+- Live post-apply: `[A paired] archived_gallery=NULL gallery=431 objects=677 | [C third identity]
+  archived_gallery=NULL gallery=4 objects=0`. No regression, no archive for anyone paired.
+- Gates: analyze CI matcher **0**, probed 2/2 in the same run, verdict present, 231 infos.
+  `flutter test --no-pub` → **1872 passed, 3 skipped, 0 failed, exit 0**.
+
+### Client and copy
+
+- `_ClosingBand` above the grid: "This gallery closes on <date>. Press and hold a picture to save
+  it to your vault, which is yours to keep." An album that ends silently is the whole harm this
+  option exists to prevent, and the way out (long press → Save to vault) is not otherwise taught
+  anywhere on that screen.
+- `GalleryRepository.archivedCoupleId()` → `archivedGallery()` returning
+  `({String coupleId, DateTime expiresAt})?`, matching `supabase_repository.dart:710`'s idiom.
+- Copy: the four short strings REVERTED to the originals, because "kept safe 30 days" is true
+  again — `reach_notifications.dart:506`, `unlink_screen.dart` :716 and :1620, and the test pin at
+  `unlink_screen_test.dart:298`. The four long surfaces (`severance_sheet`, `faq_text`,
+  `privacy-policy.html`, `delete-account.html`) are NOT pure reverts: they now also say the
+  gallery is readable during the 30 days and that saving to your own vault is the way to keep
+  something. Both HTML files re-checked as balanced.
+
+### Still open
+
+- **No device pass, unchanged from §316.** Nothing in the client half has run on a handset; the
+  riskiest path is a real unlink then opening vault and gallery from a cold start on both phones.
+- The `_ClosingBand` date uses `DateFormat.MMMMd()` — never seen rendered, only analyzed.
+- Next step: owner asks for a build when they want the device pass.
+
+### §317 addendum — the review finished: 7 confirmed, and the two worst were re-verified by hand (2026-09-09)
+
+24 agents, 6 review dimensions, every finding handed to an independent verifier prompted to
+REFUTE it. Seven survived. §317 above was written while the run was still going and named
+only the DST one; the two `high` findings below arrived after it, and **neither is taken on
+an agent's word — both were re-checked against production before being written here**, per
+the rule about not resolving a subagent's finding without re-running its check.
+
+**1. HIGH — `couple_page.dart:79`: the screen advertises the archive and, one button above,
+destroys it.** After an unlink the /couple screen now draws "Your gallery". Its PRIMARY
+action, "Create & get a code", calls `create_pairing_invite`, which mints a **couple of
+one**. That write fires `profiles_sync_couple_members`, whose release clause is:
+
+    if v_joined then
+      update public.couple_members set released_at = now()
+       where user_id = new.id and couple_id <> new.couple_id and released_at is null;
+
+`released_at` is what `archived_couple_id()` tests, so the archive is gone — permanently,
+silently, with no partner having joined anything and no way back: `grep -rn released_at
+supabase/ mobile/lib` sets it in one place and clears it nowhere.
+
+Re-verified live on production, not inferred:
+
+    invite_mints_a_couple = true      (create_pairing_invite's body contains create_couple)
+    trigger_live          = 1         (profiles_sync_couple_members on public.profiles)
+
+BRAIN §315's own addendum had already called this action "a live booby trap"; §316 shipped
+the two doors without gating it. It is in `81c41f8`, pushed.
+
+**2. HIGH — `20260909170000:212`: the archive storage policy opens the whole couple prefix,
+not just the gallery.** The live policy, read back with `pg_get_expr`:
+
+    couple_intimate_read_archived:
+      bucket_id = 'couple_intimate'
+      AND (storage.foldername(name))[1] = (select archived_couple_id())::text
+
+It scopes on segment **[1] only** — the couple id. The bucket's real second-level prefixes
+on production are:
+
+    prefixes_under_couple_intimate = {body, gallery}
+
+So an unpaired ex-partner is granted read on `<couple>/body/` — chat media — as well as
+`<couple>/gallery/`. The owner's ruling was "Vault + gallery only". Mitigation, and it is
+why this is a wrong grant rather than a leak: `body` objects are couple-key sealed and the
+couple key cannot be re-derived once the partner's public key is unreadable. The fix is one
+added conjunct, `(storage.foldername(name))[2] = 'gallery'`, and it is additive.
+
+**The other five, all confirmed, none re-verified by hand beyond what §317 already records:**
+
+- `gallery_screen.dart:598` (found twice, by two independent dimensions) — the add-photo
+  button is gated only on `!_archived`, but `_archived` is false in every no-album state, so
+  a first-run account that opens "Your gallery" gets a live + button whose `_add()` reads a
+  null couple id and returns. A dead control, on the exact screen whose own comment says "a
+  control that cannot work is worse than no control".
+- `presence_service.dart:262` — the DST day-boundary defect, as recorded above.
+- `values-night/styles.xml:21` — confirmed, and it matches what was checked by hand in §317:
+  `PLAIN_DEFAULT=true` on the play flavour means the default install's first frame is the
+  DARK app, so this change replaces a matching black splash with a white flash.
+- `web/delete-account.html:79` — the retained sentence "the stored media files are the one
+  thing that sweep does not currently erase" is false: `purge_couple` queues every object
+  under the couple prefix in four buckets into `storage_reap`, which `reap-storage` drains.
+  It also now contradicts the FAQ in the same build.
+
+**A limitation of this run, stated rather than buried:** the tree moved under the reviewers.
+The archive-client dimension read `_ClosingBand` and `archivedGallery()` — code the
+concurrent session was writing while the review ran — so a few of its line numbers point at
+a file state that is neither HEAD nor the reviewed diff. The two HIGH findings do not depend
+on that: both were re-verified against production above.
+
+**Nothing was fixed.** Scope was commit + push + build, the tree is still being edited by
+`local_008dda49`, and every one of these is an owner call. In priority order the fixes are:
+gate "Create & get a code" behind a confirmation that names what it costs (or clear
+`released_at` when a couple of one is abandoned); add the `[2] = 'gallery'` conjunct;
+`_stream != null && !_archived` on the add button; `DateTime.utc` midnights; revert
+`14a5cee`; correct the delete-account sentence.
