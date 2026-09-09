@@ -211,6 +211,19 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     String? tree;
     try {
       tree = await DataExportService.pickFolder();
+    } on MissingPluginException {
+      // iOS has no 'miles/export' host. The whole protocol below is Android's
+      // Storage Access Framework, implemented in MainActivity.kt, and its iOS
+      // counterpart (UIDocumentPicker + security-scoped bookmarks) is not
+      // written yet.
+      //
+      // This catch is SEPARATE because MissingPluginException does not extend
+      // PlatformException — the clause below never saw it, so on iOS the
+      // failure escaped uncaught and the button did nothing at all, with no
+      // toast and no error. Telling the user plainly is the honest failure;
+      // silence reads as a broken app.
+      _toast('Export is not available on iOS yet.');
+      return;
     } on PlatformException catch (e) {
       _toast(e.code == 'no_picker'
           ? 'This phone has no folder picker.'
