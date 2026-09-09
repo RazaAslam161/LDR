@@ -30023,3 +30023,102 @@ matches production.
 priority order is the couple-of-one trap (unlink, then look at /couple before pressing
 anything), then a voice note played with the phone in vibrate, then the Home card's last-seen
 line, then a cold launch in OS dark mode to see whether the splash flashes white.
+
+## §321 — 2026-09-09 — build 84 installed on the handset
+
+Owner asked for the install, twice. Done, and read back off the device rather than inferred
+from adb's "Success".
+
+### The first ask found no phone, and no install was attempted
+
+`adb devices` listed nothing, `adb get-state` answered `error: no devices/emulators found`,
+and no transport of any kind was present — not unauthorized, not offline. **No `adb install`
+was run into that empty list.** This is recorded because the tempting move is to run the
+command anyway and paste its failure as though it were a result; §313 caught the same class
+of mistake with a `|| echo` fallback printing as if it were a measurement. The owner
+reconnected, and the second ask found the device.
+
+### The chain, end to end
+
+    adb devices -l
+      1896b4b3  device  product:OnePlus8 model:IN2015 device:OnePlus8 transport_id:2
+    adb get-state -> device
+
+    # before
+    versionCode=83  minSdk=24 targetSdk=36
+    versionName=0.1.0
+    lastUpdateTime=2026-09-09 15:51:02        (that is §313's install of 83)
+    firstInstallTime=2026-08-30 07:41:46
+
+    # the artifact, stamp re-read immediately before installing
+    D:/Miles/Miles.apk  90,447,375 bytes  miles-build-84
+
+    adb install -r D:/Miles/Miles.apk
+      Performing Streamed Install
+      Success                                  INSTALL_EXIT=0
+
+    # after, read off the device
+    versionCode=84  minSdk=24 targetSdk=36
+    versionName=0.1.0
+    lastUpdateTime=2026-09-09 23:15:41
+
+The file installed is the ROOT `Miles.apk` — the copy whose `lib/arm64-v8a/libapp.so` was
+unzipped and confirmed to read `miles-build-84`, and whose sha256 matched the build output
+byte for byte (§320). So the Dart on the phone is 84, not merely the versionCode Gradle
+wrote on it. That distinction is the build-43 defect.
+
+**Seed safety is proven by the Success line itself.** `-r` over an existing package fails
+with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` when the signing certificate differs, so an
+install that succeeded IS the proof that the play flavour's upload key matches the installed
+base. No uninstall, so the X25519 seed is untouched (§262 addendum 2).
+
+### The app is RUNNING, and I did not start it
+
+`adb shell pidof com.miles.miles` -> `22520 25652`. Two processes, alive, immediately after
+an install this session did not launch. Recorded rather than explained away, because the
+obvious reading — "it started, so R8 is fine" — is not supported:
+
+- `dumpsys activity activities` gives `topResumedActivity=com.android.launcher/.Launcher`.
+  **The UI is not in the foreground.** Whatever is alive is background.
+- `dumpsys activity services com.miles.miles` printed no ServiceRecord, so no foreground
+  service is holding it. The likeliest cause is the process being restarted after the
+  package update (FCM receiver, or it was already running before the install).
+- The crash buffer has **zero** entries for `com.miles`, and zero
+  `ClassNotFound` / `NoSuchMethod` / `NoClassDefFound` anywhere.
+- `logcat *:E` filtered to this package is entirely OS-side install noise: `VerityUtils`
+  failing to measure fs-verity on the new base.apk, `AppSearchAppIndxrHlp` reindexing,
+  OplusPerfService scroll hints, and the OEM's harmless
+  `Unknown bits set in runtime_flags: 0x40000000`.
+
+**R8 startup is therefore still NOT proven**, and it remains the first thing that could
+fail. A background process surviving is not the UI surviving; the shrinker strips the
+reflection and JNI entry points in WebRTC and ML Kit that only fail when the screens using
+them are opened. If 84 misbehaves, that is the cause to look at first, and 83 is recoverable
+by reinstalling from the archive rather than by uninstalling.
+
+### Deliberately not done
+
+- **The app was not launched.** This is a private couples app on the owner's personal phone;
+  opening it could raise a cover or put private content on a screen. Startup is the owner's
+  first action.
+- `app_release.min_build` NOT raised. The rule is to raise it only after the build is
+  installed AND proven; it is installed, it is not proven.
+
+### The device pass, in priority order
+
+1. **The couple-of-one trap** (§317 addendum, HIGH, and the only one that destroys data).
+   Do NOT press "Create & get a code" on /couple after an unlink until it is fixed — it
+   mints a couple of one, which stamps `released_at` and permanently kills the gallery
+   archive the same screen advertises. Not reachable while both accounts stay paired.
+2. **A voice note with the phone in vibrate or silent** (§320's audio fix). It should now be
+   audible and the media rocker should move it. This is the one fix in the build with a
+   clean yes/no answer.
+3. **The Home card's last-seen line** — it should show the hour she was actually last in the
+   app, with a day attached when it is not today.
+4. **A cold launch with the OS in dark mode** — watch for a white splash flash. If it
+   flashes, `14a5cee` is backwards for the default install, exactly as the review claimed.
+5. The §313 list that build 83 never got: `ThumbBackfill.resize` (the only path that
+   WRITES), the album-row gesture arena, drag-select under a real thumb, vault swipe.
+
+**Next step:** owner launches it. Nothing else here can move until something has been on a
+screen.
