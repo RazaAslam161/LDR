@@ -960,6 +960,26 @@ class SupabaseRepository {
   /// cache (a second device, the claim trigger, a dead token revoked by
   /// reach-notify), and a forever-skip once left the actively used handset
   /// unregistered with no recovery short of reinstalling.
+  /// Which transport a push token row claims, as `push_tokens.platform`.
+  ///
+  /// A getter, not an inline ternary, so it can be asserted without standing up
+  /// a Supabase client: the value it returns decides how the sender routes,
+  /// and an APNs token filed as 'android' is a row nothing can deliver to.
+  ///
+  /// defaultTargetPlatform rather than Platform.isIOS, because dart:io reports
+  /// the HOST under `flutter test` and a dart:io branch is one no test in this
+  /// repo can reach. debugDefaultTargetPlatformOverride drives this.
+  ///
+  /// The column has always been real: `check (platform in ('android','ios'))`
+  /// and register_push_token's p_platform both landed in
+  /// 20260906140300_a_push_token_belongs_to_a_device_not_an_account.sql. It was
+  /// written for two platforms and had only ever been sent one.
+  @visibleForTesting
+  static String get pushPlatform =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
+          ? 'ios'
+          : 'android';
+
   static Future<bool> registerPushToken(String token, String deviceId) async {
     final uid = SupabaseService.currentUserId;
     if (uid == null) return false;
@@ -984,13 +1004,7 @@ class SupabaseRepository {
         // :97). Hardcoding 'android' was fine while one platform shipped; on
         // iOS it would file every APNs token as an FCM/Android one, and the
         // sender has no other way to tell which transport a row belongs to.
-        // defaultTargetPlatform rather than Platform.isIOS: dart:io reports the
-        // HOST under `flutter test`, so a Platform.isIOS branch is unreachable
-        // by any test here, and this one decides which transport a row claims.
-        'p_platform':
-            !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
-                ? 'ios'
-                : 'android',
+        'p_platform': pushPlatform,
       },
     );
     if (res is Map && res['dead'] == true) return true;
