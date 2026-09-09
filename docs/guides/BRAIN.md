@@ -27676,3 +27676,61 @@ nothing at all.
 - Nothing has been verified running. Analyzer is **0 errors / 0 warnings / 225 info — exactly
   the pre-port baseline** — and `flutter test` is **1,807 passed / 3 skipped / 0 failed**, but a
   test suite that forces `defaultTargetPlatform` to android cannot see any of this.
+
+### §303 addendum — the iOS app builds, proven on a machine that is not this one
+
+    run  https://github.com/RazaAslam161/LDR/actions/runs/34330047003   success
+    ✓ Built build/ios/iphonesimulator/Runner.app   255 MB, Xcode build 422.6s
+    GoogleService-Info.plist: present
+    sound assets at: Frameworks/App.framework/flutter_assets/assets/sound
+    AAC cues: 15    Ogg files: 0
+    Frameworks/WebRTC.framework
+    frameworks bundled: 54
+
+Mapbox, the restored WebRTC darwin tree, Firebase, ML Kit and ~35 other plugins compile and
+link against the iOS 26 SDK. `WebRTC.framework` being IN the bundle is the specific proof that
+the `ios/` tree restored into the vendored fork works — that fork shipped android-only, and its
+failure mode was never a build error, it was MissingPluginException on the first call.
+
+**This machine could not have produced that answer.** `xcodebuild -downloadPlatform iOS`
+downloads all 10.47 GB and then dies with "Download failed due to not having an extractor" —
+a macOS 15 host handed an iOS 26.3.1 AppleArchive. Downloading the asset by hand off
+updates.cdn-apple.com (public, no auth) and decrypting it with the ArchiveDecryptionKey the
+failure logged does work as far as decryption, but the payload is an asset PATCH descriptor —
+`YOP=manifest`, `YOP=extract`, `YOP=dst-fixup` — not a file tree, and applying it needs the
+extractor that is missing. So the error is literal. Do not spend another afternoon on it.
+
+`.github/workflows/ios-build.yml` exists because of this. gates.yml runs on ubuntu and is
+structurally incapable of failing on anything iOS: there is no Xcode, no pod is ever linked,
+and `flutter test` forces defaultTargetPlatform to android, so every iOS branch in lib/ is
+invisible to it. It stayed green through this entire port while the iOS build was, at times,
+completely broken. The new job is **workflow_dispatch only** — macOS runners bill at 10x
+against a private repo's minutes, which is the fate gates.yml's own header warns about.
+
+Four things it caught that this laptop could not:
+
+- **`flutter config --no-enable-swift-package-manager` is per-MACHINE state** in
+  ~/.config/flutter. It made the build work here and travelled nowhere. Any fresh clone hits
+  `image_cropper 12.2.1 -> tocropviewcontroller 3.1.2..<4.0.0` against
+  `DKImagePickerController -> 2.6.0..<3.0.0` and cannot resolve. Now a step in the job.
+- **A runtime is not a destination.** The runner ships iOS 26.2/26.4/26.5 runtimes and ZERO
+  instantiated devices, and xcodebuild's way of saying so is "Unable to find a destination
+  matching { generic:1, platform:iOS Simulator }" — which reads like a missing SDK and is not
+  one. Worth remembering before trusting that message again.
+- Xcode must be sorted by FULL version. The image carries 26.0, 26.0.1, 26.1 and 26.1.1; a
+  major-only comparison makes them all equal and picks whichever `ls` yields first.
+- iOS assets live at `Runner.app/Frameworks/App.framework/flutter_assets/`, not at the bundle
+  root the way they do on Android.
+
+**Still true: nothing has RUN.** A linking build is not a working app. The Darwin notification
+settings, the `first_unlock_this_device` Keychain class, the `appstore` release channel and AAC
+playback have never executed. Launching in CI needs real Supabase credentials in the
+placeholder `.env`, i.e. repository secrets — an unmade decision, not an oversight.
+
+**Correction to §303: the owner has NO paid Apple Developer Program membership.** The earlier
+note that they did was wrong. App Store submission and TestFlight are unreachable until
+enrolment; free provisioning allows 7-day device installs but explicitly without Push
+Notifications, App Groups or Associated Domains — so push, the incoming-call ring, Reach, the
+screen-share extension and Universal Links cannot be exercised on hardware at all. Xcode 26
+remains mandatory regardless: MapboxCommon ships Swift 6.2.4 binaries down to 24.28.1, this
+pubspec's floor, and an older compiler cannot consume them.
