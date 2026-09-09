@@ -154,12 +154,18 @@ class Message {
   final String? localPath;
   final SendStatus sendStatus;
 
-  Message copyWith({String? localPath, SendStatus? sendStatus}) => Message(
+  Message copyWith({
+    String? localPath,
+    SendStatus? sendStatus,
+    String? body,
+    DateTime? editedAt,
+  }) =>
+      Message(
         id: id,
         senderId: senderId,
         createdAt: createdAt,
         seq: seq,
-        body: body,
+        body: body ?? this.body,
         imagePath: imagePath,
         voicePath: voicePath,
         voiceDurationMs: voiceDurationMs,
@@ -177,8 +183,12 @@ class Message {
         hasThumb: hasThumb,
         bodyCipher: bodyCipher,
         bodyNonce: bodyNonce,
-        bodyUndecryptable: bodyUndecryptable,
-        editedAt: editedAt,
+        // Text supplied here RESOLVES the unreadable state, the same way
+        // [withDecrypted] and [reconcileWith] resolve it. A bubble the owner
+        // has just re-typed would otherwise keep claiming it cannot be opened
+        // while holding the sentence they typed into it.
+        bodyUndecryptable: body != null ? false : bodyUndecryptable,
+        editedAt: editedAt ?? this.editedAt,
       );
 
   /// The result of hydration: the opened text, or the admission that it could
@@ -260,6 +270,12 @@ class Message {
         // the bubble would claim to be unreadable while showing its own text.
         bodyUndecryptable:
             server.bodyUndecryptable && (server.body ?? body) == null,
+        // Omitting this fell back to the constructor default of null, so the
+        // authoritative row for an edited message arrived and RETIRED its own
+        // "edited" label. Never the other way round: nothing clears edited_at,
+        // so a server row without it is a row that has not been edited yet, and
+        // a local copy that knows better keeps knowing.
+        editedAt: server.editedAt ?? editedAt,
       );
 
   final String id;
@@ -572,6 +588,29 @@ class ChatRepository {
 
   /// Drop every cached page. Sign-out and account switch.
   static void forget() => _pageCache.clear();
+
+  /// Replace one message in the cached page, when that page is holding it.
+  ///
+  /// The cache is a head start and never the source of truth — but a head start
+  /// that paints a sentence the server no longer holds is worse than the
+  /// spinner it exists to avoid. Only [fetch] wrote this map, so an edit landed
+  /// in the screen's list and nowhere else: the disguise cover rebuilds the
+  /// whole router subtree on every background, and the repaint brought the
+  /// PRE-EDIT text back until the refetch returned. That is the reported bug
+  /// wearing a different hat — the edit worked, and the app showed the old
+  /// message again anyway.
+  ///
+  /// A message the page does not hold is not added. This keeps the cache
+  /// honest about the page it cached; it is not a second message store.
+  static void patchCachedPage(String coupleId, Message m) {
+    final page = _pageCache[coupleId];
+    if (page == null) return;
+    final i = page.indexWhere((x) => x.id == m.id);
+    if (i < 0) return;
+    final next = List<Message>.of(page);
+    next[i] = m;
+    _pageCache[coupleId] = List.unmodifiable(next);
+  }
 
   /// Decode one fetched page, skipping any row whose decode throws.
   ///
@@ -1142,6 +1181,13 @@ class ChatRepository {
   /// Live stream of new messages for this couple (both partners' sends).
   /// [onDelete] is called on any DELETE event (e.g. clear-for-everyone) so the
   /// partner's screen can reload without processing individual row payloads.
+  /// [onUpdate] is called with the refetched row when one CHANGES — an edit, or
+  /// a "delete for everyone", both of which are UPDATEs and neither of which
+  /// reached either handset before: this channel carried INSERT and DELETE
+  /// only, so `edit_message` wrote the new ciphertext, answered `ok`, and no
+  /// screen anywhere heard about it. The bubble kept its original text until
+  /// something else forced a full refetch, which is exactly what an edit that
+  /// "does nothing" looks like from the sofa.
   /// [onJoined] is called when the server confirms the join.
   ///
   /// The status was reported to Diag (inert in a shipped build) and to
@@ -1152,6 +1198,7 @@ class ChatRepository {
     String coupleId,
     void Function(Message) onInsert, {
     VoidCallback? onDelete,
+    void Function(Message)? onUpdate,
     VoidCallback? onJoined,
   }) {
     return _c
@@ -1216,6 +1263,41 @@ class ChatRepository {
               final m = Message.fromJson(raw);
               _takeDecodeFailures();
               onInsert(m);
+            }());
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'couple_id',
+            value: coupleId,
+          ),
+          callback: (payload) {
+            final deliver = onUpdate;
+            if (deliver == null) return;
+            // Refetched for the reason the INSERT branch above documents — this
+            // app does not trust the bytea encoding postgres_changes uses — but
+            // with the opposite fallback, and the difference is the point. An
+            // insert delivers the raw payload when the refetch fails, because
+            // the alternative is losing the message entirely. An update already
+            // has a good row on screen: handing over an unhydrated one would
+            // stamp "edited" on the text it replaced and could blank a bubble
+            // whose plaintext was never in doubt. A refetch that cannot be made
+            // therefore delivers NOTHING, and the row stands until the next
+            // fetch — stale for a moment, never wrong.
+            unawaited(() async {
+              try {
+                final fresh = await fetchById(
+                  coupleId,
+                  JsonUtils.parseString(payload.newRecord['id']),
+                );
+                if (fresh != null) deliver(fresh);
+              } catch (e) {
+                debugPrint('[chat] live update refetch failed: ${e.runtimeType}');
+              }
             }());
           },
         )

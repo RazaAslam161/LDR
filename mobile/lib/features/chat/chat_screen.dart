@@ -586,10 +586,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
     if (!mounted) return;
     if (verdict == 'ok') {
-      setState(() => _editingMessage = null);
-      // The row is refreshed by the same realtime path a send uses; nothing is
-      // patched into _messages by hand, so an edit cannot leave the list
-      // disagreeing with the server.
+      final i = _messages.indexWhere((m) => m.id == target.id);
+      setState(() {
+        _editingMessage = null;
+        // Applied HERE, on the device that typed it. The realtime UPDATE that
+        // carries this to the other handset also comes back to this one and
+        // overwrites it with the server's row a moment later — but waiting for
+        // that round trip meant the bubble sat on its old text for as long as
+        // the network took, and for ever if the channel was not joined. This
+        // device does not need to be told what it just wrote.
+        if (i >= 0) {
+          _messages[i] = _messages[i]
+              .copyWith(body: text.trim(), editedAt: DateTime.now());
+        }
+      });
+      if (i >= 0) _patchCache(_messages[i]);
       return;
     }
     // The composer STAYS in edit mode on a refusal, holding the typed text.
@@ -1156,6 +1167,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         id,
         (m) => _onIncoming(m, fromDb: true, source: 'rt_insert'),
         onDelete: _onRemoteDelete,
+        onUpdate: _onRemoteUpdate,
         onJoined: () {
           // Guarded by the attempt: a join landing for a channel this screen
           // has already replaced must not vouch for the one that replaced it.
@@ -1928,6 +1940,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         setState(() => _reloadScheduled = false);
       }
     });
+  }
+
+  /// A row this screen is already showing changed on the server: an edit, or
+  /// the partner's "delete for everyone". Already refetched and decrypted by
+  /// [ChatRepository.subscribe], so this only has to seat it.
+  ///
+  /// Patched in place, and NEVER inserted. An UPDATE arrives for every row in
+  /// the couple, including ones outside the loaded page and ones this user has
+  /// cleared for themselves — [_onIncoming] would take an unknown id for a new
+  /// message and put a three-week-old sentence at the bottom of the
+  /// conversation, or resurrect a cleared one.
+  void _onRemoteUpdate(Message m) {
+    if (!mounted) return;
+    final i = _messages.indexWhere((x) => x.id == m.id);
+    if (i < 0) return;
+    // No re-sort: created_at and seq are what the list orders on, and an UPDATE
+    // moves neither.
+    final merged = _messages[i].reconcileWith(m);
+    setState(() => _messages[i] = merged);
+    _patchCache(merged);
+  }
+
+  /// Keep the process-wide cached page in step with a message this screen just
+  /// changed. Only [ChatRepository.fetch] ever wrote that map, so a live edit
+  /// lived in `_messages` alone — and the disguise cover rebuilds the whole
+  /// router subtree on every background, repainting the PRE-EDIT text from the
+  /// cache until the refetch landed. The edit had worked; the app showed the
+  /// old message again anyway.
+  void _patchCache(Message m) {
+    final couple = _coupleId;
+    if (couple != null) ChatRepository.patchCachedPage(couple, m);
   }
 
   /// Partner cleared the whole conversation — instant signal over the broadcast

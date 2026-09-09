@@ -27560,6 +27560,74 @@ loop and then listed the OnePlus 8 immediately afterwards — the daemon had bee
 device enumerated a beat after the loop gave up. `adb devices -l` is the check worth trusting,
 and "no devices" is worth re-reading once before it is reported as unplugged.
 
+## §303 — iOS bring-up audit: the tree has no iOS, and three things fail before a build does
+
+2026-09-08. Owner signed into Claude Code on a MacBook Air and asked for the complete iOS
+setup. No code changed. This is the audit that had to come first, and its output is
+`docs/guides/IOS-BRINGUP.md`, written into the repo rather than into a chat message so it
+travels to the Mac on `git pull` — the Mac is a different machine and a reply here reaches
+nothing.
+
+**There is no `mobile/ios/`.** Never created. `.metadata` lists `root` and `android` only.
+So the ask is a platform bring-up, not a build, and `flutter create --platforms=ios` is
+step five of twelve rather than step one.
+
+Four blockers, and the ordering matters because two of them let a build succeed and fail on
+the handset instead:
+
+1. `firebase_options.dart` **throws `UnsupportedError` on `TargetPlatform.iOS`** — the
+   FlutterFire generator was run for android + web only. `main.dart:109` awaits
+   `Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)` inside a
+   `Future.wait` with nothing catching it, so the app dies before first frame, every launch,
+   until an iOS app exists in project `ldrc-120a2`.
+2. **The vendored `flutter_webrtc` fork is Android-only.** `dependency_overrides` points the
+   whole package at `third_party/flutter_webrtc`, whose pubspec declares `android` and
+   nothing else; upstream 1.6.0 declares six platforms. The fork has no `ios/`, `common/`,
+   `macos/`, `assets/` or package-level `third_party/`. Calling, voice and screen share are
+   therefore absent on iOS, and no error says so at build time.
+3. **Ten MethodChannels, all hosted in `MainActivity.kt`** (866 lines) plus 2,676 lines of
+   Kotlin beauty pipeline. 14 `MissingPluginException` handlers already exist and cover
+   beauty, PiP, secure-screen, disguise and share-intake — but `miles/export`, `miles/fsi`,
+   `miles/device_stats` and `miles/volume_keys` have no catch in the grep and are the four to
+   walk on a device.
+4. **The deployment-target floor is 15.5**, set by `google_mlkit_subject_segmentation` and
+   `google_mlkit_commons`. Read off the cached podspecs, not from memory; Mapbox wants 14.0,
+   WebRTC and camera_avfoundation 13.0, so ML Kit binds.
+
+Two things I nearly got wrong and checked instead, recorded so the next session does not
+re-derive them:
+
+- **Mapbox needs no `~/.netrc` secret token.** That requirement ended at plugin 2.4.0
+  ("Configuring Mapbox's secret token is no longer required when installing our SDKs",
+  CHANGELOG); this repo resolves 2.30.0. The `.netrc` block still in the plugin's
+  `DEVELOPING.md` is for plugin contributors. The runtime public token already comes from the
+  `map-token` edge function via `core/media/map_token.dart:36`, unchanged on iOS.
+- **`record` 7.1.1 has no podspec on this machine**, which looks like "no iOS support" and is
+  not. Its iOS implementation is the federated `record_darwin` package, which pub never
+  fetched here because Windows never resolved for iOS. Left explicitly unverified in the
+  guide rather than asserted either way.
+
+`found, not fixed` — `mobile/pubspec.yaml` describes the webrtc fork as "~20 lines in ONE
+file", `GetUserMediaImpl.java`. `diff -rq` against upstream says four modified files
+(`GetUserMediaImpl`, `MethodCallHandlerImpl`, `OrientationAwareScreenCapturer`,
+`video/LocalVideoTrack`) and two added (`MilesVideoProcessorHook`,
+`audio/PlaybackAudioMixer`). The comment is stale; nothing was edited to fix it, because the
+fork itself is untouched by this session. `lib/` is byte-identical to upstream, which is the
+fact that makes the §4a re-vendor safe.
+
+One thing that is an owner decision, not a port: **the disguise cannot be built on iOS as
+designed.** `disguise_service.dart` swaps `<activity-alias>` components to change launcher
+name *and* icon across nine covers. iOS has `setAlternateIconName` — a build-time fixed list,
+icon only, the app name cannot change, and an unsuppressable system alert fires on every
+switch. `CLAUDE.md` already records all nine aliases as `enabled="false"` on both flavors, so
+this may be moot in practice; it is in the guide so nobody writes iOS copy promising it.
+
+**Verified:** nothing was executed against a Mac — there is no Mac in this session. Every
+claim above comes from a file in this tree or a podspec in the local pub cache, and the guide
+says so in its own last section. **Still open:** the whole bring-up. **Next step:** on the
+MacBook, `docs/guides/IOS-BRINGUP.md` §1 (Apple Developer enrolment, which has queue time)
+in parallel with §2 (toolchain), then §4a and §4b before `flutter create`.
+
 ## §304 — 2026-09-08 — three field defects on build 80: one fixed, one instrumented, one waiting on a decision
 
 Reported by the owner against build 80: (1) long voice notes will not send, (2) voice-note
@@ -27819,3 +27887,776 @@ another session is still writing stayed unstaged, along with `docs/guides/IOS-BR
 225 infos, `flutter test` 1812 passed / 3 skipped / 0 failed. **Still no device pass** — the
 six steps in §305 are unchanged and still the only thing that can settle whether the wheel is
 actually gone. Nothing has been built or installed; the owner has not asked for an APK.
+
+## §306 — App info label under a cover: §286's ruling re-verified, and the one lever that is left (2026-09-08)
+
+Owner re-raised §286's exact report: cover set to Calculator, Settings › Apps › App
+info still says "Miles". §286 (2026-09-06) ruled it impossible and the picker copy
+already says so. Re-verified this session from primary sources, because a repeated
+complaint means the *outcome* was never delivered even if the ruling was right.
+
+**The ruling holds. Four independent legs, none of which §286 recorded in full:**
+
+1. **AOSP resolution order** — `PackageItemInfo.loadUnsafeLabel` (frameworks/base,
+   `core/java/android/content/pm/PackageItemInfo.java`, fetched this session):
+
+       if (nonLocalizedLabel != null) return nonLocalizedLabel;
+       if (labelRes != 0) { ... pm.getText(packageName, labelRes, ...) ... }
+       if (name != null) return name;
+       return packageName;
+
+   `nonLocalizedLabel` wins outright. No component or alias is ever consulted.
+2. **This app hits leg 1, not leg 2.** `android:label="Miles"` is a *literal* in both
+   flavour manifests — there is no `strings.xml` anywhere in `mobile/android`. So
+   `nonLocalizedLabel = "Miles"` and `labelRes = 0`. Confirmed on the shipped
+   artifact, build 80:
+
+       aapt2 dump badging Miles.apk
+       package: name='com.miles.miles' versionCode='80' versionName='0.1.0'
+       application-label:'Miles'
+       application: label='Miles' icon='res/kD.xml'
+
+   ...plus `application-label-<locale>:'Miles'` for every locale in the table.
+   **Consequence, and this is the part §286 never stated:** because the label carries
+   no resource id at all, *no* resource-overlay mechanism can reach it even in
+   principle. The overlay routes below are doubly dead, not just once.
+3. **Fabricated overlays (FRRO) are not available to normal apps.** `OverlayManager`
+   /`FabricatedOverlay`/`OverlayManagerTransaction` need elevated permissions — the
+   reference rootless-theming library (zacharee/FabricateOverlay) routes the whole
+   API through **Shizuku** for shell-level access, stating "the fabricated overlay
+   API needs elevated permissions, it can't be accessed by normal apps." A Play app
+   cannot commit one. §286 checked "the SDK 36 API index" but never named this route;
+   it is now closed by evidence rather than by absence.
+4. **Classic RROs need a second package.** source.android.com/docs/core/runtime/rros:
+   "An overlay can be enabled only by the package it targets or by a package with the
+   `android.permission.CHANGE_OVERLAY_PACKAGES` permission." Even the self-target path
+   needs a separately-installed overlay APK per cover name — not something Play
+   distribution can deliver.
+
+**So: App info can never track the cover.** The alias changes the launcher entry and
+alias-rooted recents; the application label changes nothing after install.
+
+**What was NOT settled, and is the owner's call — the only lever left.**
+§286 closed by saying "the §32/§34 ruling keeps Miles under its own name, so App info
+says Miles by design", treating the product ruling as fixed. That is the assumption
+the owner is now pushing on. App info shows exactly one string for the life of an
+install, and the app chooses which string that is:
+
+- keep `Miles` (status quo — App info identifies the app to anyone who looks), or
+- change `<application android:label>` to a neutral name that betrays nothing under
+  any cover (App info then never says "Miles" — for every user, cover or no cover).
+
+It cannot be per-cover and it cannot be per-user: one APK, one label, fixed at
+install. Both flavour manifests would change together, plus
+`disguise_manifest_test.dart:168` ("the application label is the app itself"), which
+pins the value to `kPlainProfile.label`.
+
+**Verified:** legs 1–4 above; build 80's badging. **Not verified:** nothing on a
+handset — `adb devices` was empty this session, so no App-info screenshot was taken.
+No device check is needed to settle the ruling (it is a source-level fact), but the
+label change, if made, must be seen on a phone before it is believed.
+
+**Changed:** nothing in code. This is a ruling, not a fix.
+
+**Next step:** owner picks keep-`Miles` or a neutral label. If neutral, the change is
+`src/play/AndroidManifest.xml` + `src/sideload/AndroidManifest.xml` `<application
+android:label>`, the picker copy that currently promises Settings says "Miles", and
+`disguise_manifest_test.dart:168`.
+
+### §306 addendum — owner ruled: keep "Miles" (2026-09-08)
+
+Asked in the same session, answered "Keep Miles". So the application label stays
+`Miles` on both channels and App info keeps naming the app under every cover. No
+code changed; §32/§34's honest-name ruling stands unmodified.
+
+The picker copy was re-read against this session's findings and is **already
+correct** — no edit needed. `disguise_picker_screen.dart` confirm dialog: "Android's
+Settings › Apps, permission pop-ups and the top line of any notification still say
+Miles — no app can change those." Footer: same, plus "That name is fixed when the app
+is installed and no app can change it afterwards." Both now backed by
+`loadUnsafeLabel` source rather than by an API-index absence.
+
+**This is the third time this report has been opened (§286, §306, this addendum).**
+Next session: it is closed by owner decision, not merely by impossibility. Do not
+re-research it. The only thing that would reopen it is the owner changing their mind
+about the application label, and that is a product decision, not a technical one.
+
+## §307 — Recordings played into a stream Android mutes, and Home read the wrong clock (2026-09-09)
+
+Two field reports against build 80: "on home page, last seen was wrong — it doesn't
+show partner's last online correctly", and "voice notes doesn't play sound, they need
+to save into vault, then user's can listen that vn in vault".
+
+### Home's last seen
+
+`home_screen.dart` was the ONLY surface in the app reading the raw `last_seen`
+column, and it printed it through `DateFormat('h:mm a')` — a bare clock time with no
+date. Two defects in one expression:
+
+* `last_seen` is not the activity clock. `presence_service.dart` writes it only on a
+  real online CLAIM, so it answers "when did they last come online", not "when were
+  they last here". `Presence` documents `app_last_active_at` as "the single source of
+  truth for online / last-seen / delivered", and `lastSeenText` derives from it.
+  `chat_screen.dart` and `partner_profile_screen.dart` both use `lastSeenText`; Home
+  did not, so the same partner had two different answers on two screens.
+* Time-of-day with no date. Live production rows at the time of writing: user
+  `6076edae` has `last_seen = 2026-09-02 07:01Z` — Home renders "Last seen 12:01 PM",
+  which reads as today when it is seven days ago.
+
+Measured on prod the same hour (`select ... from presence`): user `decd9b0f` had
+`last_seen 04:36:16Z` against `app_last_active_at 04:35:33Z` at `now() 04:59:01Z`.
+Home said "Last seen 09:36 AM"; chat said "23m ago". Fixed: Home now takes
+`presence?.lastSeenText ?? 'Offline'`, the same line as the other two surfaces.
+
+### Every recording in the app played on STREAM_SYSTEM
+
+Root cause: this app configures exactly ONE AudioSession, and `JustAudioEngine`
+`_ensureSession` sets it to `assistanceSonification` so a 200ms cue ducks the user's
+music instead of seizing focus. `main.dart:179` warms MilesSound at launch, so that
+session is configured before the first note can ever be tapped. just_audio then
+pushes THAT session's attributes onto every player it builds
+(`just_audio-0.10.6/lib/just_audio.dart:1683-1691` — on activation,
+`_androidAudioAttributes ??= audioSession.configuration?.androidAudioAttributes`),
+and `USAGE_ASSISTANCE_SONIFICATION` maps to `STREAM_SYSTEM` — muted outright in
+vibrate and silent, and never moved by the media rocker.
+
+The user's own sentence is the corroboration: the vault CAN be heard. The vault plays
+through `video_player`, and `video_player_android-2.12.2/.../VideoPlayer.java:99-101`
+sets its own `AudioAttributes` with `AUDIO_CONTENT_TYPE_MOVIE`, which media3 defaults
+to `USAGE_MEDIA` → STREAM_MUSIC. Two audio stacks, two streams, one audible.
+
+§304 (13ac932) fixed this for the chat bubble ONLY and said so in its own commit —
+"found, not fixed: the same audio defect sits on capsule_detail_screen.dart:52 and
+recorder_cover.dart:43". Those two were still on the silent stream. All three now go
+through one factory, `core/services/sound/content_player.dart` → `newContentPlayer()`:
+media attributes of our own plus `androidApplyAudioAttributes: false`, so the cue
+session cannot overwrite them the next time it is configured. Both halves are
+required; either alone lets the session win.
+
+The cue pool and the ambient bed are deliberately NOT converted — sonification is
+correct for them, and that is exactly why the session is configured that way.
+
+`content_player_test.dart` pins it: a recursive sweep of `lib/` fails on any bare
+`AudioPlayer(` outside the engine and the factory, plus a named check that all three
+surfaces still take the factory. The matcher is probed in the same run (fires on a
+construction, not on `AudioPlayer? _p` or `AudioPlayerPlatform`), and the gate was
+proved to RED by reverting `capsule_detail_screen.dart` to a bare player — it named
+that exact file and then went green again on restore.
+
+### Save-to-vault was never broken
+
+Checked before assuming: `personal_vault_items` holds a `saved_voice` row written
+2026-09-08 14:54Z, `mime_type audio/mp4`, 244541 bytes, `.m4a` path. `SaveMediaService
+.saveVoiceToVault` → `VaultRepository.saveMedia` works, the grid lists it
+(`_isMedia` = `type.startsWith('saved_')`), and the viewer routes `isAudio` to
+`_loadPlainPlayable`. No change made there.
+
+### What is verified, and what is not
+
+`flutter test`: 1816 passed, 3 skipped, 0 failed (1812 before, four new).
+`flutter analyze`: 0 errors, 0 warnings, 225 infos — the unchanged baseline, counted
+with `^ *(error|warning) (-|•) ` probed against synthetic right-aligned warning,
+error, and bullet-separator lines in the same run.
+
+**NOT verified on hardware, and this is the headline, not a footnote.** The handset
+answered `adb devices` once at the start of the session (`1896b4b3 device`,
+versionCode 80, installed 2026-09-07 21:08 — so it carries NEITHER 13ac932 NOR
+10de9fb) and was gone by the next command and every attempt after. Nothing here has
+been heard. The audio-stream claim is read out of just_audio, media3 and the AOSP
+mapping named in §304; whether a note is now audible on a phone in vibrate is a
+device fact and no gate can see it.
+
+### Exact next step
+
+Cable the OnePlus back, then, on a build carrying this tree:
+1. Put the phone in vibrate. Play a chat voice note. It must be audible and the media
+   rocker must move it. That single check is the whole fix.
+2. Same on a capsule with a voice recording, and on a clip in the recorder cover.
+3. Home card against the chat AppBar for the same partner — the two lines must agree.
+4. Open the `saved_voice` row already in the vault and confirm it plays.
+
+`found, not fixed`: the vault viewer renders an audio item as a square black
+`AspectRatio(1.0)` Chewie box — it plays, but nothing on screen says it is a voice
+note. Presentation only; proposed rather than built.
+
+### §307 addendum — build 81 cut, and one measurement that weakens §307's own hypothesis (2026-09-09)
+
+`bash tool/release.sh --bump` from `mobile/`, gates before the bump, 80 → 81, `build/`
+purged, full R8 rebuild (`assemblePlayRelease`, 861.0s).
+
+* `flutter test` 1816 passed, 3 skipped, 0 failed, zero `[E]` lines. The suite's own
+  `repo_hygiene_test.dart` re-asserts "the analyzer reports no errors and no warnings"
+  from inside it, so the analyzer gate is proven twice.
+* Snapshot: `checked 1 libapp.so, all stamped miles-build-81`. ABIs `['arm64-v8a']`.
+* Certificate `a37c59a5…`, `CN=Miles, O=R&D Dev, C=PK` — matches the installed base,
+  so it updates build 80 in place with no uninstall and no seed loss.
+* `Miles.apk` at the repo root: 2026-09-09 10:43, 90315972 bytes,
+  sha256 `80a284107800ecbb1352a42e6e99d5899e4c5e2c39ecdac2931c4c46ae4c68a3`.
+  The build-80 file it replaced was sha256 `6769b8d4…`, 2026-09-07 21:02 — different
+  file, so nothing was reused.
+* Read back out of the artifact rather than trusted from the script's echo:
+  `aapt dump badging Miles.apk` → `versionCode='81' versionName='0.1.0'`,
+  `package name='com.miles.miles'`.
+
+**The handset does not currently support §307's silence hypothesis.** The OnePlus came
+back on the cable after the build (`1896b4b3 device`) and was measured read-only, no
+install:
+
+```
+settings get global mode_ringer → 2   (normal, not vibrate)
+- STREAM_SYSTEM:  Muted: false   speaker: 16
+- STREAM_MUSIC:   Muted: false   speaker: 30
+zen mode: ZEN_MODE_OFF
+```
+
+So on this phone as it sits, STREAM_SYSTEM is unmuted at 16 and a build-80 voice note
+would have been audible on it. §307's mechanism — content on STREAM_SYSTEM, which
+vibrate mutes and the media rocker cannot move — is still a real defect and the fix
+stands, but it is NOT proven to be the cause of the reported silence, and this
+addendum says so before the build is tested rather than after. `dumpsys audio`
+reports the phone NOW, not at the time of the report; the ringer may have been down
+then.
+
+Earpiece routing was ruled out in the same pass: nothing under `features/chat` or
+`services/sound` mentions proximity, earpiece or speakerphone, so a note has never
+been routed away from the speaker.
+
+### If build 81 still plays voice notes silently
+
+The stream was the wrong answer and the next hypothesis has to come from the device,
+not from source. In that order, and one at a time:
+
+1. `adb logcat -s flutter:* AudioTrack:* ExoPlayerImpl:*` while tapping a note — does
+   `_load` even reach `setFilePath`/`setUrl`, and does ExoPlayer report a track?
+2. `dumpsys audio | grep com.miles` immediately after a tap — did the app request
+   focus at all, and with which attributes?
+3. If focus is requested and a track exists but nothing is heard, suspect the note
+   itself: `messages` currently holds ZERO rows of `kind='voice'` (chat was cleared),
+   so send a fresh one and read back `voice_duration_ms` and `voice_peaks` — an
+   all-zero envelope means the RECORDER captured silence and no playback fix can help.
+
+Not done, deliberately: nothing was installed. The owner asked for an artifact to test
+themselves, and this repo's rule is that installs are never unprompted.
+
+### §307 addendum 2 — build 81 installed on the handset (2026-09-09)
+
+Owner asked for the install, so the standing "never install unprompted" rule was
+lifted for this action only. `adb install -r Miles.apk`, 13.9s, no uninstall.
+
+Postcondition read back off the device rather than trusting `Success`:
+
+```
+versionCode=81 minSdk=24 targetSdk=36
+versionName=0.1.0
+lastUpdateTime=2026-09-09 10:47:37
+  firstInstallTime=2026-09-03 02:58:37
+```
+
+**firstInstallTime is UNCHANGED** at 2026-09-03 02:58:37 while lastUpdateTime moved —
+that is the proof this was an in-place update and not an uninstall/reinstall, so the
+app data and the X25519 seed survived (the failure §262 addendum 2 exists for). The
+upload-key certificate did what it was supposed to do.
+
+Launched once and checked, because R8 stripping a reflection or JNI entry point is
+the specific risk of the play channel and it only shows on a device:
+
+* `pidof com.miles.miles` → alive after 6s.
+* `logcat -b crash` → empty. No `FATAL EXCEPTION`, `UnsatisfiedLinkError`,
+  `ClassNotFoundException` or `NoSuchMethodError` anywhere in the buffer.
+* Flutter engine started, geolocator bound, FCM background service started.
+* No `[sound] session config failed` line — `JustAudioEngine._ensureSession` did not
+  report a failure.
+
+Two incidental observations, neither mine and neither a defect:
+
+* The launcher fired `com.miles.miles.AliasCalculator`, so the **Calculator cover is
+  the one selected on this handset**. `CLAUDE.md` still says `.AliasMiles` is the only
+  alias shipping `enabled="true"`, which is true of the MANIFEST; the live alias is
+  whatever Settings last flipped via PackageManager. The doc is describing the shipped
+  default, not the device state — worth knowing before anyone reads that line as a
+  contradiction again.
+* `flutter: [Action Required]: Impeller opt-out deprecated.` The app opts out of
+  Impeller and Flutter is removing that option. Pre-existing, unrelated to this
+  session, and it will break on a future Flutter bump rather than today.
+
+### Still open — nothing about the two fixes has been observed
+
+The install is proven; the FIXES are not. Nothing was tapped, nothing was heard, no
+screen was read. Driving the app past the cover needs the owner's gesture and the
+vault PIN, which is theirs and not this session's to have.
+
+Exact next step, owner-side, on the phone now carrying 81:
+
+1. Play a chat voice note. Audible? Does the volume rocker move it while it plays?
+2. Put the phone in **vibrate** and play another. §307's mechanism predicts build 80
+   was silent here and 81 is not.
+3. Home card vs the chat AppBar for the same partner — the two lines must now agree.
+4. Open the `saved_voice` row already in the vault and confirm it plays.
+
+If (1) is still silent, §307 addendum's three logcat checks are the next move, and the
+stream was the wrong answer — the handset was measured in NORMAL ringer mode with
+STREAM_SYSTEM unmuted at 16 before the install, which does not support the hypothesis.
+
+### §307 addendum 3 — I fixed Home in the wrong direction; corrected (2026-09-09)
+
+Owner, on build 81: "last online 37 m ago already show in chat, but on home page it
+should show the last online time … like the previous one, last online : 10:12 AM".
+
+**§307 misread the report.** "Last seen was wrong" was about the MOMENT, not the
+format. The clock time was the right shape all along; the column feeding it was the
+defect. §307 kept the right source and threw away the right shape — it pointed Home at
+`lastSeenText`, so Home started saying "23m ago" and lost the hour. Chat's relative
+line was never in question and was never touched.
+
+Corrected: `Presence.lastSeenClock({DateTime? now})`, a sibling of `lastSeenText` on
+the same source of truth, returning the whole line.
+
+* app_last_active_at, never `last_seen` — that is the original defect and it stands.
+* Clock time, because that is what Home asks for.
+* The DAY rides along when it is not today: `Last seen 10:12 AM` →
+  `Last seen yesterday 10:12 AM` → `Last seen Sun 10:05 PM` → `Last seen 23 Aug 7:41 AM`.
+  A bare hour on a week-old stamp reads as this morning, which is the same lie in a
+  friendlier format and was the other half of the original complaint.
+* Day boundaries are CALENDAR days in LOCAL time. 23:50 → 00:10 is yesterday even
+  though twenty minutes passed, and comparing a local stamp against a UTC today moves
+  the boundary by the zone offset — five hours, here.
+* `now` is injectable, the way `partnerSentence` already does it, so the boundaries
+  are testable without waiting for one.
+
+`last_seen_clock_test.dart`, 10 tests, including one named THE DEFECT that pins the
+hour to app_last_active_at while `last_seen` holds a different time — the exact
+production shape (came online 09:00, still there 13:45; Home printed 9:00 AM).
+
+**Trap for whoever writes the next test here:** the fixtures are pinned to a
+Wednesday in the PAST and that is load-bearing. `now` is injectable but
+`isTrulyOnline` is not — it reads ServerClock — so a fixture stamped later *today*
+tests as live and `lastSeenClock` returns null. Two tests failed exactly that way
+before the dates were moved back.
+
+`found, not fixed`: `Presence.isTrulyOnline` treats a stamp AHEAD of ServerClock as
+live. `ServerClock.now().difference(ts).inSeconds <= 45` is true for any negative
+difference, so a partner whose device or server clock runs fast reads as permanently
+Online, and no freshness decay can ever clear it. That is how the two fixtures above
+failed, which is the only reason it was noticed.
+
+Verified: `flutter test` 1826 passed, 3 skipped, 0 failed. `flutter analyze` 0 errors,
+0 warnings, 225 infos — baseline, matcher probed against synthetic right-aligned
+warning/error/bullet lines in the same run.
+
+**The handset is still on build 81, which has the WRONG Home line.** Nothing was
+rebuilt or reinstalled — the owner asks for builds. `bash tool/release.sh --bump`
+from `mobile/` cuts 82 when they do.
+
+Still open, unchanged from §307: not one of the voice-note fixes has been heard.
+
+### §307 addendum 4 — build 82 cut; the install did NOT happen (2026-09-09)
+
+`bash tool/release.sh --bump` from `mobile/`. Carries the §307 audio fix on all three
+content players and the §307-addendum-3 `lastSeenClock` correction.
+
+* `flutter test` 1826 passed, 3 skipped, 0 failed, zero `[E]` lines.
+* `bumped 81 -> 82`, `build/ is gone — every Gradle output below is recomputed`.
+* `checked 1 libapp.so, all stamped miles-build-82`. `ABIs in the APK: ['arm64-v8a']`.
+* Certificate `a37c59a5…`, `CN=Miles, O=R&D Dev, C=PK` — updates the installed base.
+* `Miles.apk`: 2026-09-09 11:25, 90315974 bytes,
+  sha256 `b449fd32323e10b8eb426f19eab2efe53d9046c285ee14d172a9b1bfaa13e4ce`.
+  Build 81's file was `80a284107800…` — different artifact, nothing reused.
+* Read back out of the file, not trusted from the script:
+  `aapt dump badging Miles.apk` → `versionCode='82' versionName='0.1.0'`.
+
+**NOT INSTALLED.** The owner asked for the install and it did not happen: the OnePlus
+was already off the cable when the build started and never came back.
+`adb kill-server` + `start-server` brought up a clean daemon that lists nothing, and a
+bounded watcher polled `adb devices` every 5s for 300s and gave up — `NOT CONNECTED:
+waited 300s, no handset appeared. Nothing installed.`
+
+**The handset is still on build 82's predecessor, 81**, which has the WRONG Home line
+(relative "23m ago" instead of the clock time) and the audio fix. Anything the owner
+tests before reconnecting is testing 81.
+
+This is the third disconnect this session (§307 measured it at 04:59 and lost it by
+05:01; it returned for the 81 install at 10:47; gone again by 11:10). Whatever is
+wrong with that cable or that USB port is now costing a device pass per turn — worth
+naming as its own problem rather than absorbing it each time.
+
+### Exact next step
+
+1. Reconnect the handset, confirm `adb devices` names `1896b4b3`.
+2. `adb install -r D:/Miles/Miles.apk` — `-r`, never an uninstall, which takes the
+   X25519 seed (§262 addendum 2).
+3. Assert the postcondition rather than reading `Success`: `versionCode=82` and
+   `firstInstallTime` STILL `2026-09-03 02:58:37`. A moved firstInstallTime means the
+   install replaced rather than updated, and the seed is gone.
+4. Then the four checks §307 addendum 2 lists — the voice note in vibrate is the one
+   that matters, and none of them has ever been run.
+
+### §307 addendum 5 — build 82 installed (2026-09-09)
+
+Handset came back (`1896b4b3 device product:OnePlus8 model:IN2015`). Owner asked for
+the install, so `adb install -r /d/Miles/Miles.apk`, 15.0s, no uninstall.
+
+Postcondition read off the device rather than trusting `Success`:
+
+```
+versionCode=82 minSdk=24 targetSdk=36
+versionName=0.1.0
+lastUpdateTime=2026-09-09 12:05:50
+  firstInstallTime=2026-09-03 02:58:37
+```
+
+`firstInstallTime` UNCHANGED while `lastUpdateTime` moved — in-place update, the
+X25519 seed survived. Launched once: pids alive after 6s, `logcat -b crash` empty,
+zero `FATAL EXCEPTION` / `UnsatisfiedLinkError` / `ClassNotFoundException` /
+`NoSuchMethodError` in the buffer, so R8 stripped nothing fatal on this build either.
+
+**The phone is in NORMAL ringer mode and both streams are unmuted** (measured after
+the install: `mode_ringer 2`, STREAM_SYSTEM and STREAM_MUSIC `Muted: false`). This
+matters for how the voice-note fix is tested, and getting it wrong would produce a
+false pass:
+
+* In normal mode, a build-81 note was ALREADY audible on this phone — STREAM_SYSTEM
+  was at 16. So "I played a note on 82 and heard it" proves nothing.
+* The discriminating check is **the volume rocker**. On 81 a note played on
+  STREAM_SYSTEM and the media rocker could not move it. On 82 it plays on
+  STREAM_MUSIC and the rocker must change it while the note is playing.
+* The second discriminating check is **vibrate**: put the phone in vibrate and play a
+  note. 81 predicts silence, 82 predicts audible.
+
+Anything else is not evidence about this fix.
+
+### Still open
+
+Not one of the fixes has been observed. Driving past the disguise cover needs the
+owner's gesture and the vault PIN, which this session does not have and should not.
+
+1. Play a voice note and **press volume-down while it plays** — does the level change?
+2. Phone in vibrate, play another — audible?
+3. Home card vs the chat AppBar for the same partner: Home must now read
+   `Last seen 10:12 AM` (clock, with a day word if it is not today), chat must still
+   read `37m ago`.
+4. Open the `saved_voice` row already in the vault and confirm it plays.
+
+The USB disconnects (four this session) remain the process risk — every device pass so
+far has been lost to them. `adb tcpip 5555` once while cabled, then
+`adb connect <phone-ip>:5555`, would survive the cable; proposed, not done, because it
+changes how adbd runs on the owner's phone.
+
+## §308 — an edit wrote to the server and no screen ever heard (2026-09-09)
+
+Owner: "in chat room, sent messages are not editing within a set time frame — there is an
+option of edit but after editing clicking send, that's not edited, again same message."
+
+### Root cause, one sentence
+
+`ChatRepository.subscribe` registered `PostgresChangeEvent.insert` and `.delete` and
+**nothing for `.update`**, so `edit_message` re-sealed the text, wrote `body_cipher` /
+`body_nonce`, answered `ok`, and neither handset was ever told — the bubble kept its
+original plaintext until something else forced a full refetch.
+
+### The server was never the problem — prod says so
+
+```
+select count(*) total, count(*) filter (where edited_at is not null) edited,
+       max(edited_at) last_edit from public.messages;
+-> total 21, edited 2, last_edit 2026-09-09 07:49:04.822873+00
+
+select id, created_at, edited_at, body is null, body_cipher is not null,
+       octet_length(body_cipher), octet_length(body_nonce)
+  from public.messages where edited_at is not null;
+-> ba944016… created 07:44:39 edited 07:49:04  body NULL  cipher 42B  nonce 24B
+-> 3bbbaf33… created 07:48:14 edited 07:48:21  body NULL  cipher 26B  nonce 24B
+```
+
+Two edits landed TODAY, minutes before the report. `edit_message` only stamps `edited_at`
+on the successful UPDATE, so both returned `ok`. prosrc md5 `dd30d2638df97ffc465eac6ce3407250`,
+signature `(uuid, text, bytea, bytea)` — matches
+`20260819140000_edit_message_says_which_rule_refused_it.sql`. `messages` is `replica
+identity full` and in `supabase_realtime` (`20260601000200_messages.sql`), so the UPDATE
+was on the wire the whole time with nobody subscribed to it.
+
+`_saveEdit`'s comment claimed "the row is refreshed by the same realtime path a send
+uses". That path was INSERT-only. The comment was the bug's alibi.
+
+### Four defects, one chain
+
+1. **No UPDATE subscription** (the cause). Added, with `onUpdate`, filtered on `couple_id`
+   like the other two.
+2. **`reconcileWith` dropped `editedAt`** — the named argument was simply absent, so the
+   constructor default (null) won and the authoritative row would have RETIRED the very
+   "edited" label it arrived to set. Identical failure class to the `seq` drop that
+   `message_seq_test.dart` exists to catch; the source-text tests in
+   `message_edit_test.dart` all passed over it.
+3. **The editing device waited on the wire.** `_saveEdit` patched nothing locally, so the
+   phone that typed the text sat on the old text for a round trip — and for ever whenever
+   the channel had not joined. Now patched on `ok` and overwritten by the server's row
+   moments later.
+4. **`_sendText` destroyed the typed text before the verdict.** The screen carefully keeps
+   the composer open on a refusal "holding the typed text" — and the input bar had already
+   called `_text.clear()` before awaiting, so every `too_late` / `too_soon` ate the
+   sentence it was asking the user to look at again. The existing test
+   ("a refused edit keeps the composer open") checked only the screen half and passed for
+   the life of the feature.
+
+The UPDATE subscription also makes the partner's **delete-for-everyone** propagate live
+for the first time — it is an UPDATE, not a DELETE, and only the deleting device called
+`_reload()`. Same mechanism, not a second feature.
+
+An update REFETCHES by id and, unlike the insert branch, delivers **nothing** when the
+refetch fails: an insert's fallback is justified because the alternative is losing the
+message, but an update already has a good row on screen and an unhydrated one would stamp
+"edited" on unchanged text. `_onRemoteUpdate` patches in place and never inserts — UPDATEs
+arrive for rows outside the loaded page and for rows cleared-for-me, and `_onIncoming`
+would seat an unknown id as a new arrival.
+
+### Verified
+
+- `flutter test test/unit/chat/message_edit_test.dart` — **17 passed** (8 pre-existing, 9 new).
+- `flutter test test/unit/chat/` — **370 passed**.
+- `flutter test` — **1835 passed, 3 skipped, 0 failed**.
+- **Both kinds of new test were proven to flip**, which is the only reason they are
+  evidence:
+  - the 5 source-text tests run against `git show HEAD:` copies of the three files:
+    5 failed ("the clear must be conditional on NOT editing", "the ok branch leaves the
+    list showing the old text", …), 12 passed. Probe file deleted.
+  - the behavioural ones run against compiled code, so the text swap could not reach
+    them: `editedAt: server.editedAt ?? editedAt` was deleted from the working file under
+    an md5 guard and `reconciling adopts the server edited_at` failed with
+    `Expected: DateTime:<2026-02-01…> Actual: <null>`. Line restored, `md5sum -c` OK
+    (`7342114a17102524d4ddc25ef1e0bf1e`).
+- Analyzer, CI's own matcher `^ *(error|warning) (-|•) `, probed in the same run against a
+  synthetic flush-left `warning - ` line (matched), an indented `  error - ` (matched) and
+  an `   info - ` (not matched): **2 errors, both in
+  `lib/core/media/encrypted_media_cache.dart`, neither mine.** Zero on the four files in
+  this diff. `230 issues found.` — infos only, as the gate expects.
+
+### Open
+
+- **`mobile/lib/core/media/encrypted_media_cache.dart` does not compile in the working
+  tree** — `undefined_getter: cacheKeys` on `_Plain` at :254 and :348. It is ` M`
+  (uncommitted) and belongs to the media-cache session, so it is left alone. Note that
+  **no test imports it**, which is why `flutter test` is green with a compile error in the
+  tree: the test gate cannot see this file at all.
+- **Not exercised on a device.** The riskiest link is the one only hardware proves: that
+  the UPDATE actually arrives over the private channel with RLS applied to the subscriber
+  while `edit_message` writes as `security definer`. Everything else is unit-proven.
+  Exact check: two handsets in the same chat, edit a message on one, confirm the text
+  changes on BOTH within a second and shows "edited"; then kill the network on the sender
+  and confirm the edit still shows instantly on the sender's own bubble (defect 3).
+- The disguise-cover rebuild repaints from `ChatRepository._pageCache`, which is only ever
+  written by `fetch` — so a covered/uncovered cycle briefly repaints the pre-edit text
+  before the fetch lands. Pre-existing and true of live inserts too; not touched.
+
+
+## §309 — 2026-09-09 — media: the second look is instant, ranges select by dragging, and a save reads the disk
+
+Owner's report, in substance: media that is already downloaded still shows a loading
+wheel and re-renders on every open; blank frames while swiping; quality looks lost;
+multi-select is tap-by-tap everywhere; saving an already-loaded gallery item into the
+vault is slow.
+
+A 12-agent audit (6 investigators, 6 adversarial verifiers, 0 errors) ran over the five
+chains. It confirmed the causes below and **corrected two of this session's own edits** —
+both corrections are applied.
+
+### Root causes, one line each
+
+1. **The cover raise wiped the GLOBAL decode cache.** `EncryptedMediaCache.clear()` ended
+   with `imageCache..clear()..clearLiveImages()`. The cover rises on any focus loss — a
+   glance at the notification shade — so several times an hour every decoded frame in the
+   process was destroyed, including chat and gallery pictures that are not encrypted and
+   sit in plaintext on disk regardless. Re-decoding all of it on the way back in IS the
+   wheel the owner is describing.
+2. **`imageCache.evict(provider)` never matched a `ResizeImage`.** Its cache key is a
+   private `ResizeImageKey`; only `MemoryImage` is its own key. So the targeted eviction
+   in `clear()`/`_evict` silently did nothing for every bounded decode, and the global
+   wipe in (1) was the only thing really clearing them. **Removing (1) without fixing
+   this would have leaked decrypted pixels** — caught by the adversarial pass, not by me.
+3. **`_admit` overwrote without evicting**, so `_l2Bytes` only ever grew and a replaced
+   entry's frames were orphaned; and the old job's `whenComplete` deleted a newer job's
+   `_inFlight` entry.
+4. **`MediaUrls.cached` returned null for the last hour of a 24h token.** It was answering
+   "does this need renewing?" when every caller was asking "does this still work?" — so
+   for an hour a day every synchronous warm path in the app missed and fell back to a
+   signing round trip with a placeholder on screen.
+5. **`NetImage`'s placeholder is an opaque `MilesColors.surface2` block with a 150ms
+   fade**, hard-coded. In the gallery pager the full-resolution layer sits directly over
+   the thumbnail, so arriving on a page painted a maroon rectangle over a perfectly good
+   photograph and then cross-faded out of it. That block is the "blank screen while
+   swiping".
+6. **The gallery pager read its URLs synchronously in `build` with no fallback.** Outside
+   the grid's warm window `fullUrl` was null and nothing ever re-signed, so the page kept
+   the soft 400px thumbnail — or black — permanently, with no error and no retry.
+7. **The gallery pager had no zoom-upgrade layer**, so pinching to 5x magnified a
+   viewport-width bitmap: the picture got softer the harder you looked at it.
+8. **The vault pager had no `allowImplicitScrolling`** (cache extent 0, so no neighbour
+   page is ever built) **and no warm at all**. Every swipe in the vault was a cold open.
+9. **The chat pager's `_warm()` dropped calls**: `if (_warming) return` with nothing
+   rescheduling, so the last swipe of every burst — the page the user actually stops on —
+   was the one page with cold neighbours.
+10. **`_PhotoPage`'s `_resolving` arm was a bare full-bleed spinner**, painted over a
+    thumbnail whose bytes were already on the phone.
+11. **`_VideoPage`'s `active: i == index && _settled`** unmounted the running player on
+    the first scroll update >2% of a page — touching a playing video killed the decoder.
+    It also painted no poster, on a comment that stopped being true when the thumbnail
+    pipeline landed.
+12. **`SaveMediaService._save` did an unconditional `http.get`** and never consulted any
+    cache, re-downloading the exact bytes the pager had just written to disk under
+    `PlainMediaCache.keyFor(bucket, path)` — verified byte-identical key on both sides.
+13. **No range selection existed anywhere.** Every surface toggled exactly one id per
+    gesture; `onLongPress` was supplied with no `onLongPressMoveUpdate` in both grids.
+
+### What changed
+
+- `core/media/encrypted_media_cache.dart` — `clear()` is targeted, not global; eviction
+  goes by the ImageCache KEY (`_Plain.cacheKeys`, resolved at build time) rather than by
+  the provider; `_admit` evicts what it replaces; a generation fence stops an in-flight
+  decrypt repopulating L2 after a cover raise, with `_orphanKeys` catching the frames
+  that fence leaves untracked; `whenComplete` only removes its own job.
+- `core/data/media_urls.dart` — `cached()` returns a still-usable URL and renews in the
+  background (deduped); `sign()`/`warm()` use a new strict `_fresh()`.
+- `core/widgets/net_image.dart` — optional `placeholder` and `fadeIn`; defaults unchanged.
+- `features/gallery/gallery_viewer.dart` — per-page sign/retry/re-sign; neighbour warm
+  (files ±3, decode ±1 at the shared width) with a re-run flag; unbounded zoom layer at
+  `kZoomUpgradeScale`; transparent placeholders and zero fades on every stacked layer;
+  the video poster now signs instead of reading the map and giving up.
+- `features/vault/vault_viewer.dart` — `allowImplicitScrolling: true` plus a neighbour
+  warm for plaintext rows.
+- `features/chat/widgets/media_viewer.dart` — `_warmAgain` re-run; the resolving arm
+  paints the thumbnail; `_VideoPage` takes `current`/`settled` and keeps a started player
+  mounted through a drag, and paints its poster.
+- `core/services/save_media_service.dart` — reads `PlainMediaCache` first, keyed exactly
+  as the writer wrote it, with the network still the fallback and a miss silent; mime
+  taken from the cached file's own extension.
+- `core/widgets/drag_select.dart` (**new**) — press-and-slide range selection. One
+  `LongPressGestureRecognizer` at the top of the scrollable, cells tagged by index with
+  `MetaData` and resolved by hit test (not by grid arithmetic, so a sectioned vault and a
+  header-bearing gallery both work), edge auto-scroll, ranges re-derived from a snapshot
+  rather than toggled per cell crossed.
+- Wired into `gallery_screen.dart`, `vault_screen.dart` and `chat_screen.dart`. Tile-level
+  `onLongPress` removed in both grids and nulled in `SelectableMessage` while selecting —
+  a per-cell recognizer wins the arena against the parent, so leaving it live means the
+  drag can never start. Chat's `DragSelect` is `enabled: _selecting` so the reaction bar
+  keeps the long press outside a selection. `ChatSelection.replaceWith` added.
+- Gallery also prunes ids that leave the grid (they were being sent to the delete RPC).
+
+### Verified
+
+- `flutter analyze lib test` → **222 issues, 0 errors, 0 warnings**. The count comes from
+  `grep -cE '^ *(error|warning) - '`, probed in the same run against a synthetic
+  error+warning+info fixture (matched 2; the info control matched 1). The `^\s+` form
+  used first matched only 1 of 2 — the analyzer right-aligns severity to width 7, so
+  `warning` has ZERO leading spaces. Same trap as §286.
+- `flutter test` → **All tests passed, 1845 tests** (1835 before; the new file is
+  `test/widget/drag_select_test.dart`: anchor, span, reverse-span,
+  plain-drag-still-scrolls, and disabled).
+- `CachedNetworkImageProvider.==` confirmed as `(cacheKey ?? url)` in the pinned
+  cached_network_image-3.4.1 (`cached_network_image_provider.dart:176-184`), and
+  `memCacheWidth` confirmed to reach `ResizeImage.resizeIfNeeded` via octo_image-2.1.0 —
+  so a warm decode really is the same ImageCache entry the page later paints, and a
+  rotated token does not cost the decode.
+
+### Still open
+
+- **NOT verified on a device.** Every claim above is analyzer, suite and source-level.
+  The riskiest paths are exactly the ones only a handset shows: whether the drag-select
+  recognizer beats the scrollable under a real thumb, and whether the cover-raise change
+  actually removes the wheel in the field. Next session: install, then gallery → drag
+  over 20 tiles → back → re-open; vault swipe; chat video touch-while-playing.
+- Chat's drag-select selects whole ROWS; an album is one row, so individual photos inside
+  an album still are not separately selectable.
+- `found, not fixed` — chat bubbles upscale the 400px tile into a 220dp slot
+  (`thumbnails.dart:27`); raising it only helps NEW uploads and needs a re-derive pass,
+  so it is a separate change.
+- `found, not fixed` — vault's batch sign is `unawaited`, so tiles still pay a per-tile
+  round trip on first paint (`vault_screen.dart:70-75`).
+- `found, not fixed` — memory-thread covers have no synchronous warm path
+  (`memory_threads_screen.dart:1202-1205`).
+- `found, not fixed` — a failed batch sign leaves the gallery grid grey with no retry
+  (`media_urls.dart:78-82` swallows).
+- `found, not fixed` — multi-item vault save has no progress indication
+  (`gallery_screen.dart` `_saveSelected`).
+
+## §310 — the edit had one more way to come back (2026-09-09)
+
+Follow-on to §308, same session, owner said "fix everything".
+
+### The analyzer errors were never mine and are now gone
+
+§308 reported 2 `undefined_getter: cacheKeys` errors in
+`lib/core/media/encrypted_media_cache.dart`. Re-run at the top of this section:
+**0 errors, 0 warnings, 227 issues found** — the media-cache session finished its edit
+(`cacheKeys` is now declared at `_Plain`, :475) while §308 was being written. Nothing was
+done to that file by this session; the fix was theirs. The lesson is the one §308 already
+paid for once: **a gate result is only about the moment it ran.** Re-run before quoting.
+
+The matcher was probed in the same run each time, because a zero from an unprobed grep is
+not evidence: a synthetic flush-left `warning - ` and an indented `  error - ` both match,
+`   info - ` does not, and the `•` form Linux CI prints counts the same 2.
+
+### The last way an edit could "not take"
+
+`ChatRepository._pageCache` was written by `fetch()` and by nothing else. A live edit
+landed in the screen's `_messages` and nowhere else — and the disguise cover replaces the
+whole router subtree on every background, so the repaint seeded `_messages` from the STALE
+cached page and the pre-edit text came back until `_loadNewest()` returned. The edit had
+worked. The app showed the old message again anyway, which is the owner's sentence
+verbatim.
+
+Added `ChatRepository.patchCachedPage(coupleId, m)` and called it from both places a
+message changes locally: `_onRemoteUpdate` and `_saveEdit`'s ok branch. It replaces a
+message the cached page already holds and **adds nothing** — the cache is the page `fetch`
+returned, not a second message store, and growing it here would let it drift into a
+half-page nothing re-derives.
+
+Live INSERTs still do not update the cache. Left alone deliberately: a missing message
+reappears when the fetch lands, while stale text is actively WRONG. Recorded here rather
+than fixed, so the next session decides it on purpose.
+
+Reply previews needed nothing — `_byId(m.replyToId)` resolves out of `_messages`, so a
+quoted bubble re-renders from the patched row for free. Checked, not assumed.
+
+### Committed around a live session, not over it
+
+`chat_screen.dart` carried a SECOND session's uncommitted work at commit time — a
+drag-select feature (`_paintedRows`, `_dragAnchor`/`_dragExtend`/`_applyDragSpan`, a
+`DragSelect`/`DragSelectItem` wrapper around the list, plus its import). Staging the file
+would have committed a stranger's half-built feature.
+
+So the file was staged **by hunk**: `git diff` for it, the four hunks that are mine kept,
+theirs dropped, `git apply --cached`. `docs/guides/BRAIN.md` was checked the same way and
+`.claude/CLAUDE.md` is this session's alone. Nothing was staged with `-A`, and the exact
+staged diff is pasted in the session report.
+
+**The consequence, stated rather than buried: the gates ran on a tree that ALSO held the
+drag-select work, so `flutter test` (1845 passed, 3 skipped) and `flutter analyze`
+(0/0) are evidence about that tree, not byte-for-byte about the commit.** The commit is
+HEAD + my four hunks, and their work is purely additive, so nothing in the commit depends
+on it — but that is reasoning, not a run, and it is why the next session should treat a
+CI green on this commit as the first real confirmation.
+
+### Verified
+
+- `flutter analyze --no-pub` → `0 errors/warnings, 227 issues found`, matcher probed in
+  the same run (2 synthetic matches, info not matched, `•` form also 2).
+- `flutter test` → **1845 passed, 3 skipped, 0 failed**.
+- `flutter test test/unit/chat/message_edit_test.dart` → **20 passed** (8 pre-existing, 12 new).
+- All 7 source-text tests re-probed against `git show HEAD:` copies of the three files:
+  all 7 fail there, 13 pass. A test that cannot fail is not a gate.
+- One of the new tests was itself wrong first: the window for `_onRemoteUpdate` was a flat
+  1200 characters and reached past the method into the definition of `_patchCache`, so it
+  would have passed on the call never being made. Both windows now close at the method's
+  own 2-space `}`.
+
+### Open — unchanged from §308, and it is still the headline
+
+**No two-handset run.** Nothing here proves an UPDATE reaches a subscriber over the
+private channel with RLS applied to the subscriber while `edit_message` writes as
+`security definer`. INSERTs already flow under the same SELECT policy, which is why it is
+expected to hold — expected, not observed. No APK was built: the owner's standing rule is
+that builds happen only when asked, and "fix everything" is not that ask.
+
+Exact check, when a build is authorised: edit a message on one handset; the text must
+change on BOTH within a second and show "edited". Then background and re-open the app
+behind the cover and confirm the NEW text repaints (that is the §309 cache path). Then
+drop the sender's network and confirm the edit still shows instantly on its own bubble.
+

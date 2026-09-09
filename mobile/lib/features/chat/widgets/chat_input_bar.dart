@@ -367,12 +367,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Future<void> _sendText() async {
     final t = _text.text.trim();
     if (t.isEmpty || _sending) return;
-    _text.clear();
-    // The draft dies with the send, and it dies BEFORE the await: this State is
-    // disposed the moment the user leaves, and a draft still holding a body
-    // that already went is one that comes back and gets sent a second time.
-    _draftTimer?.cancel();
-    unawaited(ChatDraftStore.clear(widget.coupleId));
+    // An edit is not a send, and clearing here undid the one promise the edit
+    // path makes: `_saveEdit` keeps the composer open on a refusal so the typed
+    // text survives it — but the text was already gone by the time the verdict
+    // arrived, so every `too_late` or `too_soon` ate the sentence it was asking
+    // the user to look at again. A finished edit is cleared by didUpdateWidget
+    // instead, which also puts back the draft the edit interrupted; and the
+    // couple's saved draft is not the edit's to delete.
+    if (widget.editingMessage == null) {
+      _text.clear();
+      // The draft dies with the send, and it dies BEFORE the await: this State
+      // is disposed the moment the user leaves, and a draft still holding a
+      // body that already went is one that comes back and gets sent a second
+      // time.
+      _draftTimer?.cancel();
+      unawaited(ChatDraftStore.clear(widget.coupleId));
+    }
     setState(() => _sending = true);
     try {
       await widget.onSendText(t);

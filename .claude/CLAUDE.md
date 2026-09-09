@@ -180,3 +180,46 @@ install to a device unprompted.
   **web** key (`firebase_options.dart:53`), tree-shaken out and not in the APK. Neither
   is protected by Firebase Security Rules; this app runs no Firestore, RTDB, Firebase
   Storage or Firebase Auth — only `firebase_core` + `firebase_messaging`.
+
+## Product (Working rule 1.2 depends on this)
+
+- What it is: a private long-distance couples app for one couple — see "What it is" above,
+  which this block does not repeat.
+- Who uses it: two people, one couple, two Android handsets. Both are **pinned clients**:
+  sideloaded, no update channel, and an uninstall takes the X25519 seed with it.
+- Core flow, in steps: sign in → pair → the couple's shared surfaces (chat, capsules,
+  closer, reach) over one `couple_id`, everything E2EE with plaintext never at rest.
+- What "working" means for a feature here: it works on BOTH handsets, from a cold start,
+  through the real path — not just in the gates. A write that the other phone never hears
+  about is not working, however green the suite (BRAIN §308).
+- Existing mechanisms to reuse (auth, db, API client, state, errors), with file paths:
+  - Supabase client + current user: `mobile/lib/core/data/supabase_service.dart`
+    (`SupabaseService.currentUserId`).
+  - Chat rows, sealing, hydration, realtime: `mobile/lib/features/chat/chat_repository.dart`
+    — `sealBody`/`bodyAd(rowId)` (ciphertext is bound to the row id), `hydrate`,
+    `fetchById`, `subscribe`. Bytea crosses PostgREST via `bytesToBytea`/`byteaToBytea`;
+    postgres_changes uses a DIFFERENT encoding, so realtime rows carrying `body_cipher`
+    are REFETCHED by id, never decoded off the payload.
+  - Errors: `ErrorReporter.report(e, st, kind: '<kebab>')` is the sink that leaves the
+    handset; `Diag.record` is inert in a shipped build and must never be the only report.
+  - Server rules answer a VERDICT string, not an exception, so each refusal gets its own
+    sentence (`ChatRepository.editMessageError`). Never re-implement a server rule client-side.
+- Never do: write plaintext at rest; re-seal against a new row id (the blob becomes
+  permanently unopenable); let a client clock decide what the server owns.
+
+## Project (Working rules 2 and 9, "Debugging" and "A red gate is a wall" depend on this)
+
+- Every command below needs `export PATH="/c/src/flutter/bin:$PATH"` and
+  `cd /d/Miles/mobile` first — Flutter is not on the permanent PATH and CWD drifts to the
+  repo root.
+- Run app: `<not established — do not build or install unless asked; see "Build and release">`
+- Test: `flutter test` (1835 passed, 3 skipped, 0 failed on 2026-09-09)
+- Lint / type check: `flutter analyze --no-pub`. **The exit code is not the gate** — the
+  tree carries ~230 infos, so it always exits 1. The gate is the CI matcher from
+  `.github/workflows/gates.yml`:
+  `grep -cE '^ *(error|warning) (-|•) '` over the log, plus a `grep -qE 'issues? found'`
+  blindness check, because a cold analysis server answers with nothing and nothing greps
+  as clean. `^ *` and the `(-|•)` alternation are both load-bearing.
+- Build: `bash tool/release.sh` (play flavour), run from `mobile/` — only when asked.
+- Entry points: `mobile/lib/main.dart`, `mobile/lib/features/shell/app_shell.dart`,
+  `supabase/migrations/`, `docs/guides/BRAIN.md`.
