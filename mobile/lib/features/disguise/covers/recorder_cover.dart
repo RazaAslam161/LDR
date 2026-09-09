@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:miles/core/services/sound/content_player.dart';
 import 'package:miles/features/disguise/covers/cover_theme.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -40,7 +41,7 @@ class _RecorderCoverState extends State<RecorderCover> {
   static const _maxLength = Duration(minutes: 5);
 
   final _recorder = AudioRecorder();
-  final _player = AudioPlayer();
+  final _player = newContentPlayer();
 
   List<_Clip> _clips = [];
   bool _loaded = false;

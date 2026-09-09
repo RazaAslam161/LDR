@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:miles/core/realtime/realtime_service.dart';
+import 'package:miles/core/services/sound/content_player.dart';
 import 'package:miles/core/services/sound/cue.dart';
 import 'package:miles/core/services/sound/miles_sound.dart';
 import 'package:miles/core/ui/theme.dart';
@@ -49,7 +50,7 @@ class _CapsuleDetailScreenState extends ConsumerState<CapsuleDetailScreen>
   /// with no way out of the screen.
   bool _sentToSettings = false;
 
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player = newContentPlayer();
   ManagedSubscription? _channel;
 
   @override
